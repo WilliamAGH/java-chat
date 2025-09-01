@@ -8,30 +8,42 @@ import org.jsoup.nodes.Element;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.stream.Stream;
 //
 import java.time.Duration;
 import java.util.*;
 
 @Service
 public class DocsIngestionService {
+    private static final Logger log = LoggerFactory.getLogger(DocsIngestionService.class);
+    private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
+    
     private final String rootUrl;
-    private final Chunker chunker;
     private final VectorStore vectorStore;
-    private final ContentHasher hasher;
+    private final ChunkProcessingService chunkProcessingService;
     private final LocalStoreService localStore;
+    private final FileOperationsService fileOperationsService;
+    private final HtmlContentExtractor htmlExtractor;
 
     public DocsIngestionService(@Value("${app.docs.root-url}") String rootUrl,
-                                Chunker chunker,
                                 VectorStore vectorStore,
-                                ContentHasher hasher,
-                                LocalStoreService localStore) {
+                                ChunkProcessingService chunkProcessingService,
+                                LocalStoreService localStore,
+                                FileOperationsService fileOperationsService,
+                                HtmlContentExtractor htmlExtractor) {
         this.rootUrl = rootUrl;
-        this.chunker = chunker;
         this.vectorStore = vectorStore;
-        this.hasher = hasher;
+        this.chunkProcessingService = chunkProcessingService;
         this.localStore = localStore;
+        this.fileOperationsService = fileOperationsService;
+        this.htmlExtractor = htmlExtractor;
     }
 
     public void crawlAndIngest(int maxPages) throws IOException {
@@ -44,7 +56,10 @@ public class DocsIngestionService {
             if (!url.startsWith(rootUrl)) continue;
             Document doc = Jsoup.connect(url).timeout((int) Duration.ofSeconds(30).toMillis()).get();
             String title = Optional.ofNullable(doc.title()).orElse("");
-            String bodyText = doc.body() != null ? doc.body().text() : "";
+            // Use improved content extraction for cleaner text
+            String bodyText = url.contains("/api/") ? 
+                htmlExtractor.extractJavaApiContent(doc) : 
+                htmlExtractor.extractCleanContent(doc);
             String packageName = extractPackage(url, bodyText);
 
             // Persist raw HTML snapshot
@@ -57,26 +72,124 @@ public class DocsIngestionService {
                 }
             }
 
-            List<String> chunks = chunker.chunkByTokens(bodyText, 900, 150);
-            for (int i = 0; i < chunks.size(); i++) {
-                String text = chunks.get(i);
-                Map<String, Object> meta = new HashMap<>();
-                meta.put("url", url);
-                meta.put("title", title);
-                meta.put("chunkIndex", i);
-                meta.put("package", packageName);
-                String hash = hasher.sha256(url + "#" + i + ":" + text);
-                meta.put("hash", hash);
-                org.springframework.ai.document.Document sd = new org.springframework.ai.document.Document(text);
-                sd.getMetadata().putAll(meta);
-                if (!localStore.isHashIngested(hash)) {
-                    // TODO: When Qdrant adapter exposes upsert by id, use meta.hash as point id for true dedup
-                    vectorStore.add(List.of(sd));
-                    localStore.saveChunkText(url, i, text, hash);
-                    localStore.markHashIngested(hash);
+            // Use ChunkProcessingService to handle chunking and document creation
+            List<org.springframework.ai.document.Document> documents =
+                chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+
+            // Add documents to vector store
+            if (!documents.isEmpty()) {
+                INDEXING_LOG.info("[INDEXING] Adding {} documents to vector store for URL: {}", 
+                    documents.size(), url);
+                try {
+                    vectorStore.add(documents);
+                    INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant", 
+                        documents.size());
+                    
+                    // Mark hashes as ingested ONLY after successful addition
+                    for (org.springframework.ai.document.Document aiDoc : documents) {
+                        String hash = aiDoc.getMetadata().get("hash").toString();
+                        localStore.markHashIngested(hash);
+                    }
+                } catch (Exception e) {
+                    INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant: {}", 
+                        e.getMessage());
+                    throw e;
+                }
+            } else {
+                INDEXING_LOG.warn("[INDEXING] No documents to add for URL: {}", url);
+            }
+        }
+    }
+
+    /**
+     * Ingest HTML files from a local directory mirror (e.g., data/docs/**) into the VectorStore.
+     * Scans recursively for .html/.htm files, extracts text, chunks, and upserts with citation metadata.
+     * Returns the number of files processed (not chunks).
+     */
+    public int ingestLocalDirectory(String rootDir, int maxFiles) throws IOException {
+        Path root = Paths.get(rootDir);
+        if (!Files.exists(root)) {
+            throw new IllegalArgumentException("Local docs directory does not exist: " + rootDir);
+        }
+        final int[] processed = {0};
+        try (Stream<Path> paths = Files.walk(root)) {
+            Iterator<Path> it = paths
+                    .filter(p -> !Files.isDirectory(p))
+                    .filter(p -> {
+                        String name = p.getFileName().toString().toLowerCase();
+                        return name.endsWith(".html") || name.endsWith(".htm");
+                    })
+                    .iterator();
+            while (it.hasNext() && processed[0] < maxFiles) {
+                Path file = it.next();
+                String html = fileOperationsService.readTextFile(file);
+                org.jsoup.nodes.Document doc = Jsoup.parse(html);
+                String title = Optional.ofNullable(doc.title()).orElse("");
+                // Use improved content extraction for cleaner text
+                String url = mapLocalPathToUrl(file);
+                String bodyText = url.contains("/api/") ? 
+                    htmlExtractor.extractJavaApiContent(doc) : 
+                    htmlExtractor.extractCleanContent(doc);
+
+                String packageName = extractPackage(url, bodyText);
+
+                // Use ChunkProcessingService to handle chunking and document creation
+                List<org.springframework.ai.document.Document> documents =
+                    chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+
+                // Add documents to vector store
+                if (!documents.isEmpty()) {
+                    INDEXING_LOG.info("[INDEXING] Processing file: {} with {} chunks", 
+                        file.getFileName(), documents.size());
+                    INDEXING_LOG.debug("[INDEXING] First chunk preview: {}", 
+                        documents.get(0).getText().substring(0, Math.min(100, documents.get(0).getText().length())));
+                    
+                    try {
+                        long startTime = System.currentTimeMillis();
+                        vectorStore.add(documents);
+                        long duration = System.currentTimeMillis() - startTime;
+                        
+                        INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {}", 
+                            documents.size(), duration, file.getFileName());
+                        
+                        // Mark hashes as ingested ONLY after successful addition
+                        for (org.springframework.ai.document.Document aiDoc : documents) {
+                            String hash = aiDoc.getMetadata().get("hash").toString();
+                            localStore.markHashIngested(hash);
+                        }
+                        
+                        processed[0]++;
+                    } catch (Exception e) {
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to index {}: {}", 
+                            file.getFileName(), e.getMessage());
+                        log.error("Indexing error details:", e);
+                    }
+                } else {
+                    INDEXING_LOG.debug("[INDEXING] Skipping empty document: {}", file.getFileName());
                 }
             }
         }
+        return processed[0];
+    }
+
+    private String mapLocalPathToUrl(Path file) {
+        String p = file.toAbsolutePath().toString().replace('\\', '/');
+        int idxSpring = p.indexOf("docs.spring.io/");
+        if (idxSpring >= 0) {
+            String suffix = p.substring(idxSpring);
+            return "https://" + suffix;
+        }
+        int idxJava = p.indexOf("download.java.net/");
+        if (idxJava >= 0) {
+            String suffix = p.substring(idxJava);
+            return "https://" + suffix;
+        }
+        // Known single-file mirrors
+        if (p.contains("/data/docs/spring-boot/reference.html")) {
+            return "https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/";
+        }
+        // Fallback to file:// URL for traceability
+        return "file://" + p;
     }
 
     private String extractPackage(String url, String bodyText) {
