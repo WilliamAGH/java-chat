@@ -2,6 +2,8 @@ package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
@@ -11,6 +13,7 @@ import java.util.List;
 
 @Service
 public class RerankerService {
+    private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
     private final ChatClient chatClient;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -39,14 +42,23 @@ public class RerankerService {
                     if (idx >= 0 && idx < docs.size()) reordered.add(docs.get(idx));
                 }
             }
-            if (reordered.isEmpty()) return docs.subList(0, Math.min(returnK, docs.size()));
+            if (reordered.isEmpty()) {
+                log.warn("Reranking produced empty results, falling back to original order");
+                return docs.subList(0, Math.min(returnK, docs.size()));
+            }
+            log.debug("Successfully reranked {} documents", reordered.size());
             return reordered.subList(0, Math.min(returnK, reordered.size()));
         } catch (Exception e) {
+            log.error("Error during reranking: {}", e.getMessage(), e);
+            log.info("Falling back to original document order due to reranking error");
             return docs.subList(0, Math.min(returnK, docs.size()));
         }
     }
 
     private String trim(String s, int len) { return s.length() <= len ? s : s.substring(0, len) + "…"; }
 }
+
+
+
 
 

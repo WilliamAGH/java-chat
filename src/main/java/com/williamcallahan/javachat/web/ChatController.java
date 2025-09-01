@@ -3,22 +3,40 @@ package com.williamcallahan.javachat.web;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
 @RequestMapping("/api/chat")
-public class ChatController {
+public class ChatController extends BaseController {
+    @SuppressWarnings("unused") // Used by logging framework
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+    private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
+    
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
+    private final RestTemplate restTemplate = new RestTemplate();
 
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory) {
+    @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
+    private String localEmbeddingServerUrl;
+
+    @Value("${app.local-embedding.enabled:false}")
+    private boolean localEmbeddingEnabled;
+
+    public ChatController(ChatService chatService, ChatMemoryService chatMemory, ExceptionResponseBuilder exceptionBuilder) {
+        super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
     }
@@ -28,14 +46,39 @@ public class ChatController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> stream(@RequestBody Map<String, Object> body) {
+        String requestId = "REQ-" + System.currentTimeMillis() + "-" + Thread.currentThread().threadId();
         String sessionId = String.valueOf(body.getOrDefault("sessionId", "default"));
         String latest = String.valueOf(body.getOrDefault("latest", ""));
+        
+        PIPELINE_LOG.info("[{}] ============================================", requestId);
+        PIPELINE_LOG.info("[{}] NEW CHAT REQUEST - Session: {}", requestId, sessionId);
+        PIPELINE_LOG.info("[{}] User query: {}", requestId, latest);
+        PIPELINE_LOG.info("[{}] ============================================", requestId);
+        
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        PIPELINE_LOG.info("[{}] Chat history: {} previous messages", requestId, history.size());
+        
         chatMemory.addUser(sessionId, latest);
         StringBuilder sb = new StringBuilder();
+        AtomicInteger chunkCount = new AtomicInteger(0);
+        
         return chatService.streamAnswer(history, latest)
-                .doOnNext(sb::append)
-                .doOnComplete(() -> chatMemory.addAssistant(sessionId, sb.toString()));
+                .doOnNext(chunk -> {
+                    sb.append(chunk);
+                    int count = chunkCount.incrementAndGet();
+                    if (count % 10 == 0) {
+                        PIPELINE_LOG.debug("[{}] Streaming chunk #{}: {} chars total", 
+                            requestId, count, sb.length());
+                    }
+                })
+                .doOnComplete(() -> {
+                    chatMemory.addAssistant(sessionId, sb.toString());
+                    PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars", 
+                        requestId, chunkCount.get(), sb.length());
+                })
+                .doOnError(error -> {
+                    PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage());
+                });
     }
 
     /**
@@ -65,6 +108,32 @@ public class ChatController {
             sb.append("### ").append(role).append("\n\n").append(t.getText()).append("\n\n");
         }
         return sb.toString();
+    }
+
+    @GetMapping("/health/embeddings")
+    public ResponseEntity<Map<String, Object>> checkEmbeddingsHealth() {
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("localEmbeddingEnabled", localEmbeddingEnabled);
+        response.put("serverUrl", localEmbeddingServerUrl);
+
+        if (localEmbeddingEnabled) {
+            try {
+                // Simple health check - try to get models list
+                String healthUrl = localEmbeddingServerUrl + "/v1/models";
+                restTemplate.getForEntity(healthUrl, String.class);
+                response.put("status", "healthy");
+                response.put("serverReachable", true);
+            } catch (Exception e) {
+                response.put("status", "unhealthy");
+                response.put("serverReachable", false);
+                response.put("error", e.getMessage());
+            }
+        } else {
+            response.put("status", "disabled");
+            response.put("serverReachable", null);
+        }
+
+        return ResponseEntity.ok(response);
     }
 }
 
