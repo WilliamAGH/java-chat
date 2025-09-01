@@ -321,7 +321,8 @@
             background: var(--dark-surface-2);
             border-radius: var(--radius-lg);
             border: 1px solid var(--dark-border);
-            animation: fadeIn 0.5s ease 0.2s both;
+            animation: fadeIn 0.5s ease 0.2s;
+            transform: none; /* Ensure no residual horizontal shift */
             box-sizing: border-box;
             max-width: 100%;
             width: 100%;
@@ -347,7 +348,7 @@
             text-decoration: underline;
         }
         
-        .citation-pill {
+.citation-pill {
             display: inline-flex;
             align-items: center;
             gap: var(--space-2);
@@ -363,6 +364,23 @@
             position: relative;
             overflow: hidden;
             white-space: nowrap;
+            min-width: 0;            /* allow shrinking below content width */
+            max-width: 100%;        /* never exceed row width */
+        }
+        
+        /* Ensure the label shrinks and ellipsizes */
+        .citation-pill .citation-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        /* Number and icon should not shrink */
+        .citation-pill .citation-number,
+        .citation-pill .citation-icon {
+            flex: 0 0 auto;
         }
         
         .citation-pill::before {
@@ -615,7 +633,7 @@
             margin-bottom: 0;
         }
         
-        @keyframes fadeIn {
+        @keyframes fadeInCenter {
             from { opacity: 0; transform: translateX(-50%) translateY(4px); }
             to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
@@ -1232,10 +1250,10 @@
                 // Apply syntax highlighting to code blocks
                 Prism.highlightAllUnder(assistantBubble);
                 
-                // Load citations
-                await loadCitations(q, chatEl);
+                // Load citations inside the assistant bubble for tighter alignment
+                await loadCitations(q, assistantBubble);
                 
-                // Load enrichment cards
+                // Load enrichment cards (remain at chat level below messages)
                 await loadEnrichment(q, chatEl);
                 
             } catch (error) {
@@ -1395,7 +1413,7 @@
                     pill.rel = 'noopener noreferrer';
                     pill.innerHTML = `
                         <span class="citation-number">${index + 1}</span>
-                        <span>${citation.title || new URL(citation.url).hostname}</span>
+                        <span class="citation-label">${citation.title || new URL(citation.url).hostname}</span>
                         <svg class="citation-icon" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                             <polyline points="15 3 21 3 21 9"></polyline>
