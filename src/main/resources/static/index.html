@@ -327,6 +327,7 @@
             max-width: 100%;
             width: 100%;
             position: relative;
+            z-index: 1; /* content layer, below controls like copy button */
             align-self: flex-start;
         }
         
@@ -997,6 +998,16 @@
             #chat {
                 max-height: 400px;
             }
+        }
+        
+        /* Small-screen safeguards to avoid control/content overlap */
+        @media (max-width: 600px) {
+            /* Reserve room for the 36px copy button on the right */
+            .bubble { padding-right: calc(var(--space-4) + 36px); }
+            /* Bring the copy button inside the bubble */
+            .message-copy-btn { right: var(--space-2); }
+            /* Ensure citations have breathing room below content */
+            .bubble.assistant .citations-row { margin-top: var(--space-3); }
         }
         
         /* Loading dots animation */
