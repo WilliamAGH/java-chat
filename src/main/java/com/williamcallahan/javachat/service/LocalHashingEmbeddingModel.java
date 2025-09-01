@@ -1,7 +1,10 @@
 package com.williamcallahan.javachat.service;
 
 import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.ai.embedding.EmbeddingResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -16,6 +19,16 @@ public class LocalHashingEmbeddingModel implements EmbeddingModel {
     private final int dim;
 
     public LocalHashingEmbeddingModel(int dim) { this.dim = dim; }
+
+    @Override
+    public EmbeddingResponse call(EmbeddingRequest request) {
+        List<String> inputs = request.getInstructions();
+        List<Embedding> list = new ArrayList<>(inputs.size());
+        for (int i = 0; i < inputs.size(); i++) {
+            list.add(new Embedding(embed(inputs.get(i)), i));
+        }
+        return new EmbeddingResponse(list);
+    }
 
     @Override
     public float[] embed(String text) {

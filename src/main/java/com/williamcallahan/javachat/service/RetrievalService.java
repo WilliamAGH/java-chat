@@ -1,6 +1,6 @@
 package com.williamcallahan.javachat.service;
 
-import com.williamcallahan.javachat.config.RagProperties;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.Citation;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
@@ -18,35 +18,51 @@ import java.util.stream.Collectors;
 public class RetrievalService {
     private static final Logger log = LoggerFactory.getLogger(RetrievalService.class);
     private final VectorStore vectorStore;
-    private final RagProperties props;
+    private final AppProperties props;
     private final RerankerService rerankerService;
     private final LocalSearchService localSearch;
+    private final DocumentFactory documentFactory;
 
-    public RetrievalService(VectorStore vectorStore, RagProperties props, RerankerService rerankerService, LocalSearchService localSearch) {
+    public RetrievalService(VectorStore vectorStore, AppProperties props, RerankerService rerankerService, LocalSearchService localSearch, DocumentFactory documentFactory) {
         this.vectorStore = vectorStore;
         this.props = props;
         this.rerankerService = rerankerService;
         this.localSearch = localSearch;
+        this.documentFactory = documentFactory;
     }
 
     public List<Document> retrieve(String query) {
         // Initial vector search
         List<Document> docs;
         try {
-            int topK = Math.max(1, props.getSearchTopK());
-            docs = vectorStore.similaritySearch(SearchRequest.builder()
+            int topK = Math.max(1, props.getRag().getSearchTopK());
+            log.info("=== RETRIEVAL DEBUG ===");
+            log.info("Query: '{}'", query);
+            log.info("TopK requested: {}", topK);
+            log.info("VectorStore class: {}", vectorStore.getClass().getName());
+            
+            SearchRequest searchRequest = SearchRequest.builder()
                     .query(query)
                     .topK(topK)
-                    .build());
+                    .build();
+            
+            log.info("SearchRequest created - Query: '{}', TopK: {}", 
+                searchRequest.getQuery(), searchRequest.getTopK());
+            
+            docs = vectorStore.similaritySearch(searchRequest);
+            
+            log.info("VectorStore returned {} documents", docs.size());
+            if (!docs.isEmpty()) {
+                log.info("First doc metadata: {}", docs.get(0).getMetadata());
+                log.info("First doc content preview: {}", 
+                    docs.get(0).getText().substring(0, Math.min(200, docs.get(0).getText().length())));
+            }
         } catch (Exception e) {
-            log.warn("Vector search unavailable; falling back to local keyword search ({}).", e.getMessage());
-            var results = localSearch.search(query, props.getSearchReturnK());
-            return results.stream().map(r -> {
-                org.springframework.ai.document.Document d = new org.springframework.ai.document.Document(r.text);
-                d.getMetadata().put("url", r.url);
-                d.getMetadata().put("title", "Local Doc");
-                return d;
-            }).collect(Collectors.toList());
+            log.warn("Vector search unavailable; falling back to local keyword search", e);
+            var results = localSearch.search(query, props.getRag().getSearchReturnK());
+            return results.stream()
+                .map(r -> documentFactory.createLocalDocument(r.text, r.url))
+                .collect(Collectors.toList());
         }
 
         // MMR re-ranking using embeddings
@@ -60,7 +76,7 @@ public class RetrievalService {
                 .stream()
                 .collect(Collectors.toList());
 
-        List<Document> reranked = rerankerService.rerank(query, uniqueByUrl, props.getSearchReturnK());
+        List<Document> reranked = rerankerService.rerank(query, uniqueByUrl, props.getRag().getSearchReturnK());
         return reranked;
     }
 
