@@ -2,14 +2,15 @@ SHELL := /bin/bash
 
 APP_NAME := java-chat
 MVNW := ./mvnw
-JAR := $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
+# Compute JAR lazily so it's resolved after the build runs
+JAR = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
 
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)
 # - Base URL and model names have sensible defaults
 RUN_ARGS := \
   --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-  --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
+  --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.inference.ai.azure.com}" \
   --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-openai/gpt-5-mini}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-openai/text-embedding-3-large}"
 

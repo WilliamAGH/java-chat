@@ -1,326 +1,833 @@
 ---
-description: "java-chat — simple, beautiful Java learning chat that aggregates live docs, augments with LLMs, and streams answers with citations in a ShadCN-inspired UI"
+description: 'Java Chat - Beautiful AI-powered Java learning application with live documentation, streaming responses, and contextual knowledge augmentation'
 alwaysApply: true
 ---
 
-# java-chat Agents & Architecture Guide (AGENTS.md)
+# Java Chat - Beautiful Learning Experience Configuration
 
-This document defines how agents, backend services, and the (future) UI for java-chat should behave. It sets the quality bar, UX principles, architecture, and operational rules. Follow this file as the source of truth for agent behavior and system decisions.
+## 🎯 CORE VISION: Elegant Learning Through Intelligent Documentation
 
-Vision: Make it incredibly easy to learn Java. Users ask natural questions; the app retrieves and interprets authoritative documentation, augments with LLM reasoning, optionally performs web enrichment, and streams back concise, accurate, and beautifully presented answers with citations and “URL pill” links.
+**#1 Rule**: Every interaction should teach Java beautifully. Simple queries yield rich, layered knowledge with citations, context, and insights.
 
-Design/UX Quality Bar (non-negotiable):
-- Beautiful, clean, crisp ShadCN-inspired UI
-- Live, fresh, performant streaming that matches or exceeds the quality of v0.dev, ChatGPT, Claude, Perplexity, and modern Apple design
-- Always provide citations and clickable URL pill boxes
-- Minimal cognitive load; elegant typography, motion, and spacing; accessible by default (WCAG 2.2 AA)
+**Design Philosophy**: Match or exceed the polish of v0.dev, ChatGPT, Claude, Perplexity with Apple-inspired clarity and ShadCN modern aesthetics.
 
+## 🌟 PRODUCT PRINCIPLES
 
-## Core Principles
+### 1. **Knowledge Layering, Not Just Answers**
+- Primary response with streaming clarity
+- Contextual tooltips for deeper understanding
+- Background cards for related concepts
+- Citation pills linking to source documentation
+- Code examples with live syntax highlighting
+- Progressive disclosure of complexity
 
-1) Simplicity over cleverness
-- Thin architecture. Prefer Spring Boot defaults. Clear, direct code paths.
-- Avoid unnecessary abstractions. Every layer must reduce complexity.
+### 2. **Beautiful, Performant UI**
+- Smooth streaming with character-by-character flow
+- Elegant transitions and micro-interactions
+- Responsive grid layouts adapting to content
+- Dark/light mode with thoughtful color systems
+- Typography that enhances readability
+- Low-jitter, 60fps animations
 
-2) Truthfulness with citations
-- Ground answers in authoritative sources (official JDK docs, Spring docs, Javadoc, reputable tutorials).
-- Cite everything that influences the response. If confidence is low or sources conflict, say so.
+### 3. **Learning Augmentation**
+- Proactive concept explanations
+- Visual hierarchy guiding attention
+- Interactive elements encouraging exploration
+- Smart suggestions for next learning steps
+- Contextual wisdom and best practices
+- Real-world examples and use cases
 
-3) Streaming-first experience
-- Stream tokens quickly and steadily. Defer heavy computation until necessary.
-- Show “insights” and citations as they become available. Do not block the stream waiting for all sources.
+## 📚 KNOWLEDGE PRESENTATION ARCHITECTURE
 
-4) Gradual web enrichment
-- Start with local indexes and curated docs. If recall is inadequate, escalate to web search/scrape/fetch.
-- Respect robots, rate limits, and safety rules. Never leak secrets.
-
-5) Beauty and performance
-- ShadCN-inspired modern UI components, tasteful motion, excellent readability.
-- Low-jitter streaming, responsive updates, resilient to flaky networks.
-
-6) Accessibility and inclusion
-- Keyboard-first. Screen reader friendly. High-contrast theme support. Prefers-reduced-motion compliant.
-
-
-## User Experience Spec (high-level)
-
-Chat surface
-- Streaming answer area with structured sections: short answer, deeper explanation, examples, and references
-- Inline tooltips for key terms; hover to see definitions from authoritative sources
-- “URL pills” for each citation: favicon, domain, title, and action to open in new tab
-- Code blocks with copy button, syntax highlight, and line numbers when applicable
-- Collapsible “background & context” section for curious learners
-
-Information architecture
-- Start with the most helpful, accurate synthesis
-- Then provide supporting context, caveats, and deeper links
-- Present citations inline and at the end; each reference must map to a real URL
-
-Interaction model
-- Suggestions for follow-up prompts (e.g., “Show me an example with streams and Optionals”)
-- Cmd/Ctrl+K universal search to quickly open docs or past threads
-- Keyboard shortcuts for copy, open all citations, and toggle details
-
-Loading and resilience
-- Skeletons and shimmer states for first paint
-- Progressive hydration of citations and tooltips as sources resolve
-- Clear retry affordances if a source fetch fails (never dead-end the user)
-
-
-## System Behavior and Agent Roles
-
-High-level flow
-1) Understand: Classify the user query (concept, API reference, how-to, error, performance, etc.).
-2) Retrieve: Pull relevant passages from local aggregated documentation/embeddings.
-3) Enrich (when needed): If recall/confidence is low, perform targeted web search + scrape + parse.
-4) Synthesize: Use LLM to interpret the query and the retrieved passages; produce an accurate, concise answer.
-5) Cite: Attach citations for all used sources; generate URL pill metadata.
-6) Stream: Send partials immediately; upgrade with more details/citations as they become available.
-
-Agents (logical responsibilities)
-- QueryRouter: Determines query type and selects retrieval strategy.
-- Retriever: Fetches from vector store + curated indexes; may do re-ranking.
-- WebEnrichment: Executes controlled search/scrape/fetch only if needed.
-- Synthesizer: SOTA LLM that merges retrieved content into a coherent response.
-- CitationVerifier: Validates that each claim maps to a cited source; filters weak sources.
-- UIStreamer: Packages messages into a streaming-friendly protocol (SSE/WebFlux) with incremental updates.
-
-Non-goals
-- No heavy microservices or orchestration. Keep it small, elegant, maintainable.
-- No brittle scraping of low-quality sites. Prefer official and high-signal sources.
-
-
-## Backend Architecture (current project)
-
-Stack (aligns with pom.xml)
-- Java 21, Spring Boot 3.5.5
-- Spring AI (OpenAI-compatible) via GitHub Models
-- Qdrant vector store (Spring AI starter)
-- Spring WebFlux for streaming responses
-
-Key modules/dependencies
-- org.springframework.ai:spring-ai-starter-model-openai
-- org.springframework.ai:spring-ai-starter-vector-store-qdrant
-- org.springframework.boot:spring-boot-starter-web + webflux
-
-Configuration (Makefile-driven runtime args)
-- spring.ai.openai.api-key: sourced from $GITHUB_TOKEN (do not hardcode)
-- spring.ai.openai.base-url: defaults to https://models.github.ai/inference unless overridden
-- spring.ai.openai.chat.options.model: defaults to openai/gpt-5-mini
-- spring.ai.openai.embedding.options.model: defaults to openai/text-embedding-3-large
-
-Secrets & safety
-- Never print or log secrets. Do not echo tokens in terminals, logs, or UIs.
-- Use environment variables (e.g., GITHUB_TOKEN) loaded from .env during local dev.
-- For any web fetches, ensure PII/secret-safe requests and sanitized outputs.
-
-Vector store
-- Local Qdrant via Docker Compose; start/stop with Makefile targets.
-- Ingestion endpoint is provided for indexing curated sources.
-
-
-## Commands and Verification Loops
-
-Build and run
-```bash path=null start=null
-make build                    # mvnw -DskipTests package
-make run                      # builds then runs the jar with runtime args
-make dev                      # spring-boot:run with devtools and arguments
+### Response Structure
+```
+┌─────────────────────────────────────────┐
+│ PRIMARY RESPONSE                        │
+│ Clear, streaming answer to the query    │
+│ with inline [¹] citation markers        │
+└─────────────────────────────────────────┘
+         │
+         ├── 💡 INSIGHTS PANEL (floating)
+         │   Contextual wisdom and best practices
+         │
+         ├── 📖 BACKGROUND CARDS (expandable)
+         │   Related concepts and fundamentals
+         │
+         ├── 🔧 CODE EXAMPLES (interactive)
+         │   Syntax-highlighted, copyable snippets
+         │
+         └── 🔗 CITATIONS ROW (pills)
+             Source documents with hover previews
 ```
 
-Docker services
-```bash path=null start=null
-make compose-up               # start Qdrant
-make compose-down             # stop Qdrant
-make compose-logs             # tail logs
-make compose-ps               # list services
+### Layered Knowledge Model
+
+#### **Short Answer** (Immediate)
+- One-paragraph response optimized for correctness and speed
+- Sets clear expectations and provides immediate value
+- 120-180 words maximum
+
+#### **Knowledge** (Canonical Facts)
+- Precise definitions, API contracts, signatures
+- Grounded in authoritative documentation
+- Method signatures, class hierarchies, interfaces
+
+#### **Wisdom** (Practice & Judgment)
+- Best practices, trade-offs, pitfalls
+- Performance considerations
+- Version differences and migration notes
+- Real-world usage patterns
+
+#### **Background** (Conceptual Framing)
+- Why the concept exists
+- Historical context and evolution
+- Related ideas and alternatives
+- Links to deeper readings
+
+#### **Info** (Implementation Details)
+- Step-by-step guidance
+- Parameters, return types, exceptions
+- Compatibility matrices
+- Minimal runnable examples
+
+#### **Tooltips** (Micro-Definitions)
+- Inline definitions for technical terms
+- Hover/tap activated
+- Connected to glossary system
+- Maximum 5 per response
+
+#### **Suggestions** (Next Steps)
+- 2-3 high-signal follow-ups
+- Contextually relevant explorations
+- Example: "Show Streams with Optionals", "Compare List vs Set performance"
+
+#### **Citations** (Sources)
+- Verifiable links to exact documentation sections
+- URL pills with favicon, title, domain
+- Progressive verification and loading
+- Hover previews with snippets
+
+## 🎨 DESIGN SYSTEM REQUIREMENTS
+
+### Visual Identity
+```css
+/* Color System */
+--primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+--surface-100: #f8fafc;
+--surface-200: #f1f5f9;
+--surface-300: #e2e8f0;
+--text-primary: #0f172a;
+--text-secondary: #475569;
+--accent-success: #10b981;
+--accent-warning: #f59e0b;
+--accent-error: #ef4444;
+
+/* Typography Scale */
+--font-display: system-ui, -apple-system, sans-serif;
+--text-xs: 0.75rem;
+--text-sm: 0.875rem;
+--text-base: 1rem;
+--text-lg: 1.125rem;
+--text-xl: 1.25rem;
+--text-2xl: 1.5rem;
+
+/* Spacing (8px grid) */
+--space-1: 0.25rem;
+--space-2: 0.5rem;
+--space-3: 0.75rem;
+--space-4: 1rem;
+--space-6: 1.5rem;
+--space-8: 2rem;
+
+/* Shadows */
+--shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+--shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+--shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+--shadow-xl: 0 20px 25px rgba(0,0,0,0.1);
+
+/* Borders */
+--radius-sm: 4px;
+--radius-md: 6px;
+--radius-lg: 8px;
+--radius-xl: 12px;
 ```
 
-Health checks
-```bash path=null start=null
-curl -sS http://localhost:8080/actuator/health
+### Component Library
+- **Base**: ShadCN/UI inspired components
+- **Icons**: Lucide or Heroicons for consistency
+- **Animation**: Framer Motion or CSS transitions
+- **Code Blocks**: Prism or Shiki for syntax highlighting
+- **Markdown**: Rich rendering with custom components
+- **Tooltips**: Radix UI primitives with custom styling
+
+### UI Component Specifications
+
+#### **Streaming Response Component**
+```typescript
+interface StreamingResponse {
+  text: string;              // Main response content
+  citations: Citation[];     // Inline citation markers [¹][²]
+  codeBlocks: CodeBlock[];  // Highlighted code sections
+  enrichments: Enrichment[]; // Contextual additions
+  speed: number;            // Characters per second (default: 30)
+  cursor: string;           // Typing cursor (default: "▊")
+}
 ```
 
-Ingestion and examples (adjust as needed)
-```bash path=null start=null
-# Ingest (example param)
-curl -sS -X POST "http://localhost:8080/api/ingest?maxPages=1000"
-
-# Sample citations lookup
-curl -sS "http://localhost:8080/api/chat/citations?q=records"
+#### **Citation Pills**
+```typescript
+interface CitationPill {
+  url: string;          // Source URL
+  title: string;        // Document title
+  snippet: string;      // Preview on hover
+  relevance: number;    // Visual prominence (0-1)
+  icon: IconType;       // Doc type indicator
+  verified: boolean;    // Verification status
+}
 ```
 
-Secrets for local dev (.env loaded by Makefile if present)
-```bash path=null start=null
-GITHUB_TOKEN={{YOUR_GITHUB_TOKEN_WITH_MODELS_READ}}
-# Optional overrides
-GITHUB_MODELS_BASE_URL=https://models.github.ai/inference
-GITHUB_MODELS_CHAT_MODEL=openai/gpt-5-mini
-GITHUB_MODELS_EMBED_MODEL=openai/text-embedding-3-large
+#### **Knowledge Cards**
+```typescript
+interface KnowledgeCard {
+  type: 'insight' | 'background' | 'warning' | 'tip';
+  title: string;
+  content: string;      // Markdown supported
+  expandable: boolean;
+  priority: 'high' | 'medium' | 'low';
+  relatedTopics: string[];
+  icon?: IconType;
+}
 ```
 
-Verification loop (must pass before merging)
-```bash path=null start=null
-make build                                         # expect BUILD SUCCESS
-ls -la target/*.jar                                # jar exists
-make run & sleep 8; curl -sS :8080/actuator/health # healthy, then stop app
+#### **Interactive Tooltips**
+```typescript
+interface Tooltip {
+  trigger: string;      // Text to highlight
+  content: RichContent; // Markdown + components
+  position: 'top' | 'bottom' | 'smart';
+  delay: number;        // Hover delay (default: 500ms)
+  maxWidth: number;     // Max tooltip width (default: 320px)
+}
 ```
 
+#### **Code Examples**
+```typescript
+interface CodeExample {
+  language: 'java' | 'xml' | 'properties' | 'shell';
+  code: string;
+  title?: string;
+  runnable: boolean;
+  imports?: string[];
+  highlightLines?: number[];
+  copyButton: boolean;
+}
+```
 
-## Retrieval & Synthesis Rules
+## 🏗️ TECHNICAL ARCHITECTURE
 
-Retrieval (RAG)
-- Prefer curated, authoritative Java resources (JDK docs, OpenJDK Javadoc, Spring docs, high-signal tutorials).
-- Retrieve 5–15 candidates; re-rank by semantic and lexical signals.
-- Deduplicate content; collapse near-duplicates; keep canonical source.
+### Current Stack (Spring Boot Backend)
+```yaml
+Backend:
+  framework: Spring Boot 3.5.x
+  java: 21
+  web: Spring WebFlux (streaming)
+  ai: Spring AI with GitHub Models
+  vectorDB: Qdrant
+  embedding: text-embedding-3-small
+  chat: gpt-4o-mini
+  
+Frontend (Current):
+  type: Static HTML/CSS/JS
+  streaming: Server-Sent Events (SSE)
+  styling: Custom CSS
+  
+Infrastructure:
+  containerization: Docker Compose
+  build: Maven
+  secrets: Environment variables
+```
 
-Synthesis
-- Start with a concise, accurate answer; then provide layered explanation.
-- Include examples tailored to the user’s context (Java version, library).
-- Use disciplined formatting and headings; avoid verbosity.
+### Frontend Evolution Path
 
-Citations
-- Every claim that comes from a source must include a citation.
-- Provide URL pill metadata: title, domain, favicon (when possible).
-- If a link is temporarily unavailable, mark as “pending” and update when fetched.
+#### **Phase 1: Enhanced Static (Immediate)**
+```javascript
+// Enhance current static approach
+enhancements: {
+  css: "Modern CSS variables + animations",
+  js: "ES6+ with modules",
+  streaming: "Enhanced SSE handling",
+  markdown: "Markdown-it integration",
+  syntax: "Prism.js for highlighting",
+  tooltips: "Tippy.js or Floating UI"
+}
+```
 
-Web enrichment (conditional)
-- Trigger if local recall is low, sources are outdated, or the user explicitly asks.
-- Use safe search and polite fetch (rate limit, robots-aware).
-- Clearly label any web-enriched sections and cite.
+#### **Phase 2: Component System (Next Sprint)**
+```javascript
+// Gradual component migration
+components: {
+  framework: "Alpine.js or Petite Vue",
+  bundler: "Vite for dev experience",
+  styling: "TailwindCSS utilities",
+  components: "Headless UI patterns",
+  state: "Local storage + SSE"
+}
+```
 
-Hallucination guardrails
-- If unsure, say “I’m not certain” and offer links for verification.
-- Prefer quoting directly from sources rather than paraphrasing when nuance matters.
+#### **Phase 3: Modern SPA (Future)**
+```javascript
+// Full modern stack
+spa: {
+  framework: "React 18 or Vue 3",
+  language: "TypeScript",
+  styling: "TailwindCSS + ShadCN/UI",
+  state: "Zustand or Pinia",
+  routing: "React Router or Vue Router",
+  animation: "Framer Motion or Vue transitions"
+}
+```
 
+### Backend Enhancements
 
-## Streaming Strategy
+#### **Enhanced Streaming Protocol**
+```java
+// Rich SSE events for different content types
+public enum StreamEventType {
+    TEXT("text"),                    // Main response text
+    CITATION("citation"),             // Citation reference
+    CODE("code"),                     // Code block
+    ENRICHMENT("enrichment"),         // Tooltip/background
+    SUGGESTION("suggestion"),         // Follow-up suggestion
+    STATUS("status");                 // Processing status
+}
 
-- Start streaming immediately with a skeletal outline.
-- Emit sections in this rough order: short answer → key steps → examples → citations → extras.
-- Append/tool in citations as they are confirmed; don’t delay the answer.
-- Use SSE with backpressure; keep token cadence smooth; retry gracefully.
+public record StreamEvent(
+    StreamEventType type,
+    String content,
+    Map<String, Object> metadata,
+    Long timestamp
+) {}
+```
 
+#### **Layered Response Service**
+```java
+@Service
+public class LayeredResponseService {
+    
+    public Flux<StreamEvent> generateLayeredResponse(String query) {
+        return Flux.concat(
+            generateShortAnswer(query),
+            generateKnowledge(query),
+            generateCodeExamples(query),
+            generateCitations(query),
+            generateEnrichments(query)
+        ).onErrorContinue((error, obj) -> 
+            log.warn("Partial failure in response generation", error)
+        );
+    }
+    
+    private Flux<StreamEvent> generateShortAnswer(String query) {
+        // Immediate, concise response
+    }
+    
+    private Flux<StreamEvent> generateKnowledge(String query) {
+        // Canonical facts from documentation
+    }
+}
+```
 
-## Front-End (UI) Expectations
+#### **Citation Enhancement**
+```java
+public record EnhancedCitation(
+    String url,
+    String title,
+    String snippet,
+    String domain,
+    String faviconUrl,
+    LocalDateTime lastVerified,
+    Double relevanceScore,
+    List<String> sections  // Deep links to specific sections
+) {}
+```
 
-Quality bar and style
-- ShadCN-inspired components (clean, modern, tasteful motion)
-- Typography: elegant scale, high legibility, great contrast
-- Motion: subtle, purpose-driven, respects prefers-reduced-motion
+#### **Tooltip Registry**
+```java
+@Component
+public class TooltipRegistry {
+    private final Map<String, TooltipDefinition> glossary = new ConcurrentHashMap<>();
+    
+    @PostConstruct
+    public void loadGlossary() {
+        // Load Java terms, concepts, and definitions
+        glossary.put("Optional", new TooltipDefinition(
+            "A container object that may or may not contain a non-null value",
+            "java.util.Optional",
+            List.of("https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html")
+        ));
+    }
+    
+    public List<TooltipDefinition> findTooltips(String text) {
+        // Identify terms in text that have tooltip definitions
+    }
+}
+```
 
-Components
-- Chat composer with hotkeys and slash commands
-- Streaming message list with partial updates and progressive citations
-- Tooltip system for term definitions
-- URL pill boxes: favicon, domain, title; open in a new tab
-- Code blocks with syntax highlight, copy, and collapsible sections
-- Command palette (Cmd/Ctrl+K) for quick doc search and actions
+## 🚀 IMPLEMENTATION ROADMAP
 
-Performance & accessibility
-- Optimistic rendering with server-confirmed updates
-- A11y: Focus management, ARIA roles, keyboard navigation
-- Theming: light/dark, high-contrast modes
+### Sprint 1: UI Polish & Performance (Week 1)
+```yaml
+Goals:
+  - Modern CSS design system with variables
+  - Smooth streaming animations
+  - Beautiful citation pills with hover states
+  - Loading skeletons and shimmers
+  - Dark/light theme support
 
-Front-end stack guidance (when present)
-- If a separate /web app is introduced, use Next.js + shadcn/ui with pnpm by default (bun acceptable).
-- Keep UI and API cleanly separated; stream over SSE or fetch APIs.
+Tasks:
+  - [ ] Implement CSS variable system
+  - [ ] Add streaming character animation
+  - [ ] Create citation pill components
+  - [ ] Build loading states
+  - [ ] Add theme toggle
+```
 
+### Sprint 2: Knowledge Layering (Week 2)
+```yaml
+Goals:
+  - Inline citation markers [¹][²]
+  - Expandable knowledge cards
+  - Rich tooltip system
+  - Code syntax highlighting
+  - Contextual insights panel
 
-## Safety, Privacy, and Secrets
+Tasks:
+  - [ ] Implement citation marker injection
+  - [ ] Build collapsible card system
+  - [ ] Integrate Prism.js or Shiki
+  - [ ] Create tooltip registry
+  - [ ] Add insights panel UI
+```
 
-- Never reveal or echo secrets (tokens, API keys). Use environment variables only.
-- Sanitize all user-provided URLs and inputs before fetching.
-- Respect content licenses and robots.txt. Cite and link back to sources.
-- Avoid sending sensitive content to third parties. When in doubt, omit or ask for confirmation.
+### Sprint 3: Interactivity & Polish (Week 3)
+```yaml
+Goals:
+  - Interactive code examples
+  - Hover previews for citations
+  - Keyboard navigation
+  - Search within responses
+  - Export with formatting
 
+Tasks:
+  - [ ] Add code copy buttons
+  - [ ] Implement citation previews
+  - [ ] Build keyboard shortcuts
+  - [ ] Add search highlighting
+  - [ ] Create formatted export
+```
 
-## Project Conventions (java-chat)
+### Sprint 4: Learning Features (Week 4)
+```yaml
+Goals:
+  - Concept progression tracking
+  - Related topics suggestions
+  - Learning path recommendations
+  - Interactive tutorials
+  - Knowledge graph visualization
 
-- Prefer Spring Boot defaults; configuration over code where possible.
-- Keep controllers/services small and explicit. Constructor injection.
-- Write JavaDoc as concise fragments (no full sentences) when documenting public APIs.
-- Tests are encouraged (unit first). Stream correctness tests are valuable.
+Tasks:
+  - [ ] Build progress tracking
+  - [ ] Implement suggestion engine
+  - [ ] Create learning paths
+  - [ ] Add tutorial system
+  - [ ] Prototype knowledge graph
+```
 
+## 📋 QUALITY STANDARDS
 
-## Learning-First Content Architecture (Beautiful Separation of Layers)
+### Performance Metrics
+```yaml
+Latency:
+  TTFB: < 200ms
+  StreamingStart: < 500ms
+  FullResponse: < 3s (typical query)
+  CitationLoad: < 100ms
 
-Goal: Keep the application simple yet deeply effective for learning Java. For every query, produce a structured, layered response that separates knowledge, wisdom, background, info, tooltips, suggestions, and citations. Avoid a generic "chatbot" blob. Ensure each layer is independently useful and beautifully presented.
+Rendering:
+  FPS: 60fps minimum
+  InputLatency: < 50ms
+  ScrollPerformance: No jank
+  AnimationSmooth: Yes
+```
 
-Layers and definitions
-- Short Answer: One-paragraph answer optimized for correctness and speed; sets user expectations.
-- Knowledge (Canonical Facts): Precise definitions, API contracts, signatures, constraints; grounded in authoritative docs.
-- Wisdom (Practice & Judgment): Best practices, trade-offs, pitfalls, gotchas, performance notes, version differences.
-- Background (Conceptual Framing): Why the concept exists, when to use it, related ideas, historical context; links to deeper readings.
-- Info (Implementation Details): Step-by-step guidance, parameters, return types, compatibility matrices, minimal runnable examples.
-- Tooltips (Micro-Definitions): Inline definitions for terms (e.g., Optional, Stream, sealed classes) shown on hover/tap.
-- Suggestions (Next Steps): 2–3 high-signal follow-ups (e.g., “Show an example with Streams + Optionals”, “Compare List vs Set performance”).
-- Citations (Sources): Verifiable links to exact sections in official docs; render as URL pills with favicon, title, domain.
+### Accessibility Requirements
+```yaml
+Standards:
+  - WCAG 2.1 AA compliance
+  - Keyboard navigation (all features)
+  - Screen reader support (NVDA, JAWS)
+  - High contrast mode
+  - Focus indicators
+  - Skip links
+  - ARIA labels
+  - Reduced motion support
+```
 
-Pipeline mapping (keep it simple)
-- QueryRouter: Classify intent (concept, API reference, how-to, error, performance). Sets initial layer priorities.
-- Retriever: Fetch 5–15 passages from embeddings + curated indexes; dedupe; prefer canonical sources.
-- Synthesizer: Produce a structured JSON with slots: short_answer, knowledge, wisdom, background, info, tooltips[], suggestions[], citations[].
-- CitationVerifier: Ensure every factual claim traces to at least one cited source; filter weak/noisy links.
-- UIStreamer: Stream sections in order; allow late-arriving citations and tooltips without blocking rendering.
+### Code Quality Gates
+```bash
+# Frontend quality
+npm run lint          # ESLint standards
+npm run typecheck     # TypeScript validation
+npm run test          # Component testing
+npm run a11y          # Accessibility audit
 
-Streaming order (progressive disclosure)
-1) Short Answer → immediate.
-2) Knowledge → canonical facts quickly.
-3) Info → runnable example and steps.
-4) Suggestions → short and actionable.
-5) Wisdom → pitfalls/trade-offs.
-6) Background → deeper context.
-7) Citations → progressively appended and verified.
-8) Tooltips → on-demand from a shared tooltip registry keyed by term.
+# Backend quality
+mvn clean compile     # Java compilation
+mvn test              # Unit + integration
+mvn spotbugs:check    # Bug detection
+mvn verify            # Full validation
+```
 
-Simplicity heuristics (to avoid over-engineering)
-- Fixed budgets: Max 120–180 words per layer (except citations); truncate gracefully with “Show more”.
-- Suggestions capped to 3. Tooltips capped to 5 per message.
-- Collapse near-duplicate sources; prefer official docs over blogs when both exist.
-- If confidence < threshold, label sections as “Low confidence” and link to sources for verification.
-- Prefer one minimal code example over multiple variants; link to alternatives in suggestions.
+## 🔧 DEVELOPMENT WORKFLOW
 
-Teaching ethos
-- Prefer examples that compile as-is; include imports as needed.
-- When nuance matters (e.g., memory model, concurrency), quote the source directly and cite.
-- Adapt to Java version context where known; otherwise default to current LTS.
+### Local Development Setup
+```bash
+# 1. Start infrastructure
+make compose-up       # Qdrant vector store
 
-UI presentation (ShadCN-inspired)
-- Section chips or tabs (Short, Knowledge, Info, Wisdom, Background, Citations); sensible default is Short + Knowledge visible, others collapsible.
-- URL pills with favicon, domain, title; click opens new tab; keyboard accessible.
-- Tooltips surfaced via consistent glossary; keyboard navigable; screen-reader friendly descriptions.
-- Smooth streaming with skeletons; partial citations appear as they verify.
+# 2. Start backend
+make dev              # Spring Boot with hot reload
+# or
+make run              # Production-like execution
 
-Quality gates (Ultra Think pass)
-- Check: Does each claim have a citation? Are sources authoritative?
-- Check: Are layers distinct (no redundancy) and within token budgets?
-- Check: Is the example minimal yet runnable? Are pitfalls called out?
-- Check: Are suggestions actionable and contextually relevant?
-- Check: Is the UI able to render each layer progressively without blocking?
+# 3. Start frontend (if separate)
+npm run dev           # Vite dev server (future)
 
-Configuration toggles
-- Learning Mode (default): Show all layers with conservative budgets; extra tooltips on.
-- Expert Mode: Focus on Short + Knowledge + Info; Wisdom compact; Background collapsed by default.
+# 4. Ingest documentation
+curl -X POST http://localhost:8080/api/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://docs.oracle.com/javase/24/"}'
 
-## Checklist Before Merge
+# 5. Test streaming
+curl -N http://localhost:8080/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What are Java records?"}'
+```
 
-- Build success and jar present
-- App runs locally; health endpoint green
-- Retrieval works on at least a few representative queries
-- Streaming produces smooth, incremental output
-- Citations present and clickable; URL pills render as expected (if UI present)
-- No secrets in logs, code, or docs
+### Environment Configuration
+```bash
+# AI Services (.env file)
+GITHUB_TOKEN=ghp_xxxx            # GitHub Models access
+# GitHub Models OpenAI-compatible endpoint (default if unset)
+GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
+OPENAI_API_KEY=sk-xxx            # Alternative provider
 
+# Vector Store
+QDRANT_URL=localhost:6333
+QDRANT_API_KEY=                  # Cloud deployment
+QDRANT_COLLECTION=java-docs
 
-## Inspiration Borrowed from hybrid/back-end
+# Embedding Configuration
+EMBEDDING_MODE=github            # github | local | openai
+LOCAL_EMBEDDING_URL=http://localhost:11434
+EMBEDDING_MODEL=text-embedding-3-small
 
-- Convention over configuration and DRY by default
-- Verification loops that prove behavior (not just code compiles)
-- Documentation-first clarity: what to do and what to avoid
+# Chat Model
+CHAT_MODEL=gpt-4o-mini
+CHAT_TEMPERATURE=0.7
+CHAT_MAX_TOKENS=2000
 
-Adapted to java-chat’s goals: a smaller, simpler, teaching-focused app with top-tier UX and trustworthy, cited, streaming answers.
+# Feature Flags
+ENABLE_TOOLTIPS=true
+ENABLE_CITATIONS=true
+ENABLE_CODE_EXAMPLES=true
+ENABLE_WEB_SEARCH=false          # Future enhancement
+ENABLE_LEARNING_PATHS=false      # Future feature
+
+# UI Configuration
+UI_THEME_DEFAULT=dark
+UI_STREAMING_SPEED=30            # chars/second
+UI_ANIMATION_DURATION=300        # milliseconds
+```
+
+## 🎯 SUCCESS METRICS
+
+### User Experience KPIs
+```yaml
+Quality:
+  ResponseRelevance: > 90%        # Queries with relevant answers
+  CitationAccuracy: > 95%         # Correct source attribution
+  StreamingSmooth: > 98%          # No stuttering
+  ErrorRate: < 1%                 # Failed responses
+
+Engagement:
+  TooltipInteraction: > 40%       # Users hovering tooltips
+  CitationClicks: > 30%           # Click-through rate
+  SuggestionFollow: > 25%         # Follow-up usage
+  SessionLength: > 5 minutes      # Average engagement
+
+Learning:
+  ConceptComprehension: Track via feedback
+  ReturnUsers: > 60%              # Weekly active return
+  ExportUsage: > 20%              # Users exporting content
+```
+
+### Technical Performance
+```yaml
+Infrastructure:
+  Uptime: 99.9%
+  ResponseTime: p50 < 500ms, p95 < 1s, p99 < 2s
+  Throughput: 100+ concurrent users
+  MemoryUsage: < 512MB heap
+  CPUUsage: < 50% average
+
+Quality:
+  CodeCoverage: > 80%
+  BugDensity: < 1 per 1000 LOC
+  TechDebt: < 10% of codebase
+  SecurityVulnerabilities: 0 critical, 0 high
+```
+
+## 🚨 CRITICAL REQUIREMENTS
+
+### 1. **ALWAYS BEAUTIFUL**
+- Every component meets design standards
+- No "temporary" or "good enough" UI
+- Consistent spacing, typography, motion
+- Pixel-perfect attention to detail
+
+### 2. **ALWAYS EDUCATIONAL**
+- Every response enriches Java knowledge
+- Never just answer — always teach
+- Layer information for different expertise levels
+- Provide pathways for deeper learning
+
+### 3. **ALWAYS CITED**
+- Every fact links to authoritative documentation
+- Build trust through transparency
+- Verify citations before display
+- Fallback gracefully if source unavailable
+
+### 4. **ALWAYS ACCESSIBLE**
+- Keyboard navigable everything
+- Screen reader friendly
+- High contrast support
+- Mobile responsive
+- Works without JavaScript (basic functionality)
+
+### 5. **ALWAYS PERFORMANT**
+- Stream starts < 500ms
+- Smooth 60fps animations
+- Progressive enhancement
+- Graceful degradation
+- Efficient resource usage
+
+## 📚 INSPIRATION & REFERENCES
+
+### Design Inspiration
+```yaml
+v0.dev:
+  - Component generation UI
+  - Preview panels
+  - Clean code display
+
+ChatGPT:
+  - Streaming responses
+  - Conversation threading
+  - Code block handling
+
+Claude:
+  - Clean, minimal interface
+  - Thoughtful typography
+  - Artifact system
+
+Perplexity:
+  - Citation integration
+  - Source cards
+  - Follow-up suggestions
+
+Apple Developer:
+  - Documentation clarity
+  - Visual hierarchy
+  - Interactive examples
+```
+
+### Component Examples
+```javascript
+// Beautiful streaming text
+<StreamingText
+  text={response}
+  speed={30}           // chars per second
+  cursor="▊"
+  highlight={terms}    // Tooltip triggers
+  onComplete={() => showEnrichments()}
+/>
+
+// Elegant citation pills
+<CitationPill
+  citation={citation}
+  variant="primary"
+  showPreview={true}
+  previewDelay={500}
+  onHover={loadSnippet}
+  onClick={openInNewTab}
+/>
+
+// Rich knowledge cards
+<KnowledgeCard
+  type="insight"
+  title="Best Practice"
+  icon={LightbulbIcon}
+  expandable={true}
+  priority="high"
+>
+  <MarkdownContent>{enrichment}</MarkdownContent>
+</KnowledgeCard>
+
+// Interactive code blocks
+<CodeBlock
+  language="java"
+  title="Example: Using Optional"
+  code={exampleCode}
+  runnable={true}
+  highlightLines={[3, 5, 7]}
+  onCopy={() => track('code_copied')}
+/>
+```
+
+## 🔄 CONTINUOUS IMPROVEMENT
+
+### Analytics & Monitoring
+```yaml
+UserBehavior:
+  - Tooltip hover patterns
+  - Citation click rates
+  - Scroll depth tracking
+  - Time on response
+  - Feature usage heatmaps
+
+SystemHealth:
+  - Response latency histograms
+  - Streaming performance metrics
+  - Error rate tracking
+  - Citation verification success
+  - Model performance metrics
+
+LearningEffectiveness:
+  - Concept comprehension surveys
+  - Follow-up question analysis
+  - Knowledge retention testing
+  - User progress tracking
+```
+
+### Feedback Mechanisms
+```yaml
+InApp:
+  - Response quality rating (👍/👎)
+  - Citation accuracy reporting
+  - Feature request widget
+  - Bug report button
+  - Learning effectiveness survey
+
+External:
+  - GitHub issues tracking
+  - Discord community
+  - User interviews
+  - A/B testing framework
+  - Analytics dashboards
+```
+
+### Documentation Standards
+```yaml
+Code:
+  - JSDoc/JavaDoc on public APIs
+  - README for each module
+  - Architecture decision records
+  - Component storybook
+
+User:
+  - Interactive tutorials
+  - Video walkthroughs
+  - FAQ section
+  - Glossary of terms
+
+Developer:
+  - Setup guide
+  - API documentation
+  - Design system docs
+  - Contributing guidelines
+```
+
+## 🎬 VERIFICATION & LAUNCH CHECKLIST
+
+### Pre-Launch Requirements
+```bash
+# Build verification
+make build                        # BUILD SUCCESS
+ls -la target/*.jar               # JAR exists
+
+# Health checks
+make run &
+sleep 10
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/api/chat/health/embeddings
+
+# Feature verification
+curl -X POST http://localhost:8080/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Explain Java Optional"}'
+
+# UI verification (manual)
+- [ ] Streaming smooth and jitter-free
+- [ ] Citations load and link correctly
+- [ ] Tooltips appear on hover
+- [ ] Theme switching works
+- [ ] Mobile responsive
+- [ ] Keyboard navigation works
+- [ ] Screen reader tested
+```
+
+### Quality Gates
+```yaml
+Must Pass:
+  - All tests green
+  - No critical bugs
+  - Performance benchmarks met
+  - Accessibility audit passed
+  - Security scan clean
+  - Documentation complete
+
+Should Have:
+  - 90% code coverage
+  - All feature flags tested
+  - Load testing completed
+  - User acceptance testing
+  - Design review approved
+```
 
 ---
-END OF AGENTS.MD
 
+## 🌟 FINAL VISION STATEMENT
+
+**Java Chat is not just a chatbot — it's a beautiful, intelligent learning companion that transforms how people learn Java.**
+
+Every query becomes an opportunity to deliver:
+- **Immediate value** through streaming responses
+- **Deep understanding** through layered knowledge
+- **Trust** through verifiable citations
+- **Engagement** through beautiful interactions
+- **Growth** through smart learning paths
+
+We achieve this through:
+- **Thoughtful design** that delights users
+- **Smart architecture** that scales elegantly
+- **Rich content** that educates effectively
+- **Inclusive features** that work for everyone
+- **Continuous improvement** based on real usage
+
+**Success is when users don't just get answers — they gain understanding, build confidence, and develop mastery of Java through every beautifully crafted interaction.**
+
+---
+
+*Remember: Every pixel, every animation, every response is an opportunity to inspire learning through exceptional design and intelligent information architecture.*
+
+**Ship beautiful. Ship educational. Ship accessible. Ship fast.**

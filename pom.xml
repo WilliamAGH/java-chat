@@ -50,12 +50,13 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-advisors-vector-store</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
-            <!-- Using OpenAI-compatible client pointed at GitHub Models via properties
-                 See README for required env vars and Makefile runtime args. -->
-        </dependency>
+         <dependency>
+             <groupId>org.springframework.ai</groupId>
+             <artifactId>spring-ai-starter-model-openai</artifactId>
+             <!-- Using OpenAI-compatible client pointed at GitHub Models via properties
+                  See README for required env vars and Makefile runtime args. -->
+         </dependency>
+
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
@@ -96,6 +97,22 @@
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
+        
+        <!-- macOS DNS resolver to avoid Netty warning on Mac -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-resolver-dns-native-macos</artifactId>
+            <classifier>osx-aarch_64</classifier>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-resolver-dns-classes-macos</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
