@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender with color coding -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- File appender for pipeline logs -->
+    <appender name="PIPELINE_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/pipeline.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/pipeline-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{ISO8601} [%thread] %-5level %logger - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Async appender for better performance -->
+    <appender name="ASYNC_PIPELINE" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="PIPELINE_FILE"/>
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+    </appender>
+
+    <!-- Pipeline logger configuration -->
+    <logger name="PIPELINE" level="INFO" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_PIPELINE"/>
+    </logger>
+
+    <!-- Application loggers -->
+    <logger name="com.williamcallahan.javachat" level="INFO"/>
+    <logger name="com.williamcallahan.javachat.logging.ProcessingLogger" level="DEBUG"/>
+    <logger name="com.williamcallahan.javachat.service" level="DEBUG"/>
+    
+    <!-- Spring framework loggers -->
+    <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.springframework.ai" level="DEBUG"/>
+    
+    <!-- Qdrant client logger -->
+    <logger name="io.qdrant" level="INFO"/>
+    
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
