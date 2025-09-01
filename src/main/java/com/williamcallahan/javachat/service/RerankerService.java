@@ -1,0 +1,52 @@
+package com.williamcallahan.javachat.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.document.Document;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class RerankerService {
+    private final ChatClient chatClient;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public RerankerService(ChatClient chatClient) {
+        this.chatClient = chatClient;
+    }
+
+    public List<Document> rerank(String query, List<Document> docs, int returnK) {
+        if (docs.size() <= 1) return docs;
+        try {
+            StringBuilder prompt = new StringBuilder();
+            prompt.append("You are a re-ranker. Reorder the following documents for the query by relevance. Return JSON: {\"order\":[indices...]} with 0-based indices.\n");
+            prompt.append("Query: ").append(query).append("\n\n");
+            for (int i = 0; i < docs.size(); i++) {
+                var d = docs.get(i);
+                prompt.append("["+i+"] ").append(d.getMetadata().get("title")).append(" | ")
+                      .append(d.getMetadata().get("url")).append("\n")
+                      .append(trim(d.getText(), 500)).append("\n\n");
+            }
+            String json = chatClient.prompt().user(prompt.toString()).call().content();
+            JsonNode root = mapper.readTree(json);
+            List<Document> reordered = new ArrayList<>();
+            if (root.has("order") && root.get("order").isArray()) {
+                for (JsonNode n : root.get("order")) {
+                    int idx = n.asInt();
+                    if (idx >= 0 && idx < docs.size()) reordered.add(docs.get(idx));
+                }
+            }
+            if (reordered.isEmpty()) return docs.subList(0, Math.min(returnK, docs.size()));
+            return reordered.subList(0, Math.min(returnK, reordered.size()));
+        } catch (Exception e) {
+            return docs.subList(0, Math.min(returnK, docs.size()));
+        }
+    }
+
+    private String trim(String s, int len) { return s.length() <= len ? s : s.substring(0, len) + "…"; }
+}
+
+

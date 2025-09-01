@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Java Chat</title>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 0; background: #0b0d0f; color: #e7e7ea; }
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .header { display:flex; align-items:center; gap:12px; }
+        .pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #2a2f36; background:#12151a; padding:6px 10px; border-radius:999px; font-size:12px; color:#c8c9ce; }
+        .bubble { background:#111318; border:1px solid #1f2430; padding:16px; border-radius:14px; margin:8px 0; }
+        .assistant { background:#0f1218; border-color:#202737; }
+        .user { background:#12171d; border-color:#283241; }
+        .row { display:flex; gap:12px; align-items:flex-start; }
+        .col { flex:1; }
+        .src { display:inline-flex; gap:6px; align-items:center; margin-right:8px; }
+        .src a { color:#9cc4ff; text-decoration:none; }
+        .src a:hover { text-decoration:underline; }
+        .small { font-size:12px; color:#9aa2ad; }
+        .input { width:100%; padding:12px; border-radius:12px; border:1px solid #2c323a; background:#0f1319; color:#e7e7ea; }
+        .btn { padding:10px 14px; border-radius:10px; border:1px solid #2c323a; background:#11151c; color:#e7e7ea; cursor:pointer; }
+        .btn:hover { background:#151a22; }
+        .tooltip { position:relative; cursor:help; }
+        .tooltip:hover .tip { display:block; }
+        .tip { display:none; position:absolute; top:100%; left:0; background:#0c0f14; border:1px solid #2a2f36; padding:12px; border-radius:10px; width:320px; z-index:10; box-shadow:0 10px 24px rgba(0,0,0,.4); }
+        code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+    <script>
+        async function ask(){
+            const q = document.getElementById('q').value;
+            const el = document.getElementById('chat');
+            const u = document.createElement('div');
+            u.className='bubble user';
+            u.textContent=q;
+            el.appendChild(u);
+
+            const sse = new EventSourcePolyfill('/api/chat/stream', { method:'POST', headers:{'Content-Type':'application/json'}, payload: JSON.stringify({ sessionId:'web', latest:q })});
+            const a = document.createElement('div'); a.className='bubble assistant'; el.appendChild(a);
+            await new Promise(resolve => {
+              sse.onmessage = (e)=>{ a.textContent += e.data; };
+              sse.onerror = ()=>{ sse.close(); resolve(); };
+              setTimeout(()=>{ sse.close(); resolve(); }, 15000);
+            });
+
+            const citsRes = await fetch('/api/chat/citations?q='+encodeURIComponent(q));
+            const cits = await citsRes.json();
+            const row = document.createElement('div'); row.className='row small';
+            cits.slice(0,3).forEach(c=>{
+                const pill = document.createElement('span'); pill.className='pill src';
+                const a = document.createElement('a'); a.href=c.url; a.target='_blank'; a.textContent=c.title||c.url; pill.appendChild(a);
+                row.appendChild(pill);
+            });
+            el.appendChild(row);
+
+            const enrRes = await fetch('/api/enrich?q='+encodeURIComponent(q));
+            if (enrRes.ok){
+                const enr = await enrRes.json();
+                const tipWrap = document.createElement('div'); tipWrap.className='tooltip small'; tipWrap.textContent='Background';
+                const tip = document.createElement('div'); tip.className='tip';
+                const list = (enr.background||[]).concat(enr.hints||[]).concat(enr.reminders||[]);
+                tip.innerHTML = '<ul>'+ list.map(x=>'<li>'+x+'</li>').join('') +'</ul>';
+                tipWrap.appendChild(tip);
+                el.appendChild(tipWrap);
+            }
+        }
+
+        // Minimal SSE over POST polyfill
+        class EventSourcePolyfill{
+            constructor(url, opts){
+                this.controller = new AbortController();
+                fetch(url, { method: opts.method||'POST', headers: opts.headers||{}, body: opts.payload||'', signal:this.controller.signal })
+                  .then(async r=>{
+                    const reader = r.body.getReader();
+                    const decoder = new TextDecoder();
+                    while(true){
+                        const {done, value} = await reader.read();
+                        if (done) break;
+                        const txt = decoder.decode(value);
+                        this.onmessage && this.onmessage({ data: txt });
+                    }
+                  }).catch(()=>this.onerror && this.onerror());
+            }
+            close(){ this.controller.abort(); }
+        }
+    </script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <span class="pill">Java Chat • JDK 24 Docs</span>
+        <button class="btn" onclick="copyLast()">Copy last</button>
+        <button class="btn" onclick="copyChat()">Copy chat</button>
+      </div>
+      <div id="chat"></div>
+      <div class="row" style="margin-top:16px;">
+        <div class="col"><input id="q" class="input" placeholder="Ask about Java (e.g., records, pattern matching, streams)"/></div>
+        <button class="btn" onclick="ask()">Ask</button>
+      </div>
+    </div>
+    <script>
+      async function copyLast(){
+        const res = await fetch('/api/chat/export/last?sessionId=web');
+        const txt = await res.text();
+        await navigator.clipboard.writeText(txt);
+      }
+      async function copyChat(){
+        const res = await fetch('/api/chat/export/session?sessionId=web');
+        const txt = await res.text();
+        await navigator.clipboard.writeText(txt);
+      }
+    </script>
+  </body>
+ </html>
+
