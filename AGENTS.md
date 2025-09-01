@@ -518,7 +518,7 @@ curl -N http://localhost:8080/api/chat/stream \
 # AI Services (.env file)
 GITHUB_TOKEN=ghp_xxxx            # GitHub Models access
 # GitHub Models OpenAI-compatible endpoint (default if unset)
-GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
+GITHUB_MODELS_BASE_URL=https://models.github.ai/inference
 OPENAI_API_KEY=sk-xxx            # Alternative provider
 
 # Vector Store
