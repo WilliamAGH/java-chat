@@ -2,16 +2,11 @@ package com.williamcallahan.javachat.service;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.vladsch.flexmark.ast.FencedCodeBlock;
-import com.vladsch.flexmark.ast.IndentedCodeBlock;
 import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
 import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension;
 import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.html.HtmlRenderer;
-import com.vladsch.flexmark.html.HtmlRenderer.HtmlRendererExtension;
-import com.vladsch.flexmark.html.renderer.NodeRenderer;
-import com.vladsch.flexmark.html.renderer.NodeRenderingHandler;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
@@ -21,8 +16,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -55,8 +48,7 @@ public class MarkdownService {
                 TablesExtension.create(),
                 StrikethroughExtension.create(),
                 TaskListExtension.create(),
-                AutolinkExtension.create(),
-                new CustomSpacingExtension()
+                AutolinkExtension.create()
             ))
             
             // Parser options
@@ -70,7 +62,6 @@ public class MarkdownService {
             .set(HtmlRenderer.SOFT_BREAK, "<br />\n") // Line breaks as <br>
             .set(HtmlRenderer.HARD_BREAK, "<br />\n") // Consistent line breaks
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-") // For Prism.js
-            .set(HtmlRenderer.CODE_CLASS_PREFIX, "language-") // Inline code classes
             .set(HtmlRenderer.INDENT_SIZE, 2) // Clean indentation
             
             // Table rendering options
@@ -206,11 +197,29 @@ public class MarkdownService {
      * Restores custom enrichment markers after markdown processing.
      */
     private String restoreEnrichments(String html) {
-        // Restore enrichment markers
+        // First, handle cases where the whole thing got wrapped in <strong> tags
+        // Like: <strong>ENRICHMENT_hint_START__text__ENRICHMENT_hint_END</strong>
+        html = html.replaceAll(
+            "<strong>ENRICHMENT_(\\w+)_START__([\\s\\S]*?)__ENRICHMENT_\\1_END</strong>",
+            "{{$1:$2}}"
+        );
+        
+        // Handle partially wrapped cases with missing underscores
+        // Like: __ENRICHMENT_example_START__text<strong>ENRICHMENT_example_END</strong>
+        html = html.replaceAll(
+            "__ENRICHMENT_(\\w+)_START__([\\s\\S]*?)<strong>ENRICHMENT_\\1_END</strong>",
+            "{{$1:$2}}"
+        );
+        
+        // Handle any remaining unwrapped cases
         html = html.replaceAll(
             "__ENRICHMENT_(\\w+)_START__([\\s\\S]*?)__ENRICHMENT_\\1_END__",
             "{{$1:$2}}"
         );
+        
+        // Clean up any HTML entities that might have been escaped in the content
+        html = html.replace("&quot;", "\"");
+        
         return html;
     }
     
@@ -263,48 +272,4 @@ public class MarkdownService {
         }
     }
     
-    /**
-     * Custom extension for optimal spacing in rendered output.
-     */
-    static class CustomSpacingExtension implements HtmlRendererExtension {
-        @Override
-        public void rendererOptions(MutableDataSet options) {
-            // Additional renderer options if needed
-        }
-        
-        @Override
-        public void extend(HtmlRenderer.Builder htmlRendererBuilder, String rendererType) {
-            htmlRendererBuilder.nodeRendererFactory(new CustomSpacingRenderer.Factory());
-        }
-    }
-    
-    /**
-     * Custom node renderer for spacing control.
-     */
-    static class CustomSpacingRenderer implements NodeRenderer {
-        
-        static class Factory implements NodeRenderingHandler.CustomNodeRenderer<FencedCodeBlock> {
-            @Override
-            public NodeRenderingHandler<FencedCodeBlock> getNodeRenderingHandler() {
-                return new NodeRenderingHandler<>(
-                    FencedCodeBlock.class,
-                    (node, context, html) -> {
-                        // Custom rendering for fenced code blocks with proper spacing
-                        String language = node.getInfo().toString().trim();
-                        if (!language.isEmpty()) {
-                            html.attr("class", "language-" + language);
-                        }
-                        html.tag("pre").tag("code");
-                        html.text(node.getContentChars().toString());
-                        html.closeTag("code").closeTag("pre");
-                    }
-                );
-            }
-        }
-        
-        @Override
-        public Set<NodeRenderingHandler<?>> getNodeRenderingHandlers() {
-            return new HashSet<>();
-        }
-    }
 }

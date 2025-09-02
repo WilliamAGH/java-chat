@@ -7,6 +7,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,9 @@ public class ChatService {
     private final ChatClient chatClient;
     private final RetrievalService retrievalService;
     private final WebClient webClient;
+    
+    @Autowired
+    private MarkdownService markdownService;
 
     @Value("${OPENAI_API_KEY:}")
     private String openaiApiKey;
@@ -149,5 +153,49 @@ public class ChatService {
                     }
                 })
                 .flatMapMany(text -> Flux.just(text));
+    }
+    
+    /**
+     * Process response text with markdown rendering.
+     * This can be used to pre-render markdown on the server side.
+     * 
+     * @param text The raw text response from AI
+     * @return HTML-rendered markdown
+     */
+    public String processResponseWithMarkdown(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        
+        try {
+            // Render markdown to HTML
+            String html = markdownService.render(text);
+            logger.debug("Processed response with markdown rendering");
+            return html;
+        } catch (Exception e) {
+            logger.error("Error processing response with markdown", e);
+            // Fallback to plain text with basic escaping
+            return text.replace("&", "&amp;")
+                      .replace("<", "&lt;")
+                      .replace(">", "&gt;")
+                      .replace("\n", "<br />\n");
+        }
+    }
+    
+    /**
+     * Stream answers with optional markdown processing.
+     * Each chunk can be processed through markdown if needed.
+     */
+    public Flux<String> streamAnswerWithMarkdown(List<Message> history, String latestUserMessage, boolean renderMarkdown) {
+        Flux<String> baseStream = streamAnswer(history, latestUserMessage);
+        
+        if (!renderMarkdown) {
+            return baseStream;
+        }
+        
+        // For streaming with markdown, we need to buffer complete sentences/paragraphs
+        // This is complex for streaming, so typically markdown is applied client-side
+        // or after the full response is received
+        return baseStream;
     }
 }
