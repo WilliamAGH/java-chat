@@ -196,6 +196,48 @@ The pipeline automatically fetches and processes:
 # - Generates processing statistics
 ```
 
+#### Important Usage Notes
+
+**Resumable Processing**: The script is designed to handle interruptions gracefully:
+- If the connection is lost or the process is killed, simply re-run the script
+- It will automatically skip all previously indexed documents (via hash markers in `data/index/`)
+- Progress is preserved in Qdrant - vectors are never lost
+- Each successful chunk creates a persistent marker file
+
+**How Resume Works**:
+1. **Hash Markers**: Each successfully indexed chunk creates a file in `data/index/` named with its SHA-256 hash
+2. **On Restart**: The system checks for existing hash files before processing any chunk
+3. **Skip Logic**: If `data/index/{hash}` exists, the chunk is skipped (already in Qdrant)
+4. **Atomic Operations**: Markers are only created AFTER successful Qdrant insertion
+
+**Monitoring Progress**:
+```bash
+# Check current vector count in Qdrant
+source .env && curl -s -H "api-key: $QDRANT_API_KEY" \
+  "https://$QDRANT_HOST/collections/$QDRANT_COLLECTION" | \
+  grep -o '"points_count":[0-9]*' | cut -d: -f2
+
+# Count processed chunks (hash markers)
+ls data/index/ | wc -l
+
+# Monitor real-time progress (create monitor_progress.sh)
+#!/bin/bash
+source .env
+while true; do
+    count=$(curl -s -H "api-key: $QDRANT_API_KEY" \
+      "https://$QDRANT_HOST/collections/$QDRANT_COLLECTION" | \
+      grep -o '"points_count":[0-9]*' | cut -d: -f2)
+    echo -ne "\r[$(date +%H:%M:%S)] Vectors in Qdrant: $count"
+    sleep 5
+done
+```
+
+**Performance Notes**:
+- Local embeddings (LM Studio) process ~35-40 vectors/minute
+- Full indexing of 60,000 documents takes ~24-30 hours
+- The script has NO timeout - it will run until completion
+- Safe to run multiple times - deduplication prevents any redundant work
+
 #### Manual Ingestion (if needed)
 ```bash
 # The application automatically processes docs on startup
