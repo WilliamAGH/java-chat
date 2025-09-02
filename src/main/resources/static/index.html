@@ -1236,10 +1236,13 @@
                         }
                     }
                     
-                    // Update content with proper formatting
-                    const formattedText = formatText(fullText);
-                    contentWrapper.innerHTML = formattedText;
-                    contentWrapper.appendChild(cursor);
+                    // Update content with proper formatting (async)
+                    formatText(fullText).then(formattedText => {
+                        contentWrapper.innerHTML = formattedText;
+                        contentWrapper.appendChild(cursor);
+                        // Re-apply syntax highlighting after content update
+                        Prism.highlightAllUnder(contentWrapper);
+                    });
                     
                     // Auto-scroll
                     chatEl.scrollTop = chatEl.scrollHeight;
@@ -1280,9 +1283,39 @@
             }
         }
         
-        // Format text with markdown-like syntax and inline enrichments
-        function formatText(text) {
-            // Parse inline enrichment markers FIRST (before other formatting)
+        // Enhanced markdown rendering with server-side support
+        async function formatText(text, useServerMarkdown = true) {
+            // Try server-side markdown rendering first
+            if (useServerMarkdown) {
+                try {
+                    const response = await fetch('/api/markdown/render', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ content: text })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Server returns HTML with preserved enrichments
+                        return applyCustomEnrichments(data.html);
+                    }
+                } catch (error) {
+                    console.warn('Server markdown failed, using client fallback', error);
+                }
+            }
+            
+            // Fallback to client-side processing
+            return formatTextClientSide(text);
+        }
+        
+        // Client-side markdown formatting (fallback)
+        function formatTextClientSide(text) {
+            // Apply custom enrichments
+            return applyCustomEnrichments(text);
+        }
+        
+        // Apply custom enrichment markers
+        function applyCustomEnrichments(text) {
             // {{hint:text}} - Helpful tips and best practices
             text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g, (match, content) => {
                 return `<div class="inline-enrichment hint">
@@ -1348,50 +1381,9 @@
                 </div>`;
             });
             
-            // Parse inline citations [n] format FIRST
+            // Parse inline citations [n] format
             text = text.replace(/\[(\d+)\]/g, (match, num) => {
                 return `<sup class="inline-citation" data-cite="${num}">[${num}]</sup>`;
-            });
-            
-            // Convert markdown-style code blocks
-            text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-                const language = lang || 'java';
-                return `<pre><code class="language-${language}">${escapeHtml(code.trim())}</code></pre>`;
-            });
-            
-            // Convert inline code
-            text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-            
-            // Convert bold text
-            text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-            
-            // Convert italic text (but not list items that start with *)
-            text = text.replace(/(?<!^|\n)\*([^*\n]+)\*/g, '<em>$1</em>');
-            
-            // Handle paragraphs and line breaks properly
-            // First, protect block elements from being wrapped
-            const blocks = [];
-            let blockIndex = 0;
-            
-            // Temporarily replace block elements with placeholders
-            text = text.replace(/(<div[^>]*>[\s\S]*?<\/div>|<pre[^>]*>[\s\S]*?<\/pre>)/g, (match) => {
-                blocks.push(match);
-                return `__BLOCK_${blockIndex++}__`;
-            });
-            
-            // Now handle paragraphs for remaining text
-            const paragraphs = text.split(/\n\n+/);
-            text = paragraphs.map(p => {
-                p = p.trim();
-                if (!p) return '';
-                if (p.startsWith('__BLOCK_')) return p; // Don't wrap placeholders
-                // Convert single newlines to <br> within paragraphs
-                return `<p>${p.replace(/\n/g, '<br>')}</p>`;
-            }).filter(p => p).join('');
-            
-            // Restore block elements
-            blocks.forEach((block, i) => {
-                text = text.replace(`__BLOCK_${i}__`, block);
             });
             
             return text;
