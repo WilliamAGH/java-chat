@@ -7,6 +7,20 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Optional: centralized source URLs
+if [ -f "$SCRIPT_DIR/docs_sources.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$SCRIPT_DIR/docs_sources.sh"
+fi
+# Also allow sourcing from the Java resources properties to keep a single source of truth
+RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
+if [ -f "$RES_PROPS" ]; then
+  # Export variables defined as KEY=VALUE in the properties file
+  set -a
+  # shellcheck source=/dev/null
+  . "$RES_PROPS"
+  set +a
+fi
 DOCS_ROOT="$SCRIPT_DIR/../data/docs"
 LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
 
@@ -97,11 +111,11 @@ fetch_docs() {
 # Documentation sources configuration (using arrays for compatibility)
 # Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES
 DOC_SOURCES=(
-    "https://docs.oracle.com/en/java/javase/24/docs/api/|$DOCS_ROOT/java/java24-complete|Java 24 Complete API|5|9000"
-    "https://download.java.net/java/early_access/jdk25/docs/api/|$DOCS_ROOT/java/java25-ea-complete|Java 25 EA Complete API|4|8000"
-    "https://docs.spring.io/spring-boot/docs/current/api/|$DOCS_ROOT/spring-boot-complete|Spring Boot Complete API|5|7000"
-    "https://docs.spring.io/spring-framework/docs/current/javadoc-api/|$DOCS_ROOT/spring-framework-complete|Spring Framework Complete API|5|7000"
-    "https://docs.spring.io/spring-ai/reference/1.0/api/|$DOCS_ROOT/spring-ai-complete|Spring AI Complete API|6|200"
+    "${JAVA24_API_BASE:-https://docs.oracle.com/en/java/javase/24/docs/api/}|$DOCS_ROOT/java/java24-complete|Java 24 Complete API|5|9000"
+    "${JAVA25_EA_API_BASE:-https://download.java.net/java/early_access/jdk25/docs/api/}|$DOCS_ROOT/java/java25-ea-complete|Java 25 EA Complete API|4|8000"
+    "${SPRING_BOOT_API_BASE:-https://docs.spring.io/spring-boot/docs/current/api/}|$DOCS_ROOT/spring-boot-complete|Spring Boot Complete API|5|7000"
+    "${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Complete API|5|7000"
+    "${SPRING_AI_API_BASE:-https://docs.spring.io/spring-ai/reference/1.0/api/}|$DOCS_ROOT/spring-ai-complete|Spring AI Complete API|6|200"
 )
 
 # Statistics
