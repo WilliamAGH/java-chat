@@ -3,8 +3,7 @@ package com.williamcallahan.javachat.service;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,7 +27,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 
 @Service
 public class GuidedLearningService {
-    private static final Logger log = LoggerFactory.getLogger(GuidedLearningService.class);
+
 
     private final GuidedTOCProvider tocProvider;
     private final RetrievalService retrievalService;
@@ -175,11 +174,12 @@ public class GuidedLearningService {
         try {
             String safe = localStore.toSafeName(url);
             Path dir = localStore.getParsedDir();
-            int count = 0;
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, safe + "_*.txt")) {
-                for (Path ignored : stream) count++;
+            try (var stream = Files.list(dir)) {
+                return (int) stream
+                    .filter(path -> path.getFileName().toString().startsWith(safe + "_"))
+                    .filter(path -> path.getFileName().toString().endsWith(".txt"))
+                    .count();
             }
-            return count;
         } catch (Exception e) {
             return 0;
         }

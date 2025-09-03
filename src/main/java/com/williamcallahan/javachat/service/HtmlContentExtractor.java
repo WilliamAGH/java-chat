@@ -5,7 +5,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
+
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -122,9 +122,6 @@ public class HtmlContentExtractor {
         // Process specific elements for better formatting
         Elements headers = element.select("h1, h2, h3, h4, h5, h6");
         Elements paragraphs = element.select("p");
-        Elements lists = element.select("ul, ol");
-        Elements code = element.select("pre, code");
-        Elements tables = element.select("table");
         
         // If we have structured content, process it
         if (!headers.isEmpty() || !paragraphs.isEmpty()) {

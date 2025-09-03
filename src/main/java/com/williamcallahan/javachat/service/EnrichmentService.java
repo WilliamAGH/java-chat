@@ -5,36 +5,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
+
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class EnrichmentService {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
-    private final WebClient webClient;
 
-    @Value("${OPENAI_API_KEY:}")
-    private String openaiApiKey;
 
-    @Value("${APP_INFERENCE_PRIMARY_URL:http://localhost:8086}")
-    private String inferencePrimaryBaseUrl;
 
-    @Value("${APP_INFERENCE_SECONDARY_URL:http://localhost:8087}")
-    private String inferenceSecondaryBaseUrl;
 
-    @Value("${OPENAI_MODEL:gpt-4o-mini}")
-    private String openaiModel;
-
-    public EnrichmentService(ChatClient chatClient, ObjectMapper objectMapper, WebClient.Builder webClientBuilder) {
+    public EnrichmentService(ChatClient chatClient, ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.objectMapper = objectMapper;
-        this.webClient = webClientBuilder.build();
     }
 
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
@@ -121,37 +107,7 @@ public class EnrichmentService {
         return "{}";
     }
 
-    private String tryOpenAiCompat(String prompt, String baseUrl) {
-        try {
-            String url = baseUrl.endsWith("/") ? baseUrl + "v1/chat/completions" : baseUrl + "/v1/chat/completions";
-            Map<String, Object> body = Map.of(
-                    "model", openaiModel,
-                    "messages", List.of(Map.of("role", "user", "content", prompt)),
-                    "temperature", 0.7
-            );
-            WebClient.RequestBodySpec req = webClient.post()
-                    .uri(url)
-                    .contentType(MediaType.APPLICATION_JSON);
-            if (openaiApiKey != null && !openaiApiKey.isBlank()) {
-                req = req.header("Authorization", "Bearer " + openaiApiKey);
-            }
-            Map<?, ?> resp = req.bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) resp.get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                Object content = message != null ? message.get("content") : null;
-                return content != null ? content.toString() : "{}";
-            }
-            return "{}";
-        } catch (Exception e) {
-            return null;
-        }
-    }
+
 
     private String cleanJson(String raw) {
         if (raw == null) return "{}";
