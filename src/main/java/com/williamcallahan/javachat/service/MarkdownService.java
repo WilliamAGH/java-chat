@@ -209,16 +209,8 @@ public class MarkdownService {
             markdown = markdown.replaceAll("(?<=[:;,.\\)\\]])\\s*-\\s+(?=\\p{L})", "\n- ");
         }
         
-        // Debug: show before code-fence adjustment
-        if (markdown.contains("```")) {
-            System.out.println("[DEBUG preprocess] Before fence adjust=\n" + markdown);
-        }
-        // Fix code blocks without preceding line break: ensure a paragraph break before any fence
-        // e.g., "text:```" -> "text:\n\n```" and "text```" -> "text\n\n```"
-        markdown = markdown.replaceAll("(?<!\\n)```", "\n\n```");
-        if (markdown.contains("```")) {
-            System.out.println("[DEBUG preprocess] After fence adjust=\n" + markdown);
-        }
+        // Ensure proper separation before opening code fences, without touching closing fences
+        markdown = ensureFenceSeparation(markdown);
         
         // CRITICAL: Protect code block content from being consumed by other patterns
         // Ensure code blocks are properly delimited and content is preserved
@@ -241,6 +233,36 @@ public class MarkdownService {
         // Restore inline code placeholders back to markdown
         markdown = restoreInlineCode(markdown);
         return markdown;
+    }
+
+    /**
+     * Ensures a blank paragraph (\n\n) exists before every opening code fence (```),
+     * while not altering closing fences inside code blocks.
+     */
+    private String ensureFenceSeparation(String s) {
+        if (s == null || s.indexOf('`') < 0) return s;
+        StringBuilder out = new StringBuilder(s.length() + 16);
+        boolean inCode = false;
+        for (int i = 0; i < s.length();) {
+            if (i + 2 < s.length() && s.charAt(i) == '`' && s.charAt(i + 1) == '`' && s.charAt(i + 2) == '`') {
+                if (!inCode) {
+                    int len = out.length();
+                    if (len >= 2) {
+                        boolean hasDouble = out.charAt(len - 1) == '\n' && out.charAt(len - 2) == '\n';
+                        if (!hasDouble) {
+                            if (out.charAt(len - 1) == '\n') out.append('\n'); else out.append("\n\n");
+                        }
+                    }
+                }
+                inCode = !inCode; // toggle on open, off on close
+                out.append("```");
+                i += 3;
+            } else {
+                out.append(s.charAt(i));
+                i++;
+            }
+        }
+        return out.toString();
     }
     
     /**
@@ -425,6 +447,7 @@ public class MarkdownService {
             java.util.regex.Pattern.compile("```([\\w-]*)\n?([\\s\\S]*?)```", 
                                            java.util.regex.Pattern.DOTALL);
         java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
+        int blocks = 0;
         
         int lastEnd = 0;
         while (matcher.find()) {
@@ -434,6 +457,7 @@ public class MarkdownService {
             String language = matcher.group(1);
             String code = matcher.group(2);
             
+            blocks++;
             // Ensure code content is not empty and properly formatted
             if (code != null && !code.trim().isEmpty()) {
                 // Preserve the code block with proper formatting
@@ -468,7 +492,13 @@ public class MarkdownService {
             result.append(markdown.substring(lastEnd));
         }
         
-        return result.toString();
+        String out = result.toString();
+        if (blocks == 0 && markdown.contains("```")) {
+            logger.warn("protectCodeBlocks: no blocks matched; input contains fence. Sample={}...", markdown.substring(0, Math.min(80, markdown.length())).replace("\n","\\n"));
+        } else {
+            logger.debug("protectCodeBlocks: matched {} block(s)", blocks);
+        }
+        return out;
     }
     
     /**
