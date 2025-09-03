@@ -10,6 +10,9 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+
+### Compiled class files ###
+*.class
 ### STS ###
 .apt_generated
 .classpath
