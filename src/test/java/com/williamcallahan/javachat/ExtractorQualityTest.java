@@ -5,7 +5,8 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Bean;
 
 import java.nio.file.Files;
@@ -17,7 +18,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@SpringBootApplication
+// NOTE: This is a manual utility runner, not part of test boot configuration.
+// IMPORTANT: Do NOT annotate with @SpringBootApplication here to avoid
+// multiple @SpringBootConfiguration conflicts during @SpringBootTest.
+@Configuration
+@Profile("manual")
 public class ExtractorQualityTest {
     
     public static void main(String[] args) {
