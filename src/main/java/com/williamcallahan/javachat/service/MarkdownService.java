@@ -389,41 +389,66 @@ public class MarkdownService {
     }
     
     /**
-     * Fixes inline lists that should have line breaks.
-     * ONLY converts to list format when we have strong evidence it's actually a list.
+     * COMPREHENSIVE list formatting - handles ALL list types reliably.
+     * Supports numbered lists, roman numerals, letters, bullets, and special markers.
      */
     private String fixInlineLists(String markdown) {
-        // Be MUCH more conservative - only fix when:
-        // 1. After a colon followed by "1." (common pattern: "types:1. boolean")
-        // 2. Multiple consecutive numbered items on same line with clear list structure
+        // Support ALL list types:
+        // - Arabic numerals: 1. 2. 3. or 1) 2) 3)
+        // - Roman numerals: i. ii. iii. or I. II. III.
+        // - Letters: a. b. c. or A. B. C. or a) b) c)
+        // - Bullets: - * + • → ▸ ◆ □ ▪
         
-        // Fix pattern like "types:1. item 2. item" or "types: 1. item 2. item" 
-        // BUT NOT "Java 1. supports this and 2. that" in normal sentences
-        if (markdown.matches("(?s).*:\\s*1\\.\\s+.*?\\s+2\\.\\s+.*")) {
-            // This is very likely a list after a colon
-            markdown = markdown.replaceAll("(:\\s*)(1\\.\\s+)", "$1\n\n$2");
-            
-            // Add line breaks before subsequent numbers ONLY if they follow the pattern
-            // Must have: whitespace + number + period + whitespace + uppercase letter or lowercase (start of item)
-            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d{1,2}\\.\\s+)([A-Za-z])", "\n$2$3");
-            
-            logger.debug("Fixed inline numbered list after colon");
+        // STEP 1: Fix lists after colons (highest confidence)
+        // Pattern: "text:1. item" or "text:- item" etc
+        
+        // Numbered lists after colon
+        if (markdown.matches("(?s).*:\\s*\\d+[.)]\\s+.*")) {
+            markdown = markdown.replaceAll("(:\\s*)(\\d+[.)]\\s+)", "$1\n\n$2");
+            // Break subsequent numbers
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d+[.)]\\s+)", "\n$2");
+            logger.debug("Fixed numbered list after colon");
         }
         
-        // Fix obvious bullet lists after colons that got concatenated
-        // "types:- item1 - item2" -> proper list
-        if (markdown.matches("(?s).*:\\s*-\\s+.*")) {
-            markdown = markdown.replaceAll("(:\\s*)(-\\s+)", "$1\n\n$2");
-            // Fix subsequent bullets on same line
-            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(-\\s+)([A-Z])", "\n$2$3");
-            logger.debug("Fixed inline bullet list after colon");
+        // Roman numerals after colon (lowercase)
+        if (markdown.matches("(?s).*:\\s*(?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+.*")) {
+            markdown = markdown.replaceAll("(:\\s*)((?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)((?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+)", "\n$2");
+            logger.debug("Fixed roman numeral list after colon");
         }
         
-        // Also handle direct colon-number pattern: "types:1." without space
-        if (markdown.matches("(?s).*:\\d+\\.\\s+.*")) {
-            markdown = markdown.replaceAll("(:)(\\d+\\.\\s+)", "$1\n\n$2");
-            logger.debug("Fixed inline numbered list directly after colon");
+        // Letters after colon  
+        if (markdown.matches("(?s).*:\\s*[a-zA-Z][.)]\\s+.*")) {
+            markdown = markdown.replaceAll("(:\\s*)([a-zA-Z][.)]\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)([a-zA-Z][.)]\\s+)", "\n$2");
+            logger.debug("Fixed letter list after colon");
         }
+        
+        // Bullet lists after colon (including special characters)
+        String bullets = "[-*+•→▸◆□▪]";
+        if (markdown.matches("(?s).*:\\s*" + bullets + "\\s+.*")) {
+            markdown = markdown.replaceAll("(:\\s*)(" + bullets + "\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(" + bullets + "\\s+)", "\n$2");
+            logger.debug("Fixed bullet list after colon");
+        }
+        
+        // STEP 2: Fix multiple inline numbered items (moderate confidence)
+        // Pattern: "The types are 1. boolean 2. byte 3. int"
+        if (markdown.matches("(?s).*\\b(are|include|includes|such as|follows?)\\s+\\d+[.)]\\s+.*\\d+[.)]\\s+.*")) {
+            markdown = markdown.replaceAll(
+                "\\b(are|include|includes|such as|follows?)\\s+(\\d+[.)]\\s+)",
+                "$1\n\n$2"
+            );
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d+[.)]\\s+)", "\n$2");
+            logger.debug("Fixed inline numbered list with intro phrase");
+        }
+        
+        // STEP 3: Direct punctuation attachment (no space)
+        // Pattern: "text:1." or "text:-" etc
+        markdown = markdown.replaceAll(
+            "([:.!?;,])(?=\\d+[.)]\\s+|" + bullets + "\\s+|[a-zA-Z][.)]\\s+)",
+            "$1\n\n"
+        );
         
         return markdown;
     }
