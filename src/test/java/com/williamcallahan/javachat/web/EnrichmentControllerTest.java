@@ -6,7 +6,7 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -21,15 +21,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = EnrichmentController.class)
 @org.springframework.test.context.TestPropertySource(properties = "app.docs.jdk-version=24")
+@org.springframework.security.test.context.support.WithMockUser
 class EnrichmentControllerTest {
 
     @Autowired
     MockMvc mvc;
 
-    @MockBean
+    @MockitoBean
     RetrievalService retrievalService;
 
-    @MockBean
+    @MockitoBean
     EnrichmentService enrichmentService;
 
     private static Enrichment withItems(List<String> hints, List<String> reminders, List<String> background) {

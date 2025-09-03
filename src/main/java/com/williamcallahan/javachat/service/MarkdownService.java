@@ -216,6 +216,12 @@ public class MarkdownService {
         // Ensure code blocks are properly delimited and content is preserved
         markdown = protectCodeBlocks(markdown);
 
+        // Final guard: ensure a paragraph break before any fence still attached to punctuation
+        // e.g., "...:```" -> "...:\n\n```"
+        if (markdown.contains(":```")) {
+            markdown = markdown.replace(":```", ":\n\n```");
+        }
+
         // Ensure headings don't run into body text on the same logical line (common with streaming)
         // Insert a paragraph break when an ATX heading appears to be concatenated directly
         // with the next capitalized word (start of a sentence)

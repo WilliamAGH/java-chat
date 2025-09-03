@@ -7,7 +7,7 @@ import com.williamcallahan.javachat.service.MarkdownService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -20,21 +20,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = GuidedLearningController.class)
+@org.springframework.security.test.context.support.WithMockUser
 class GuidedLearningControllerTest {
 
     @Autowired
     MockMvc mvc;
 
-    @MockBean
+    @MockitoBean
     GuidedLearningService guidedLearningService;
 
-    @MockBean
+    @MockitoBean
     ChatMemoryService chatMemoryService;
 
-    @MockBean
+    @MockitoBean
     MarkdownService markdownService;
 
-    @MockBean
+    @MockitoBean
     ExceptionResponseBuilder exceptionResponseBuilder;
 
     @Test
