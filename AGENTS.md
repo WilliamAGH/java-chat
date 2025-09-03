@@ -39,6 +39,16 @@ alwaysApply: true
 
 ## 📚 KNOWLEDGE PRESENTATION ARCHITECTURE
 
+### Modes
+- Chat (free‑form):
+  - Primary streaming Q&A with inline [n] citations, enrichment markers ({{hint}}, {{reminder}}, {{background}}, {{warning}}, {{example}}), server‑side markdown, and code highlighting.
+  - Objective: fastest route to clarity with layered knowledge and verifiable sources.
+
+- Guided Learning (curated):
+  - Lesson‑driven experience centered on the “Think Java — 2nd Edition” PDF with a curated TOC and lesson summaries.
+  - Each lesson includes: featured summary, book‑scoped citations, enrichment cards, and an embedded chat scoped to the lesson.
+  - Objective: structured progression that remains beautifully educational and fully cited.
+
 ### Response Structure
 ```
 ┌─────────────────────────────────────────┐
@@ -247,6 +257,10 @@ Infrastructure:
   secrets: Environment variables
 ```
 
+Frontend structure:
+- Tab shell at `/` (a11y tablist) loads pages via iframe.
+- `/chat.html` for free‑form Chat, `/guided.html` for Guided Learning.
+
 ### Frontend Evolution Path
 
 #### **Phase 1: Enhanced Static (Immediate)**
@@ -288,6 +302,15 @@ spa: {
 ```
 
 ### Backend Enhancements
+
+#### Guided Learning API (implemented)
+- `GET /api/guided/toc` → curated lessons (from `src/main/resources/guided/toc.json`)
+- `GET /api/guided/lesson?slug=...` → lesson metadata (title, summary, keywords)
+- `GET /api/guided/citations?slug=...` → citations filtered to Think Java PDF
+- `GET /api/guided/enrich?slug=...` → hints/background/reminders grounded to book snippets
+- `POST /api/guided/stream` (SSE) → lesson‑scoped streaming chat (`sessionId = guided:<slug>`)
+
+All endpoints reuse existing retrieval/markdown/enrichment/citation infrastructure; only lesson scoping and TOC are new.
 
 #### **Enhanced Streaming Protocol**
 ```java
@@ -371,6 +394,12 @@ public class TooltipRegistry {
     }
 }
 ```
+
+## 🧭 Operations: Qdrant Migration Plan
+
+- Primary strategy: Cloud snapshot export → restore into self-hosted Qdrant (fastest; preserves vectors and payloads). Keep secrets in environment variables; do not inline in commands.
+- Portable fallback: use scripts/migrate_qdrant_cloud_to_local.sh to stream-copy points (scroll + upsert) from Cloud to self-hosted. The script is idempotent (safe to resume) and preserves ids, vectors (single or named), and payloads.
+- Rollback: retain Cloud collection during validation; switch application endpoints (QDRANT_HOST/PORT/SSL/API_KEY) after verification.
 
 ## 🚀 IMPLEMENTATION ROADMAP
 
@@ -784,6 +813,21 @@ curl -X POST http://localhost:8080/api/chat/stream \
 - [ ] Mobile responsive
 - [ ] Keyboard navigation works
 - [ ] Screen reader tested
+```
+
+```bash
+# Dual‑mode (Chat | Guided) quick checks
+# Chat UI
+open http://localhost:8080/#chat
+
+# Guided UI
+open http://localhost:8080/#guided
+
+# Guided API
+curl http://localhost:8080/api/guided/toc
+curl "http://localhost:8080/api/guided/lesson?slug=introduction-to-java"
+curl "http://localhost:8080/api/guided/citations?slug=introduction-to-java"
+curl "http://localhost:8080/api/guided/enrich?slug=introduction-to-java"
 ```
 
 ### Quality Gates

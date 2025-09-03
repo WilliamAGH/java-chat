@@ -10,6 +10,8 @@ A modern, streaming RAG chat for Java learners, grounded in Java 24/25 documenta
 - **Consolidated Pipeline**: Single-command fetch and process pipeline with SHA-256 hash-based deduplication
 - **Smart Deduplication**: Prevents redundant processing and re-uploading of documents
 - **Comprehensive Documentation**: Java 24 (10,743 files), Java 25 (10,510 files), Java 25 EA (1,257+ files), Spring AI (218 files)
+ - **Dual-Mode UI (Chat + Guided Learning)**: Tabbed shell (`/`) loads isolated Chat (`/chat.html`) and new Guided Learning (`/guided.html`)
+ - **Guided Learning (Think Java)**: Curated lessons powered by the “Think Java — 2nd Edition” PDF with lesson-scoped chat, citations, and enrichment
 
 ## Quick start
 
@@ -64,6 +66,35 @@ make run
 
 Health check: GET http://localhost:8085/actuator/health
 Embeddings health: GET http://localhost:8085/api/chat/health/embeddings
+
+## Dual-Mode UI: Chat + Guided Learning
+
+The app now provides two complementary modes with a shared learning UX and formatting pipeline:
+
+- Chat (free-form):
+  - Location: `/chat.html` (also accessible via the “Chat” tab at `/`)
+  - Features: SSE streaming, server-side markdown, inline enrichments ({{hint}}, {{reminder}}, {{background}}, {{warning}}, {{example}}), citation pills, Prism highlighting, copy/export.
+  - APIs used: `/api/chat/stream`, `/api/chat/citations`, `/api/markdown/render`, `/api/enrich`.
+
+- Guided Learning (curated):
+  - Location: `/guided.html` (also accessible via the “Guided Learning” tab at `/`)
+  - Content scope: “Think Java — 2nd Edition” PDF (mapped to `/pdfs/Think Java - 2nd Edition Book.pdf`)
+  - Features: lesson selector (TOC), lesson summary, book-scoped citations, enrichment cards, and an embedded chat scoped to the selected lesson.
+  - APIs used: `/api/guided/toc`, `/api/guided/lesson`, `/api/guided/citations`, `/api/guided/enrich`, `/api/guided/stream`.
+
+Frontend structure:
+- `static/index.html`: tab shell only (a11y tabs + iframe loader for pages).
+- `static/chat.html`: isolated Chat UI (migrated from original `index.html`).
+- `static/guided.html`: Guided Learning UI.
+
+Guided Learning backend:
+- `GET /api/guided/toc` → curated lessons (from `src/main/resources/guided/toc.json`).
+- `GET /api/guided/lesson?slug=...` → lesson metadata.
+- `GET /api/guided/citations?slug=...` → citations restricted to Think Java.
+- `GET /api/guided/enrich?slug=...` → hints/background/reminders based on Think Java snippets.
+- `POST /api/guided/stream` (SSE) → lesson-scoped chat. Body: `{ "sessionId":"guided:<slug>", "slug":"<slug>", "latest":"question" }`.
+
+All rendering quality is consistent across both modes: server-side markdown via `MarkdownService` preserves enrichment markers which the client rehydrates into styled blocks; spacing for paragraphs, lists, and code follows the same rules; Prism handles code highlighting.
 
 ## Makefile (recommended)
 
@@ -294,12 +325,17 @@ Responses are grounded with citations and “background tooltips”:
 Data structures (server):
 - Citation: `{ url, title, anchor, snippet }` (see `com.williamcallahan.javachat.model.Citation`).
 - TODO: `Enrichment` payload with fields: `packageName`, `jdkVersion`, `resource`, `resourceVersion`, `hints[]`, `reminders[]`, `background[]`.
+ - Guided: `GuidedLesson` `{ slug, title, summary, keywords[] }` + TOC from `src/main/resources/guided/toc.json`.
 
 UI (server-rendered static placeholder):
 - Return JSON with `citations` and `enrichment`. The client should render:
   - Compact “source pills” with domain icon, title, and external-link affordance (open in new tab).
   - Hover tooltips for background context (multi-paragraph allowed, markdown-safe).
   - Clear, modern layout (Shadcn-inspired). Future: SPA frontend if needed.
+
+Modes & objectives:
+- Chat: fast, accurate answers with layered insights and citations.
+- Guided: structured progression through core topics with the same learning affordances, plus lesson-focused chat to deepen understanding.
 
 ## Models & Architecture
 
