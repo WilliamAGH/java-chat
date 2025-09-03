@@ -110,7 +110,7 @@ public class GuidedLearningService {
         // Guidance: produce a clean, layered markdown lesson body
         String guidance = String.join(" ",
             "Create a concise, beautifully formatted Java lesson using markdown only.",
-            "Start with an H2 heading of the topic title.",
+            "Do NOT include any heading at the top; the UI provides the title.",
             "Then 1-2 short paragraphs that define and motivate the topic.",
             "Add a bullet list of 3-5 key points or rules.",
             "Include one short Java example in a fenced ```java code block with comments.",

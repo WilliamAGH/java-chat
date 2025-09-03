@@ -63,29 +63,60 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] Chat history: {} previous messages", requestId, history.size());
         
         chatMemory.addUser(sessionId, latest);
-        StringBuilder sb = new StringBuilder();
+        StringBuilder fullResponse = new StringBuilder();
+        StringBuilder buffer = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
         
         return chatService.streamAnswer(history, latest)
                 .map(chunk -> {
-                    // CRITICAL: Preserve newlines in chunks!
-                    // The LLM sends text that may have lost formatting
-                    // We need to ensure chunks maintain structure
-                    return chunk;
-                })
-                .doOnNext(chunk -> {
-                    sb.append(chunk);
-                    int count = chunkCount.incrementAndGet();
-                    if (count % 10 == 0) {
-                        PIPELINE_LOG.debug("[{}] Streaming chunk #{}: {} chars total", 
-                            requestId, count, sb.length());
+                    buffer.append(chunk);
+                    fullResponse.append(chunk);
+                    
+                    // Process buffer when we hit natural break points
+                    String buffered = buffer.toString();
+                    
+                    // Check for natural break points: sentence ends, newlines, or list markers
+                    boolean hasBreakPoint = buffered.matches(".*[.!?]\\s*$") || 
+                                           buffered.endsWith("\n") ||
+                                           buffered.matches(".*\\d+\\.\\s+.*") ||
+                                           buffered.contains("- ") ||
+                                           buffer.length() > 200;  // Force break for long chunks
+                    
+                    if (hasBreakPoint) {
+                        // Preprocess the buffered content
+                        String processed = markdownService.preprocessMarkdown(buffered);
+                        buffer.setLength(0);  // Clear buffer
+                        
+                        PIPELINE_LOG.debug("[{}] Preprocessed chunk: '{}' -> '{}'", 
+                            requestId, buffered.replace("\n", "\\n"), processed.replace("\n", "\\n"));
+                        
+                        return processed;
+                    } else {
+                        // Keep buffering, don't send anything yet
+                        return "";
                     }
                 })
+                .filter(s -> !s.isEmpty())  // Only send non-empty processed chunks
+                .doOnNext(chunk -> {
+                    int count = chunkCount.incrementAndGet();
+                    if (count % 10 == 0) {
+                        PIPELINE_LOG.debug("[{}] Streaming processed chunk #{}: {} chars total", 
+                            requestId, count, fullResponse.length());
+                    }
+                })
+                .concatWith(Flux.defer(() -> {
+                    // Process any remaining buffered content
+                    if (buffer.length() > 0) {
+                        String processed = markdownService.preprocessMarkdown(buffer.toString());
+                        PIPELINE_LOG.debug("[{}] Final buffer processed: '{}'", 
+                            requestId, buffer.toString().replace("\n", "\\n"));
+                        return Flux.just(processed);
+                    }
+                    return Flux.empty();
+                }))
                 .doOnComplete(() -> {
-                    // Process the complete message with markdown formatting
-                    String rawResponse = sb.toString();
-                    // Apply markdown processing to fix formatting issues
-                    String processed = markdownService.preprocessMarkdown(rawResponse);
+                    // Store the full preprocessed response in memory
+                    String processed = markdownService.preprocessMarkdown(fullResponse.toString());
                     chatMemory.addAssistant(sessionId, processed);
                     PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars", 
                         requestId, chunkCount.get(), processed.length());
