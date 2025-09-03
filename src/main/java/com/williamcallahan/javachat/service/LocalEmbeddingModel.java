@@ -33,8 +33,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         this.modelName = modelName;
         this.dimensions = dimensions;
         this.restTemplate = restTemplateBuilder
-            .connectTimeout(java.time.Duration.ofMillis(2000))
-            .readTimeout(java.time.Duration.ofMillis(5000))
+            .connectTimeout(java.time.Duration.ofSeconds(10))
+            .readTimeout(java.time.Duration.ofSeconds(60))
             .build();
         // Check server availability on startup
         checkServerAvailability();
