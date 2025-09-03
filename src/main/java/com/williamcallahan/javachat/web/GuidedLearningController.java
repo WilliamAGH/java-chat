@@ -5,8 +5,7 @@ import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -19,7 +18,7 @@ import java.time.Duration;
 @RequestMapping("/api/guided")
 public class GuidedLearningController extends BaseController {
 
-    private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
+
     private final GuidedLearningService guidedService;
     private final ChatMemoryService chatMemory;
 

@@ -100,7 +100,6 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     }
 
     private static void killProcessOnPort(int port) {
-        String[] cmd = {"/bin/sh", "-lc", "lsof -ti tcp:" + port + " | xargs -r kill -9"};
         // macOS/BSD 'xargs' may not support -r; fallback by checking output ourselves
         String[] listCmd = {"/bin/sh", "-lc", "lsof -ti tcp:" + port};
         try {

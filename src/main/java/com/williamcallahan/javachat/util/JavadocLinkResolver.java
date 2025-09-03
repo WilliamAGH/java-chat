@@ -123,7 +123,7 @@ public final class JavadocLinkResolver {
 
     private static String[] splitParams(String s) {
         // Split on commas not inside generics '<>'
-        int depth = 0; boolean inArray = false;
+        int depth = 0;
         StringBuilder cur = new StringBuilder();
         java.util.List<String> list = new java.util.ArrayList<>();
         for (int i = 0; i < s.length(); i++) {

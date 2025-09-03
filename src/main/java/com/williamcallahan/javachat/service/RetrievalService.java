@@ -154,9 +154,5 @@ public class RetrievalService {
         return prefix + rest;
     }
 
-    private boolean isBookSource(String url) {
-        if (url == null) return false;
-        String u = url.toLowerCase();
-        return u.startsWith("file://") && (u.contains("/data/docs/books/") || u.contains("\\data\\docs\\books\\"));
-    }
+
 }

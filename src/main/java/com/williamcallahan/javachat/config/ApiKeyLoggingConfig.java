@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
+
 
 @Configuration
 public class ApiKeyLoggingConfig {
@@ -23,10 +23,7 @@ public class ApiKeyLoggingConfig {
     @Value("${spring.profiles.active:dev}")
     private String activeProfile;
     
-    private final Environment environment;
-    
-    public ApiKeyLoggingConfig(Environment environment) {
-        this.environment = environment;
+    public ApiKeyLoggingConfig() {
     }
     
     @PostConstruct
