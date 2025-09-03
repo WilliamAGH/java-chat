@@ -100,6 +100,13 @@
     let toc = [];
     let currentIndex = 0;
     let glossary = [];
+    let currentLoadId = 0;
+    let activeControllers = [];
+
+    function cancelActiveControllers(){
+      activeControllers.forEach(c => { try { c.abort(); } catch(_){} });
+      activeControllers = [];
+    }
 
     function setLessonLoading(isLoading){
       const sk = document.getElementById('lessonSkeleton');
@@ -145,31 +152,50 @@
     function updateNavButtons() { document.getElementById('prevBtn').disabled = currentIndex === 0; document.getElementById('nextBtn').disabled = currentIndex === toc.length - 1; }
 
     async function loadLesson(slug) {
+      // Cancel any in-flight fetch/streams and clear UI immediately
+      cancelActiveControllers();
+      const wrap = document.getElementById('citations');
+      const content = document.getElementById('lessonContent');
+      const enrich = document.getElementById('enrichment');
+      const chatArea = document.getElementById('chatArea');
+      wrap.innerHTML = '';
+      content.innerHTML = '';
+      enrich.innerHTML = '';
+      chatArea.innerHTML = '';
       setLessonLoading(true);
+      currentLoadId++;
+      const loadId = currentLoadId;
       try {
         const res = await fetch('/api/guided/lesson?slug=' + encodeURIComponent(slug));
         const lesson = await res.json();
         document.getElementById('lessonSummary').textContent = lesson.summary || '';
-        await loadCitations(slug);
-        await loadLessonContent(slug);
-        await loadEnrichment(slug);
-        // clear chat area
-        document.getElementById('chatArea').innerHTML = '';
+        await Promise.all([
+          loadCitations(slug, loadId),
+          loadLessonContent(slug, loadId),
+          loadEnrichment(slug, loadId)
+        ]);
       } finally {
         setLessonLoading(false);
       }
     }
 
-    async function loadLessonContent(slug){
+    async function loadLessonContent(slug, loadId){
       const el = document.getElementById('lessonContent');
       el.innerHTML = '';
       try {
-        const response = await fetch('/api/guided/content/stream?slug=' + encodeURIComponent(slug));
+        const controller = new AbortController();
+        activeControllers.push(controller);
+        const response = await fetch('/api/guided/content/stream?slug=' + encodeURIComponent(slug), { signal: controller.signal });
         if (!response.ok) { el.textContent = 'Failed to load lesson content.'; return; }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
         let buffer = '';
+        let firstChunkShown = false;
+        // Debounced rendering for smoother lesson updates
+        let renderTimer = null; let lastRendered = '';
+        const flushRender = async () => { try { if (loadId !== currentLoadId) return; if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); el.innerHTML = html; Prism.highlightAllUnder(el); applyGlossaryTooltips(el); lastRendered = fullText; } catch(_){} };
+        const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -184,11 +210,18 @@
               if (data.trim()) fullText += data;
             }
           }
-          const html = await renderMarkdown(fullText);
-          el.innerHTML = html;
-          Prism.highlightAllUnder(el);
-          applyGlossaryTooltips(el);
+          // If user switched lessons, drop work
+          if (loadId !== currentLoadId) return;
+          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
+          scheduleRender(immediate);
+          if (!firstChunkShown) {
+            firstChunkShown = true;
+            setLessonLoading(false);
+            // Inform parent to hide top loader immediately
+            try { window.parent.postMessage({ type: 'content-started' }, '*'); } catch(_){}
+          }
         }
+        await flushRender();
       } catch (_) {
         el.textContent = 'Error streaming lesson content.';
       }
@@ -227,10 +260,13 @@
       const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
     }
 
-    async function loadCitations(slug) {
+    async function loadCitations(slug, loadId) {
       const wrap = document.getElementById('citations'); wrap.innerHTML = '';
-      const res = await fetch('/api/guided/citations?slug=' + encodeURIComponent(slug));
+      const controller = new AbortController();
+      activeControllers.push(controller);
+      const res = await fetch('/api/guided/citations?slug=' + encodeURIComponent(slug), { signal: controller.signal });
       const citations = await res.json();
+      if (loadId !== currentLoadId) return;
       (citations || []).slice(0,5).forEach((c, i) => {
         const a = document.createElement(c.url ? 'a' : 'div');
         a.className = 'citation-pill';
@@ -240,22 +276,29 @@
       });
     }
 
-    async function loadEnrichment(slug) {
+    async function loadEnrichment(slug, loadId) {
       const div = document.getElementById('enrichment'); div.innerHTML = '';
-      const res = await fetch('/api/guided/enrich?slug=' + encodeURIComponent(slug));
+      const controller = new AbortController();
+      activeControllers.push(controller);
+      const res = await fetch('/api/guided/enrich?slug=' + encodeURIComponent(slug), { signal: controller.signal });
       if (!res.ok) return; const enrichment = await res.json();
+      if (loadId !== currentLoadId) return;
       const sections = [
         { key: 'hints', title: '💡 Helpful Hints' },
         { key: 'background', title: '📚 Background Context' },
         { key: 'reminders', title: '🔔 Important Reminders' }
       ];
       sections.forEach(({key, title}) => {
-        const items = enrichment[key] || [];
-        if (items.length > 0) {
+        const normalized = (Array.isArray(enrichment[key]) ? enrichment[key] : [])
+          .map(t => (typeof t === 'string' ? t.trim() : ''))
+          .filter(t => t.length > 0);
+        if (normalized.length > 0) {
           const card = document.createElement('div');
           card.className = 'bubble assistant';
           const h = document.createElement('div'); h.style.fontWeight='600'; h.textContent = title; card.appendChild(h);
-          const ul = document.createElement('ul'); items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }); card.appendChild(ul);
+          const ul = document.createElement('ul');
+          normalized.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+          card.appendChild(ul);
           div.appendChild(card);
         }
       });
@@ -275,9 +318,14 @@
         const response = await fetch('/api/guided/stream', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId: 'guided:'+slug, slug, latest: q }) });
         if (!response.ok) throw new Error('HTTP '+response.status);
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let fullText=''; let buffer='';
+        let renderTimer=null; let lastRendered='';
+        const flushRender = async () => { try { if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); content.innerHTML = html; content.appendChild(cursor); Prism.highlightAllUnder(content); lastRendered = fullText; } catch(_){} };
+        const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while(true){ const {done,value}=await reader.read(); if(done) break; const chunk=decoder.decode(value,{stream:true}); buffer+=chunk; const lines=buffer.split('\n'); buffer=lines[lines.length-1]; for(let i=0;i<lines.length-1;i++){ const line=lines[i].trim(); if(line.startsWith('data:')){ const data=line.substring(5); if(data.trim()) fullText+=data; } }
-          const html = await renderMarkdown(fullText); content.innerHTML = html; content.appendChild(cursor); Prism.highlightAllUnder(content);
+          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
+          scheduleRender(immediate);
         }
+        await flushRender();
         cursor.remove();
       } catch(e) { ab.textContent = 'Error while streaming response.'; }
       askBtn.disabled=false;
@@ -298,12 +346,16 @@
      * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
      */
     async function renderMarkdown(text){
+      text = stripLeadingHeading(text);
       try { const res = await fetch('/api/markdown/render', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content:text}) }); if(res.ok){ const data=await res.json(); return applyEnrichments(data.html); } } catch(e){}
       // Safety net: preserve enrichments, client markdown, restore, then enrich
       const preserved = preserveEnrichments(text);
       const html = clientMarkdownFallback(preserved);
       const restored = restoreEnrichments(html);
       return applyEnrichments(restored);
+    }
+    function stripLeadingHeading(text){
+      return text.replace(/^(\s*#{1,6}[^\n]*\n?)+/,'');
     }
     
     /**
@@ -355,10 +407,10 @@
       return out;
     }
     function applyEnrichments(text){
-      text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">💡 ${c.trim()}</div>`);
-      text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">🔔 ${c.trim()}</div>`);
-      text = text.replace(/\{\{background:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">📚 ${c.trim()}</div>`);
-      text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">⚠️ ${c.trim()}</div>`);
+      text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">💡 ${ct}</div>` : ''; });
+      text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">🔔 ${ct}</div>` : ''; });
+      text = text.replace(/\{\{background:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">📚 ${ct}</div>` : ''; });
+      text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">⚠️ ${ct}</div>` : ''; });
       text = text.replace(/\[(\d+)\]/g,(m,n)=>`<sup class="inline-citation">[${n}]</sup>`);
       return text;
     }
@@ -366,6 +418,8 @@
     // Show skeleton immediately then load content
     document.getElementById('lessonSkeleton').classList.remove('hidden');
     loadTOC().catch(() => setLessonLoading(false));
+    // Notify parent that page is ready (for top loader)
+    try { window.parent.postMessage({ type: 'content-ready' }, '*'); } catch(_){}
   </script>
 </body>
 </html>

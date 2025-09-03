@@ -40,9 +40,22 @@
     /* Basic a11y focus */
     .tab:focus { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 
-    /* Loader overlay */
-    .loader-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; background: rgba(11,13,15,0.55); backdrop-filter: blur(2px); }
-    .loader-overlay.show { display:flex; }
+    /* Loader overlay - FIXED to prevent overlapping */
+    .loader-overlay { 
+      position:absolute; 
+      inset:0; 
+      display:none; 
+      align-items:center; 
+      justify-content:center; 
+      background: var(--dark-bg); /* Solid background to prevent see-through */
+      z-index: 1000; /* Ensure it's on top */
+      opacity: 0;
+      transition: opacity 200ms ease;
+    }
+    .loader-overlay.show { 
+      display:flex; 
+      opacity: 1;
+    }
     .loader {
       display: grid; gap: 10px; width: min(600px, 80%);
     }
@@ -85,6 +98,8 @@
       { id: 'tab-guided', url: 'guided.html' }
     ];
 
+    let loaderTimeout = null;
+    
     function setActiveTab(targetId) {
       tabs.forEach(({ id, url }) => {
         const el = document.getElementById(id);
@@ -93,9 +108,15 @@
         el.tabIndex = isActive ? 0 : -1;
         if (isActive) {
           document.getElementById('tabpanel').setAttribute('aria-labelledby', id);
-          // show loader and mark busy while swapping content
-          showLoader(true);
+          
+          // Only show loader after a small delay to prevent flash for fast loads
+          if (loaderTimeout) clearTimeout(loaderTimeout);
+          loaderTimeout = setTimeout(() => showLoader(true), 100);
+          
+          // Clear iframe first to prevent stale content flash
+          frame.style.visibility = 'hidden';
           frame.src = url;
+          
           // reflect in hash for deep-linking
           const hash = id === 'tab-guided' ? '#guided' : '#chat';
           if (location.hash !== hash) history.replaceState(null, '', hash);
@@ -125,9 +146,35 @@
       }
     });
 
-    // Hide loader when iframe finishes loading (first paint)
+    // Hide loader when iframe finishes loading
     frame.addEventListener('load', () => {
-      showLoader(false);
+      // Cancel pending loader if it hasn't shown yet
+      if (loaderTimeout) {
+        clearTimeout(loaderTimeout);
+        loaderTimeout = null;
+      }
+      // Small delay to ensure content is painted
+      setTimeout(() => {
+        showLoader(false);
+        frame.style.visibility = 'visible';
+      }, 50);
+    });
+
+    // Immediately hide loader when inner page signals readiness
+    window.addEventListener('message', (e) => {
+      const data = e && e.data;
+      if (!data || typeof data !== 'object') return;
+      
+      if (data.type === 'content-started' || data.type === 'content-ready' || data.type === 'dom-ready') {
+        // Cancel pending loader
+        if (loaderTimeout) {
+          clearTimeout(loaderTimeout);
+          loaderTimeout = null;
+        }
+        // Hide loader immediately
+        showLoader(false);
+        frame.style.visibility = 'visible';
+      }
     });
 
     function showLoader(show) {
