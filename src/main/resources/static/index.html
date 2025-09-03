@@ -296,20 +296,7 @@
             vertical-align: text-bottom;
         }
         
-        /* Loading skeleton */
-        .skeleton {
-            background: linear-gradient(
-                90deg,
-                var(--dark-surface-2) 25%,
-                var(--dark-surface-3) 50%,
-                var(--dark-surface-2) 75%
-            );
-            background-size: 200% 100%;
-            animation: var(--animation-shimmer);
-            border-radius: var(--radius-md);
-            height: 20px;
-            margin: var(--space-2) 0;
-        }
+        /* Loading skeleton - REMOVED (unused) */
         
         /* Citations */
         .citations-row {
@@ -327,7 +314,7 @@
             max-width: 100%;
             width: 100%;
             position: relative;
-            z-index: 1; /* content layer, below controls like copy button */
+            /* Removed z-index to prevent layer conflicts */
             align-self: flex-start;
         }
         
@@ -428,6 +415,27 @@
             font-size: 10px;
             font-weight: 600;
         }
+
+        /* PDF variant for citation pills */
+        .citation-pill-pdf {
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.08), transparent);
+            border-color: rgba(239, 68, 68, 0.35);
+        }
+        .citation-pill-pdf .citation-number {
+            background: var(--accent-error);
+        }
+        .citation-pill-pdf .citation-icon {
+            color: var(--accent-error);
+            opacity: 0.9;
+        }
+        .citation-pill-pdf::before {
+            background: rgba(239, 68, 68, 0.2);
+        }
+        .citation-pill-pdf:hover {
+            border-color: var(--accent-error);
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.25);
+            transform: translateY(-2px);
+        }
         
         /* Knowledge Cards */
         .knowledge-card {
@@ -438,6 +446,7 @@
             overflow: hidden;
             transition: all var(--transition-base);
             animation: fadeIn 0.5s ease 0.3s both;
+            /* Border-left set by type-specific classes only */
         }
         
         .knowledge-card-header {
@@ -611,6 +620,52 @@
             display: none;
         }
         
+        /* Markdown element styling inside bubbles */
+        .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 {
+            margin: var(--space-4) 0 var(--space-3) 0;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        
+        .bubble h1:first-child, .bubble h2:first-child, .bubble h3:first-child {
+            margin-top: 0;
+        }
+        
+        .bubble h1 { font-size: var(--text-2xl); }
+        .bubble h2 { font-size: var(--text-xl); }
+        .bubble h3 { font-size: var(--text-lg); }
+        
+        .bubble ul, .bubble ol {
+            margin: var(--space-3) 0;
+            padding-left: var(--space-6);
+            line-height: 1.8;
+        }
+        
+        .bubble li {
+            margin: var(--space-1) 0;
+        }
+        
+        .bubble ul ul, .bubble ol ol, .bubble ul ol, .bubble ol ul {
+            margin: var(--space-1) 0;
+        }
+        
+        .bubble strong {
+            font-weight: 600;
+            color: var(--dark-text-primary);
+        }
+        
+        .bubble em {
+            font-style: italic;
+        }
+        
+        .bubble blockquote {
+            margin: var(--space-3) 0;
+            padding: var(--space-3) var(--space-4);
+            border-left: 3px solid var(--accent-primary);
+            background: var(--dark-surface-3);
+            border-radius: var(--radius-md);
+        }
+        
         /* Adjacent sibling margin collapse for block elements only */
         .bubble > div + div,
         .bubble > p + p,
@@ -619,6 +674,37 @@
         .bubble > pre + p,
         .bubble > p + pre {
             margin-top: var(--space-3);
+        }
+        
+        /* Ensure proper spacing for lists and code blocks after paragraphs */
+        .bubble p + ol,
+        .bubble p + ul {
+            margin-top: var(--space-4);
+        }
+        
+        .bubble ol + pre,
+        .bubble ul + pre,
+        .bubble li + pre {
+            margin-top: var(--space-4);
+        }
+        
+        .bubble pre + ol,
+        .bubble pre + ul,
+        .bubble pre + p {
+            margin-top: var(--space-4);
+        }
+        
+        /* Ensure list items have proper internal spacing */
+        .bubble li {
+            margin: var(--space-2) 0;
+        }
+        
+        .bubble li:first-child {
+            margin-top: 0;
+        }
+        
+        .bubble li:last-child {
+            margin-bottom: 0;
         }
         
         /* Enrichment blocks should have consistent spacing */
@@ -639,50 +725,7 @@
             to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
         
-        /* Enhanced Tooltips */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            border-bottom: 1px dotted var(--accent-primary);
-            cursor: help;
-            color: var(--accent-primary);
-        }
-        
-        .tooltip-content {
-            visibility: hidden;
-            opacity: 0;
-            position: absolute;
-            bottom: 125%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--dark-surface-3);
-            border: 1px solid var(--dark-border);
-            border-radius: var(--radius-lg);
-            padding: var(--space-3);
-            width: 280px;
-            max-width: 90vw;
-            box-shadow: var(--shadow-2xl);
-            z-index: 1000;
-            transition: all var(--transition-base);
-            font-size: var(--text-sm);
-            line-height: 1.5;
-        }
-        
-        .tooltip:hover .tooltip-content {
-            visibility: visible;
-            opacity: 1;
-            transform: translateX(-50%) translateY(-5px);
-        }
-        
-        .tooltip-content::after {
-            content: '';
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 6px solid transparent;
-            border-top-color: var(--dark-surface-3);
-        }
+        /* Tooltips - REMOVED (unused) */
         
         /* Input Area - Fixed overflow */
         .input-area {
@@ -1010,7 +1053,7 @@
             .bubble.assistant .citations-row { margin-top: var(--space-3); }
         }
         
-        /* Loading dots animation */
+        /* Loading dots animation (used in streaming) */
         .loading-dots {
             display: inline-flex;
             gap: 4px;
@@ -1296,7 +1339,8 @@
                     
                     if (response.ok) {
                         const data = await response.json();
-                        // Server returns HTML with preserved enrichments
+                        // Server returns HTML with {{markers}} preserved
+                        // Now apply the enrichment transformations
                         return applyCustomEnrichments(data.html);
                     }
                 } catch (error) {
@@ -1316,6 +1360,9 @@
         
         // Apply custom enrichment markers
         function applyCustomEnrichments(text) {
+            // Process enrichment markers - content is already HTML from server
+            // so we don't escape it again
+            
             // {{hint:text}} - Helpful tips and best practices
             text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g, (match, content) => {
                 return `<div class="inline-enrichment hint">
@@ -1325,7 +1372,7 @@
                         </svg>
                         <span>Helpful Hint</span>
                     </div>
-                    <div class="enrichment-text">${escapeHtml(content.trim())}</div>
+                    <div class="enrichment-text">${content.trim()}</div>
                 </div>`;
             });
             
@@ -1338,7 +1385,7 @@
                         </svg>
                         <span>Important Reminder</span>
                     </div>
-                    <div class="enrichment-text">${escapeHtml(content.trim())}</div>
+                    <div class="enrichment-text">${content.trim()}</div>
                 </div>`;
             });
             
@@ -1351,12 +1398,16 @@
                         </svg>
                         <span>Background Context</span>
                     </div>
-                    <div class="enrichment-text">${escapeHtml(content.trim())}</div>
+                    <div class="enrichment-text">${content.trim()}</div>
                 </div>`;
             });
             
-            // {{example:code}} - Inline code examples (enhanced formatting)
+            // {{example:code}} - Inline code examples (keep escaping for code)
             text = text.replace(/\{\{example:([\s\S]*?)\}\}/g, (match, code) => {
+                // Extract text content from any HTML tags for code blocks
+                const temp = document.createElement('div');
+                temp.innerHTML = code;
+                const plainCode = temp.textContent || temp.innerText || code;
                 return `<div class="inline-example">
                     <div class="example-header">
                         <svg width="14" height="14" viewbox="0 0 24 24" fill="currentColor">
@@ -1364,7 +1415,7 @@
                         </svg>
                         <span>Example</span>
                     </div>
-                    <pre><code class="language-java">${escapeHtml(code.trim())}</code></pre>
+                    <pre><code class="language-java">${escapeHtml(plainCode.trim())}</code></pre>
                 </div>`;
             });
             
@@ -1377,7 +1428,7 @@
                         </svg>
                         <span>Warning</span>
                     </div>
-                    <div class="enrichment-text">${escapeHtml(content.trim())}</div>
+                    <div class="enrichment-text">${content.trim()}</div>
                 </div>`;
             });
             
@@ -1409,19 +1460,41 @@
                 citationsRow.className = 'citations-row';
                 
                 citations.slice(0, 5).forEach((citation, index) => {
-                    const pill = document.createElement('a');
-                    pill.className = 'citation-pill';
-                    pill.href = citation.url;
-                    pill.target = '_blank';
-                    pill.rel = 'noopener noreferrer';
-                    pill.innerHTML = `
-                        <span class="citation-number">${index + 1}</span>
-                        <span class="citation-label">${citation.title || new URL(citation.url).hostname}</span>
+                    const href = citation.url || '';
+                    const isHttpLink = href.startsWith('http://') || href.startsWith('https://');
+                    const isLocalLink = href.startsWith('/');
+                    const isPdf = href.toLowerCase().endsWith('.pdf');
+                    const isLink = !!href && (isHttpLink || isLocalLink);
+
+                    const pill = document.createElement(isLink ? 'a' : 'div');
+                    pill.className = 'citation-pill' + (isPdf ? ' citation-pill-pdf' : '');
+                    if (isLink) {
+                        pill.href = href;
+                        pill.target = '_blank';
+                        pill.rel = 'noopener noreferrer';
+                    }
+
+                    let label = citation.title || 'Source';
+                    if (!citation.title && isHttpLink) {
+                        try { label = new URL(href).hostname; } catch (_) { /* ignore */ }
+                    }
+
+                    const iconExternal = `
                         <svg class="citation-icon" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                             <polyline points="15 3 21 3 21 9"></polyline>
                             <line x1="10" y1="14" x2="21" y2="3"></line>
-                        </svg>
+                        </svg>`;
+                    const iconPdf = `
+                        <svg class="citation-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5"/>
+                            <path d="M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2"/>
+                        </svg>`;
+
+                    pill.innerHTML = `
+                        <span class="citation-number">${index + 1}</span>
+                        <span class="citation-label">${label}${isPdf ? ' (PDF)' : ''}</span>
+                        ${isLink ? (isPdf ? iconPdf : iconExternal) : ''}
                     `;
                     citationsRow.appendChild(pill);
                 });
