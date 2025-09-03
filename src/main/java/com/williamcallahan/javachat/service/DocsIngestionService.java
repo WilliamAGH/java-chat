@@ -22,6 +22,7 @@ import java.util.*;
 
 @Service
 public class DocsIngestionService {
+    private final ProgressTracker progressTracker;
     private static final Logger log = LoggerFactory.getLogger(DocsIngestionService.class);
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
     
@@ -39,7 +40,8 @@ public class DocsIngestionService {
                                 LocalStoreService localStore,
                                 FileOperationsService fileOperationsService,
                                 HtmlContentExtractor htmlExtractor,
-                                PdfContentExtractor pdfExtractor) {
+                                PdfContentExtractor pdfExtractor,
+                                ProgressTracker progressTracker) {
         this.rootUrl = rootUrl;
         this.vectorStore = vectorStore;
         this.chunkProcessingService = chunkProcessingService;
@@ -47,6 +49,7 @@ public class DocsIngestionService {
         this.fileOperationsService = fileOperationsService;
         this.htmlExtractor = htmlExtractor;
         this.pdfExtractor = pdfExtractor;
+        this.progressTracker = progressTracker;
     }
 
     public void crawlAndIngest(int maxPages) throws IOException {
@@ -85,8 +88,8 @@ public class DocsIngestionService {
                     documents.size(), url);
                 try {
                     vectorStore.add(documents);
-                    INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant", 
-                        documents.size());
+                    INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})", 
+                        documents.size(), progressTracker.formatPercent());
                     
                     // Mark hashes as ingested ONLY after successful addition
                     for (org.springframework.ai.document.Document aiDoc : documents) {
@@ -128,14 +131,13 @@ public class DocsIngestionService {
                 long fileStartMillis = System.currentTimeMillis();
                 String fileName = file.getFileName().toString().toLowerCase();
                 String title;
-                String bodyText;
+                String bodyText = null;
                 String url = mapLocalPathToUrl(file);
                 String packageName;
                 
                 if (fileName.endsWith(".pdf")) {
                     // Process PDF file
                     try {
-                        bodyText = pdfExtractor.extractTextFromPdf(file);
                         // Extract title from PDF metadata or filename
                         String metadata = pdfExtractor.getPdfMetadata(file);
                         title = extractTitleFromMetadata(metadata, file.getFileName().toString());
@@ -161,8 +163,17 @@ public class DocsIngestionService {
                 }
 
                 // Use ChunkProcessingService to handle chunking and document creation
-                List<org.springframework.ai.document.Document> documents =
-                    chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+                List<org.springframework.ai.document.Document> documents;
+                if (fileName.endsWith(".pdf")) {
+                    try {
+                        documents = chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
+                    } catch (Exception e) {
+                        log.error("PDF chunking failed for {}: {}", file, e.getMessage());
+                        continue;
+                    }
+                } else {
+                    documents = chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+                }
 
                 // Add documents to vector store
                 if (!documents.isEmpty()) {
@@ -176,12 +187,12 @@ public class DocsIngestionService {
                         vectorStore.add(documents);
                         long duration = System.currentTimeMillis() - startTime;
                         
-                        INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {}", 
-                            documents.size(), duration, file.getFileName());
+                        INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {} ({})", 
+                            documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
                         // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
                         long totalDuration = System.currentTimeMillis() - fileStartMillis;
-                        INDEXING_LOG.info("[INDEXING] ✔ Completed indexing file: {} — {}/{} chunks indexed in {}ms (end-to-end)",
-                            file.getFileName(), documents.size(), documents.size(), totalDuration);
+                        INDEXING_LOG.info("[INDEXING] ✔ Completed indexing file: {} — {}/{} chunks indexed in {}ms (end-to-end) ({})",
+                            file.getFileName(), documents.size(), documents.size(), totalDuration, progressTracker.formatPercent());
                         
                         // Mark hashes as ingested ONLY after successful addition
                         for (org.springframework.ai.document.Document aiDoc : documents) {

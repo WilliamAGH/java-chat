@@ -94,6 +94,8 @@ public class MarkdownService {
             return "";
         }
         
+        String original = markdown; // Keep original for logging
+        
         if (markdown.length() > MAX_INPUT_LENGTH) {
             logger.warn("Markdown input exceeds maximum length: {} > {}", 
                        markdown.length(), MAX_INPUT_LENGTH);
@@ -110,6 +112,13 @@ public class MarkdownService {
         try {
             // Pre-process to fix common markdown formatting issues
             markdown = preprocessMarkdown(markdown);
+            
+            // LOG to see if preprocessing is working
+            if (!markdown.equals(original)) {
+                logger.info("Preprocessing changed markdown: added {} paragraph breaks, {} list fixes", 
+                           markdown.split("\n\n").length - original.split("\n\n").length,
+                           markdown.contains("\n-") || markdown.contains("\n1.") ? "YES" : "NO");
+            }
             
             // Pre-process custom enrichments (preserve them)
             String preprocessed = preserveEnrichments(markdown);
@@ -166,11 +175,16 @@ public class MarkdownService {
         // CRITICAL: Ensure single space after sentence-ending punctuation FIRST
         // This must happen before paragraph breaking so the text can be properly split
         // Fixes: "operation.For example" -> "operation. For example"
-        // Also handles quotes: "operator."This -> "operator." This
-        markdown = markdown.replaceAll("([.!?])([\"'])?([A-Z])", "$1$2 $3");
+        // Also handles quotes/parentheses after punctuation while avoiding decimals
+        // Keep decimals (e.g., 3.14) intact by requiring next char not a digit
+        markdown = markdown.replaceAll("(?<!\\d)([.!?])([\\\"'])?([A-Za-z(])", "$1$2 $3");
         
-        // Apply smart paragraph breaking AFTER fixing spaces
-        markdown = applySmartParagraphBreaks(markdown);
+        // Fix inline lists FIRST - if we see "text. 1. Item 2. Item" pattern, it's a list!
+        // This catches malformed lists from AI that forgot newlines
+        markdown = fixInlineLists(markdown);
+        
+        // Apply smart paragraph breaking AFTER fixing lists
+        markdown = applySmartParagraphBreaksImproved(markdown);
         
         // DO NOT auto-detect lists from inline text like "are:1."
         // Only treat as list if it's at the start of a line or after explicit list marker
@@ -178,19 +192,31 @@ public class MarkdownService {
         // markdown = markdown.replaceAll(":\\s+(\\d+\\.\\s+[A-Z])", ":\n\n$1");
         // COMMENTED OUT - causing false positives
         
-        // Fix inline bullet lists: "text:- " or "text: - " -> "text:\n\n- "
-        markdown = markdown.replaceAll("([^\\n]):?-\\s+", "$1\n\n- ");
-        markdown = markdown.replaceAll("([^\\n]):\\*\\s+", "$1\n\n* ");
-        markdown = markdown.replaceAll("([^\\n]):\\+\\s+", "$1\n\n+ ");
+        // Fix inline bullet lists only in safe contexts to avoid false positives like math "x - y"
+        // 1) After a colon: "such as:- Item" or "such as: - Item" -> break into a proper list
+        // Also handle when items are concatenated like "- Item1- Item2"
+        markdown = markdown.replaceAll("(?<=:)\\s*-\\s*(?=\\S)", "\n\n- ");
+        markdown = markdown.replaceAll("(?<!^)(?<!\\n)-\\s+(?=[A-Z])", "\n- ");  // Line break before subsequent items
+        markdown = markdown.replaceAll("(?<=:)\\s*\\*\\s+(?=\\S)", "\n\n* ");
+        markdown = markdown.replaceAll("(?<=:)\\s*\\+\\s+(?=\\S)", "\n\n+ ");
+
+        // 2) When multiple inline hyphen items appear, likely an inline list. Only convert when preceded by punctuation/closer
+        // Detect two or more occurrences of "- Word" to reduce risk of converting a single minus usage
+        if (markdown.matches("(?s).* - \\p{L}+.* - \\p{L}+.*")) {
+            // Add a newline before "- " when it follows punctuation or a closing bracket/paren
+            markdown = markdown.replaceAll("(?<=[:;,.\\)\\]])\\s*-\\s+(?=\\p{L})", "\n- ");
+        }
         
         // Fix code blocks without preceding line break: "text:```" -> "text:\n\n```"
-        markdown = markdown.replaceAll("([^\\n]):?\\s?```", "$1\n\n```");
+        // Match text followed by optional colon and ```
+        markdown = markdown.replaceAll("(:)```", "$1\n\n```");
+        markdown = markdown.replaceAll("([^\\n:])(```)", "$1\n\n$2");
         
         // CRITICAL: Protect code block content from being consumed by other patterns
         // Ensure code blocks are properly delimited and content is preserved
         markdown = protectCodeBlocks(markdown);
         
-        // Clean up: Never allow multiple consecutive HORIZONTAL spaces (preserve newlines!)
+        // Clean up: collapse horizontal spaces (preserve newlines!)
         markdown = markdown.replaceAll("[ \\t]{2,}", " ");
         
         // Never allow leading spaces at start of lines (except in code blocks)
@@ -254,8 +280,25 @@ public class MarkdownService {
             if (shouldBreak) {
                 // ADD THE CRITICAL DOUBLE NEWLINE FOR PARAGRAPH BREAK
                 result.append("\n\n");
-                logger.debug("Added paragraph break after: {}", 
-                           sentence.substring(Math.max(0, sentence.length() - 30)));
+                
+                // IMPORTANT: Check if next sentence starts with a number
+                // If so, don't let it be at line start (would be treated as list)
+                if (i < sentences.length - 1) {
+                    String nextSentence = sentences[i + 1].trim();
+                    if (nextSentence.matches("^\\d+\\..*")) {
+                        // Next sentence starts with "N." - escape it to prevent list
+                        // Add a zero-width space or backslash to prevent list detection
+                        // Actually, just don't break here
+                        result.delete(result.length() - 2, result.length()); // Remove the \n\n we just added
+                        sentenceCount = 2; // Reset to 2 so we don't immediately break again
+                        shouldBreak = false;
+                    }
+                }
+                
+                if (shouldBreak) {
+                    logger.debug("Added paragraph break after: {}", 
+                               sentence.substring(Math.max(0, sentence.length() - 30)));
+                }
             }
         }
         
@@ -263,6 +306,31 @@ public class MarkdownService {
         logger.debug("Paragraph breaking: {} sentences -> {} paragraphs", 
                     sentences.length, processed.split("\n\n").length);
         return processed;
+    }
+    
+    /**
+     * Fixes inline lists that should have line breaks.
+     * Detects patterns like "types are:1. boolean: desc. 2. byte: desc."
+     * and converts them to proper list format.
+     */
+    private String fixInlineLists(String markdown) {
+        // Pattern: text followed by "1." or continuing numbers
+        // If we see "sometext 1. " followed later by "2. ", it's a list!
+        if (markdown.matches(".*\\b1\\.\\s+\\S.*\\b2\\.\\s+\\S.*")) {
+            // This looks like an inline list - fix it!
+            
+            // First, ensure newline before "1."
+            markdown = markdown.replaceAll("([a-z:])\\s*(1\\.\\s+)", "$1\n\n$2");
+            
+            // Then add newlines before each subsequent number
+            for (int i = 2; i <= 20; i++) {
+                markdown = markdown.replaceAll("([.!?])\\s*(" + i + "\\.\\s+)", "$1\n$2");
+            }
+            
+            logger.debug("Fixed inline list formatting");
+        }
+        
+        return markdown;
     }
     
     /**
@@ -368,6 +436,91 @@ public class MarkdownService {
     }
     
     /**
+     * Improved paragraph breaking that supports '.', '?', '!' and respects code blocks.
+     */
+    private String applySmartParagraphBreaksImproved(String markdown) {
+        if (markdown == null || markdown.isEmpty()) return markdown;
+        // If code blocks are present, process only non-code segments to preserve code
+        if (markdown.contains("```") ) {
+            StringBuilder out = new StringBuilder();
+            java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("```[a-zA-Z]*\n?[\\s\\S]*?```", java.util.regex.Pattern.DOTALL);
+            java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
+            int last = 0;
+            while (matcher.find()) {
+                String before = markdown.substring(last, matcher.start());
+                out.append(applySmartParagraphBreaksNoCode(before));
+                out.append(matcher.group());
+                last = matcher.end();
+            }
+            if (last < markdown.length()) {
+                out.append(applySmartParagraphBreaksNoCode(markdown.substring(last)));
+            }
+            return out.toString();
+        }
+        return applySmartParagraphBreaksNoCode(markdown);
+    }
+
+    /**
+     * Adds paragraph breaks to text without code blocks.
+     * Handles '.', '?', '!' ends and respects closing quotes/parentheses.
+     * Avoids abbreviations and ordered-list false positives.
+     */
+    private String applySmartParagraphBreaksNoCode(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.contains("\n\n")) return text; // honor existing paragraphs
+
+        // Improved approach: find sentence boundaries and insert breaks
+        StringBuilder result = new StringBuilder();
+        java.util.regex.Pattern sentenceEnd = java.util.regex.Pattern.compile(
+            "([.!?])([\"'\\)\\]]*)\\s+([A-Z])"
+        );
+        java.util.regex.Matcher matcher = sentenceEnd.matcher(text);
+        
+        int lastEnd = 0;
+        int sentenceCount = 0;
+        
+        while (matcher.find()) {
+            // Append text up to and including this sentence
+            result.append(text.substring(lastEnd, matcher.end()));
+            sentenceCount++;
+            
+            // Check if we should add a paragraph break
+            if (sentenceCount >= 2) {
+                String beforeBreak = text.substring(Math.max(0, matcher.start() - 10), matcher.start());
+                
+                // Don't break at abbreviations
+                if (!beforeBreak.matches(".*\\b(e\\.g|i\\.e|etc|Dr|Mr|Mrs|Ms|Jr|Sr|St|No)$")) {
+                    // Check if next text starts with a number (potential list)
+                    String nextChar = matcher.group(3);
+                    if (!Character.isDigit(nextChar.charAt(0))) {
+                        // Insert paragraph break before the capital letter
+                        result.setLength(result.length() - nextChar.length());
+                        result.append("\n\n").append(nextChar);
+                        sentenceCount = 0;
+                    }
+                }
+            }
+            
+            lastEnd = matcher.end();
+        }
+        
+        // Append any remaining text
+        if (lastEnd < text.length()) {
+            result.append(text.substring(lastEnd));
+        }
+
+        String processed = result.toString().trim();
+        logger.debug("Paragraph breaking: added {} breaks", processed.split("\n\n").length - 1);
+        return processed;
+    }
+
+    private boolean endsWithAbbreviation(String sentence) {
+        String s = sentence == null ? "" : sentence.trim();
+        // Common abbreviations where the trailing period doesn't end the sentence (case-insensitive)
+        return s.matches("(?i).*(?:\\b(e\\.g|i\\.e|etc|mr|mrs|ms|dr|prof|vs|sr|jr|st|no))\\.\u00A0?\\s*$");
+    }
+
+    /**
      * Preserves custom enrichment markers during markdown processing.
      * Uses unique placeholders that won't be affected by markdown parsing or HTML filtering.
      */
@@ -389,17 +542,37 @@ public class MarkdownService {
      * Works with unique text placeholders that survive HTML processing.
      */
     private String restoreEnrichments(String html) {
-        // Restore from unique text placeholders
+        // Restore from unique text placeholders ONLY if they have content
         // Pattern: ZZENRICHZ(type)ZSTARTZZZ(content)ZZENRICHZ(type)ZENDZZZ
-        html = html.replaceAll(
-            "ZZENRICHZ(\\w+)ZSTARTZZZ([\\s\\S]*?)ZZENRICHZ\\1ZENDZZZ",
-            "{{$1:$2}}"
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+            "ZZENRICHZ(\\w+)ZSTARTZZZ([\\s\\S]*?)ZZENRICHZ\\1ZENDZZZ"
         );
+        java.util.regex.Matcher matcher = pattern.matcher(html);
+        
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String type = matcher.group(1);
+            String content = matcher.group(2);
+            
+            // Only restore if content is not empty
+            if (content != null && !content.trim().isEmpty()) {
+                matcher.appendReplacement(result, "{{" + type + ":" + content + "}}");
+            } else {
+                // Remove empty enrichment completely
+                matcher.appendReplacement(result, "");
+                logger.debug("Removed empty {} enrichment", type);
+            }
+        }
+        matcher.appendTail(result);
+        html = result.toString();
         
         // Clean up any HTML entities that might have been escaped in the content
         html = html.replace("&quot;", "\"");
         html = html.replace("&apos;", "'");
         html = html.replace("&#39;", "'");
+        
+        // Final cleanup: remove any empty enrichment patterns
+        html = html.replaceAll("\\{\\{\\w+:\\s*\\}\\}", "");
         
         return html;
     }

@@ -16,13 +16,16 @@ public class LocalStoreService {
     private final Path snapshotDir;
     private final Path parsedDir;
     private final Path indexDir;
+    private final ProgressTracker progressTracker;
 
     public LocalStoreService(@Value("${app.docs.snapshot-dir}") String snapshotDir,
                              @Value("${app.docs.parsed-dir}") String parsedDir,
-                             @Value("${app.docs.index-dir}") String indexDir) throws IOException {
+                             @Value("${app.docs.index-dir}") String indexDir,
+                             ProgressTracker progressTracker) throws IOException {
         this.snapshotDir = Paths.get(snapshotDir);
         this.parsedDir = Paths.get(parsedDir);
         this.indexDir = Paths.get(indexDir);
+        this.progressTracker = progressTracker;
         Files.createDirectories(this.snapshotDir);
         Files.createDirectories(this.parsedDir);
         Files.createDirectories(this.indexDir);
@@ -38,6 +41,10 @@ public class LocalStoreService {
         Path p = parsedDir.resolve(safeName(url) + "_" + index + "_" + hash.substring(0, 12) + ".txt");
         Files.createDirectories(p.getParent());
         Files.writeString(p, text, StandardCharsets.UTF_8);
+        // Update progress after chunk text is saved
+        if (progressTracker != null) {
+            progressTracker.markChunkParsed();
+        }
     }
 
     public boolean isHashIngested(String hash) {
@@ -49,6 +56,10 @@ public class LocalStoreService {
         Path marker = indexDir.resolve(hash);
         if (!Files.exists(marker)) {
             Files.writeString(marker, "1", StandardCharsets.UTF_8);
+            // Update progress after successful ingest
+            if (progressTracker != null) {
+                progressTracker.markChunkIndexed();
+            }
         }
     }
 
@@ -70,6 +81,10 @@ public class LocalStoreService {
 
     public Path getParsedDir() {
         return parsedDir;
+    }
+
+    public Path getIndexDir() {
+        return indexDir;
     }
 
     private String shortSha256(String input) {

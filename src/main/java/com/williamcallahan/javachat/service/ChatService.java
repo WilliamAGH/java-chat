@@ -85,6 +85,51 @@ public class ChatService {
                         : Flux.error(ex));
     }
 
+    /**
+     * Stream answer reusing existing pipeline but with preselected context documents
+     * and optional guidance to prepend to the system context.
+     */
+    public Flux<String> streamAnswerWithContext(List<Message> history,
+                                                String latestUserMessage,
+                                                List<Document> contextDocs,
+                                                String guidance) {
+        if (contextDocs == null) contextDocs = List.of();
+        StringBuilder systemContext = new StringBuilder();
+        if (guidance != null && !guidance.isBlank()) {
+            systemContext.append(guidance).append("\n\n");
+        }
+        systemContext.append(
+            "Use the provided context to answer questions.\n" +
+            "CRITICAL: Embed learning insights directly in your response using these markers:\n" +
+            "- {{hint:Text here}} for helpful tips and best practices\n" +
+            "- {{reminder:Text here}} for important things to remember\n" +
+            "- {{background:Text here}} for conceptual explanations\n" +
+            "- {{example:code here}} for inline code examples\n" +
+            "- {{warning:Text here}} for common pitfalls to avoid\n" +
+            "- [n] for citations with the source URL\n\n" +
+            "Integrate these naturally into your explanation. Don't group them separately.\n"
+        );
+
+        for (int i = 0; i < contextDocs.size(); i++) {
+            Document d = contextDocs.get(i);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+        }
+
+        List<Message> messages = new ArrayList<>();
+        messages.add(new UserMessage(systemContext.toString()));
+        messages.addAll(history);
+        messages.add(new UserMessage(latestUserMessage));
+        Message[] msgs = messages.toArray(new Message[0]);
+
+        String fallbackPrompt = systemContext + "\n\n" + latestUserMessage;
+
+        return chatClient
+                .prompt().messages(msgs).stream().content()
+                .onErrorResume(ex -> isUnauthorized(ex)
+                        ? openAiOnce(fallbackPrompt)
+                        : Flux.error(ex));
+    }
+
     public List<Citation> citationsFor(String userQuery) {
         List<Document> docs = retrievalService.retrieve(userQuery);
         return retrievalService.toCitations(docs);

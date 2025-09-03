@@ -68,4 +68,22 @@ public class DocumentFactory {
 
         return document;
     }
+
+    /**
+     * Creates a Spring AI Document with page range metadata for PDFs.
+     */
+    public org.springframework.ai.document.Document createDocumentWithPages(
+            String text,
+            String url,
+            String title,
+            int chunkIndex,
+            String packageName,
+            String hash,
+            int pageStart,
+            int pageEnd) {
+        var doc = createDocument(text, url, title, chunkIndex, packageName, hash);
+        doc.getMetadata().put("pageStart", pageStart);
+        doc.getMetadata().put("pageEnd", pageEnd);
+        return doc;
+    }
 }

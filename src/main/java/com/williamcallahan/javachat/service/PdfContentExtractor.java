@@ -106,4 +106,22 @@ public class PdfContentExtractor {
             return metadata.toString();
         }
     }
+
+    /**
+     * Extracts text per page as a list where index 0 == page 1.
+     */
+    public java.util.List<String> extractPageTexts(Path pdfPath) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
+            java.util.List<String> pages = new java.util.ArrayList<>(document.getNumberOfPages());
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+            for (int p = 1; p <= document.getNumberOfPages(); p++) {
+                stripper.setStartPage(p);
+                stripper.setEndPage(p);
+                String text = stripper.getText(document);
+                pages.add(text == null ? "" : text);
+            }
+            return pages;
+        }
+    }
 }

@@ -18,16 +18,19 @@ public class ChunkProcessingService {
     private final ContentHasher hasher;
     private final DocumentFactory documentFactory;
     private final LocalStoreService localStore;
+    private final PdfContentExtractor pdfExtractor;
 
     public ChunkProcessingService(
             Chunker chunker,
             ContentHasher hasher,
             DocumentFactory documentFactory,
-            LocalStoreService localStore) {
+            LocalStoreService localStore,
+            PdfContentExtractor pdfExtractor) {
         this.chunker = chunker;
         this.hasher = hasher;
         this.documentFactory = documentFactory;
         this.localStore = localStore;
+        this.pdfExtractor = pdfExtractor;
     }
 
     /**
@@ -105,5 +108,46 @@ public class ChunkProcessingService {
         }
 
         return documents;
+    }
+
+    /**
+     * Process a PDF by splitting into per-page chunks with token-aware splitting
+     * for long pages. Adds pageStart/pageEnd metadata to each resulting document.
+     */
+    public List<Document> processPdfAndStoreWithPages(
+            java.nio.file.Path pdfPath,
+            String url,
+            String title,
+            String packageName) throws java.io.IOException {
+
+        List<String> pages = pdfExtractor.extractPageTexts(pdfPath);
+        List<Document> out = new ArrayList<>();
+        int globalIndex = 0;
+
+        for (int i = 0; i < pages.size(); i++) {
+            String pageText = pages.get(i);
+            if (pageText == null) pageText = "";
+
+            // Split pageText by tokens if longer than window; no overlap for simplicity
+            List<String> sub = chunker.chunkByTokens(pageText, 900, 0);
+            for (String chunkText : sub) {
+                String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
+                if (!localStore.isHashIngested(hash)) {
+                    Document doc = documentFactory.createDocumentWithPages(
+                            chunkText,
+                            url,
+                            title,
+                            globalIndex,
+                            packageName,
+                            hash,
+                            i + 1,
+                            i + 1);
+                    out.add(doc);
+                    localStore.saveChunkText(url, globalIndex, chunkText, hash);
+                }
+                globalIndex++;
+            }
+        }
+        return out;
     }
 }
