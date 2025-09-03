@@ -33,6 +33,8 @@ public class DocsIngestionService {
     private final FileOperationsService fileOperationsService;
     private final HtmlContentExtractor htmlExtractor;
     private final PdfContentExtractor pdfExtractor;
+    private final EmbeddingCacheService embeddingCache;
+    private final boolean localOnlyMode;
 
     public DocsIngestionService(@Value("${app.docs.root-url}") String rootUrl,
                                 VectorStore vectorStore,
@@ -41,7 +43,9 @@ public class DocsIngestionService {
                                 FileOperationsService fileOperationsService,
                                 HtmlContentExtractor htmlExtractor,
                                 PdfContentExtractor pdfExtractor,
-                                ProgressTracker progressTracker) {
+                                ProgressTracker progressTracker,
+                                EmbeddingCacheService embeddingCache,
+                                @Value("${EMBEDDINGS_UPLOAD_MODE:local-only}") String uploadMode) {
         this.rootUrl = rootUrl;
         this.vectorStore = vectorStore;
         this.chunkProcessingService = chunkProcessingService;
@@ -50,6 +54,14 @@ public class DocsIngestionService {
         this.htmlExtractor = htmlExtractor;
         this.pdfExtractor = pdfExtractor;
         this.progressTracker = progressTracker;
+        this.embeddingCache = embeddingCache;
+        this.localOnlyMode = "local-only".equals(uploadMode);
+        
+        if (localOnlyMode) {
+            INDEXING_LOG.info("[INDEXING] Running in LOCAL-ONLY mode - embeddings will be cached locally");
+        } else {
+            INDEXING_LOG.info("[INDEXING] Running in UPLOAD mode - embeddings will be sent to Qdrant");
+        }
     }
 
     public void crawlAndIngest(int maxPages) throws IOException {
@@ -82,24 +94,45 @@ public class DocsIngestionService {
             List<org.springframework.ai.document.Document> documents =
                 chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
 
-            // Add documents to vector store
+            // Add documents to vector store or cache
             if (!documents.isEmpty()) {
-                INDEXING_LOG.info("[INDEXING] Adding {} documents to vector store for URL: {}", 
-                    documents.size(), url);
-                try {
-                    vectorStore.add(documents);
-                    INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})", 
-                        documents.size(), progressTracker.formatPercent());
-                    
-                    // Mark hashes as ingested ONLY after successful addition
-                    for (org.springframework.ai.document.Document aiDoc : documents) {
-                        String hash = aiDoc.getMetadata().get("hash").toString();
-                        localStore.markHashIngested(hash);
+                if (localOnlyMode) {
+                    // Local-only mode: compute and cache embeddings without uploading
+                    INDEXING_LOG.info("[INDEXING] Caching {} documents locally for URL: {}", 
+                        documents.size(), url);
+                    try {
+                        // Compute and cache embeddings
+                        embeddingCache.getOrComputeEmbeddings(documents);
+                        INDEXING_LOG.info("[INDEXING] ✓ Successfully cached {} documents locally ({})", 
+                            documents.size(), progressTracker.formatPercent());
+                        
+                        // Mark hashes as ingested (cached) after successful caching
+                        for (org.springframework.ai.document.Document aiDoc : documents) {
+                            String hash = aiDoc.getMetadata().get("hash").toString();
+                            localStore.markHashIngested(hash);
+                        }
+                    } catch (Exception e) {
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally: {}", e.getMessage());
                     }
-                } catch (Exception e) {
-                    INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant: {}", 
-                        e.getMessage());
-                    throw e;
+                } else {
+                    // Upload mode: send to Qdrant
+                    INDEXING_LOG.info("[INDEXING] Adding {} documents to Qdrant for URL: {}", 
+                        documents.size(), url);
+                    try {
+                        vectorStore.add(documents);
+                        INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})", 
+                            documents.size(), progressTracker.formatPercent());
+                        
+                        // Mark hashes as ingested ONLY after successful addition
+                        for (org.springframework.ai.document.Document aiDoc : documents) {
+                            String hash = aiDoc.getMetadata().get("hash").toString();
+                            localStore.markHashIngested(hash);
+                        }
+                    } catch (Exception e) {
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant: {}", 
+                            e.getMessage());
+                        throw e;
+                    }
                 }
             } else {
                 INDEXING_LOG.warn("[INDEXING] No documents to add for URL: {}", url);
