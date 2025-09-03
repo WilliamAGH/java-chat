@@ -31,19 +31,22 @@ public class DocsIngestionService {
     private final LocalStoreService localStore;
     private final FileOperationsService fileOperationsService;
     private final HtmlContentExtractor htmlExtractor;
+    private final PdfContentExtractor pdfExtractor;
 
     public DocsIngestionService(@Value("${app.docs.root-url}") String rootUrl,
                                 VectorStore vectorStore,
                                 ChunkProcessingService chunkProcessingService,
                                 LocalStoreService localStore,
                                 FileOperationsService fileOperationsService,
-                                HtmlContentExtractor htmlExtractor) {
+                                HtmlContentExtractor htmlExtractor,
+                                PdfContentExtractor pdfExtractor) {
         this.rootUrl = rootUrl;
         this.vectorStore = vectorStore;
         this.chunkProcessingService = chunkProcessingService;
         this.localStore = localStore;
         this.fileOperationsService = fileOperationsService;
         this.htmlExtractor = htmlExtractor;
+        this.pdfExtractor = pdfExtractor;
     }
 
     public void crawlAndIngest(int maxPages) throws IOException {
@@ -117,21 +120,45 @@ public class DocsIngestionService {
                     .filter(p -> !Files.isDirectory(p))
                     .filter(p -> {
                         String name = p.getFileName().toString().toLowerCase();
-                        return name.endsWith(".html") || name.endsWith(".htm");
+                        return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
                     })
                     .iterator();
             while (it.hasNext() && processed[0] < maxFiles) {
                 Path file = it.next();
-                String html = fileOperationsService.readTextFile(file);
-                org.jsoup.nodes.Document doc = Jsoup.parse(html);
-                String title = Optional.ofNullable(doc.title()).orElse("");
-                // Use improved content extraction for cleaner text
+                long fileStartMillis = System.currentTimeMillis();
+                String fileName = file.getFileName().toString().toLowerCase();
+                String title;
+                String bodyText;
                 String url = mapLocalPathToUrl(file);
-                String bodyText = url.contains("/api/") ? 
-                    htmlExtractor.extractJavaApiContent(doc) : 
-                    htmlExtractor.extractCleanContent(doc);
-
-                String packageName = extractPackage(url, bodyText);
+                String packageName;
+                
+                if (fileName.endsWith(".pdf")) {
+                    // Process PDF file
+                    try {
+                        bodyText = pdfExtractor.extractTextFromPdf(file);
+                        // Extract title from PDF metadata or filename
+                        String metadata = pdfExtractor.getPdfMetadata(file);
+                        title = extractTitleFromMetadata(metadata, file.getFileName().toString());
+                        packageName = "";
+                        // For recognized book PDFs, point URL to public /pdfs path
+                        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(file.toString());
+                        if (publicPdf != null) {
+                            url = publicPdf;
+                        }
+                    } catch (Exception e) {
+                        log.error("Failed to extract PDF content from {}: {}", file, e.getMessage());
+                        continue;
+                    }
+                } else {
+                    // Process HTML file
+                    String html = fileOperationsService.readTextFile(file);
+                    org.jsoup.nodes.Document doc = Jsoup.parse(html);
+                    title = Optional.ofNullable(doc.title()).orElse("");
+                    bodyText = url.contains("/api/") ? 
+                        htmlExtractor.extractJavaApiContent(doc) : 
+                        htmlExtractor.extractCleanContent(doc);
+                    packageName = extractPackage(url, bodyText);
+                }
 
                 // Use ChunkProcessingService to handle chunking and document creation
                 List<org.springframework.ai.document.Document> documents =
@@ -151,6 +178,10 @@ public class DocsIngestionService {
                         
                         INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {}", 
                             documents.size(), duration, file.getFileName());
+                        // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
+                        long totalDuration = System.currentTimeMillis() - fileStartMillis;
+                        INDEXING_LOG.info("[INDEXING] ✔ Completed indexing file: {} — {}/{} chunks indexed in {}ms (end-to-end)",
+                            file.getFileName(), documents.size(), documents.size(), totalDuration);
                         
                         // Mark hashes as ingested ONLY after successful addition
                         for (org.springframework.ai.document.Document aiDoc : documents) {
@@ -174,22 +205,44 @@ public class DocsIngestionService {
 
     private String mapLocalPathToUrl(Path file) {
         String p = file.toAbsolutePath().toString().replace('\\', '/');
-        int idxSpring = p.indexOf("docs.spring.io/");
-        if (idxSpring >= 0) {
-            String suffix = p.substring(idxSpring);
-            return "https://" + suffix;
-        }
-        int idxJava = p.indexOf("download.java.net/");
-        if (idxJava >= 0) {
-            String suffix = p.substring(idxJava);
-            return "https://" + suffix;
-        }
+        // If book PDF, map to public /pdfs path
+        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(p);
+        if (publicPdf != null) return publicPdf;
+        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
+        if (embedded != null) return embedded;
+        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
+        if (mapped != null) return mapped;
         // Known single-file mirrors
         if (p.contains("/data/docs/spring-boot/reference.html")) {
             return "https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/";
         }
         // Fallback to file:// URL for traceability
         return "file://" + p;
+    }
+
+    private String extractTitleFromMetadata(String metadata, String fileName) {
+        // Simple heuristic: try to find a Title in metadata (case-insensitive), otherwise use filename
+        if (metadata != null && !metadata.isBlank()) {
+            String m = metadata;
+            // Normalize line endings
+            m = m.replace("\r\n", "\n");
+            // Case-insensitive search for "Title:"
+            String lower = m.toLowerCase();
+            String key = "title:";
+            int startIdx = lower.indexOf(key);
+            if (startIdx >= 0) {
+                int start = startIdx + key.length();
+                int end = m.indexOf('\n', start);
+                if (end == -1) end = m.length();
+                return m.substring(start, end).trim();
+            }
+        }
+        // Fallback to using the filename, removing extension
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            return fileName.substring(0, dotIndex);
+        }
+        return fileName;
     }
 
     private String extractPackage(String url, String bodyText) {
@@ -219,5 +272,3 @@ public class DocsIngestionService {
         return "";
     }
 }
-
-

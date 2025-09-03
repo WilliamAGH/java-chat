@@ -45,6 +45,8 @@ public class DocumentProcessor {
             
             // Documentation directories in priority order
             String[][] docSets = {
+                // Books and PDFs
+                {"PDF Books", "books"},
                 // Complete documentation (preferred)
                 {"Java 24 Complete API", "java/java24-complete"},
                 {"Java 25 Complete API", "java/java25-complete"},
@@ -70,14 +72,14 @@ public class DocumentProcessor {
                 Path dirPath = Paths.get(fullPath);
                 
                 if (Files.exists(dirPath) && Files.isDirectory(dirPath)) {
-                    // Count HTML files
+                    // Count HTML and PDF files
                     long fileCount = 0;
                     try (Stream<Path> paths = Files.walk(dirPath)) {
                         fileCount = paths
                             .filter(p -> !Files.isDirectory(p))
                             .filter(p -> {
                                 String fileName = p.getFileName().toString().toLowerCase();
-                                return fileName.endsWith(".html") || fileName.endsWith(".htm");
+                                return fileName.endsWith(".html") || fileName.endsWith(".htm") || fileName.endsWith(".pdf");
                             })
                             .count();
                     }
