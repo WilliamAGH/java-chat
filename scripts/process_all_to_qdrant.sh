@@ -267,8 +267,19 @@ process_documents() {
     # Start the application with document processor
     log "${YELLOW}Starting document processor in ${CYAN}${UPLOAD_MODE}${YELLOW} mode...${NC}"
     
-    # Use make run which handles environment properly
-    make run >> "$LOG_FILE" 2>&1 &
+    # Run DocumentProcessor with cli profile for document ingestion
+    cd "$PROJECT_ROOT"
+    if [ -f .env ]; then
+        set -a
+        source .env
+        set +a
+    fi
+    
+    # Run with cli profile to trigger DocumentProcessor
+    java -Dspring.profiles.active=cli \
+         -DEMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE" \
+         -DDOCS_DIR="$DOCS_ROOT" \
+         -jar target/*.jar >> "$LOG_FILE" 2>&1 &
     local APP_PID=$!
     
     log "${BLUE}ℹ Application started with PID: $APP_PID${NC}"
