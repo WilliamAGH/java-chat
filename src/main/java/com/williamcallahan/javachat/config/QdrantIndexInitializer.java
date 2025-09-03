@@ -8,9 +8,13 @@ import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -20,6 +24,7 @@ public class QdrantIndexInitializer {
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
 
+    // Note: 6334 is gRPC; REST is 6333. We keep this for gRPC config but compute REST URL separately.
     @Value("${spring.ai.vectorstore.qdrant.port:6334}")
     private int port;
 
@@ -32,11 +37,29 @@ public class QdrantIndexInitializer {
     @Value("${spring.ai.vectorstore.qdrant.collection-name}")
     private String collection;
 
-    private String baseUrl() {
+    /**
+     * Build candidate REST base URLs for Qdrant.
+     * - Cloud (TLS): https://host (port 443 behind gateway)
+     * - Local (no TLS): prefer REST default 6333; if a typical gRPC port is configured (6334 or 8086),
+     *   try the corresponding REST port (6333 or 8087) as well.
+     */
+    private List<String> restBaseUrls() {
+        List<String> bases = new ArrayList<>();
         if (useTls) {
-            return "https://" + host;
+            bases.add("https://" + host); // Cloud REST via 443
+        } else {
+            // Always try the REST default first
+            bases.add("http://" + host + ":6333");
+            // If user provided gRPC port, also try the mapped REST port
+            if (port == 6334) {
+                bases.add("http://" + host + ":6334"); // last resort if someone exposed REST there
+            } else if (port == 8086) {
+                bases.add("http://" + host + ":8087"); // docker-compose mapping in this repo
+            }
+            // Finally, try whatever port was configured explicitly
+            bases.add("http://" + host + ":" + port);
         }
-        return "http://" + host + ":" + port;
+        return bases;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -51,7 +74,6 @@ public class QdrantIndexInitializer {
     }
 
     private void createPayloadIndex(String field, String schema) {
-        String url = baseUrl() + "/collections/" + collection + "/indexes";
         RestTemplate rt = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -62,13 +84,39 @@ public class QdrantIndexInitializer {
                 "field_name", field,
                 "field_schema", schema
         );
-        try {
-            rt.postForEntity(url, new HttpEntity<>(body, headers), String.class);
-            log.info("[QDRANT] Ensured payload index '{}' (schema={})", field, schema);
-        } catch (Exception e) {
-            // If it already exists or API variant differs, log and continue
-            log.info("[QDRANT] Index '{}' may already exist or API returned non-200: {}", field, e.getMessage());
+
+        // Qdrant payload index endpoints differ by version; try the known variants.
+        String[] pathCandidates = new String[] {
+                "/collections/" + collection + "/points/index", // common
+                "/collections/" + collection + "/index"          // older variant
+        };
+
+        Exception lastError = null;
+        for (String base : restBaseUrls()) {
+            for (String path : pathCandidates) {
+                String url = base + path;
+                try {
+                    // Try POST first (modern API)
+                    rt.postForEntity(url, new HttpEntity<>(body, headers), String.class);
+                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via POST {}", field, schema, url);
+                    return;
+                } catch (Exception postEx) {
+                    lastError = postEx;
+                    try {
+                        // Some deployments expect PUT
+                        ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
+                        log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT {} (status={})",
+                                field, schema, url, resp.getStatusCode());
+                        return;
+                    } catch (Exception putEx) {
+                        lastError = putEx; // continue trying other candidates
+                    }
+                }
+            }
         }
+        // If we reach here, all attempts failed; log once at INFO to avoid noisy warnings.
+        log.info("[QDRANT] Could not ensure payload index '{}' (schema={}). Last error: {}", field, schema,
+                lastError != null ? lastError.getMessage() : "unknown");
     }
 }
 

@@ -66,6 +66,29 @@ log() {
 # Initialize log
 echo "[$(date)] Starting document processing with deduplication" > "$LOG_FILE"
 
+# Compute overall % complete (indexed vs parsed)
+percent_complete() {
+    local parsed_dir="$PROJECT_ROOT/data/parsed"
+    local index_dir="$PROJECT_ROOT/data/index"
+    local parsed_count=0
+    local indexed_count=0
+    if [ -d "$parsed_dir" ]; then
+        parsed_count=$(find "$parsed_dir" -type f -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ -d "$index_dir" ]; then
+        indexed_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ "$parsed_count" -gt 0 ]; then
+        awk -v i="$indexed_count" -v p="$parsed_count" 'BEGIN { printf("%.1f%%", (i/p)*100) }'
+    else
+        # Fallback: use Qdrant points vs 60k estimate
+        local url="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
+        local pts=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url" | grep -o '"points_count\":[0-9]*' | cut -d: -f2)
+        pts=${pts:-0}
+        awk -v i="$pts" 'BEGIN { printf("%.1f%%", (i/60000)*100) }'
+    fi
+}
+
 # Function to get SHA-256 hash of a file
 get_file_hash() {
     local file="$1"
@@ -113,11 +136,11 @@ check_qdrant_connection() {
         -H "api-key: $QDRANT_API_KEY" \
         "$url")
     
-    if [ "$response" = "200" ]; then
-        log "${GREEN}✓ Qdrant connection successful${NC}"
-        
-        # Get collection info
-        local info=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url")
+        if [ "$response" = "200" ]; then
+            log "${GREEN}✓ Qdrant connection successful${NC} ($(percent_complete))"
+            
+            # Get collection info
+            local info=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url")
         local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
         local dimensions=$(echo "$info" | grep -o '"size":[0-9]*' | head -1 | cut -d: -f2)
         
@@ -140,7 +163,7 @@ check_embedding_server() {
         local response=$(curl -s -o /dev/null -w "%{http_code}" "$url")
         
         if [ "$response" = "200" ]; then
-            log "${GREEN}✓ Local embedding server is healthy${NC}"
+            log "${GREEN}✓ Local embedding server is healthy${NC} ($(percent_complete))"
             return 0
         else
             log "${RED}✗ Local embedding server not responding (HTTP $response)${NC}"
@@ -167,7 +190,7 @@ process_documents() {
     ./mvnw -DskipTests clean package >> "$LOG_FILE" 2>&1
     
     if [ $? -eq 0 ]; then
-        log "${GREEN}✓ Application built successfully${NC}"
+        log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"
     else
         log "${RED}✗ Failed to build application${NC}"
         return 1
@@ -189,7 +212,7 @@ process_documents() {
     
     while true; do
         if grep -q "DOCUMENT PROCESSING COMPLETE" "$LOG_FILE" 2>/dev/null; then
-            log "${GREEN}✓ Document processing completed${NC}"
+            log "${GREEN}✓ Document processing completed${NC} ($(percent_complete))"
             
             # Extract statistics
             local total_processed=$(grep "Total new documents processed:" "$LOG_FILE" | tail -1 | grep -o '[0-9]*')
@@ -219,7 +242,7 @@ process_documents() {
     echo ""  # New line after progress indicator
     
     # Application will continue running for API access
-    log "${GREEN}✓ Application is running on port ${PORT:-8085}${NC}"
+    log "${GREEN}✓ Application is running on port ${PORT:-8085}${NC} ($(percent_complete))"
     log "${BLUE}ℹ Access the chat at: http://localhost:${PORT:-8085}${NC}"
     
     return 0
@@ -291,7 +314,7 @@ main() {
     if process_documents; then
         show_statistics
         log ""
-        log "${GREEN}✅ Processing pipeline completed successfully!${NC}"
+        log "${GREEN}✅ Processing pipeline completed successfully!${NC} ($(percent_complete))"
         log "Check log for details: $LOG_FILE"
     else
         log "${RED}✗ Processing pipeline failed${NC}"
