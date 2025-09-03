@@ -162,15 +162,21 @@ public class MarkdownService {
      * Pre-processes markdown to fix common formatting issues.
      * Ensures lists and code blocks are properly separated from preceding text.
      */
-    private String preprocessMarkdown(String markdown) {
-        // CRITICAL: Ensure single space after sentence-ending punctuation
+    public String preprocessMarkdown(String markdown) {
+        // CRITICAL: Ensure single space after sentence-ending punctuation FIRST
+        // This must happen before paragraph breaking so the text can be properly split
         // Fixes: "operation.For example" -> "operation. For example"
         // Also handles quotes: "operator."This -> "operator." This
         markdown = markdown.replaceAll("([.!?])([\"'])?([A-Z])", "$1$2 $3");
         
-        // Fix inline numbered lists only when preceded by colon or at line start
-        // Use negative lookbehind to avoid matching decimal numbers like "76.12"
-        markdown = markdown.replaceAll("(?<!\\d)([^\\n]):?\\s?(\\d+\\.\\s+\\w)", "$1\n\n$2");
+        // Apply smart paragraph breaking AFTER fixing spaces
+        markdown = applySmartParagraphBreaks(markdown);
+        
+        // DO NOT auto-detect lists from inline text like "are:1."
+        // Only treat as list if it's at the start of a line or after explicit list marker
+        // This prevents "are:1. boolean" from becoming a list
+        // markdown = markdown.replaceAll(":\\s+(\\d+\\.\\s+[A-Z])", ":\n\n$1");
+        // COMMENTED OUT - causing false positives
         
         // Fix inline bullet lists: "text:- " or "text: - " -> "text:\n\n- "
         markdown = markdown.replaceAll("([^\\n]):?-\\s+", "$1\n\n- ");
@@ -180,17 +186,15 @@ public class MarkdownService {
         // Fix code blocks without preceding line break: "text:```" -> "text:\n\n```"
         markdown = markdown.replaceAll("([^\\n]):?\\s?```", "$1\n\n```");
         
-        // Ensure code blocks have trailing newline for proper closure
-        markdown = markdown.replaceAll("```([^`]+)```([^\\n])", "```$1```\n$2");
+        // CRITICAL: Protect code block content from being consumed by other patterns
+        // Ensure code blocks are properly delimited and content is preserved
+        markdown = protectCodeBlocks(markdown);
         
-        // Apply smart paragraph breaking for better readability
-        markdown = applySmartParagraphBreaks(markdown);
-        
-        // Clean up: Never allow multiple consecutive spaces
-        markdown = markdown.replaceAll("\\s{2,}(?!\\n)", " ");
+        // Clean up: Never allow multiple consecutive HORIZONTAL spaces (preserve newlines!)
+        markdown = markdown.replaceAll("[ \\t]{2,}", " ");
         
         // Never allow leading spaces at start of lines (except in code blocks)
-        markdown = markdown.replaceAll("(?m)^\\s+(?!```)", "");
+        markdown = markdown.replaceAll("(?m)^[ \\t]+(?!```)", "");
         
         return markdown;
     }
@@ -200,60 +204,115 @@ public class MarkdownService {
      * Avoids breaking in inappropriate places like abbreviations or code.
      */
     private String applySmartParagraphBreaks(String markdown) {
-        // Don't process if already has paragraph breaks or is code
-        if (markdown.contains("\n\n") || markdown.contains("```")) {
+        // Don't process code blocks
+        if (markdown.contains("```")) {
             return markdown;
         }
         
-        // Use regex to split on sentence boundaries while preserving the punctuation
-        String[] parts = markdown.split("(?<=[.!?]\\s)(?=[A-Z])");
-        if (parts.length < 3) {
-            return markdown; // Too short to break
+        // CRITICAL: We MUST add paragraph breaks for proper rendering!
+        
+        // First check if there are already paragraph breaks
+        if (markdown.contains("\n\n")) {
+            // Already has breaks, don't add more
+            return markdown;
+        }
+        
+        // Split on sentence endings but keep the punctuation
+        String[] sentences = markdown.split("(?<=\\. )");
+        
+        // If text is very short, don't break it
+        if (sentences.length < 2) {
+            return markdown;
         }
         
         StringBuilder result = new StringBuilder();
         int sentenceCount = 0;
-        int charCount = 0;
         
-        for (int i = 0; i < parts.length; i++) {
-            String part = parts[i];
-            result.append(part);
+        for (int i = 0; i < sentences.length; i++) {
+            String sentence = sentences[i];
+            result.append(sentence);
             sentenceCount++;
-            charCount += part.length();
             
-            // Determine if we should add a paragraph break
+            // Add paragraph break every 2-3 sentences
+            // Check various conditions for breaking
             boolean shouldBreak = false;
             
-            // Check if we have enough content for a paragraph
-            if (sentenceCount >= 3 && charCount > 250) {
-                // Don't break if next part starts with lowercase (continuation)
-                if (i < parts.length - 1) {
-                    String nextPart = parts[i + 1];
-                    if (!nextPart.isEmpty() && Character.isUpperCase(nextPart.charAt(0))) {
-                        // Check for common abbreviations that shouldn't end paragraphs
-                        if (!part.endsWith("e.g. ") && !part.endsWith("i.e. ") && 
-                            !part.endsWith("etc. ") && !part.endsWith("Dr. ") &&
-                            !part.endsWith("Mr. ") && !part.endsWith("Mrs. ") &&
-                            !part.endsWith("Ms. ")) {
-                            shouldBreak = true;
-                        }
-                    }
+            if (sentenceCount >= 2 && i < sentences.length - 1) {
+                // Don't break at abbreviations
+                if (!sentence.endsWith("e.g. ") && 
+                    !sentence.endsWith("i.e. ") && 
+                    !sentence.endsWith("etc. ") &&
+                    !sentence.endsWith("Dr. ") &&
+                    !sentence.endsWith("Mr. ") &&
+                    !sentence.endsWith("Mrs. ") &&
+                    !sentence.endsWith("Ms. ")) {
+                    shouldBreak = true;
+                    sentenceCount = 0;
                 }
             }
             
             if (shouldBreak) {
+                // ADD THE CRITICAL DOUBLE NEWLINE FOR PARAGRAPH BREAK
                 result.append("\n\n");
-                sentenceCount = 0;
-                charCount = 0;
-            } else if (i < parts.length - 1) {
-                // Ensure space between parts if not breaking
-                if (!result.toString().endsWith(" ")) {
-                    result.append(" ");
-                }
+                logger.debug("Added paragraph break after: {}", 
+                           sentence.substring(Math.max(0, sentence.length() - 30)));
             }
         }
         
-        return result.toString().trim();
+        String processed = result.toString().trim();
+        logger.debug("Paragraph breaking: {} sentences -> {} paragraphs", 
+                    sentences.length, processed.split("\n\n").length);
+        return processed;
+    }
+    
+    /**
+     * Protects code block content from being consumed or altered by other regex patterns.
+     * Ensures code blocks maintain their content integrity.
+     */
+    private String protectCodeBlocks(String markdown) {
+        // Match code blocks and ensure they have proper structure
+        StringBuilder result = new StringBuilder();
+        java.util.regex.Pattern codeBlockPattern = 
+            java.util.regex.Pattern.compile("```([a-z]*)\n?([^`]*?)```", 
+                                           java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
+        
+        int lastEnd = 0;
+        while (matcher.find()) {
+            // Append text before code block
+            result.append(markdown.substring(lastEnd, matcher.start()));
+            
+            String language = matcher.group(1);
+            String code = matcher.group(2);
+            
+            // Ensure code content is not empty and properly formatted
+            if (code != null && !code.trim().isEmpty()) {
+                // Preserve the code block with proper formatting
+                result.append("```").append(language).append("\n");
+                result.append(code);
+                if (!code.endsWith("\n")) {
+                    result.append("\n");
+                }
+                result.append("```\n");
+                logger.debug("Code block preserved with {} characters", code.length());
+            } else {
+                // Log warning about empty code block
+                logger.warn("Empty code block detected at position {}, language: '{}'", 
+                           matcher.start(), language);
+                result.append("```").append(language).append("\n");
+                result.append("// Code block content missing - check streaming\n");
+                result.append("```\n");
+            }
+            
+            lastEnd = matcher.end();
+        }
+        
+        // Append remaining text
+        if (lastEnd < markdown.length()) {
+            result.append(markdown.substring(lastEnd));
+        }
+        
+        return result.toString();
     }
     
     /**
@@ -313,6 +372,11 @@ public class MarkdownService {
      * Uses unique placeholders that won't be affected by markdown parsing or HTML filtering.
      */
     private String preserveEnrichments(String markdown) {
+        // Log if we're about to process enrichments
+        if (markdown.contains("{{")) {
+            logger.debug("Processing enrichment markers in markdown");
+        }
+        
         // Replace enrichment markers with unique placeholders that won't be processed by markdown
         // Using a format that avoids markdown special characters (no underscores, asterisks, etc.)
         return ENRICHMENT_PATTERN.matcher(markdown).replaceAll(

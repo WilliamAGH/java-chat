@@ -694,6 +694,22 @@
             margin-top: var(--space-4);
         }
         
+        /* CRITICAL: Ensure text after lists is NOT indented */
+        .bubble ol + p,
+        .bubble ul + p {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
+            text-indent: 0 !important;
+        }
+        
+        /* Reset any inherited list styling for following elements */
+        .bubble ol ~ p,
+        .bubble ul ~ p {
+            list-style: none;
+            margin-left: 0;
+            padding-left: 0;
+        }
+        
         /* Ensure list items have proper internal spacing */
         .bubble li {
             margin: var(--space-2) 0;
@@ -1270,10 +1286,10 @@
                     buffer = lines[lines.length - 1]; // Keep incomplete line in buffer
                     
                     for (let i = 0; i < lines.length - 1; i++) {
-                        const line = lines[i].trim();
+                        const line = lines[i];
                         if (line.startsWith('data:')) {
-                            const data = line.substring(5);
-                            if (data.trim()) {
+                            const data = line.substring(5).trim();
+                            if (data) {
                                 fullText += data;
                             }
                         }

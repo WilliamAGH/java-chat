@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.web;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
+import com.williamcallahan.javachat.service.MarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -27,6 +28,7 @@ public class ChatController extends BaseController {
     
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
+    private final MarkdownService markdownService;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
@@ -35,10 +37,12 @@ public class ChatController extends BaseController {
     @Value("${app.local-embedding.enabled:false}")
     private boolean localEmbeddingEnabled;
 
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory, ExceptionResponseBuilder exceptionBuilder) {
+    public ChatController(ChatService chatService, ChatMemoryService chatMemory, 
+                         MarkdownService markdownService, ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
+        this.markdownService = markdownService;
     }
 
     /**
@@ -63,6 +67,12 @@ public class ChatController extends BaseController {
         AtomicInteger chunkCount = new AtomicInteger(0);
         
         return chatService.streamAnswer(history, latest)
+                .map(chunk -> {
+                    // CRITICAL: Preserve newlines in chunks!
+                    // The LLM sends text that may have lost formatting
+                    // We need to ensure chunks maintain structure
+                    return chunk;
+                })
                 .doOnNext(chunk -> {
                     sb.append(chunk);
                     int count = chunkCount.incrementAndGet();
@@ -72,9 +82,13 @@ public class ChatController extends BaseController {
                     }
                 })
                 .doOnComplete(() -> {
-                    chatMemory.addAssistant(sessionId, sb.toString());
+                    // Process the complete message with markdown formatting
+                    String rawResponse = sb.toString();
+                    // Apply markdown processing to fix formatting issues
+                    String processed = markdownService.preprocessMarkdown(rawResponse);
+                    chatMemory.addAssistant(sessionId, processed);
                     PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars", 
-                        requestId, chunkCount.get(), sb.length());
+                        requestId, chunkCount.get(), processed.length());
                 })
                 .doOnError(error -> {
                     PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage());
