@@ -195,6 +195,16 @@
         .inline-enrichment:empty { display: none !important; }
         .inline-enrichment:has(.enrichment-text:empty) { display: none !important; }
         
+        /* Hide any empty elements with borders */
+        .bubble div:empty:not(.loading-dots):not(.typing-cursor) { display: none !important; }
+        .citations-row:empty { display: none !important; }
+        
+        /* Hide divs that only contain whitespace */
+        .bubble div:not(:has(*)):not(.loading-dots):not(.typing-cursor) {
+            min-height: 0 !important;
+            border: none !important;
+        }
+        
         /* Markdown elements */
         .bubble p { margin: 0 0 var(--space-3) 0; line-height: 1.6; }
         .bubble p:last-child { margin-bottom: 0; }
@@ -389,6 +399,9 @@
                 attachCodeCopyButtons(assistantBubble);
                 await loadCitations(q, assistantBubble);
                 await loadEnrichment(q, chatEl);
+                
+                // CRITICAL: Clean up any empty elements that might create visual artifacts
+                cleanupEmptyElements(chatEl);
             } catch (error) {
                 console.error('Streaming error:', error);
                 assistantBubble.innerHTML = `<div style="color: var(--accent-error);">⚠️ Error: Failed to get response. Please try again.</div>`;
@@ -586,6 +599,11 @@
         }
         
         async function loadEnrichment(query, container) {
+            // DISABLED - Do not load enrichment cards at all to prevent artifacts
+            return;
+            
+            // Original code kept for reference but disabled
+            /*
             try {
                 const response = await fetch('/api/enrich?q=' + encodeURIComponent(query));
                 if (!response.ok) return;
@@ -616,6 +634,7 @@
                 // Silently fail - don't create empty cards on error
                 console.debug('Enrichment load skipped:', error); 
             }
+            */
         }
         
         function createKnowledgeCard(type, title, items) {
@@ -652,6 +671,47 @@
         
         async function copyChat() {
             try { const res = await fetch('/api/chat/export/session?sessionId=web'); const txt = await res.text(); await navigator.clipboard.writeText(txt); const btn = document.querySelector('.export-chat-btn'); if (btn) { btn.style.background = 'var(--accent-success)'; btn.style.color = 'white'; setTimeout(() => { btn.style.background = ''; btn.style.color = ''; }, 2000); } showToast('Chat session exported to clipboard!'); } catch (error) { showToast('Failed to export', 'error'); }
+        }
+        
+        function cleanupEmptyElements(container) {
+            // Remove any divs that are empty or only contain whitespace
+            const allDivs = container.querySelectorAll('div');
+            allDivs.forEach(div => {
+                // Skip special elements
+                if (div.classList.contains('loading-dots') || 
+                    div.classList.contains('typing-cursor') ||
+                    div.classList.contains('bubble') ||
+                    div.classList.contains('streaming-text')) {
+                    return;
+                }
+                
+                // Remove if empty or only whitespace
+                const text = div.textContent || '';
+                if (text.trim() === '' && div.children.length === 0) {
+                    div.remove();
+                }
+                
+                // Remove knowledge cards without content
+                if (div.classList.contains('knowledge-card')) {
+                    const content = div.querySelector('.knowledge-card-content');
+                    if (!content || !content.textContent || content.textContent.trim() === '') {
+                        div.remove();
+                    }
+                }
+                
+                // Remove empty enrichment blocks
+                if (div.classList.contains('inline-enrichment')) {
+                    const enrichText = div.querySelector('.enrichment-text');
+                    if (!enrichText || !enrichText.textContent || enrichText.textContent.trim() === '') {
+                        div.remove();
+                    }
+                }
+                
+                // Remove empty citation rows
+                if (div.classList.contains('citations-row') && div.children.length === 0) {
+                    div.remove();
+                }
+            });
         }
         
         function showToast(message, type = 'success') { const toast = document.createElement('div'); toast.style.cssText = `position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: ${type === 'error' ? 'var(--accent-error)' : 'var(--accent-success)'}; color: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); z-index: 1000; animation: fadeIn 0.3s ease;`; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => { toast.style.animation = 'fadeIn 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, 3000); }
