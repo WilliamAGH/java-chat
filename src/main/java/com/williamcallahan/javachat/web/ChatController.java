@@ -92,14 +92,16 @@ public class ChatController extends BaseController {
                                            buffer.length() > 500;  // Force break for very long chunks
                     
                     if (hasBreakPoint) {
-                        // Preprocess the buffered content
-                        String processed = markdownService.preprocessMarkdown(buffered);
+                        // IMPORTANT: Don't preprocess during streaming!
+                        // The client will call /api/markdown/render which does full preprocessing.
+                        // Double preprocessing causes corruption of markdown structures.
+                        String toSend = buffered;
                         buffer.setLength(0);  // Clear buffer
                         
-                        PIPELINE_LOG.debug("[{}] Preprocessed chunk: '{}' -> '{}'", 
-                            requestId, buffered.replace("\n", "\\n"), processed.replace("\n", "\\n"));
+                        PIPELINE_LOG.debug("[{}] Sending chunk: '{}'", 
+                            requestId, toSend.replace("\n", "\\n"));
                         
-                        return processed;
+                        return toSend;
                     } else {
                         // Keep buffering
                         return "";
@@ -114,12 +116,12 @@ public class ChatController extends BaseController {
                     }
                 })
                 .concatWith(Flux.defer(() -> {
-                    // Process any remaining buffered content
+                    // Send any remaining buffered content (without preprocessing)
                     if (buffer.length() > 0) {
-                        String processed = markdownService.preprocessMarkdown(buffer.toString());
-                        PIPELINE_LOG.debug("[{}] Final buffer processed: '{}'", 
-                            requestId, buffer.toString().replace("\n", "\\n"));
-                        return Flux.just(processed);
+                        String remaining = buffer.toString();
+                        PIPELINE_LOG.debug("[{}] Final buffer sent: '{}'", 
+                            requestId, remaining.replace("\n", "\\n"));
+                        return Flux.just(remaining);
                     }
                     return Flux.empty();
                 }))
