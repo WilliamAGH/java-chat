@@ -1,0 +1,669 @@
+<!doctype html>
+<!-- htmlhint attr-lowercase:false -->
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Java Chat - Beautiful AI-Powered Java Learning</title>
+    
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    
+    <style>
+        /* CSS Variables for Design System */
+        :root {
+            /* Color System */
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --surface-100: #f8fafc;
+            --surface-200: #f1f5f9;
+            --surface-300: #e2e8f0;
+            --surface-400: #cbd5e1;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-tertiary: #64748b;
+            --accent-primary: #667eea;
+            --accent-secondary: #764ba2;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            
+            /* Dark theme colors */
+            --dark-bg: #0b0d0f;
+            --dark-surface-1: #111318;
+            --dark-surface-2: #1a1d23;
+            --dark-surface-3: #22262e;
+            --dark-border: #2a2f36;
+            --dark-text-primary: #f1f5f9;
+            --dark-text-secondary: #cbd5e1;
+            --dark-text-tertiary: #94a3b8;
+            
+            /* Typography Scale */
+            --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+            --text-xs: 0.75rem;
+            --text-sm: 0.875rem;
+            --text-base: 1rem;
+            --text-lg: 1.125rem;
+            --text-xl: 1.25rem;
+            --text-2xl: 1.5rem;
+            --text-3xl: 1.875rem;
+            
+            /* Spacing (8px grid) */
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-5: 1.25rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
+            --space-10: 2.5rem;
+            --space-12: 3rem;
+            
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+            --shadow-xl: 0 20px 25px rgba(0,0,0,0.1);
+            --shadow-2xl: 0 25px 50px rgba(0,0,0,0.25);
+            --shadow-glow: 0 0 20px rgba(102, 126, 234, 0.4);
+            
+            /* Borders */
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --radius-xl: 12px;
+            --radius-2xl: 16px;
+            --radius-full: 9999px;
+            
+            /* Animations */
+            --transition-fast: 150ms ease;
+            --transition-base: 250ms ease;
+            --transition-slow: 350ms ease;
+            --animation-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            --animation-shimmer: shimmer 2s ease-in-out infinite;
+        }
+        
+        /* Dark theme (default) */
+        body {
+            font-family: var(--font-display);
+            margin: 0;
+            background: var(--dark-bg);
+            color: var(--dark-text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        /* Animations */
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideDown { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 500px; } }
+        @keyframes typing { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* Container */
+        .container { max-width: 1024px; margin: 0 auto; padding: var(--space-6); animation: fadeIn 0.5s ease; box-sizing: border-box; width: 100%; }
+        
+        /* Header */
+        .header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-8); padding-bottom: var(--space-6); border-bottom: 1px solid var(--dark-border); }
+        .header-left { display: flex; align-items: center; gap: var(--space-3); }
+        .header-right { display: flex; align-items: center; gap: var(--space-2); }
+        .app-title { font-size: var(--text-xl); font-weight: 600; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        
+        /* Pills */
+        .pill { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--dark-surface-2); border: 1px solid var(--dark-border); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--dark-text-secondary); transition: all var(--transition-fast); }
+        .pill:hover { background: var(--dark-surface-3); border-color: var(--accent-primary); transform: translateY(-1px); }
+        .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-success); animation: var(--animation-pulse); }
+        
+        /* Chat Area */
+        #chat { min-height: 400px; max-height: 600px; overflow-y: auto; overflow-x: hidden; padding: var(--space-4); padding-right: calc(var(--space-4) + 36px); padding-bottom: 60px; background: var(--dark-surface-1); border: 1px solid var(--dark-border); border-radius: var(--radius-xl); margin-bottom: var(--space-6); scroll-behavior: smooth; position: relative; display: flex; flex-direction: column; gap: var(--space-3); align-items: stretch; }
+        
+        /* Bubbles */
+        .bubble { padding: var(--space-3) var(--space-4); margin: var(--space-2) 0; border-radius: var(--radius-xl); animation: fadeIn 0.3s ease; position: relative; overflow: visible; word-wrap: break-word; line-height: 1.6; }
+        .message-copy-btn { position: absolute; top: var(--space-3); right: -32px; width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(30, 30, 40, 0.8); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border: 1px solid var(--dark-border); border-radius: var(--radius-md); color: var(--dark-text-secondary); cursor: pointer; opacity: 0; transition: all var(--transition-fast); z-index: 10; }
+        .bubble:hover .message-copy-btn { opacity: 1; }
+        .message-copy-btn:hover { background: var(--accent-primary); color: white; transform: scale(1.1); }
+        .message-copy-btn.copied { background: var(--accent-success); color: white; }
+        /* Per-code-block copy button */
+        .bubble pre { position: relative; }
+        .code-copy-btn { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(30, 30, 40, 0.8); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border: 1px solid var(--dark-border); border-radius: var(--radius-md); color: var(--dark-text-secondary); cursor: pointer; opacity: 0; transition: all var(--transition-fast); z-index: 2; }
+        .bubble pre:hover .code-copy-btn { opacity: 1; }
+        .code-copy-btn:hover { background: var(--accent-primary); color: white; transform: scale(1.05); }
+        .code-copy-btn.copied { background: var(--accent-success); color: white; }
+        .bubble.user { background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; margin-left: auto; max-width: min(500px, 60%); align-self: flex-end; box-shadow: var(--shadow-lg); }
+        .bubble.assistant { background: var(--dark-surface-2); border: 1px solid var(--dark-border); max-width: min(700px, 75%); position: relative; align-self: flex-start; }
+        
+        /* Streaming text */
+        /* Streaming container must allow block-level children (p, ul, ol) */
+        .streaming-text { display: block; }
+        .typing-cursor { display: inline-block; width: 3px; height: 1.2em; background: var(--accent-primary); animation: typing 1s infinite; margin-left: 2px; vertical-align: text-bottom; }
+        
+        /* Citations */
+        .citations-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; padding: var(--space-3); background: var(--dark-surface-2); border-radius: var(--radius-lg); border: 1px solid var(--dark-border); animation: fadeIn 0.5s ease 0.2s; transform: none; box-sizing: border-box; max-width: 100%; width: 100%; position: relative; align-self: flex-start; }
+        sup.inline-citation { color: var(--accent-primary); font-weight: 600; cursor: pointer; text-decoration: none; transition: all var(--transition-fast); font-size: 0.75em; margin: 0 1px; vertical-align: super; line-height: 0; }
+        sup.inline-citation:hover { color: var(--accent-info); text-decoration: underline; }
+        .citation-pill { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); background: var(--dark-surface-3); border: 1px solid var(--dark-border); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--dark-text-secondary); text-decoration: none; transition: all var(--transition-fast); }
+        .citation-pill:hover { border-color: var(--accent-primary); color: var(--dark-text-primary); transform: translateY(-1px); }
+        .citation-pill .citation-number { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--dark-surface-2); border: 1px solid var(--dark-border); font-weight: 700; color: var(--dark-text-secondary); }
+        .citation-pill .citation-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+        .citation-pill .citation-icon { width: 16px; height: 16px; }
+        .citation-pill-pdf { background: rgba(248, 113, 113, 0.15); border-color: var(--accent-error); }
+        .citation-pill-pdf:hover { border-color: var(--accent-error); color: var(--dark-text-primary); }
+        
+        /* Knowledge cards */
+        .knowledge-card { background: var(--dark-surface-1); border: 1px solid var(--dark-border); border-radius: var(--radius-xl); margin: var(--space-4) 0; overflow: hidden; position: relative; }
+        /* CRITICAL: Hide empty knowledge cards that only show borders */
+        .knowledge-card:empty { display: none !important; }
+        .knowledge-card:not(.expanded):has(.knowledge-card-content:empty) { display: none !important; }
+        .knowledge-card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--dark-surface-2); border-bottom: 1px solid var(--dark-border); cursor: pointer; }
+        .knowledge-card-title { display: flex; align-items: center; justify-content: space-between; width: 100%; font-weight: 600; color: var(--dark-text-primary); }
+        .knowledge-card-title svg { transition: transform var(--transition-fast); }
+        .knowledge-card.expanded .knowledge-card-title svg { transform: rotate(180deg); }
+        .knowledge-card-content { display: none; padding: var(--space-4); color: var(--dark-text-primary); }
+        .knowledge-card.expanded .knowledge-card-content { display: block; }
+        .knowledge-card.type-tip .knowledge-card-header { color: var(--accent-primary); }
+        .knowledge-card.type-background .knowledge-card-header { color: #10b981; }
+        .knowledge-card.type-insight .knowledge-card-header { color: #f59e0b; }
+        .knowledge-card:hover .message-copy-btn { opacity: 1; }
+
+        /* Loading dots */
+        .loading-dots { display: inline-flex; gap: 4px; }
+        .loading-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-primary); animation: bounce 1.4s infinite ease-in-out both; }
+        .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+        
+        /* Enrichment blocks */
+        .inline-enrichment { margin: var(--space-3) 0; padding: var(--space-3); border-radius: var(--radius-lg); border: 1px solid var(--dark-border); background: var(--dark-surface-1); }
+        .inline-enrichment-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); font-weight: 600; }
+        .inline-enrichment-header svg { width: 16px; height: 16px; }
+        .inline-enrichment.hint { background: rgba(102, 126, 234, 0.15); color: var(--dark-text-primary); border-left: 3px solid var(--accent-primary); }
+        .inline-enrichment.hint .inline-enrichment-header { color: var(--accent-primary); }
+        .inline-enrichment.reminder { background: rgba(250, 204, 21, 0.15); color: var(--dark-text-primary); border-left: 3px solid var(--accent-warning); }
+        .inline-enrichment.reminder .inline-enrichment-header { color: var(--accent-warning); }
+        .inline-enrichment.background { background: rgba(74, 222, 128, 0.15); color: var(--dark-text-primary); border-left: 3px solid var(--accent-success); }
+        .inline-enrichment.background .inline-enrichment-header { color: var(--accent-success); }
+        .inline-enrichment.warning { background: rgba(248, 113, 113, 0.15); color: var(--dark-text-primary); border-left: 3px solid var(--accent-error); }
+        .inline-enrichment.warning .inline-enrichment-header { color: var(--accent-error); }
+        .inline-example { margin: var(--space-3) 0; border: 1px solid var(--dark-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--dark-surface-1); }
+        .example-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--dark-surface-2); border-bottom: 1px solid var(--dark-border); font-size: var(--text-sm); font-weight: 500; color: var(--accent-primary); }
+        .inline-example pre { margin: 0; border: none; background: transparent; }
+        .inline-enrichment .enrichment-text { display: block; color: var(--dark-text-primary); margin: 0; }
+        
+        /* CRITICAL: Hide empty enrichment divs that cause border artifacts */
+        .inline-enrichment:empty { display: none !important; }
+        .inline-enrichment:has(.enrichment-text:empty) { display: none !important; }
+        
+        /* Markdown elements */
+        .bubble p { margin: 0 0 var(--space-3) 0; line-height: 1.6; }
+        .bubble p:last-child { margin-bottom: 0; }
+        .bubble p:empty { display: none; }
+        .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: var(--space-4) 0 var(--space-3) 0; font-weight: 600; line-height: 1.3; }
+        .bubble h1:first-child, .bubble h2:first-child, .bubble h3:first-child { margin-top: 0; }
+        .bubble h1 { font-size: var(--text-2xl); }
+        .bubble h2 { font-size: var(--text-xl); }
+        .bubble h3 { font-size: var(--text-lg); }
+        .bubble ul, .bubble ol { margin: var(--space-3) 0; padding-left: var(--space-6); line-height: 1.8; }
+        .bubble li { margin: var(--space-1) 0; }
+        .bubble ul ul, .bubble ol ol, .bubble ul ol, .bubble ol ul { margin: var(--space-1) 0; }
+        .bubble strong { font-weight: 600; color: var(--dark-text-primary); }
+        .bubble em { font-style: italic; }
+        .bubble blockquote { margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border-left: 3px solid var(--accent-primary); background: var(--dark-surface-3); border-radius: var(--radius-md); }
+        .bubble > div + div, .bubble > p + p, .bubble > div + p, .bubble > p + div, .bubble > pre + p, .bubble > p + pre { margin-top: var(--space-3); }
+        .bubble p + ol, .bubble p + ul { margin-top: var(--space-4); }
+        .bubble ol + pre, .bubble ul + pre, .bubble li + pre { margin-top: var(--space-4); }
+        .bubble pre + ol, .bubble pre + ul, .bubble pre + p { margin-top: var(--space-4); }
+        .bubble ol + p, .bubble ul + p { margin-left: 0 !important; padding-left: 0 !important; text-indent: 0 !important; }
+        .bubble ol ~ p, .bubble ul ~ p { list-style: none; margin-left: 0; padding-left: 0; }
+        .bubble li { margin: var(--space-2) 0; }
+        .bubble li:first-child { margin-top: 0; }
+        .bubble li:last-child { margin-bottom: 0; }
+        .bubble .inline-enrichment { margin: var(--space-3) 0; }
+        .bubble .inline-enrichment:first-child { margin-top: 0; }
+        .bubble .inline-enrichment:last-child { margin-bottom: 0; }
+        
+        /* Input Area */
+        .input-area { background: var(--dark-surface-1); border: 1px solid var(--dark-border); border-radius: var(--radius-xl); padding: var(--space-4); margin-top: var(--space-4); width: 100%; box-sizing: border-box; overflow: hidden; }
+        .input-row { display: flex; gap: var(--space-3); align-items: center; width: 100%; box-sizing: border-box; }
+        .input-wrapper { flex: 1; position: relative; min-width: 0; box-sizing: border-box; }
+        .input { width: 100%; padding: var(--space-3) 50px var(--space-3) var(--space-4); background: var(--dark-surface-2); border: 2px solid var(--dark-border); border-radius: var(--radius-lg); color: var(--dark-text-primary); font-size: var(--text-base); font-family: var(--font-display); transition: all var(--transition-base); outline: none; box-sizing: border-box; }
+        .btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: var(--accent-primary); color: white; border: none; border-radius: var(--radius-md); padding: 10px; cursor: pointer; box-shadow: var(--shadow-md); transition: all var(--transition-fast); }
+        .btn:hover { filter: brightness(1.05); transform: translateY(-50%) scale(1.03); box-shadow: var(--shadow-lg), var(--shadow-glow); }
+        
+        /* Export button */
+        .export-chat-btn { position: fixed; right: 24px; bottom: 24px; background: var(--dark-surface-3); border: 1px solid var(--dark-border); border-radius: var(--radius-full); padding: 10px 12px; color: var(--dark-text-secondary); cursor: pointer; box-shadow: var(--shadow-xl); transition: all var(--transition-fast); z-index: 100; }
+        .export-chat-btn:hover { background: var(--accent-primary); color: white; transform: translateY(-2px); box-shadow: var(--shadow-2xl), var(--shadow-glow); }
+        .export-chat-btn::after { content: 'Copy entire chat'; position: absolute; right: 0; bottom: 46px; white-space: nowrap; background: var(--dark-surface-2); border: 1px solid var(--dark-border); padding: 6px 10px; border-radius: var(--radius-md); font-size: var(--text-xs); color: var(--dark-text-secondary); opacity: 0; transform: translateY(6px); pointer-events: none; transition: all var(--transition-fast); }
+        .export-chat-btn:hover::after { opacity: 1; transform: translateY(0); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-left">
+                <h1 class="app-title">Java Chat</h1>
+                <span class="pill">
+                    <span class="status-indicator"></span>
+                    JDK 24 Docs
+                </span>
+                <span class="pill">AI-Powered Learning</span>
+            </div>
+            <div class="header-right"></div>
+        </div>
+        
+        <div id="chat" role="log" aria-live="polite" aria-label="Chat messages"></div>
+        
+        <button class="export-chat-btn" onclick="copyChat()" aria-label="Export entire chat" title="Export entire chat">
+            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L12 14"></path>
+                <polyline points="19 9 12 16 5 9"></polyline>
+                <path d="M5 20h14"></path>
+            </svg>
+        </button>
+        
+        <div class="input-area">
+            <div class="input-row">
+                <div class="input-wrapper">
+                    <input 
+                        id="q" 
+                        class="input" 
+                        placeholder="Ask about Java - try 'What are records?' or 'Explain pattern matching'"
+                        aria-label="Enter your Java question"
+                        autocomplete="off"
+                        onkeypress="if(event.key==='Enter') ask()"
+                    />
+                    <button class="btn" onclick="ask()" id="askBtn" aria-label="Send question">
+                        <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Theme Toggle Placeholder (kept for parity) -->
+    <button class="theme-toggle" style="display:none" aria-hidden="true"></button>
+    
+    <!-- Prism.js for syntax highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+    
+    <script>
+        // Enhanced streaming with character-by-character animation
+        class StreamingText {
+            constructor(element, text, speed = 30) { this.element = element; this.text = text; this.speed = speed; this.index = 0; }
+            async stream() { const cursor = document.createElement('span'); cursor.className = 'typing-cursor'; this.element.appendChild(cursor); for (let i = 0; i < this.text.length; i++) { const char = this.text[i]; const textNode = document.createTextNode(char); this.element.insertBefore(textNode, cursor); await this.delay(1000 / this.speed); } cursor.remove(); }
+            delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+        }
+        
+        async function ask() {
+            const input = document.getElementById('q');
+            const q = input.value.trim();
+            if (!q) return;
+            
+            const chatEl = document.getElementById('chat');
+            const askBtn = document.getElementById('askBtn');
+            
+            // User bubble
+            const userBubble = document.createElement('div');
+            userBubble.className = 'bubble user';
+            userBubble.textContent = q;
+            const userCopyBtn = document.createElement('button');
+            userCopyBtn.className = 'message-copy-btn';
+            userCopyBtn.setAttribute('aria-label', 'Copy message');
+            userCopyBtn.title = 'Copy message';
+            userCopyBtn.innerHTML = `<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>`;
+            userCopyBtn.onclick = () => copyMessage(q, userCopyBtn);
+            userBubble.appendChild(userCopyBtn);
+            chatEl.appendChild(userBubble);
+            
+            input.value = '';
+            askBtn.disabled = true;
+            
+            // Assistant bubble
+            const assistantBubble = document.createElement('div');
+            assistantBubble.className = 'bubble assistant';
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading-dots';
+            loadingDiv.innerHTML = `
+                <span class="loading-dot"></span>
+                <span class="loading-dot"></span>
+                <span class="loading-dot"></span>
+            `;
+            assistantBubble.appendChild(loadingDiv);
+            chatEl.appendChild(assistantBubble);
+            chatEl.scrollTop = chatEl.scrollHeight;
+            
+            try {
+                const response = await fetch('/api/chat/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sessionId: 'web', latest: q }) });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                loadingDiv.remove();
+                const contentWrapper = document.createElement('div');
+                contentWrapper.className = 'streaming-text';
+                assistantBubble.appendChild(contentWrapper);
+                const cursor = document.createElement('span'); cursor.className = 'typing-cursor'; contentWrapper.appendChild(cursor);
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = '';
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    buffer += chunk;
+                    const lines = buffer.split('\n');
+                    buffer = lines[lines.length - 1];
+                    for (let i = 0; i < lines.length - 1; i++) {
+                        // Preserve literal spaces in SSE data payloads.
+                        // Do NOT trim the line; only strip a trailing CR.
+                        let line = lines[i];
+                        if (line.endsWith('\r')) line = line.slice(0, -1);
+                        if (line.startsWith('data:')) {
+                            const data = line.slice(5); // keep any leading space after 'data:'
+                            if (data.length) fullText += data;
+                        }
+                    }
+                    formatText(fullText).then(formatted => { contentWrapper.innerHTML = formatted; contentWrapper.appendChild(cursor); Prism.highlightAllUnder(contentWrapper); });
+                    chatEl.scrollTop = chatEl.scrollHeight;
+                }
+                cursor.remove();
+                const assistantCopyBtn = document.createElement('button');
+                assistantCopyBtn.className = 'message-copy-btn';
+                assistantCopyBtn.setAttribute('aria-label', 'Copy assistant response');
+                assistantCopyBtn.title = 'Copy assistant response';
+                assistantCopyBtn.innerHTML = `<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>`;
+                assistantCopyBtn.onclick = () => copyMessage(fullText, assistantCopyBtn);
+                assistantBubble.appendChild(assistantCopyBtn);
+                Prism.highlightAllUnder(assistantBubble);
+                attachCodeCopyButtons(assistantBubble);
+                await loadCitations(q, assistantBubble);
+                await loadEnrichment(q, chatEl);
+            } catch (error) {
+                console.error('Streaming error:', error);
+                assistantBubble.innerHTML = `<div style="color: var(--accent-error);">⚠️ Error: Failed to get response. Please try again.</div>`;
+            } finally { askBtn.disabled = false; input.focus(); }
+        }
+        
+        /**
+         * FALLBACK-AWARE: Markdown rendering with server-side support and a minimal client-side fallback.
+         * Source of truth: com.williamcallahan.javachat.service.MarkdownService (server).
+         * If the server endpoint /api/markdown/render fails, we use a BASIC client parser
+         * solely to maintain readability (paragraphs, UL/OL, inline code, fenced code).
+         * Keep this fallback aligned with server logic:
+         *   - preprocessMarkdown()
+         *   - applySmartParagraphBreaksImproved()
+         *   - fixInlineLists()
+         *   - protectCodeBlocks()
+         *   - restoreEnrichments()
+         *   - render()
+         * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
+         */
+        async function formatText(text, useServerMarkdown = true) {
+            if (useServerMarkdown) {
+                try {
+                    const response = await fetch('/api/markdown/render', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' }, 
+                        body: JSON.stringify({ content: text }) 
+                    });
+                    if (response.ok) { 
+                        const data = await response.json(); 
+                        return applyCustomEnrichments(data.html); 
+                    }
+                    console.error('Server markdown failed with status:', response.status);
+                } catch (error) { 
+                    console.error('Server markdown error:', error); 
+                }
+            }
+            // Safety net: preserve enrichments, do minimal client markdown, then restore and enrich
+            const preserved = preserveEnrichments(text);
+            const html = clientMarkdownFallback(preserved);
+            const restored = restoreEnrichments(html);
+            return applyCustomEnrichments(restored);
+        }
+        
+        function applyCustomEnrichments(text) {
+            // CRITICAL: Only create enrichment divs if content is not empty!
+            text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g, (m, c) => {
+                const content = c.trim();
+                return content ? `<div class="inline-enrichment hint"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Helpful Hint</span></div><div class="enrichment-text">${content}</div></div>` : '';
+            });
+            text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g, (m, c) => {
+                const content = c.trim();
+                return content ? `<div class="inline-enrichment reminder"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg><span>Important Reminder</span></div><div class="enrichment-text">${content}</div></div>` : '';
+            });
+            text = text.replace(/\{\{background:([\s\S]*?)\}\}/g, (m, c) => {
+                const content = c.trim();
+                return content ? `<div class="inline-enrichment background"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M3 3h18v2H3zM3 7h18v2H3zM3 11h18v2H3z"/></svg><span>Background Context</span></div><div class="enrichment-text">${content}</div></div>` : '';
+            });
+            text = text.replace(/\{\{example:([\s\S]*?)\}\}/g, (m, c) => {
+                const content = c.trim();
+                return content ? `<div class="inline-example"><div class="example-header">Example</div><pre><code class="language-java">${escapeHtml(content)}</code></pre></div>` : '';
+            });
+            text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g, (m, c) => {
+                const content = c.trim();
+                return content ? `<div class="inline-enrichment warning"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span>Warning</span></div><div class="enrichment-text">${content}</div></div>` : '';
+            });
+            text = text.replace(/\[(\d+)\]/g, (m, n) => `<sup class="inline-citation" data-cite="${n}">[${n}]</sup>`);
+            
+            // Remove any stray empty enrichment patterns
+            text = text.replace(/\{\{\w+:\s*\}\}/g, '');
+            
+            return text;
+        }
+        
+        function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+
+        /**
+         * FALLBACK: Preserve custom enrichment blocks while client-side parsing.
+         * Mirrors server placeholders in MarkdownService.preserveEnrichments().
+         * Focus fixes on server first; keep placeholder format in sync with server.
+         */
+        function preserveEnrichments(text) {
+            return text.replace(/\{\{(hint|reminder|background|example|warning):([\s\S]*?)\}\}/g, (m, t, c) => `ZZENRICHZ${t}ZSTARTZZZ${c}ZZENRICHZ${t}ZENDZZZ`);
+        }
+        /**
+         * FALLBACK: Restore enrichment placeholders back to {{type:content}} after client parse.
+         * Mirrors MarkdownService.restoreEnrichments(). Keep in sync with server format.
+         */
+        function restoreEnrichments(html) {
+            return html.replace(/ZZENRICHZ(\w+)ZSTARTZZZ([\s\S]*?)ZZENRICHZ\1ZENDZZZ/g, (m, t, c) => `{{${t}:${c}}}`);
+        }
+
+        /**
+         * FALLBACK: Minimal, safe client markdown renderer.
+         * Purpose: readability if /api/markdown/render is unavailable.
+         * Scope: paragraphs, UL/OL, inline code, fenced code (escaped). No advanced GFM.
+         * Keep behavior broadly aligned with server MarkdownService preprocessing, but do not
+         * attempt full parity. Always prioritize server-side rendering for correctness.
+         */
+        function clientMarkdownFallback(text) {
+            if (!text) return '';
+            // Extract fenced code blocks and replace with placeholders
+            const codeBlocks = [];
+            let s = text.replace(/```([\w-]+)?\n([\s\S]*?)```/g, (m, lang, code) => {
+                const idx = codeBlocks.push({ lang: (lang||'').trim(), code: code }) - 1;
+                return `[[CODE_BLOCK_${idx}]]`;
+            });
+
+            // Normalize inline list markers frequently produced by models
+            s = s.replace(/(:)\s*-\s+(?=\S)/g, '$1\n\n- ');
+            s = s.replace(/([.!?])\s+(\d+\.\s+)/g, '$1\n$2');
+
+            // Escape HTML globally
+            s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            // Inline code
+            s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+
+            const lines = s.split(/\r?\n/);
+            let out = '';
+            let inUl = false, inOl = false, para = '';
+            const closeLists = () => { if (inUl) { out += '</ul>'; inUl = false; } if (inOl) { out += '</ol>'; inOl = false; } };
+            const flushPara = () => { if (para.trim()) { out += `<p>${para.trim()}</p>`; } para = ''; };
+
+            for (let raw of lines) {
+                const line = raw.replace(/\s+$/, '');
+                const codePh = line.match(/^\[\[CODE_BLOCK_(\d+)\]\]$/);
+                if (codePh) {
+                    flushPara(); closeLists();
+                    const idx = parseInt(codePh[1], 10);
+                    const blk = codeBlocks[idx] || { lang: '', code: '' };
+                    const escaped = blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const langClass = blk.lang ? ` class="language-${blk.lang}"` : '';
+                    out += `<pre><code${langClass}>${escaped}</code></pre>`;
+                    continue;
+                }
+
+                if (/^\s*$/.test(line)) { // blank line
+                    flushPara(); closeLists();
+                    continue;
+                }
+                if (/^-\s+/.test(line)) {
+                    flushPara();
+                    if (!inUl) { closeLists(); out += '<ul>'; inUl = true; }
+                    out += `<li>${line.replace(/^-\s+/, '')}</li>`;
+                    continue;
+                }
+                if (/^\d+\.\s+/.test(line)) {
+                    flushPara();
+                    if (!inOl) { closeLists(); out += '<ol>'; inOl = true; }
+                    out += `<li>${line.replace(/^\d+\.\s+/, '')}</li>`;
+                    continue;
+                }
+                // paragraph continuation
+                para += (para ? ' ' : '') + line;
+            }
+            flushPara(); closeLists();
+
+            // Reinsert fenced code blocks (already escaped)
+            out = out.replace(/\[\[CODE_BLOCK_(\d+)\]\]/g, (m, i) => {
+                const idx = parseInt(i, 10);
+                const blk = codeBlocks[idx] || { lang: '', code: '' };
+                const escaped = blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const langClass = blk.lang ? ` class=\"language-${blk.lang}\"` : '';
+                return `<pre><code${langClass}>${escaped}</code></pre>`;
+            });
+            return out;
+        }
+        
+        async function loadCitations(query, container) {
+            try {
+                const response = await fetch('/api/chat/citations?q=' + encodeURIComponent(query));
+                if (!response.ok) return;
+                const citations = await response.json();
+                if (!citations || citations.length === 0) return;
+                const citationsRow = document.createElement('div'); citationsRow.className = 'citations-row';
+                citations.slice(0, 5).forEach((citation, index) => {
+                    const href = citation.url || '';
+                    const isHttpLink = href.startsWith('http://') || href.startsWith('https://');
+                    const isLocalLink = href.startsWith('/');
+                    const isPdf = href.toLowerCase().endsWith('.pdf');
+                    const isLink = !!href && (isHttpLink || isLocalLink);
+                    const pill = document.createElement(isLink ? 'a' : 'div'); pill.className = 'citation-pill' + (isPdf ? ' citation-pill-pdf' : '');
+                    if (isLink) { pill.href = href; pill.target = '_blank'; pill.rel = 'noopener noreferrer'; }
+                    let label = citation.title || 'Source';
+                    if (!citation.title && isHttpLink) { try { label = new URL(href).hostname; } catch (_) {} }
+                    const iconExternal = `<svg class=\"citation-icon\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"></path><polyline points=\"15 3 21 3 21 9\"></polyline><line x1=\"10\" y1=\"14\" x2=\"21\" y2=\"3\"></line></svg>`;
+                    const iconPdf = `<svg class=\"citation-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5\"/><path d=\"M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2\"/></svg>`;
+                    pill.innerHTML = `<span class=\"citation-number\">${index + 1}</span><span class=\"citation-label\">${label}${isPdf ? ' (PDF)' : ''}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
+                    citationsRow.appendChild(pill);
+                });
+                const exportBtn = container.querySelector('.export-chat-btn');
+                if (exportBtn) { container.insertBefore(citationsRow, exportBtn); } else { container.appendChild(citationsRow); }
+            } catch (error) { console.error('Error loading citations:', error); }
+        }
+        
+        async function loadEnrichment(query, container) {
+            try {
+                const response = await fetch('/api/enrich?q=' + encodeURIComponent(query));
+                if (!response.ok) return;
+                const enrichment = await response.json();
+                
+                // Only create cards if arrays exist, have items, AND items are not empty strings
+                if (enrichment.hints && Array.isArray(enrichment.hints) && enrichment.hints.length > 0) {
+                    const validHints = enrichment.hints.filter(h => h && h.trim());
+                    if (validHints.length > 0) {
+                        container.appendChild(createKnowledgeCard('tip', '💡 Helpful Hints', validHints));
+                    }
+                }
+                
+                if (enrichment.background && Array.isArray(enrichment.background) && enrichment.background.length > 0) {
+                    const validBg = enrichment.background.filter(b => b && b.trim());
+                    if (validBg.length > 0) {
+                        container.appendChild(createKnowledgeCard('background', '📚 Background Context', validBg));
+                    }
+                }
+                
+                if (enrichment.reminders && Array.isArray(enrichment.reminders) && enrichment.reminders.length > 0) {
+                    const validReminders = enrichment.reminders.filter(r => r && r.trim());
+                    if (validReminders.length > 0) {
+                        container.appendChild(createKnowledgeCard('insight', '🔔 Important Reminders', validReminders));
+                    }
+                }
+            } catch (error) { 
+                // Silently fail - don't create empty cards on error
+                console.debug('Enrichment load skipped:', error); 
+            }
+        }
+        
+        function createKnowledgeCard(type, title, items) {
+            const card = document.createElement('div'); card.className = `knowledge-card type-${type}`; card.style.position = 'relative';
+            const header = document.createElement('div'); header.className = 'knowledge-card-header'; header.onclick = () => card.classList.toggle('expanded');
+            const titleEl = document.createElement('div'); titleEl.className = 'knowledge-card-title'; titleEl.innerHTML = `<span>${title}</span><svg width=\"20\" height=\"20\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"6 9 12 15 18 9\"></polyline></svg>`; header.appendChild(titleEl);
+            const content = document.createElement('div'); content.className = 'knowledge-card-content'; content.innerHTML = '<ul>' + items.map(item => `<li>${item}</li>`).join('') + '</ul>';
+            const copyBtn = document.createElement('button'); copyBtn.className = 'message-copy-btn'; copyBtn.style.top = 'var(--space-2)'; copyBtn.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path></svg>`; const cardText = `${title}\n${items.join('\n')}`; copyBtn.onclick = (e) => { e.stopPropagation(); copyMessage(cardText, copyBtn); };
+            card.appendChild(header); card.appendChild(content); card.appendChild(copyBtn); return card;
+        }
+        
+        function copyMessage(text, button) { navigator.clipboard.writeText(text).then(() => { button.classList.add('copied'); const originalHTML = button.innerHTML; button.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"20 6 9 17 4 12\"></polyline></svg>`; setTimeout(() => { button.classList.remove('copied'); button.innerHTML = originalHTML; }, 2000); }).catch(() => { showToast('Failed to copy', 'error'); }); }
+
+        function attachCodeCopyButtons(container) {
+            try {
+                const blocks = container.querySelectorAll('pre');
+                blocks.forEach(pre => {
+                    if (pre.querySelector('.code-copy-btn')) return;
+                    const btn = document.createElement('button');
+                    btn.className = 'code-copy-btn';
+                    btn.setAttribute('aria-label', 'Copy code');
+                    btn.title = 'Copy code';
+                    btn.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n                        <rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect>\n                        <path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path>\n                    </svg>`;
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const codeEl = pre.querySelector('code');
+                        const text = codeEl ? codeEl.innerText : pre.innerText;
+                        copyMessage(text, btn);
+                    });
+                    pre.appendChild(btn);
+                });
+            } catch (err) { console.warn('Failed to attach code copy buttons', err); }
+        }
+        
+        async function copyChat() {
+            try { const res = await fetch('/api/chat/export/session?sessionId=web'); const txt = await res.text(); await navigator.clipboard.writeText(txt); const btn = document.querySelector('.export-chat-btn'); if (btn) { btn.style.background = 'var(--accent-success)'; btn.style.color = 'white'; setTimeout(() => { btn.style.background = ''; btn.style.color = ''; }, 2000); } showToast('Chat session exported to clipboard!'); } catch (error) { showToast('Failed to export', 'error'); }
+        }
+        
+        function showToast(message, type = 'success') { const toast = document.createElement('div'); toast.style.cssText = `position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: ${type === 'error' ? 'var(--accent-error)' : 'var(--accent-success)'}; color: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); z-index: 1000; animation: fadeIn 0.3s ease;`; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => { toast.style.animation = 'fadeIn 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, 3000); }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.getElementById('q');
+            input.focus();
+            document.addEventListener('keydown', (e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus(); input.select(); }
+                if (e.key === 'Escape' && document.activeElement === input) { input.value = ''; }
+            });
+        });
+    </script>
+</body>
+</html>

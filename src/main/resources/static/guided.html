@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guided Learning</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --dark-bg: #0b0d0f;
+      --dark-surface-1: #111318;
+      --dark-surface-2: #1a1d23;
+      --dark-border: #2a2f36;
+      --dark-text-primary: #f1f5f9;
+      --dark-text-secondary: #cbd5e1;
+      --radius-xl: 12px;
+      --space-4: 1rem;
+      --space-6: 1.5rem;
+    }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--dark-bg); color: var(--dark-text-primary); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 1024px; margin: 0 auto; padding: var(--space-6); }
+    .card { background: var(--dark-surface-2); border: 1px solid var(--dark-border); border-radius: var(--radius-xl); padding: var(--space-6); }
+    .muted { color: var(--dark-text-secondary); }
+    .row { display:flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .select { background: var(--dark-surface-1); color: var(--dark-text-primary); border: 1px solid var(--dark-border); border-radius: 8px; padding: 8px 12px; }
+    .btn { background: #2b3040; color: var(--dark-text-primary); border: 1px solid var(--dark-border); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .bubble { padding: 12px 16px; border-radius: 12px; margin: 8px 0; }
+    .bubble.assistant { background: var(--dark-surface-1); border: 1px solid var(--dark-border); }
+    .bubble.user { background: #2c2f3a; }
+    .lesson-content { background: var(--dark-surface-1); border:1px solid var(--dark-border); border-radius: 12px; padding: 16px; margin-top: 12px; }
+    .lesson-content h1, .lesson-content h2, .lesson-content h3 { margin: 12px 0 8px; }
+    .lesson-content p { margin: 0 0 10px; line-height: 1.6; }
+    .lesson-content ul, .lesson-content ol { margin: 8px 0 12px 22px; line-height: 1.8; }
+    .lesson-content pre { margin: 10px 0; }
+    .citations-row { display:flex; flex-wrap:wrap; gap:8px; margin-top: 12px; }
+    .citation-pill { display:inline-flex; gap:8px; align-items:center; padding:4px 10px; border-radius: 9999px; border:1px solid var(--dark-border); background: #181b22; color: var(--dark-text-secondary); text-decoration:none; }
+    .input-area { margin-top: 16px; background: var(--dark-surface-2); border:1px solid var(--dark-border); border-radius: 12px; padding: 12px; }
+    .input-row { display:flex; gap:10px; }
+    .input { flex:1; border-radius: 8px; border: 1px solid var(--dark-border); background: var(--dark-surface-1); color: var(--dark-text-primary); padding: 10px 12px; }
+    .message-copy-btn { border:1px solid var(--dark-border); background:#1f2330; color: var(--dark-text-secondary); border-radius:8px; padding:4px; cursor:pointer; }
+    /* Allow block-level markdown children to render correctly */
+    .streaming-text { display:block; }
+    .typing-cursor { display:inline-block; width:3px; height:1.2em; background:#667eea; animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* Skeleton shimmer for lesson loading */
+    .skeleton { display: grid; gap: 10px; margin-top: 12px; }
+    .sk { position: relative; overflow: hidden; background: #1a1d23; border:1px solid var(--dark-border); border-radius: 10px; }
+    .sk::before { content:""; position:absolute; inset:0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); transform: translateX(-100%); animation: sk 1.6s infinite; }
+    @keyframes sk { 0% { transform: translateX(-100%);} 100% { transform: translateX(100%);} }
+    .sk.s { height: 12px; border-radius: 9999px; }
+    .sk.m { height: 16px; border-radius: 9999px; }
+    .sk.l { height: 46px; }
+    .sk.row { height: 72px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <h1 style="margin:0">Guided Learning</h1>
+        <div class="row">
+          <button id="prevBtn" class="btn" aria-label="Previous lesson">◀</button>
+          <select id="lessonSelect" class="select" aria-label="Lesson selector"></select>
+          <button id="nextBtn" class="btn" aria-label="Next lesson">▶</button>
+        </div>
+      </div>
+      <div id="lessonSummary" class="muted" style="margin-top:12px"></div>
+
+      <!-- Skeleton placeholder while lessons/citations/enrichment load -->
+      <div id="lessonSkeleton" class="skeleton hidden" aria-hidden="true">
+        <div class="sk l"></div>
+        <div class="sk m"></div>
+        <div class="sk s"></div>
+        <div class="sk row"></div>
+      </div>
+
+      <div id="citations" class="citations-row" aria-label="Citations"></div>
+      <div id="lessonContent" class="lesson-content" aria-live="polite"></div>
+      <div id="enrichment" style="margin-top: 12px"></div>
+
+      <div id="guidedChat" style="margin-top: 16px">
+        <div id="chatArea" aria-live="polite" aria-label="Guided chat messages"></div>
+        <div class="input-area">
+          <div class="input-row">
+            <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()"/>
+            <button id="askBtn" class="btn" onclick="ask()">Ask</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+  <script>
+    let toc = [];
+    let currentIndex = 0;
+    let glossary = [];
+
+    function setLessonLoading(isLoading){
+      const sk = document.getElementById('lessonSkeleton');
+      const prev = document.getElementById('prevBtn');
+      const next = document.getElementById('nextBtn');
+      const ask = document.getElementById('askBtn');
+      sk.classList.toggle('hidden', !isLoading);
+      prev.disabled = isLoading || prev.disabled;
+      next.disabled = isLoading || next.disabled;
+      ask.disabled = isLoading || ask.disabled;
+    }
+
+    async function loadTOC() {
+      setLessonLoading(true);
+      const res = await fetch('/api/guided/toc');
+      toc = await res.json();
+      // Fetch tooltips glossary once
+      try { const gres = await fetch('/api/tooltips/list'); if (gres.ok) glossary = await gres.json(); } catch(_){}
+      const sel = document.getElementById('lessonSelect');
+      sel.innerHTML = '';
+      toc.forEach((l, i) => {
+        const opt = document.createElement('option');
+        opt.value = l.slug; opt.textContent = l.title; sel.appendChild(opt);
+      });
+      sel.onchange = () => {
+        currentIndex = Math.max(0, toc.findIndex(l => l.slug === sel.value));
+        loadLesson(toc[currentIndex].slug);
+      };
+      if (toc.length > 0) {
+        currentIndex = 0;
+        sel.value = toc[0].slug;
+        await loadLesson(toc[0].slug);
+      }
+      document.getElementById('prevBtn').onclick = prevLesson;
+      document.getElementById('nextBtn').onclick = nextLesson;
+      updateNavButtons();
+      setLessonLoading(false);
+    }
+
+    function prevLesson() { if (currentIndex > 0) { currentIndex--; selectByIndex(); } }
+    function nextLesson() { if (currentIndex < toc.length - 1) { currentIndex++; selectByIndex(); } }
+    function selectByIndex() { const sel = document.getElementById('lessonSelect'); sel.value = toc[currentIndex].slug; loadLesson(toc[currentIndex].slug); updateNavButtons(); }
+    function updateNavButtons() { document.getElementById('prevBtn').disabled = currentIndex === 0; document.getElementById('nextBtn').disabled = currentIndex === toc.length - 1; }
+
+    async function loadLesson(slug) {
+      setLessonLoading(true);
+      try {
+        const res = await fetch('/api/guided/lesson?slug=' + encodeURIComponent(slug));
+        const lesson = await res.json();
+        document.getElementById('lessonSummary').textContent = lesson.summary || '';
+        await loadCitations(slug);
+        await loadLessonContent(slug);
+        await loadEnrichment(slug);
+        // clear chat area
+        document.getElementById('chatArea').innerHTML = '';
+      } finally {
+        setLessonLoading(false);
+      }
+    }
+
+    async function loadLessonContent(slug){
+      const el = document.getElementById('lessonContent');
+      el.innerHTML = '';
+      try {
+        const response = await fetch('/api/guided/content/stream?slug=' + encodeURIComponent(slug));
+        if (!response.ok) { el.textContent = 'Failed to load lesson content.'; return; }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          const lines = buffer.split('\n');
+          buffer = lines[lines.length - 1];
+          for (let i = 0; i < lines.length - 1; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('data:')) {
+              const data = line.substring(5);
+              if (data.trim()) fullText += data;
+            }
+          }
+          const html = await renderMarkdown(fullText);
+          el.innerHTML = html;
+          Prism.highlightAllUnder(el);
+          applyGlossaryTooltips(el);
+        }
+      } catch (_) {
+        el.textContent = 'Error streaming lesson content.';
+      }
+    }
+
+    function applyGlossaryTooltips(container){
+      if (!glossary || glossary.length === 0) return;
+      const maxTooltips = 5; let applied = 0;
+      const terms = glossary.map(g => ({ term: g.term || g.term, def: g.definition || g.definition, link: g.link || g.link }));
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        if (applied >= maxTooltips) break;
+        const parent = node.parentElement;
+        if (!parent) continue;
+        const tag = parent.tagName.toLowerCase();
+        if (tag === 'code' || tag === 'pre' || tag === 'a') continue;
+        let text = node.nodeValue;
+        for (const t of terms) {
+          if (applied >= maxTooltips) break;
+          const re = new RegExp('\\b' + escapeRegExp(t.term) + '\\b','i');
+          if (re.test(text)) {
+            const span = document.createElement('span');
+            const replaced = text.replace(re, (m)=>`<abbr title="${escapeHtml(t.def)}">${m}</abbr>`);
+            span.innerHTML = replaced;
+            parent.replaceChild(span, node);
+            applied++;
+            break;
+          }
+        }
+      }
+    }
+    function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    function escapeHtml(s){
+      const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+    }
+
+    async function loadCitations(slug) {
+      const wrap = document.getElementById('citations'); wrap.innerHTML = '';
+      const res = await fetch('/api/guided/citations?slug=' + encodeURIComponent(slug));
+      const citations = await res.json();
+      (citations || []).slice(0,5).forEach((c, i) => {
+        const a = document.createElement(c.url ? 'a' : 'div');
+        a.className = 'citation-pill';
+        if (c.url) { a.href = c.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        a.textContent = `${i+1}. ${c.title || 'Source'}`;
+        wrap.appendChild(a);
+      });
+    }
+
+    async function loadEnrichment(slug) {
+      const div = document.getElementById('enrichment'); div.innerHTML = '';
+      const res = await fetch('/api/guided/enrich?slug=' + encodeURIComponent(slug));
+      if (!res.ok) return; const enrichment = await res.json();
+      const sections = [
+        { key: 'hints', title: '💡 Helpful Hints' },
+        { key: 'background', title: '📚 Background Context' },
+        { key: 'reminders', title: '🔔 Important Reminders' }
+      ];
+      sections.forEach(({key, title}) => {
+        const items = enrichment[key] || [];
+        if (items.length > 0) {
+          const card = document.createElement('div');
+          card.className = 'bubble assistant';
+          const h = document.createElement('div'); h.style.fontWeight='600'; h.textContent = title; card.appendChild(h);
+          const ul = document.createElement('ul'); items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }); card.appendChild(ul);
+          div.appendChild(card);
+        }
+      });
+    }
+
+    async function ask() {
+      const input = document.getElementById('q'); const q = input.value.trim(); if (!q) return;
+      const lesson = toc[currentIndex]; const slug = lesson.slug;
+      const chatArea = document.getElementById('chatArea'); const askBtn = document.getElementById('askBtn');
+      // user bubble
+      const ub = document.createElement('div'); ub.className = 'bubble user'; ub.textContent = q; chatArea.appendChild(ub);
+      input.value=''; askBtn.disabled=true;
+      // assistant bubble
+      const ab = document.createElement('div'); ab.className = 'bubble assistant'; chatArea.appendChild(ab);
+      const content = document.createElement('div'); content.className = 'streaming-text'; ab.appendChild(content); const cursor=document.createElement('span'); cursor.className='typing-cursor'; content.appendChild(cursor);
+      try {
+        const response = await fetch('/api/guided/stream', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId: 'guided:'+slug, slug, latest: q }) });
+        if (!response.ok) throw new Error('HTTP '+response.status);
+        const reader = response.body.getReader(); const decoder = new TextDecoder(); let fullText=''; let buffer='';
+        while(true){ const {done,value}=await reader.read(); if(done) break; const chunk=decoder.decode(value,{stream:true}); buffer+=chunk; const lines=buffer.split('\n'); buffer=lines[lines.length-1]; for(let i=0;i<lines.length-1;i++){ const line=lines[i].trim(); if(line.startsWith('data:')){ const data=line.substring(5); if(data.trim()) fullText+=data; } }
+          const html = await renderMarkdown(fullText); content.innerHTML = html; content.appendChild(cursor); Prism.highlightAllUnder(content);
+        }
+        cursor.remove();
+      } catch(e) { ab.textContent = 'Error while streaming response.'; }
+      askBtn.disabled=false;
+    }
+
+    /**
+     * FALLBACK-AWARE: Markdown rendering with server-side support and a minimal client-side fallback.
+     * Source of truth: com.williamcallahan.javachat.service.MarkdownService (server).
+     * If the server endpoint /api/markdown/render fails, we use a BASIC client parser
+     * solely to maintain readability (paragraphs, UL/OL, inline code, fenced code).
+     * Keep this fallback aligned with server logic:
+     *   - preprocessMarkdown()
+     *   - applySmartParagraphBreaksImproved()
+     *   - fixInlineLists()
+     *   - protectCodeBlocks()
+     *   - restoreEnrichments()
+     *   - render()
+     * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
+     */
+    async function renderMarkdown(text){
+      try { const res = await fetch('/api/markdown/render', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content:text}) }); if(res.ok){ const data=await res.json(); return applyEnrichments(data.html); } } catch(e){}
+      // Safety net: preserve enrichments, client markdown, restore, then enrich
+      const preserved = preserveEnrichments(text);
+      const html = clientMarkdownFallback(preserved);
+      const restored = restoreEnrichments(html);
+      return applyEnrichments(restored);
+    }
+    
+    /**
+     * FALLBACK: Preserve custom enrichment blocks while client-side parsing.
+     * Mirrors server placeholders in MarkdownService.preserveEnrichments().
+     * Focus fixes on server first; keep placeholder format in sync with server.
+     */
+    function preserveEnrichments(text){
+      return text.replace(/\{\{(hint|reminder|background|example|warning):([\s\S]*?)\}\}/g,(m,t,c)=>`ZZENRICHZ${t}ZSTARTZZZ${c}ZZENRICHZ${t}ZENDZZZ`);
+    }
+    /**
+     * FALLBACK: Restore enrichment placeholders back to {{type:content}}.
+     * Mirrors MarkdownService.restoreEnrichments(). Keep in sync with server format.
+     */
+    function restoreEnrichments(html){
+      return html.replace(/ZZENRICHZ(\w+)ZSTARTZZZ([\s\S]*?)ZZENRICHZ\1ZENDZZZ/g,(m,t,c)=>`{{${t}:${c}}}`);
+    }
+    
+    /**
+     * FALLBACK: Minimal, safe client markdown renderer.
+     * Purpose: readability if /api/markdown/render is unavailable.
+     * Scope: paragraphs, UL/OL, inline code, fenced code (escaped). No advanced GFM.
+     * Keep behavior broadly aligned with server MarkdownService preprocessing, but do not
+     * attempt full parity. Always prioritize server-side rendering for correctness.
+     */
+    function clientMarkdownFallback(text){
+      if(!text) return '';
+      const codeBlocks=[];
+      let s=text.replace(/```([\w-]+)?\n([\s\S]*?)```/g,(m,lang,code)=>{ const i=codeBlocks.push({lang:(lang||'').trim(),code})-1; return `[[CODE_BLOCK_${i}]]`; });
+      s=s.replace(/(:)\s*-\s+(?=\S)/g,'$1\n\n- ');
+      s=s.replace(/([.!?])\s+(\d+\.\s+)/g,'$1\n$2');
+      s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      s=s.replace(/`([^`]+)`/g,(m,c)=>`<code>${c}</code>`);
+      const lines=s.split(/\r?\n/);
+      let out='', inUl=false, inOl=false, para='';
+      const closeLists=()=>{ if(inUl){ out+='</ul>'; inUl=false;} if(inOl){ out+='</ol>'; inOl=false;} };
+      const flushPara=()=>{ if(para.trim()){ out+=`<p>${para.trim()}</p>`;} para=''; };
+      for(const raw of lines){
+        const line=raw.replace(/\s+$/,'');
+        const codePh=line.match(/^\[\[CODE_BLOCK_(\d+)\]\]$/);
+        if(codePh){ flushPara(); closeLists(); const idx=parseInt(codePh[1],10); const blk=codeBlocks[idx]||{lang:'',code:''}; const esc=blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); const cls=blk.lang?` class="language-${blk.lang}"`:''; out+=`<pre><code${cls}>${esc}</code></pre>`; continue; }
+        if(/^\s*$/.test(line)){ flushPara(); closeLists(); continue; }
+        if(/^-\s+/.test(line)){ flushPara(); if(!inUl){ closeLists(); out+='<ul>'; inUl=true;} out+=`<li>${line.replace(/^-\s+/, '')}</li>`; continue; }
+        if(/^\d+\.\s+/.test(line)){ flushPara(); if(!inOl){ closeLists(); out+='<ol>'; inOl=true;} out+=`<li>${line.replace(/^\d+\.\s+/, '')}</li>`; continue; }
+        para += (para? ' ' : '') + line;
+      }
+      flushPara(); closeLists();
+      out=out.replace(/\[\[CODE_BLOCK_(\d+)\]\]/g,(m,i)=>{ const idx=parseInt(i,10); const blk=codeBlocks[idx]||{lang:'',code:''}; const esc=blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); const cls=blk.lang?` class=\"language-${blk.lang}\"`:''; return `<pre><code${cls}>${esc}</code></pre>`; });
+      return out;
+    }
+    function applyEnrichments(text){
+      text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">💡 ${c.trim()}</div>`);
+      text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">🔔 ${c.trim()}</div>`);
+      text = text.replace(/\{\{background:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">📚 ${c.trim()}</div>`);
+      text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g,(m,c)=>`<div class="bubble assistant">⚠️ ${c.trim()}</div>`);
+      text = text.replace(/\[(\d+)\]/g,(m,n)=>`<sup class="inline-citation">[${n}]</sup>`);
+      return text;
+    }
+
+    // Show skeleton immediately then load content
+    document.getElementById('lessonSkeleton').classList.remove('hidden');
+    loadTOC().catch(() => setLessonLoading(false));
+  </script>
+</body>
+</html>

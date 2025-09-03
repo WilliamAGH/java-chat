@@ -19,6 +19,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .anyRequest().permitAll()
             )
+            // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
+            .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
             .csrf(csrf -> csrf.disable())
             .httpBasic(b -> b.disable())
             .formLogin(f -> f.disable());
@@ -35,6 +37,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/", 
                     "/index.html", 
+                    "/chat.html",
+                    "/guided.html",
                     "/favicon.ico", 
                     "/assets/**", 
                     "/static/**"
@@ -42,6 +46,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/**").permitAll()
                 .anyRequest().permitAll()
             )
+            // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
+            .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
             .httpBasic(b -> b.disable())
             .formLogin(f -> f.disable());
         return http.build();
