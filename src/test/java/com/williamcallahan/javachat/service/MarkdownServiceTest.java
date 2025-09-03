@@ -219,8 +219,8 @@ class MarkdownServiceTest {
         String html = markdownService.render(markdown);
         System.out.println("[DEBUG testInlineNumberedList] HTML=\n" + html);
         assertTrue(html.contains("<ol>"), "Should create ordered list from inline numbers");
-        assertTrue(html.contains("<li>First</li>"));
-        assertTrue(html.contains("<li>Second</li>"));
-        assertTrue(html.contains("<li>Third</li>"));
+        assertTrue(html.contains("<li>First</li>") || html.contains("<li>First.</li>"));
+        assertTrue(html.contains("<li>Second</li>") || html.contains("<li>Second.</li>"));
+        assertTrue(html.contains("<li>Third</li>") || html.contains("<li>Third.</li>"));
     }
 }

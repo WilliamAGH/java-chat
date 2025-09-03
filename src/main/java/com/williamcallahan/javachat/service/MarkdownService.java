@@ -172,19 +172,21 @@ public class MarkdownService {
      * Ensures lists and code blocks are properly separated from preceding text.
      */
     public String preprocessMarkdown(String markdown) {
-        // CRITICAL: Ensure single space after sentence-ending punctuation FIRST
-        // This must happen before paragraph breaking so the text can be properly split
-        // Fixes: "operation.For example" -> "operation. For example"
-        // Also handles quotes/parentheses after punctuation while avoiding decimals
-        // Keep decimals (e.g., 3.14) intact by requiring next char not a digit
+        // Protect inline code spans so we don't mutate their contents during preprocessing
+        markdown = preserveInlineCode(markdown);
+
+        // CRITICAL: Ensure single space after sentence-ending punctuation FIRST (outside code)
+        // Fixes: "operation.For example" -> "operation. For example" while avoiding decimals
         markdown = markdown.replaceAll("(?<!\\d)([.!?])([\\\"'])?([A-Za-z(])", "$1$2 $3");
         
         // Fix inline lists FIRST - if we see "text. 1. Item 2. Item" pattern, it's a list!
         // This catches malformed lists from AI that forgot newlines
         markdown = fixInlineLists(markdown);
         
-        // Apply smart paragraph breaking AFTER fixing lists
-        markdown = applySmartParagraphBreaksImproved(markdown);
+        // Apply smart paragraph breaking AFTER fixing lists, but never when list markers are present
+        if (!hasListMarkers(markdown)) {
+            markdown = applySmartParagraphBreaksImproved(markdown);
+        }
         
         // DO NOT auto-detect lists from inline text like "are:1."
         // Only treat as list if it's at the start of a line or after explicit list marker
@@ -215,6 +217,14 @@ public class MarkdownService {
         // CRITICAL: Protect code block content from being consumed by other patterns
         // Ensure code blocks are properly delimited and content is preserved
         markdown = protectCodeBlocks(markdown);
+
+        // Ensure headings don't run into body text on the same logical line (common with streaming)
+        // Insert a paragraph break when an ATX heading appears to be concatenated directly
+        // with the next capitalized word (start of a sentence)
+        // Example: "## TitleBody starts here" -> "## Title\n\nBody starts here"
+        try {
+            markdown = markdown.replaceAll("(?m)^(#{1,6}\\s+[^\\n]*?[a-z])([A-Z][a-z])", "$1\n\n$2");
+        } catch (Exception ignored) {}
         
         // Clean up: collapse horizontal spaces (preserve newlines!)
         markdown = markdown.replaceAll("[ \\t]{2,}", " ");
@@ -222,6 +232,8 @@ public class MarkdownService {
         // Never allow leading spaces at start of lines (except in code blocks)
         markdown = markdown.replaceAll("(?m)^[ \\t]+(?!```)", "");
         
+        // Restore inline code placeholders back to markdown
+        markdown = restoreInlineCode(markdown);
         return markdown;
     }
     
@@ -315,22 +327,83 @@ public class MarkdownService {
      */
     private String fixInlineLists(String markdown) {
         // Pattern: text followed by "1." or continuing numbers
-        // If we see "sometext 1. " followed later by "2. ", it's a list!
-        if (markdown.matches(".*\\b1\\.\\s+\\S.*\\b2\\.\\s+\\S.*")) {
+        // If we see "... 1. ... 2. ...", it's likely an inline list emitted by the model.
+        if (markdown.matches("(?s).*\\b1\\.\\s+\\S.*\\b2\\.\\s+\\S.*")) {
             // This looks like an inline list - fix it!
             
             // First, ensure newline before "1."
-            markdown = markdown.replaceAll("([a-z:])\\s*(1\\.\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("([A-Za-z:])\\s*(1\\.\\s+)", "$1\n\n$2");
             
-            // Then add newlines before each subsequent number
-            for (int i = 2; i <= 20; i++) {
-                markdown = markdown.replaceAll("([.!?])\\s*(" + i + "\\.\\s+)", "$1\n$2");
-            }
+            // Then add newlines before each subsequent number regardless of preceding char
+            // Avoid matching decimals by requiring a space before the number token
+            markdown = markdown.replaceAll("(\\s+)([2-9]\\d*\\.\\s+)", "\n$2");
             
             logger.debug("Fixed inline list formatting");
         }
         
         return markdown;
+    }
+
+    /**
+     * Detect if the text contains markdown list markers at line starts.
+     * Used to avoid paragraph-breaking around list structures.
+     */
+    private boolean hasListMarkers(String text) {
+        if (text == null || text.isEmpty()) return false;
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^(\\s*)(?:[-+*]|\\d+\\.)\\s+");
+        return p.matcher(text).find();
+    }
+
+    /**
+     * Replace inline code spans `code` with placeholders carrying base64 content to avoid
+     * punctuation/paragraph mutations inside code. Restored before parsing markdown.
+     */
+    private String preserveInlineCode(String text) {
+        if (text == null || text.indexOf('`') < 0) return text;
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("`([^`]+)`");
+        java.util.regex.Matcher m = p.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String code = m.group(1);
+            String b64 = java.util.Base64.getEncoder().encodeToString(code.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            m.appendReplacement(sb, "ZZINLCODESTART" + b64 + "ZZINLCODEEND");
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    /**
+     * Restore inline code placeholders back to markdown `code`.
+     */
+    private String restoreInlineCode(String text) {
+        if (text == null || text.indexOf('Z') < 0) return text;
+        // Use a NON-GREEDY capture to avoid spanning across multiple placeholders
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("ZZINLCODESTART([A-Za-z0-9+/=]+?)ZZINLCODEEND");
+        java.util.regex.Matcher m = p.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String b64 = m.group(1);
+            // Normalize any accidental whitespace and fix padding
+            b64 = b64.replaceAll("\\s+", "");
+            int mod = b64.length() % 4;
+            if (mod != 0) {
+                // Pad with '=' to nearest multiple of 4
+                b64 = b64 + "===".substring(0, 4 - mod);
+            }
+            String code;
+            try {
+                code = new String(java.util.Base64.getDecoder().decode(b64), java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException ex) {
+                // If decode still fails, do not crash the pipeline; fall back to showing raw content
+                logger.warn("Failed to Base64-decode inline code placeholder; leaving as-is. length={} err={}", b64.length(), ex.getMessage());
+                code = b64; // degrade gracefully
+            }
+            // rewrap with backticks
+            String replacement = "`" + java.util.regex.Matcher.quoteReplacement(code) + "`";
+            m.appendReplacement(sb, replacement);
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
     
     /**
