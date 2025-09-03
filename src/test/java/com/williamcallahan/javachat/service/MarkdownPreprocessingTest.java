@@ -117,11 +117,96 @@ class MarkdownPreprocessingTest {
     void testPeriodDirectlyBeforeCodeFence() {
         String input = "Here is the code.```python\nprint('hello')";
         String result = markdownService.preprocessMarkdown(input);
-        
+
         System.out.println("\nTest: Period directly before code fence");
         System.out.println("Input: " + input);
         System.out.println("Output: " + result);
-        
+
         assertTrue(result.contains("code.\n\n```"), "Should have paragraph break between period and fence");
+    }
+
+    @Test
+    void testJavaCodeBlockWithComplexLanguageTag() {
+        String input = "Here's a Java example:```java\npublic class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n```";
+        String result = markdownService.preprocessMarkdown(input);
+        String html = markdownService.render(input);
+
+        assertTrue(result.contains("example:\n\n```java"), "Should have paragraph break before Java code fence");
+        assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain code with Java language class");
+        assertTrue(html.contains("public class Hello"), "Should contain Java code content");
+    }
+
+    @Test
+    void testMultipleJavaCodeBlocks() {
+        String input = "First example:```java\nSystem.out.println(\"First\");\n```\n\nSecond example:```java\nSystem.out.println(\"Second\");\n```";
+        String html = markdownService.render(input);
+
+        System.out.println("\nTest: Multiple Java code blocks");
+        System.out.println("Input: " + input);
+
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
+        assertTrue(html.contains("First"), "Should contain first code block content");
+        assertTrue(html.contains("Second"), "Should contain second code block content");
+        // Count occurrences of <pre> tags
+        int preCount = html.split("<pre>").length - 1;
+        assertTrue(preCount >= 2, "Should have at least 2 <pre> tags for 2 code blocks");
+    }
+
+    @Test
+    void testJavaCodeBlockAfterColon() {
+        String input = "The solution is:```java\npublic static void main(String[] args) {\n    // Java code here\n}\n```";
+        String result = markdownService.preprocessMarkdown(input);
+        String html = markdownService.render(input);
+
+        System.out.println("\nTest: Java code block after colon");
+        System.out.println("Input: " + input);
+        System.out.println("Preprocessed: " + result);
+
+        assertTrue(result.contains("is:\n\n```java"), "Should have paragraph break after colon");
+        assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
+        assertTrue(html.contains("public static void main"), "Should contain Java method");
+    }
+
+    @Test
+    void testJavaCodeBlockWithSpecialCharacters() {
+        String input = "Advanced Java features:```java\n// Using generics and lambdas\nList<String> names = Arrays.asList(\"Alice\", \"Bob\");\nnames.stream().filter(name -> name.length() > 3).forEach(System.out::println);\n```";
+        String html = markdownService.render(input);
+
+        System.out.println("\nTest: Java code block with special characters");
+        System.out.println("Input: " + input);
+
+        assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
+        assertTrue(html.contains("List&lt;String&gt;"), "Should properly escape generics");
+        assertTrue(html.contains("System.out::println"), "Should contain method reference");
+    }
+
+    @Test
+    void testEmptyJavaCodeBlock() {
+        String input = "Empty code block:```java\n```";
+        String html = markdownService.render(input);
+
+        System.out.println("\nTest: Empty Java code block");
+        System.out.println("Input: " + input);
+
+        assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
+        // Should handle empty blocks gracefully without breaking
+    }
+
+    @Test
+    void testJavaCodeBlockWithAnnotations() {
+        String input = "Spring Boot example:```java\n@RestController\npublic class UserController {\n    @GetMapping(\"/users\")\n    public List<User> getUsers() {\n        return userService.findAll();\n    }\n}\n```";
+        String html = markdownService.render(input);
+
+        System.out.println("\nTest: Java code block with annotations");
+        System.out.println("Input: " + input);
+
+        assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
+        assertTrue(html.contains("@RestController"), "Should contain Spring annotation");
+        assertTrue(html.contains("@GetMapping"), "Should contain HTTP annotation");
     }
 }
