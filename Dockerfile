@@ -72,22 +72,23 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # - Xms128m: Initial heap 128MB (faster startup)
 # - UseSerialGC: Single-threaded GC for minimal memory usage
 # - MaxRAM=256m: Total JVM memory limit
-# - AggressiveOpts: Enable performance optimizations
+# - UseCompressedOops: Enable compressed object pointers
+# - UseCompressedClassPointers: Enable compressed class pointers
 # ================================
-ENTRYPOINT ["java", \
-    "-Xmx256m", \
-    "-Xms128m", \
-    "-XX:+UseSerialGC", \
-    "-XX:MaxRAM=256m", \
-    "-XX:+AggressiveOpts", \
-    "-XX:+UseCompressedOops", \
-    "-XX:+UseCompressedClassPointers", \
-    "-Djava.security.egd=file:/dev/./urandom", \
-    "-jar", \
-    "app.jar", \
-    "--spring.main.banner-mode=off", \
-    "--spring.jmx.enabled=false", \
-    "--server.port=8085"]
+ENTRYPOINT ["sh", "-c", \
+    "java \
+    -XX:+IgnoreUnrecognizedVMOptions \
+    -Xmx256m \
+    -Xms128m \
+    -XX:+UseSerialGC \
+    -XX:MaxRAM=256m \
+    -XX:+UseCompressedOops \
+    -XX:+UseCompressedClassPointers \
+    -Djava.security.egd=file:/dev/./urandom \
+    -jar app.jar \
+    --spring.main.banner-mode=off \
+    --spring.jmx.enabled=false \
+    --server.port=8085"]
 
 # ================================
 # IMAGE SIZE OPTIMIZATION
