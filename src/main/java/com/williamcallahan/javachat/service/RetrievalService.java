@@ -83,15 +83,80 @@ public class RetrievalService {
     public List<Citation> toCitations(List<Document> docs) {
         List<Citation> citations = new ArrayList<>();
         for (Document d : docs) {
-            String url = String.valueOf(d.getMetadata().getOrDefault("url", ""));
+            String rawUrl = String.valueOf(d.getMetadata().getOrDefault("url", ""));
             String title = String.valueOf(d.getMetadata().getOrDefault("title", ""));
+            String url = normalizeCitationUrl(rawUrl);
+            // Refine Javadoc URLs to nested type pages where the chunk references them
+            url = com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(url, d.getText());
+            // Append member anchors (methods/constructors) when confidently derivable
+            String pkg = String.valueOf(d.getMetadata().getOrDefault("package", ""));
+            url = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(url, d.getText(), pkg);
+            // Final canonicalization in case of any accidental duplications
+            if (url.startsWith("http://") || url.startsWith("https://")) {
+                url = canonicalizeHttpDocUrl(url);
+            }
             String snippet = d.getText();
-            citations.add(new Citation(url, title, "", snippet.length() > 500 ? snippet.substring(0, 500) + "…" : snippet));
+
+            // For book sources, we now link to public /pdfs path (handled by normalizeCitationUrl)
+
+            citations.add(new Citation(
+                url,
+                title,
+                "",
+                snippet.length() > 500 ? snippet.substring(0, 500) + "…" : snippet
+            ));
         }
         return citations;
     }
 
     // TODO: Implement MMR and reranker integration
+
+    /**
+     * Normalize URLs from locally mirrored files to their authoritative online sources.
+     * Handles Oracle Java SE 24 docs, JDK 24 GA, and Java 25 Early Access docs.
+     */
+    private String normalizeCitationUrl(String url) {
+        if (url == null || url.isBlank()) return url;
+        String u = url.trim();
+        if (u.startsWith("http://") || u.startsWith("https://")) {
+            return canonicalizeHttpDocUrl(u);
+        }
+
+        // Map book PDFs to public PDFs even if not file:// (defensive)
+        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(u.startsWith("file://") ? u.substring("file://".length()) : u);
+        if (publicPdf != null) return publicPdf;
+
+        // Only handle file:// mirrors beyond this point
+        if (!u.startsWith("file://")) return u;
+
+        String p = u.substring("file://".length());
+        // Try embedded host reconstruction first
+        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
+        if (embedded != null) return embedded;
+        // Try local prefix mapping
+        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
+        return mapped != null ? mapped : url;
+    }
+
+    /**
+     * Fix common path duplications in already-HTTP doc URLs (e.g., '/docs/api/api/').
+     */
+    private String canonicalizeHttpDocUrl(String url) {
+        String out = url;
+        // Collapse duplicated segments for Oracle and EA docs
+        out = out.replace("/docs/api/api/", "/docs/api/");
+        out = out.replace("/api/api/", "/api/");
+        // Remove accidental double slashes (but keep protocol)
+        int protoIdx = out.indexOf("://");
+        String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
+        String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
+        rest = rest.replaceAll("/+", "/");
+        return prefix + rest;
+    }
+
+    private boolean isBookSource(String url) {
+        if (url == null) return false;
+        String u = url.toLowerCase();
+        return u.startsWith("file://") && (u.contains("/data/docs/books/") || u.contains("\\data\\docs\\books\\"));
+    }
 }
-
-

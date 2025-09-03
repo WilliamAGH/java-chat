@@ -33,7 +33,26 @@ public class RerankerService {
                       .append(d.getMetadata().get("url")).append("\n")
                       .append(trim(d.getText(), 500)).append("\n\n");
             }
-            String json = chatClient.prompt().user(prompt.toString()).call().content();
+            String response = chatClient.prompt().user(prompt.toString()).call().content();
+            // Clean up response - remove markdown code blocks if present
+            String json = response;
+            if (json.contains("```")) {
+                // Extract JSON from markdown code block
+                int start = json.indexOf("```");
+                if (start >= 0) {
+                    start = json.indexOf("\n", start) + 1; // Skip the ```json line
+                    int end = json.indexOf("```", start);
+                    if (end > start) {
+                        json = json.substring(start, end).trim();
+                    }
+                }
+            }
+            // Also handle case where response starts with backticks
+            json = json.replaceAll("^`+|`+$", "").trim();
+            if (json.startsWith("json")) {
+                json = json.substring(4).trim();
+            }
+            
             JsonNode root = mapper.readTree(json);
             List<Document> reordered = new ArrayList<>();
             if (root.has("order") && root.get("order").isArray()) {

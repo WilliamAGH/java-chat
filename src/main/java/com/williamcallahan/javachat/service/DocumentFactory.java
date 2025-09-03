@@ -44,6 +44,7 @@ public class DocumentFactory {
 
         // Create and configure the document
         var document = new org.springframework.ai.document.Document(text);
+        // Persist hash alongside metadata (used for audit and dedup checks)
         document.getMetadata().putAll(metadata);
 
         return document;
