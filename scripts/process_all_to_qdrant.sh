@@ -11,12 +11,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 DOCS_ROOT="$PROJECT_ROOT/data/docs"
-HASH_DB="$PROJECT_ROOT/data/.processed_hashes.db"
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 CACHE_DIR="$PROJECT_ROOT/data/embeddings-cache"
 
 # Parse command line arguments
-UPLOAD_MODE="local-only"  # Default to local-only mode
+UPLOAD_MODE="upload"  # Default to upload mode (with cache as fallback)
 for arg in "$@"; do
     case $arg in
         --local-only)
@@ -27,8 +26,8 @@ for arg in "$@"; do
             ;;
         --help|-h)
             echo "Usage: $0 [--local-only | --upload]"
-            echo "  --local-only : Cache embeddings locally without uploading (default)"
-            echo "  --upload     : Upload cached embeddings to Qdrant"
+            echo "  --local-only : Cache embeddings locally without uploading"
+            echo "  --upload     : Upload to Qdrant (default, with auto-fallback to cache if Qdrant fails)"
             exit 0
             ;;
         *)
@@ -48,12 +47,11 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo "=============================================="
-echo "Document Processor with Deduplication"
+echo "Document Processor"
 echo "=============================================="
 echo -e "${CYAN}Mode: ${YELLOW}${UPLOAD_MODE}${NC}"
 echo "Project root: $PROJECT_ROOT"
 echo "Docs root: $DOCS_ROOT"
-echo "Hash database: $HASH_DB"
 echo "Cache directory: $CACHE_DIR"
 echo ""
 
@@ -103,75 +101,27 @@ echo "[$(date)] Starting document processing in $UPLOAD_MODE mode" > "$LOG_FILE"
 
 # Compute overall % complete (indexed vs parsed)
 percent_complete() {
-    if [ "$UPLOAD_MODE" = "local-only" ]; then
-        # For local mode, show cache statistics
-        if [ -d "$CACHE_DIR" ]; then
-            local cache_files=$(find "$CACHE_DIR" -name "*.gz" 2>/dev/null | wc -l | tr -d ' ')
-            echo "Cache: $cache_files files"
-        else
-            echo "Cache: 0 files"
-        fi
+    local parsed_dir="$PROJECT_ROOT/data/parsed"
+    local index_dir="$PROJECT_ROOT/data/index"
+    local parsed_count=0
+    local indexed_count=0
+    
+    if [ -d "$parsed_dir" ]; then
+        parsed_count=$(find "$parsed_dir" -type f -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ -d "$index_dir" ]; then
+        indexed_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    
+    if [ "$parsed_count" -gt 0 ]; then
+        # Show percentage of parsed files that have been indexed/processed
+        awk -v i="$indexed_count" -v p="$parsed_count" 'BEGIN { printf("%.1f%%", (i/p)*100) }'
     else
-        # Original Qdrant-based percentage
-        local parsed_dir="$PROJECT_ROOT/data/parsed"
-        local index_dir="$PROJECT_ROOT/data/index"
-        local parsed_count=0
-        local indexed_count=0
-        if [ -d "$parsed_dir" ]; then
-            parsed_count=$(find "$parsed_dir" -type f -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
-        fi
-        if [ -d "$index_dir" ]; then
-            indexed_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
-        fi
-        if [ "$parsed_count" -gt 0 ]; then
-            awk -v i="$indexed_count" -v p="$parsed_count" 'BEGIN { printf("%.1f%%", (i/p)*100) }'
-        else
-            # Fallback: use Qdrant points vs 60k estimate
-            local url="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
-            local pts=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
-            pts=${pts:-0}
-            awk -v i="$pts" 'BEGIN { printf("%.1f%%", (i/60000)*100) }'
-        fi
+        # No parsed files yet, show 0%
+        echo "0.0%"
     fi
 }
 
-# Function to get SHA-256 hash of a file
-get_file_hash() {
-    local file="$1"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        shasum -a 256 "$file" | cut -d' ' -f1
-    else
-        sha256sum "$file" | cut -d' ' -f1
-    fi
-}
-
-# Initialize hash database if it doesn't exist
-init_hash_db() {
-    if [ ! -f "$HASH_DB" ]; then
-        mkdir -p "$(dirname "$HASH_DB")"
-        echo "# Processed file hashes database" > "$HASH_DB"
-        echo "# Format: hash|filepath|timestamp|status" >> "$HASH_DB"
-        log "${GREEN}✓ Created hash database${NC}"
-    else
-        local count=$(grep -v '^#' "$HASH_DB" 2>/dev/null | wc -l | tr -d ' ')
-        log "${BLUE}ℹ Found existing hash database with $count entries${NC}"
-    fi
-}
-
-# Check if file has been processed
-is_processed() {
-    local file="$1"
-    local hash=$(get_file_hash "$file")
-    grep -q "^$hash|" "$HASH_DB" 2>/dev/null
-}
-
-# Mark file as processed
-mark_processed() {
-    local file="$1"
-    local status="$2"
-    local hash=$(get_file_hash "$file")
-    echo "$hash|$file|$(date -u +%Y-%m-%dT%H:%M:%SZ)|$status" >> "$HASH_DB"
-}
 
 # Function to check Qdrant connection (only in upload mode)
 check_qdrant_connection() {
@@ -240,6 +190,38 @@ trigger_cache_upload() {
     fi
 }
 
+# Trap handler for graceful shutdown
+cleanup() {
+    log ""
+    log "${YELLOW}⚠ Received interrupt signal. Gracefully shutting down...${NC}"
+    
+    if [ -n "$APP_PID" ] && kill -0 $APP_PID 2>/dev/null; then
+        log "${YELLOW}Stopping application (PID: $APP_PID)...${NC}"
+        kill -TERM $APP_PID 2>/dev/null || true
+        
+        # Wait up to 10 seconds for graceful shutdown
+        for i in {1..10}; do
+            if ! kill -0 $APP_PID 2>/dev/null; then
+                log "${GREEN}✓ Application stopped gracefully${NC}"
+                break
+            fi
+            sleep 1
+        done
+        
+        # Force kill if still running
+        if kill -0 $APP_PID 2>/dev/null; then
+            log "${YELLOW}Force stopping application...${NC}"
+            kill -9 $APP_PID 2>/dev/null || true
+        fi
+    fi
+    
+    log "${CYAN}Cache data has been saved. You can resume processing by running the script again.${NC}"
+    exit 0
+}
+
+# Set up trap for Ctrl+C and other signals
+trap cleanup INT TERM
+
 # Main processing function
 process_documents() {
     # Check if application is already running
@@ -288,8 +270,13 @@ process_documents() {
     # Monitor the log for completion
     local start_time=$(date +%s)
     
+    # Track last log position for incremental updates
+    local last_log_size=0
+    local last_file_count=0
+    
     while true; do
         if grep -q "DOCUMENT PROCESSING COMPLETE" "$LOG_FILE" 2>/dev/null; then
+            echo ""  # New line after progress
             log "${GREEN}✓ Document processing completed${NC} ($(percent_complete))"
             
             # Extract statistics
@@ -309,6 +296,7 @@ process_documents() {
         fi
         
         if ! kill -0 $APP_PID 2>/dev/null; then
+            echo ""  # New line after progress
             log "${RED}✗ Application terminated unexpectedly${NC}"
             return 1
         fi
@@ -316,11 +304,28 @@ process_documents() {
         local current_time=$(date +%s)
         local elapsed=$((current_time - start_time))
         
-        # Show progress
-        local processed_count=$(grep -c "✓ Processed" "$LOG_FILE" 2>/dev/null || echo "0")
-        echo -ne "\r${YELLOW}Progress: $processed_count document sets processed... (${elapsed}s elapsed)${NC}"
+        # Get detailed progress
+        local sets_count=$(grep -c "✓ Processed" "$LOG_FILE" 2>/dev/null || echo "0")
+        local files_count=$(grep -c "✔ Completed processing file:" "$LOG_FILE" 2>/dev/null || echo "0")
+        local current_set=$(grep "Processing:" "$LOG_FILE" 2>/dev/null | tail -1 | cut -d: -f2 | xargs)
+        local percent=$(percent_complete)
         
-        sleep 5
+        # Show what's currently being processed if file count changed
+        if [ "$files_count" -gt "$last_file_count" ]; then
+            local current_file=$(grep "✔ Completed processing file:" "$LOG_FILE" 2>/dev/null | tail -1 | sed 's/.*file: //' | cut -d' ' -f1)
+            echo -ne "\r${YELLOW}[$percent] Set $sets_count: $current_set | Files: $files_count | Current: $current_file (${elapsed}s)${NC}     "
+            
+            # Every 10 files, show a summary line
+            if [ $((files_count % 10)) -eq 0 ] && [ "$files_count" -gt 0 ]; then
+                echo ""  # New line for summary
+                log "${CYAN}  [$percent] Checkpoint: $files_count files processed, currently in: $current_set${NC}"
+            fi
+        else
+            echo -ne "\r${YELLOW}[$percent] Set $sets_count: $current_set | Files: $files_count (${elapsed}s)${NC}     "
+        fi
+        
+        last_file_count=$files_count
+        sleep 2  # Check more frequently for better responsiveness
     done
     
     echo ""  # New line after progress indicator
@@ -376,12 +381,13 @@ show_statistics() {
         fi
     done
     
-    # Get hash database statistics
-    if [ -f "$HASH_DB" ]; then
-        local hash_count=$(grep -v '^#' "$HASH_DB" 2>/dev/null | wc -l | tr -d ' ')
+    # Get actual deduplication statistics from Java app
+    local index_dir="$PROJECT_ROOT/data/index"
+    if [ -d "$index_dir" ]; then
+        local chunk_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
         log ""
         log "${BLUE}🔒 Deduplication Statistics:${NC}"
-        log "  - Tracked files: $hash_count"
+        log "  - Processed chunks (unique hashes): $chunk_count"
     fi
     
     # Show mode-specific instructions
@@ -396,9 +402,6 @@ show_statistics() {
 # Main execution
 main() {
     log "Starting document processing pipeline in ${CYAN}${UPLOAD_MODE}${NC} mode..."
-    
-    # Initialize hash database
-    init_hash_db
     
     # Check prerequisites
     if [ "$UPLOAD_MODE" = "upload" ]; then
