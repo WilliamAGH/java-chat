@@ -1,0 +1,75 @@
+# ================================
+# DOCKER BUILD OPTIMIZATION
+# ================================
+# Exclude unnecessary files to reduce build context and image size
+
+# Build artifacts
+target/
+target_test-classes/
+*.jar
+*.war
+*.ear
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (not needed in container)
+README.md
+*.md
+docs/
+
+# Development files
+.env*
+.env.example
+AGENTS.md
+AGENT.md
+LOGGING.md
+WARP.md
+SSE_MIGRATION_PLAN.md
+
+# Scripts (not needed in runtime container)
+scripts/
+*.sh
+Makefile
+
+# Test files
+src/test/
+
+# Maven wrapper files are needed for Docker build stage
+# (will be excluded from final runtime image via multi-stage build)
+# .mvn/
+# mvnw
+# mvnw.cmd
+
+# Node.js files (if any)
+node_modules/
+package*.json
+*.lock
+
+# Python files (if any)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Temporary files
+tmp/
+temp/
