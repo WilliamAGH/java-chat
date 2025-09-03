@@ -21,6 +21,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Service for caching embeddings locally to reduce API calls and enable batch processing.
@@ -37,6 +40,10 @@ public class EmbeddingCacheService {
     private final Map<String, CachedEmbedding> memoryCache = new ConcurrentHashMap<>();
     private final AtomicInteger cacheHits = new AtomicInteger(0);
     private final AtomicInteger cacheMisses = new AtomicInteger(0);
+    private final AtomicInteger embeddingsSinceLastSave = new AtomicInteger(0);
+    private static final int AUTO_SAVE_THRESHOLD = 50; // Save every 50 embeddings
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
     
     public EmbeddingCacheService(
             @Value("${app.embeddings.cache-dir:./data/embeddings-cache}") String cacheDir,
@@ -47,6 +54,31 @@ public class EmbeddingCacheService {
         this.vectorStore = vectorStore;
         Files.createDirectories(this.cacheDir);
         loadExistingCache();
+        
+        // Register shutdown hook to save cache on exit
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                scheduler.shutdown();
+                CACHE_LOG.info("Saving cache before shutdown...");
+                saveIncrementalCache();
+                CACHE_LOG.info("Cache saved successfully. Total embeddings cached: {}", memoryCache.size());
+            } catch (Exception e) {
+                CACHE_LOG.error("Failed to save cache on shutdown: {}", e.getMessage());
+            }
+        }));
+        
+        // Start periodic save timer (every 2 minutes)
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (embeddingsSinceLastSave.get() > 0) {
+                    CACHE_LOG.info("Periodic save: {} new embeddings since last save", embeddingsSinceLastSave.get());
+                    saveIncrementalCache();
+                    embeddingsSinceLastSave.set(0);
+                }
+            } catch (Exception e) {
+                CACHE_LOG.error("Periodic save failed: {}", e.getMessage());
+            }
+        }, 2, 2, TimeUnit.MINUTES);
     }
     
     /**
@@ -132,9 +164,25 @@ public class EmbeddingCacheService {
                 
                 String cacheKey = generateCacheKey(doc);
                 memoryCache.put(cacheKey, cached);
+                
+                // Auto-save every N embeddings
+                if (embeddingsSinceLastSave.incrementAndGet() >= AUTO_SAVE_THRESHOLD) {
+                    CACHE_LOG.info("Auto-saving cache after {} new embeddings...", AUTO_SAVE_THRESHOLD);
+                    try {
+                        saveIncrementalCache();
+                        embeddingsSinceLastSave.set(0);
+                        CACHE_LOG.info("Auto-save completed. Total cached: {}", memoryCache.size());
+                    } catch (Exception e) {
+                        CACHE_LOG.error("Auto-save failed: {}", e.getMessage());
+                    }
+                }
             }
             
-            saveIncrementalCache();
+            // Final save after batch completion
+            if (embeddingsSinceLastSave.get() > 0) {
+                saveIncrementalCache();
+                embeddingsSinceLastSave.set(0);
+            }
         }
         
         return embeddings;

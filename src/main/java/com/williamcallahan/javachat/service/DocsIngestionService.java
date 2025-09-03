@@ -45,7 +45,7 @@ public class DocsIngestionService {
                                 PdfContentExtractor pdfExtractor,
                                 ProgressTracker progressTracker,
                                 EmbeddingCacheService embeddingCache,
-                                @Value("${EMBEDDINGS_UPLOAD_MODE:local-only}") String uploadMode) {
+                                @Value("${EMBEDDINGS_UPLOAD_MODE:upload}") String uploadMode) {
         this.rootUrl = rootUrl;
         this.vectorStore = vectorStore;
         this.chunkProcessingService = chunkProcessingService;
@@ -208,7 +208,7 @@ public class DocsIngestionService {
                     documents = chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
                 }
 
-                // Add documents to vector store
+                // Add documents to vector store or cache
                 if (!documents.isEmpty()) {
                     INDEXING_LOG.info("[INDEXING] Processing file: {} with {} chunks", 
                         file.getFileName(), documents.size());
@@ -217,17 +217,38 @@ public class DocsIngestionService {
                     
                     try {
                         long startTime = System.currentTimeMillis();
-                        vectorStore.add(documents);
-                        long duration = System.currentTimeMillis() - startTime;
                         
-                        INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {} ({})", 
-                            documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                        if (localOnlyMode) {
+                            // Local-only mode: compute and cache embeddings
+                            embeddingCache.getOrComputeEmbeddings(documents);
+                            long duration = System.currentTimeMillis() - startTime;
+                            INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms for file: {} ({})", 
+                                documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                        } else {
+                            // Upload mode: send to Qdrant with fallback to cache
+                            try {
+                                vectorStore.add(documents);
+                                long duration = System.currentTimeMillis() - startTime;
+                                INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {} ({})", 
+                                    documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                            } catch (Exception qdrantError) {
+                                // Qdrant failed (could be full or connection issue), fallback to local cache
+                                INDEXING_LOG.warn("[INDEXING] Qdrant upload failed ({}), falling back to local cache", 
+                                    qdrantError.getMessage());
+                                embeddingCache.getOrComputeEmbeddings(documents);
+                                long duration = System.currentTimeMillis() - startTime;
+                                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms for file: {} ({})", 
+                                    documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                            }
+                        }
+                        
                         // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
                         long totalDuration = System.currentTimeMillis() - fileStartMillis;
-                        INDEXING_LOG.info("[INDEXING] ✔ Completed indexing file: {} — {}/{} chunks indexed in {}ms (end-to-end) ({})",
-                            file.getFileName(), documents.size(), documents.size(), totalDuration, progressTracker.formatPercent());
+                        String destination = localOnlyMode ? "cache" : "Qdrant";
+                        INDEXING_LOG.info("[INDEXING] ✔ Completed processing file: {} — {}/{} chunks to {} in {}ms (end-to-end) ({})",
+                            file.getFileName(), documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
                         
-                        // Mark hashes as ingested ONLY after successful addition
+                        // Mark hashes as processed after successful addition/caching
                         for (org.springframework.ai.document.Document aiDoc : documents) {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
@@ -235,9 +256,10 @@ public class DocsIngestionService {
                         
                         processed[0]++;
                     } catch (Exception e) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to index {}: {}", 
-                            file.getFileName(), e.getMessage());
-                        log.error("Indexing error details:", e);
+                        String operation = localOnlyMode ? "cache" : "index";
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to {} {}: {}", 
+                            operation, file.getFileName(), e.getMessage());
+                        log.error("Processing error details:", e);
                     }
                 } else {
                     INDEXING_LOG.debug("[INDEXING] Skipping empty document: {}", file.getFileName());
