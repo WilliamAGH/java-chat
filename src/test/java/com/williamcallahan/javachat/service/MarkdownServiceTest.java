@@ -14,7 +14,15 @@ class MarkdownServiceTest {
     void setUp() {
         markdownService = new MarkdownService();
     }
-    
+
+    @Test
+    @DisplayName("Should insert paragraph breaks for '?' and '!' sentences")
+    void testParagraphBreaksQuestionExclamation() {
+        String markdown = "Is this correct? Yes! Great.";
+        String pre = markdownService.preprocessMarkdown(markdown);
+        assertTrue(pre.contains("\n\n"), "Should insert paragraph break after sentences ending with ?/!");
+    }
+
     @Test
     @DisplayName("Should render headers correctly")
     void testHeaders() {
@@ -167,5 +175,49 @@ class MarkdownServiceTest {
         assertTrue(html.contains("<code class=\"language-java\">"));
         assertTrue(html.contains("{{background:Java releases often focus on developer experience}}"));
         assertTrue(html.contains("{{hint:Records are immutable by default}}"));
+    }
+
+    @Test
+    @DisplayName("Should convert inline hyphen bullets after colon into list")
+    void testInlineHyphenListAfterColon() {
+        String markdown = "Useful in several ways: - Checking divisibility - Extracting digits - Crypto remainders";
+        String html = markdownService.render(markdown);
+        assertTrue(html.contains("<ul>"), "Should create unordered list");
+        assertTrue(html.contains("<li>Checking divisibility</li>"));
+        assertTrue(html.contains("<li>Extracting digits</li>"));
+        assertTrue(html.contains("<li>Crypto remainders</li>"));
+        assertTrue(html.contains("</ul>"));
+    }
+
+    @Test
+    @DisplayName("Should not mistake minus sign for bullet list")
+    void testMinusNotMistakenForBullet() {
+        String markdown = "Compute x - y - z then divide by 3.";
+        String html = markdownService.render(markdown);
+        assertFalse(html.contains("<ul>"), "Minus math should not become a list");
+        assertFalse(html.contains("<ol>"), "Minus math should not become a list");
+        assertTrue(html.contains("x - y - z"), "Content should be preserved");
+    }
+
+    @Test
+    @DisplayName("Should fix inline hyphen list in long prose like the remainder operator example")
+    void testInlineListFromRemainderExample() {
+        String markdown = "The remainder operator is useful in several ways, such as:- Checking divisibility: If x % y equals 0.- Extracting digits: x % 10 gives the rightmost digit.- Its application in encryption algorithms.";
+        String html = markdownService.render(markdown);
+        assertTrue(html.contains("<ul>"), "Should create unordered list from inline items");
+        assertTrue(html.toLowerCase().contains("checking divisibility"));
+        assertTrue(html.toLowerCase().contains("extracting digits"));
+        assertTrue(html.toLowerCase().contains("encryption"));
+    }
+
+    @Test
+    @DisplayName("Should convert inline ordered list (1. 2. 3.) into OL")
+    void testInlineNumberedList() {
+        String markdown = "Key points 1. First 2. Second 3. Third.";
+        String html = markdownService.render(markdown);
+        assertTrue(html.contains("<ol>"), "Should create ordered list from inline numbers");
+        assertTrue(html.contains("<li>First</li>"));
+        assertTrue(html.contains("<li>Second</li>"));
+        assertTrue(html.contains("<li>Third</li>"));
     }
 }
