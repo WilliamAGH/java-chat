@@ -64,6 +64,7 @@ class MarkdownServiceTest {
     void testOrderedLists() {
         String markdown = "1. First item\n2. Second item\n3. Third item";
         String html = markdownService.render(markdown);
+        System.out.println("[DEBUG testOrderedLists] HTML=\n" + html);
         
         assertTrue(html.contains("<ol>"), "Should contain OL tag");
         assertTrue(html.contains("<li>First item</li>"), "Should contain list item 1");
@@ -88,6 +89,7 @@ class MarkdownServiceTest {
     void testInlineCode() {
         String markdown = "Use `System.out.println()` to print";
         String html = markdownService.render(markdown);
+        System.out.println("[DEBUG testInlineCode] HTML=\n" + html);
         
         assertTrue(html.contains("<code>System.out.println()</code>"), "Should contain inline code");
     }
@@ -215,6 +217,7 @@ class MarkdownServiceTest {
     void testInlineNumberedList() {
         String markdown = "Key points 1. First 2. Second 3. Third.";
         String html = markdownService.render(markdown);
+        System.out.println("[DEBUG testInlineNumberedList] HTML=\n" + html);
         assertTrue(html.contains("<ol>"), "Should create ordered list from inline numbers");
         assertTrue(html.contains("<li>First</li>"));
         assertTrue(html.contains("<li>Second</li>"));
