@@ -74,7 +74,7 @@ The app now provides two complementary modes with a shared learning UX and forma
 - Chat (free-form):
   - Location: `/chat.html` (also accessible via the “Chat” tab at `/`)
   - Features: SSE streaming, server-side markdown, inline enrichments ({{hint}}, {{reminder}}, {{background}}, {{warning}}, {{example}}), citation pills, Prism highlighting, copy/export.
-  - APIs used: `/api/chat/stream`, `/api/chat/citations`, `/api/markdown/render`, `/api/enrich`.
+  - APIs used: `/api/chat/stream`, `/api/chat/citations`, `/api/markdown/render`, `/api/chat/enrich` (alias: `/api/enrich`).
 
 - Guided Learning (curated):
   - Location: `/guided.html` (also accessible via the “Guided Learning” tab at `/`)
