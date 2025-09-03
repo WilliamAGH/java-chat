@@ -194,6 +194,15 @@ public class MarkdownService {
         // markdown = markdown.replaceAll(":\\s+(\\d+\\.\\s+[A-Z])", ":\n\n$1");
         // COMMENTED OUT - causing false positives
         
+        // CRITICAL FIX: Ensure opening fences ALWAYS start on new paragraph
+        // This handles cases like ":```java" or ".```python" etc.
+        // Use negative lookbehind to exclude cases already with newlines
+        String beforeFenceHack = markdown;
+        markdown = markdown.replaceAll("(?<!\n)(?<!^)```", "\n\n```");
+        if (!markdown.equals(beforeFenceHack) && markdown.contains("```")) {
+            logger.debug("[preprocess] inserted paragraph before opening fence");
+        }
+
         // Fix inline bullet lists only in safe contexts to avoid false positives like math "x - y"
         // 1) After a colon: "such as:- Item" or "such as: - Item" -> break into a proper list
         // Also handle when items are concatenated like "- Item1- Item2"
@@ -214,13 +223,16 @@ public class MarkdownService {
         
         // CRITICAL: Protect code block content from being consumed by other patterns
         // Ensure code blocks are properly delimited and content is preserved
+        // Note: This must happen AFTER ensureFenceSeparation since it looks for the pattern
         markdown = protectCodeBlocks(markdown);
 
-        // Final guard: ensure a paragraph break before any fence still attached to punctuation
-        // e.g., "...:```" -> "...:\n\n```"
-        if (markdown.contains(":```")) {
-            markdown = markdown.replace(":```", ":\n\n```");
-        }
+        // Final guard: ensure paragraph break before any fence attached to punctuation
+        // Handle all common punctuation cases: : . ! ? ) ] } ; ,
+        markdown = markdown.replaceAll("([:.!?)\\]};,])```", "$1\n\n```");
+        
+        // Also ensure space after punctuation before next word (but not before code fence)
+        // This fixes "approach.```java" -> "approach.\n\n```java"
+        markdown = markdown.replaceAll("([.!?])```([a-zA-Z])", "$1\n\n```$2");
 
         // Ensure headings don't run into body text on the same logical line (common with streaming)
         // Insert a paragraph break when an ATX heading appears to be concatenated directly
@@ -244,23 +256,45 @@ public class MarkdownService {
     /**
      * Ensures a blank paragraph (\n\n) exists before every opening code fence (```),
      * while not altering closing fences inside code blocks.
+     * IMPROVED: Properly tracks fence pairs instead of just toggling.
      */
     private String ensureFenceSeparation(String s) {
-        if (s == null || s.indexOf('`') < 0) return s;
+        if (s == null || !s.contains("```")) return s;
+        
         StringBuilder out = new StringBuilder(s.length() + 16);
-        boolean inCode = false;
+        
         for (int i = 0; i < s.length();) {
             if (i + 2 < s.length() && s.charAt(i) == '`' && s.charAt(i + 1) == '`' && s.charAt(i + 2) == '`') {
-                if (!inCode) {
+                // Found a fence - count previous fences to determine if this is opening or closing
+                String processed = out.toString();
+                int fenceCount = 0;
+                int idx = 0;
+                while ((idx = processed.indexOf("```", idx)) != -1) {
+                    fenceCount++;
+                    idx += 3;
+                }
+                
+                // Even count means this is an opening fence, odd means closing
+                boolean isOpeningFence = (fenceCount % 2 == 0);
+                
+                if (isOpeningFence) {
+                    // Opening fence - ensure proper separation BEFORE the fence
                     int len = out.length();
-                    if (len >= 2) {
-                        boolean hasDouble = out.charAt(len - 1) == '\n' && out.charAt(len - 2) == '\n';
-                        if (!hasDouble) {
-                            if (out.charAt(len - 1) == '\n') out.append('\n'); else out.append("\n\n");
-                        }
+                    if (len == 0) {
+                        // Start of string, no spacing needed
+                    } else if (len >= 2 && out.charAt(len - 1) == '\n' && out.charAt(len - 2) == '\n') {
+                        // Already has paragraph break, good
+                    } else if (len >= 1 && out.charAt(len - 1) == '\n') {
+                        // Single newline, add one more for paragraph break
+                        out.append('\n');
+                        logger.debug("[ensureFenceSeparation] Added newline before opening fence");
+                    } else {
+                        // No newline at all, add paragraph break
+                        out.append("\n\n");
+                        logger.debug("[ensureFenceSeparation] Added paragraph break before opening fence");
                     }
                 }
-                inCode = !inCode; // toggle on open, off on close
+                // Append the fence itself
                 out.append("```");
                 i += 3;
             } else {
@@ -356,23 +390,39 @@ public class MarkdownService {
     
     /**
      * Fixes inline lists that should have line breaks.
-     * Detects patterns like "types are:1. boolean: desc. 2. byte: desc."
-     * and converts them to proper list format.
+     * ONLY converts to list format when we have strong evidence it's actually a list.
      */
     private String fixInlineLists(String markdown) {
-        // Pattern: text followed by "1." or continuing numbers
-        // If we see "... 1. ... 2. ...", it's likely an inline list emitted by the model.
-        if (markdown.matches("(?s).*\\b1\\.\\s+\\S.*\\b2\\.\\s+\\S.*")) {
-            // This looks like an inline list - fix it!
+        // Be MUCH more conservative - only fix when:
+        // 1. After a colon followed by "1." (common pattern: "types:1. boolean")
+        // 2. Multiple consecutive numbered items on same line with clear list structure
+        
+        // Fix pattern like "types:1. item 2. item" or "types: 1. item 2. item" 
+        // BUT NOT "Java 1. supports this and 2. that" in normal sentences
+        if (markdown.matches("(?s).*:\\s*1\\.\\s+.*?\\s+2\\.\\s+.*")) {
+            // This is very likely a list after a colon
+            markdown = markdown.replaceAll("(:\\s*)(1\\.\\s+)", "$1\n\n$2");
             
-            // First, ensure newline before "1."
-            markdown = markdown.replaceAll("([A-Za-z:])\\s*(1\\.\\s+)", "$1\n\n$2");
+            // Add line breaks before subsequent numbers ONLY if they follow the pattern
+            // Must have: whitespace + number + period + whitespace + uppercase letter or lowercase (start of item)
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d{1,2}\\.\\s+)([A-Za-z])", "\n$2$3");
             
-            // Then add newlines before each subsequent number regardless of preceding char
-            // Avoid matching decimals by requiring a space before the number token
-            markdown = markdown.replaceAll("(\\s+)([2-9]\\d*\\.\\s+)", "\n$2");
-            
-            logger.debug("Fixed inline list formatting");
+            logger.debug("Fixed inline numbered list after colon");
+        }
+        
+        // Fix obvious bullet lists after colons that got concatenated
+        // "types:- item1 - item2" -> proper list
+        if (markdown.matches("(?s).*:\\s*-\\s+.*")) {
+            markdown = markdown.replaceAll("(:\\s*)(-\\s+)", "$1\n\n$2");
+            // Fix subsequent bullets on same line
+            markdown = markdown.replaceAll("(?<!\\n)(\\s+)(-\\s+)([A-Z])", "\n$2$3");
+            logger.debug("Fixed inline bullet list after colon");
+        }
+        
+        // Also handle direct colon-number pattern: "types:1." without space
+        if (markdown.matches("(?s).*:\\d+\\.\\s+.*")) {
+            markdown = markdown.replaceAll("(:)(\\d+\\.\\s+)", "$1\n\n$2");
+            logger.debug("Fixed inline numbered list directly after colon");
         }
         
         return markdown;
@@ -449,8 +499,9 @@ public class MarkdownService {
         StringBuilder result = new StringBuilder();
         // FIXED: Use [\s\S]*? to match ANY content including backticks inside code blocks
         // Also support uppercase, numbers, hyphens in language tags like client-side
+        // Allow multiple newlines after the language tag since preprocessing may add them
         java.util.regex.Pattern codeBlockPattern = 
-            java.util.regex.Pattern.compile("```([\\w-]*)\n?([\\s\\S]*?)```", 
+            java.util.regex.Pattern.compile("```([\\w-]*)\\s*([\\s\\S]*?)```", 
                                            java.util.regex.Pattern.DOTALL);
         java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
         int blocks = 0;
