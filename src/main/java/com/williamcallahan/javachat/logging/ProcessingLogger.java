@@ -62,29 +62,14 @@ public class ProcessingLogger {
     }
     
     /**
-     * Log document parsing
+     * Log document parsing - DISABLED to avoid excessive logging during startup
+     * The ChunkProcessingService processes thousands of documents on startup
      */
-    @Around("execution(* com.williamcallahan.javachat.service.ChunkProcessingService.process*(..))")
+    // @Around("execution(* com.williamcallahan.javachat.service.ChunkProcessingService.process*(..))")
     public Object logDocumentParsing(ProceedingJoinPoint joinPoint) throws Throwable {
-        String requestId = REQUEST_ID.get();
-        long startTime = System.currentTimeMillis();
-        
-        PIPELINE_LOG.info("[{}] STEP 2: DOCUMENT PARSING - Starting", requestId);
-        PIPELINE_LOG.debug("[{}] Processing method: {}", requestId, joinPoint.getSignature().getName());
-        
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
-            
-            PIPELINE_LOG.info("[{}] STEP 2: DOCUMENT PARSING - Completed in {}ms", 
-                requestId, duration);
-            
-            return result;
-        } catch (Exception e) {
-            PIPELINE_LOG.error("[{}] STEP 2: DOCUMENT PARSING - Failed: {}", 
-                requestId, e.getMessage());
-            throw e;
-        }
+        // This method is disabled to prevent flooding logs during document processing
+        // Uncomment the @Around annotation to re-enable if needed for debugging
+        return joinPoint.proceed();
     }
     
     /**

@@ -3,6 +3,10 @@ package com.williamcallahan.javachat.service;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +38,16 @@ public class FileOperationsService {
      * @throws IOException If file operations fail
      */
     public String readTextFile(Path filePath) throws IOException {
-        return Files.readString(filePath, StandardCharsets.UTF_8);
+        try {
+            return Files.readString(filePath, StandardCharsets.UTF_8);
+        } catch (MalformedInputException mie) {
+            // Fallback: decode with replacement to handle non-UTF8 bytes gracefully
+            byte[] bytes = Files.readAllBytes(filePath);
+            CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE);
+            return decoder.decode(ByteBuffer.wrap(bytes)).toString();
+        }
     }
 
     /**

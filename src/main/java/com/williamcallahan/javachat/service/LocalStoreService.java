@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @Service
 public class LocalStoreService {
@@ -51,10 +53,40 @@ public class LocalStoreService {
     }
 
     private String safeName(String url) {
-        return url.replaceAll("[^a-zA-Z0-9._-]", "_");
+        String sanitized = url.replaceAll("[^a-zA-Z0-9._-]", "_");
+        // Ensure filename stays within safe limits for most filesystems
+        int max = 150; // conservative cap for base name before adding index/hash suffixes
+        if (sanitized.length() <= max) return sanitized;
+        String prefix = sanitized.substring(0, 80);
+        String suffix = sanitized.substring(sanitized.length() - 40);
+        String hash = shortSha256(url);
+        return prefix + "_" + hash + "_" + suffix;
+    }
+
+    // Expose safeName for audit tooling
+    public String toSafeName(String url) {
+        return safeName(url);
+    }
+
+    public Path getParsedDir() {
+        return parsedDir;
+    }
+
+    private String shortSha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 6; i++) { // first 6 bytes -> 12 hex chars
+                sb.append(String.format("%02x", digest[i]));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // Fallback to simple hash if SHA-256 unavailable (should not happen)
+            return Integer.toHexString(input.hashCode());
+        }
     }
 }
-
 
 
 
