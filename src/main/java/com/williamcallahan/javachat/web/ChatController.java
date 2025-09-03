@@ -72,15 +72,24 @@ public class ChatController extends BaseController {
                     buffer.append(chunk);
                     fullResponse.append(chunk);
                     
-                    // Process buffer when we hit natural break points
                     String buffered = buffer.toString();
                     
-                    // Check for natural break points: sentence ends, newlines, or list markers
-                    boolean hasBreakPoint = buffered.matches(".*[.!?]\\s*$") || 
-                                           buffered.endsWith("\n") ||
+                    // CRITICAL: Check if we're inside a code block - don't break if so!
+                    int openFences = countOccurrences(buffered, "```");
+                    boolean insideCodeBlock = (openFences % 2) == 1; // Odd count means we're inside
+                    
+                    if (insideCodeBlock) {
+                        // We're inside a code block - keep buffering until we close it
+                        return "";
+                    }
+                    
+                    // Check for natural break points: sentence ends, newlines, list markers, or code block end
+                    boolean hasBreakPoint = buffered.endsWith("```\n") || // Code block just ended
+                                           buffered.matches(".*[.!?]\\s*$") || 
+                                           buffered.endsWith("\n\n") || // Paragraph break
                                            buffered.matches(".*\\d+\\.\\s+.*") ||
                                            buffered.contains("- ") ||
-                                           buffer.length() > 200;  // Force break for long chunks
+                                           buffer.length() > 500;  // Force break for very long chunks
                     
                     if (hasBreakPoint) {
                         // Preprocess the buffered content
@@ -92,7 +101,7 @@ public class ChatController extends BaseController {
                         
                         return processed;
                     } else {
-                        // Keep buffering, don't send anything yet
+                        // Keep buffering
                         return "";
                     }
                 })
@@ -155,6 +164,16 @@ public class ChatController extends BaseController {
         return sb.toString();
     }
 
+    private int countOccurrences(String str, String substr) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = str.indexOf(substr, idx)) != -1) {
+            count++;
+            idx += substr.length();
+        }
+        return count;
+    }
+    
     @GetMapping("/health/embeddings")
     public ResponseEntity<Map<String, Object>> checkEmbeddingsHealth() {
         Map<String, Object> response = new java.util.HashMap<>();

@@ -209,10 +209,16 @@ public class MarkdownService {
             markdown = markdown.replaceAll("(?<=[:;,.\\)\\]])\\s*-\\s+(?=\\p{L})", "\n- ");
         }
         
-        // Fix code blocks without preceding line break: "text:```" -> "text:\n\n```"
-        // Match text followed by optional colon and ```
-        markdown = markdown.replaceAll("(:)```", "$1\n\n```");
-        markdown = markdown.replaceAll("([^\\n:])(```)", "$1\n\n$2");
+        // Debug: show before code-fence adjustment
+        if (markdown.contains("```")) {
+            System.out.println("[DEBUG preprocess] Before fence adjust=\n" + markdown);
+        }
+        // Fix code blocks without preceding line break: ensure a paragraph break before any fence
+        // e.g., "text:```" -> "text:\n\n```" and "text```" -> "text\n\n```"
+        markdown = markdown.replaceAll("(?<!\\n)```", "\n\n```");
+        if (markdown.contains("```")) {
+            System.out.println("[DEBUG preprocess] After fence adjust=\n" + markdown);
+        }
         
         // CRITICAL: Protect code block content from being consumed by other patterns
         // Ensure code blocks are properly delimited and content is preserved
@@ -413,8 +419,10 @@ public class MarkdownService {
     private String protectCodeBlocks(String markdown) {
         // Match code blocks and ensure they have proper structure
         StringBuilder result = new StringBuilder();
+        // FIXED: Use [\s\S]*? to match ANY content including backticks inside code blocks
+        // Also support uppercase, numbers, hyphens in language tags like client-side
         java.util.regex.Pattern codeBlockPattern = 
-            java.util.regex.Pattern.compile("```([a-z]*)\n?([^`]*?)```", 
+            java.util.regex.Pattern.compile("```([\\w-]*)\n?([\\s\\S]*?)```", 
                                            java.util.regex.Pattern.DOTALL);
         java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
         
@@ -429,20 +437,27 @@ public class MarkdownService {
             // Ensure code content is not empty and properly formatted
             if (code != null && !code.trim().isEmpty()) {
                 // Preserve the code block with proper formatting
+                // CRITICAL: Ensure paragraph break BEFORE code block if not at start
+                if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
+                    result.append("\n\n");
+                }
                 result.append("```").append(language).append("\n");
                 result.append(code);
                 if (!code.endsWith("\n")) {
                     result.append("\n");
                 }
-                result.append("```\n");
+                result.append("```\n\n"); // CRITICAL: Double newline AFTER code block for separation
                 logger.debug("Code block preserved with {} characters", code.length());
             } else {
                 // Log warning about empty code block
                 logger.warn("Empty code block detected at position {}, language: '{}'", 
                            matcher.start(), language);
+                if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
+                    result.append("\n\n");
+                }
                 result.append("```").append(language).append("\n");
                 result.append("// Code block content missing - check streaming\n");
-                result.append("```\n");
+                result.append("```\n\n"); // Double newline after
             }
             
             lastEnd = matcher.end();
@@ -516,7 +531,8 @@ public class MarkdownService {
         // If code blocks are present, process only non-code segments to preserve code
         if (markdown.contains("```") ) {
             StringBuilder out = new StringBuilder();
-            java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("```[a-zA-Z]*\n?[\\s\\S]*?```", java.util.regex.Pattern.DOTALL);
+            // FIXED: Consistent code block pattern with protectCodeBlocks method
+            java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("```[\\w-]*\n?[\\s\\S]*?```", java.util.regex.Pattern.DOTALL);
             java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
             int last = 0;
             while (matcher.find()) {
