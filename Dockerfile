@@ -57,12 +57,12 @@ RUN chown -R appuser:appgroup /app
 # Switch to non-root user
 USER appuser
 
-# Expose port (matches application.properties default)
+# Expose port (Railway will assign via PORT env var)
 EXPOSE 8085
 
-# Health check
+# Health check using PORT environment variable
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8085/actuator/health || exit 1
+    CMD curl -f http://localhost:${PORT}/actuator/health || exit 1
 
 # ================================
 # JVM OPTIMIZATION FOR <512MB RAM
@@ -75,20 +75,17 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # - UseCompressedOops: Enable compressed object pointers
 # - UseCompressedClassPointers: Enable compressed class pointers
 # ================================
-ENTRYPOINT ["sh", "-c", \
-    "java \
-    -XX:+IgnoreUnrecognizedVMOptions \
-    -Xmx256m \
-    -Xms128m \
-    -XX:+UseSerialGC \
-    -XX:MaxRAM=256m \
-    -XX:+UseCompressedOops \
-    -XX:+UseCompressedClassPointers \
-    -Djava.security.egd=file:/dev/./urandom \
-    -jar app.jar \
-    --spring.main.banner-mode=off \
-    --spring.jmx.enabled=false \
-    --server.port=8085"]
+# Use PORT environment variable (Railway assigns this)
+# Default to 8085 if not set
+ENV PORT=8085
+
+# Disable Qdrant initialization for Railway (no vector DB needed for basic functionality)
+ENV QDRANT_INIT_SCHEMA=false
+ENV APP_LOCAL_EMBEDDING_ENABLED=false
+
+# JSON array format for ENTRYPOINT (recommended by Docker)
+# Use shell form to allow PORT variable expansion
+ENTRYPOINT ["/bin/sh", "-c", "java -XX:+IgnoreUnrecognizedVMOptions -Xmx256m -Xms128m -XX:+UseSerialGC -XX:MaxRAM=256m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.security.egd=file:/dev/./urandom -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
 
 # ================================
 # IMAGE SIZE OPTIMIZATION
