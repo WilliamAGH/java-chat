@@ -1,0 +1,57 @@
+[
+  {
+    "slug": "introduction-to-java",
+    "title": "Introduction to Java",
+    "summary": "What programs are, how they run, and the structure of a simple Java program.",
+    "keywords": ["program", "source code", "compile", "run", "Hello, World"]
+  },
+  {
+    "slug": "variables-and-types",
+    "title": "Variables and Types",
+    "summary": "Primitive types, declarations, assignment, and naming conventions.",
+    "keywords": ["int", "double", "boolean", "declaration", "assignment"]
+  },
+  {
+    "slug": "conditionals",
+    "title": "Conditionals",
+    "summary": "if/else, comparison operators, and boolean logic.",
+    "keywords": ["if", "else", "comparison", "boolean", "logic"]
+  },
+  {
+    "slug": "loops",
+    "title": "Loops",
+    "summary": "while and for loops, loop variables, and termination conditions.",
+    "keywords": ["while", "for", "iteration", "loop variable"]
+  },
+  {
+    "slug": "methods",
+    "title": "Methods",
+    "summary": "Defining methods, parameters, return values, and scope.",
+    "keywords": ["method", "parameter", "return", "scope", "call"]
+  },
+  {
+    "slug": "classes-and-objects",
+    "title": "Classes and Objects",
+    "summary": "Defining classes, fields, constructors, and object interaction.",
+    "keywords": ["class", "object", "constructor", "field", "this"]
+  },
+  {
+    "slug": "arrays",
+    "title": "Arrays",
+    "summary": "Declaring arrays, indexing, iteration, and common patterns.",
+    "keywords": ["array", "index", "length", "iteration"]
+  },
+  {
+    "slug": "strings",
+    "title": "Strings",
+    "summary": "String operations, immutability, and common methods.",
+    "keywords": ["String", "substring", "charAt", "equals", "immutability"]
+  },
+  {
+    "slug": "recursion",
+    "title": "Recursion",
+    "summary": "Recursive definitions, base cases, and stack behavior.",
+    "keywords": ["recursion", "base case", "stack", "factorial"]
+  }
+]
+
