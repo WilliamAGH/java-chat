@@ -50,9 +50,25 @@ public class GuidedLearningController extends BaseController {
         return guidedService.citationsForLesson(slug);
     }
 
+    private Enrichment sanitizeEnrichment(Enrichment e) {
+        if (e == null) return null;
+        e.setHints(trimFilter(e.getHints()));
+        e.setReminders(trimFilter(e.getReminders()));
+        e.setBackground(trimFilter(e.getBackground()));
+        return e;
+    }
+    
+    private java.util.List<String> trimFilter(java.util.List<String> in) {
+        if (in == null) return java.util.List.of();
+        return in.stream()
+                .map(s -> s == null ? "" : s.trim())
+                .filter(s -> s.length() > 0)
+                .toList();
+    }
+
     @GetMapping("/enrich")
     public Enrichment enrich(@RequestParam("slug") String slug) {
-        return guidedService.enrichmentForLesson(slug);
+        return sanitizeEnrichment(guidedService.enrichmentForLesson(slug));
     }
 
     /**

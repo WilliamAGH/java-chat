@@ -80,6 +80,10 @@ public class EnrichmentService {
             if (parsed.getHints() == null) parsed.setHints(List.of());
             if (parsed.getReminders() == null) parsed.setReminders(List.of());
             if (parsed.getBackground() == null) parsed.setBackground(List.of());
+            // Sanitize: trim and drop empty items across all lists
+            parsed.setHints(trimFilter(parsed.getHints()));
+            parsed.setReminders(trimFilter(parsed.getReminders()));
+            parsed.setBackground(trimFilter(parsed.getBackground()));
             return parsed;
         } catch (JsonProcessingException ex) {
             Enrichment fallback = new Enrichment();
@@ -89,6 +93,14 @@ public class EnrichmentService {
             fallback.setBackground(List.of());
             return fallback;
         }
+    }
+
+    private List<String> trimFilter(List<String> in) {
+        if (in == null) return List.of();
+        return in.stream()
+                .map(s -> s == null ? "" : s.trim())
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     private boolean isUnauthorized(Throwable ex) {
@@ -162,5 +174,4 @@ public class EnrichmentService {
         return s;
     }
 }
-
 

@@ -29,10 +29,31 @@ public class EnrichmentController {
     public Enrichment enrich(@RequestParam("q") String q) {
         var docs = retrievalService.retrieve(q);
         List<String> snippets = docs.stream().map(d -> d.getText()).limit(6).collect(Collectors.toList());
-        return enrichmentService.enrich(q, jdkVersion, snippets);
+        return sanitize(enrichmentService.enrich(q, jdkVersion, snippets));
+    }
+
+    // New alias for consistent naming with chat routes
+    @GetMapping("/api/chat/enrich")
+    public Enrichment chatEnrich(@RequestParam("q") String q) {
+        return enrich(q);
+    }
+
+    private Enrichment sanitize(Enrichment e) {
+        if (e == null) return null;
+        e.setHints(trimFilter(e.getHints()));
+        e.setReminders(trimFilter(e.getReminders()));
+        e.setBackground(trimFilter(e.getBackground()));
+        return e;
+    }
+
+    private List<String> trimFilter(List<String> in) {
+        if (in == null) return List.of();
+        return in.stream()
+                .map(s -> s == null ? "" : s.trim())
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 }
-
 
 
 
