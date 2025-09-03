@@ -57,8 +57,8 @@ public class MarkdownService {
             .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true) // Clean code blocks
             
             // Renderer options for clean output
-            .set(HtmlRenderer.ESCAPE_HTML, true) // XSS protection
-            .set(HtmlRenderer.SUPPRESS_HTML, true) // Don't allow raw HTML
+            .set(HtmlRenderer.ESCAPE_HTML, true) // Escape raw HTML input for XSS protection
+            .set(HtmlRenderer.SUPPRESS_HTML, false) // Allow markdown-generated HTML output
             .set(HtmlRenderer.SOFT_BREAK, "<br />\n") // Line breaks as <br>
             .set(HtmlRenderer.HARD_BREAK, "<br />\n") // Consistent line breaks
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-") // For Prism.js
@@ -108,6 +108,9 @@ public class MarkdownService {
         }
         
         try {
+            // Pre-process to fix common markdown formatting issues
+            markdown = preprocessMarkdown(markdown);
+            
             // Pre-process custom enrichments (preserve them)
             String preprocessed = preserveEnrichments(markdown);
             
@@ -141,6 +144,8 @@ public class MarkdownService {
         }
         
         try {
+            // Pre-process to fix common markdown formatting issues
+            markdown = preprocessMarkdown(markdown);
             String preprocessed = preserveEnrichments(markdown);
             Node document = parser.parse(preprocessed);
             String html = renderer.render(document);
@@ -154,24 +159,144 @@ public class MarkdownService {
     }
     
     /**
+     * Pre-processes markdown to fix common formatting issues.
+     * Ensures lists and code blocks are properly separated from preceding text.
+     */
+    private String preprocessMarkdown(String markdown) {
+        // CRITICAL: Ensure single space after sentence-ending punctuation
+        // Fixes: "operation.For example" -> "operation. For example"
+        // Also handles quotes: "operator."This -> "operator." This
+        markdown = markdown.replaceAll("([.!?])([\"'])?([A-Z])", "$1$2 $3");
+        
+        // Fix inline numbered lists only when preceded by colon or at line start
+        // Use negative lookbehind to avoid matching decimal numbers like "76.12"
+        markdown = markdown.replaceAll("(?<!\\d)([^\\n]):?\\s?(\\d+\\.\\s+\\w)", "$1\n\n$2");
+        
+        // Fix inline bullet lists: "text:- " or "text: - " -> "text:\n\n- "
+        markdown = markdown.replaceAll("([^\\n]):?-\\s+", "$1\n\n- ");
+        markdown = markdown.replaceAll("([^\\n]):\\*\\s+", "$1\n\n* ");
+        markdown = markdown.replaceAll("([^\\n]):\\+\\s+", "$1\n\n+ ");
+        
+        // Fix code blocks without preceding line break: "text:```" -> "text:\n\n```"
+        markdown = markdown.replaceAll("([^\\n]):?\\s?```", "$1\n\n```");
+        
+        // Ensure code blocks have trailing newline for proper closure
+        markdown = markdown.replaceAll("```([^`]+)```([^\\n])", "```$1```\n$2");
+        
+        // Apply smart paragraph breaking for better readability
+        markdown = applySmartParagraphBreaks(markdown);
+        
+        // Clean up: Never allow multiple consecutive spaces
+        markdown = markdown.replaceAll("\\s{2,}(?!\\n)", " ");
+        
+        // Never allow leading spaces at start of lines (except in code blocks)
+        markdown = markdown.replaceAll("(?m)^\\s+(?!```)", "");
+        
+        return markdown;
+    }
+    
+    /**
+     * Intelligently breaks long text into paragraphs.
+     * Avoids breaking in inappropriate places like abbreviations or code.
+     */
+    private String applySmartParagraphBreaks(String markdown) {
+        // Don't process if already has paragraph breaks or is code
+        if (markdown.contains("\n\n") || markdown.contains("```")) {
+            return markdown;
+        }
+        
+        // Use regex to split on sentence boundaries while preserving the punctuation
+        String[] parts = markdown.split("(?<=[.!?]\\s)(?=[A-Z])");
+        if (parts.length < 3) {
+            return markdown; // Too short to break
+        }
+        
+        StringBuilder result = new StringBuilder();
+        int sentenceCount = 0;
+        int charCount = 0;
+        
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            result.append(part);
+            sentenceCount++;
+            charCount += part.length();
+            
+            // Determine if we should add a paragraph break
+            boolean shouldBreak = false;
+            
+            // Check if we have enough content for a paragraph
+            if (sentenceCount >= 3 && charCount > 250) {
+                // Don't break if next part starts with lowercase (continuation)
+                if (i < parts.length - 1) {
+                    String nextPart = parts[i + 1];
+                    if (!nextPart.isEmpty() && Character.isUpperCase(nextPart.charAt(0))) {
+                        // Check for common abbreviations that shouldn't end paragraphs
+                        if (!part.endsWith("e.g. ") && !part.endsWith("i.e. ") && 
+                            !part.endsWith("etc. ") && !part.endsWith("Dr. ") &&
+                            !part.endsWith("Mr. ") && !part.endsWith("Mrs. ") &&
+                            !part.endsWith("Ms. ")) {
+                            shouldBreak = true;
+                        }
+                    }
+                }
+            }
+            
+            if (shouldBreak) {
+                result.append("\n\n");
+                sentenceCount = 0;
+                charCount = 0;
+            } else if (i < parts.length - 1) {
+                // Ensure space between parts if not breaking
+                if (!result.toString().endsWith(" ")) {
+                    result.append(" ");
+                }
+            }
+        }
+        
+        return result.toString().trim();
+    }
+    
+    /**
      * Post-processes HTML for optimal spacing and formatting.
      */
     private String postProcessHtml(String html) {
-        // Remove excessive blank lines (more than 2 consecutive)
-        html = html.replaceAll("(\n\\s*){3,}", "\n\n");
+        // CRITICAL: Ensure space between sentences in HTML content
+        // Fixes cases where tags might have removed spaces
+        html = html.replaceAll("([.!?])(<[^>]+>)?([A-Z])", "$1$2 $3");
         
-        // Clean up paragraph spacing - ensure single spacing
-        html = html.replaceAll("</p>\\s*<p>", "</p>\n<p>");
+        // Remove any leading spaces from paragraph starts
+        html = html.replaceAll("<p>\\s+", "<p>");
+        
+        // IMPORTANT: Preserve line breaks - only collapse excessive ones (more than 3)
+        // This maintains intentional paragraph breaks
+        html = html.replaceAll("(\n\\s*){4,}", "\n\n\n");
+        
+        // Ensure proper paragraph spacing (maintain separation)
+        html = html.replaceAll("</p>\\s*<p>", "</p>\n\n<p>");
         
         // Clean up list spacing
         html = html.replaceAll("</li>\\s*<li>", "</li>\n<li>");
         
-        // Remove empty paragraphs
+        // Remove only truly empty paragraphs (no content at all)
         html = html.replaceAll("<p>\\s*</p>", "");
         
-        // Ensure code blocks have proper spacing
-        html = html.replaceAll("</pre>\\s*<p>", "</pre>\n<p>");
-        html = html.replaceAll("</p>\\s*<pre>", "</p>\n<pre>");
+        // Ensure proper spacing around code blocks with ALL elements
+        html = html.replaceAll("</pre>\\s*<p>", "</pre>\n\n<p>");
+        html = html.replaceAll("</p>\\s*<pre>", "</p>\n\n<pre>");
+        html = html.replaceAll("</ol>\\s*<pre>", "</ol>\n\n<pre>");
+        html = html.replaceAll("</ul>\\s*<pre>", "</ul>\n\n<pre>");
+        html = html.replaceAll("</pre>\\s*<ol>", "</pre>\n\n<ol>");
+        html = html.replaceAll("</pre>\\s*<ul>", "</pre>\n\n<ul>");
+        
+        // Ensure proper spacing between paragraphs and lists
+        html = html.replaceAll("</p>\\s*<ol>", "</p>\n\n<ol>");
+        html = html.replaceAll("</p>\\s*<ul>", "</p>\n\n<ul>");
+        html = html.replaceAll("</ol>\\s*<p>", "</ol>\n\n<p>");
+        html = html.replaceAll("</ul>\\s*<p>", "</ul>\n\n<p>");
+        
+        // Ensure proper spacing around enrichment placeholders (now text placeholders)
+        html = html.replaceAll("(ZZENRICHZ\\w+ZSTARTZZZ)", "\n$1");
+        html = html.replaceAll("(ZZENRICHZ\\w+ZENDZZZ)", "$1\n");
         
         // Clean up table formatting
         html = html.replaceAll("</tr>\\s*<tr>", "</tr>\n<tr>");
@@ -185,40 +310,32 @@ public class MarkdownService {
     
     /**
      * Preserves custom enrichment markers during markdown processing.
+     * Uses unique placeholders that won't be affected by markdown parsing or HTML filtering.
      */
     private String preserveEnrichments(String markdown) {
-        // Replace enrichment markers with placeholders
+        // Replace enrichment markers with unique placeholders that won't be processed by markdown
+        // Using a format that avoids markdown special characters (no underscores, asterisks, etc.)
         return ENRICHMENT_PATTERN.matcher(markdown).replaceAll(
-            "__ENRICHMENT_$1_START__$2__ENRICHMENT_$1_END__"
+            "ZZENRICHZ$1ZSTARTZZZ$2ZZENRICHZ$1ZENDZZZ"
         );
     }
     
     /**
      * Restores custom enrichment markers after markdown processing.
+     * Works with unique text placeholders that survive HTML processing.
      */
     private String restoreEnrichments(String html) {
-        // First, handle cases where the whole thing got wrapped in <strong> tags
-        // Like: <strong>ENRICHMENT_hint_START__text__ENRICHMENT_hint_END</strong>
+        // Restore from unique text placeholders
+        // Pattern: ZZENRICHZ(type)ZSTARTZZZ(content)ZZENRICHZ(type)ZENDZZZ
         html = html.replaceAll(
-            "<strong>ENRICHMENT_(\\w+)_START__([\\s\\S]*?)__ENRICHMENT_\\1_END</strong>",
-            "{{$1:$2}}"
-        );
-        
-        // Handle partially wrapped cases with missing underscores
-        // Like: __ENRICHMENT_example_START__text<strong>ENRICHMENT_example_END</strong>
-        html = html.replaceAll(
-            "__ENRICHMENT_(\\w+)_START__([\\s\\S]*?)<strong>ENRICHMENT_\\1_END</strong>",
-            "{{$1:$2}}"
-        );
-        
-        // Handle any remaining unwrapped cases
-        html = html.replaceAll(
-            "__ENRICHMENT_(\\w+)_START__([\\s\\S]*?)__ENRICHMENT_\\1_END__",
+            "ZZENRICHZ(\\w+)ZSTARTZZZ([\\s\\S]*?)ZZENRICHZ\\1ZENDZZZ",
             "{{$1:$2}}"
         );
         
         // Clean up any HTML entities that might have been escaped in the content
         html = html.replace("&quot;", "\"");
+        html = html.replace("&apos;", "'");
+        html = html.replace("&#39;", "'");
         
         return html;
     }

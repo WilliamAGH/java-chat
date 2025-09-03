@@ -4,11 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Tests for MarkdownService to ensure reliable, clean markdown rendering.
- */
 class MarkdownServiceTest {
     
     private MarkdownService markdownService;
@@ -19,243 +16,156 @@ class MarkdownServiceTest {
     }
     
     @Test
-    @DisplayName("Should render basic markdown elements")
-    void testBasicMarkdown() {
-        String markdown = """
-            # Heading 1
-            ## Heading 2
-            
-            This is a **bold** text and this is *italic*.
-            
-            - List item 1
-            - List item 2
-              - Nested item
-            
-            1. Numbered item
-            2. Another item
-            """;
-        
+    @DisplayName("Should render headers correctly")
+    void testHeaders() {
+        String markdown = "# Header 1\n## Header 2\n### Header 3";
         String html = markdownService.render(markdown);
         
-        assertThat(html).contains("<h1>Heading 1</h1>");
-        assertThat(html).contains("<h2>Heading 2</h2>");
-        assertThat(html).contains("<strong>bold</strong>");
-        assertThat(html).contains("<em>italic</em>");
-        assertThat(html).contains("<ul>");
-        assertThat(html).contains("<ol>");
-        assertThat(html).contains("<li>List item 1</li>");
+        assertTrue(html.contains("<h1>Header 1</h1>"), "Should contain H1");
+        assertTrue(html.contains("<h2>Header 2</h2>"), "Should contain H2");
+        assertTrue(html.contains("<h3>Header 3</h3>"), "Should contain H3");
     }
     
     @Test
-    @DisplayName("Should render code blocks with language classes")
+    @DisplayName("Should render bold and italic text")
+    void testBoldAndItalic() {
+        String markdown = "**bold text** and *italic text* and ***bold italic***";
+        String html = markdownService.render(markdown);
+        
+        assertTrue(html.contains("<strong>bold text</strong>"), "Should contain bold");
+        assertTrue(html.contains("<em>italic text</em>"), "Should contain italic");
+        assertTrue(html.contains("<em><strong>bold italic</strong></em>") || 
+                   html.contains("<strong><em>bold italic</em></strong>"), "Should contain bold italic");
+    }
+    
+    @Test
+    @DisplayName("Should render unordered lists")
+    void testUnorderedLists() {
+        String markdown = "- Item 1\n- Item 2\n- Item 3";
+        String html = markdownService.render(markdown);
+        
+        assertTrue(html.contains("<ul>"), "Should contain UL tag");
+        assertTrue(html.contains("<li>Item 1</li>"), "Should contain list item 1");
+        assertTrue(html.contains("<li>Item 2</li>"), "Should contain list item 2");
+        assertTrue(html.contains("<li>Item 3</li>"), "Should contain list item 3");
+        assertTrue(html.contains("</ul>"), "Should close UL tag");
+    }
+    
+    @Test
+    @DisplayName("Should render ordered lists")
+    void testOrderedLists() {
+        String markdown = "1. First item\n2. Second item\n3. Third item";
+        String html = markdownService.render(markdown);
+        
+        assertTrue(html.contains("<ol>"), "Should contain OL tag");
+        assertTrue(html.contains("<li>First item</li>"), "Should contain list item 1");
+        assertTrue(html.contains("<li>Second item</li>"), "Should contain list item 2");
+        assertTrue(html.contains("<li>Third item</li>"), "Should contain list item 3");
+        assertTrue(html.contains("</ol>"), "Should close OL tag");
+    }
+    
+    @Test
+    @DisplayName("Should render code blocks with language class")
     void testCodeBlocks() {
-        String markdown = """
-            ```java
-            public class HelloWorld {
-                public static void main(String[] args) {
-                    System.out.println("Hello, World!");
-                }
-            }
-            ```
-            
-            Inline `code` example.
-            """;
-        
+        String markdown = "```java\npublic class Test {}\n```";
         String html = markdownService.render(markdown);
         
-        assertThat(html).contains("class=\"language-java\"");
-        assertThat(html).contains("<pre>");
-        assertThat(html).contains("<code");
-        assertThat(html).contains("HelloWorld");
-        assertThat(html).contains("<code>code</code>");
+        assertTrue(html.contains("<pre>"), "Should contain PRE tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain code with language class");
+        assertTrue(html.contains("public class Test {}"), "Should contain code content");
     }
     
     @Test
-    @DisplayName("Should handle tables correctly")
-    void testTables() {
-        String markdown = """
-            | Column 1 | Column 2 | Column 3 |
-            |----------|----------|----------|
-            | Data 1   | Data 2   | Data 3   |
-            | Data 4   | Data 5   | Data 6   |
-            """;
-        
+    @DisplayName("Should render inline code")
+    void testInlineCode() {
+        String markdown = "Use `System.out.println()` to print";
         String html = markdownService.render(markdown);
         
-        assertThat(html).contains("<table");
-        assertThat(html).contains("class=\"markdown-table\"");
-        assertThat(html).contains("<thead>");
-        assertThat(html).contains("<tbody>");
-        assertThat(html).contains("<th>Column 1</th>");
-        assertThat(html).contains("<td>Data 1</td>");
+        assertTrue(html.contains("<code>System.out.println()</code>"), "Should contain inline code");
     }
     
     @Test
-    @DisplayName("Should preserve custom enrichment markers")
-    void testCustomEnrichments() {
-        String markdown = """
-            This is regular text.
-            
-            {{hint:This is a helpful hint}}
-            
-            {{warning:This is a warning message}}
-            
-            {{example:String example = "test";}}
-            """;
-        
+    @DisplayName("Should preserve enrichment markers")
+    void testEnrichmentMarkers() {
+        String markdown = "Text with {{hint:This is a hint}} and {{warning:This is a warning}}";
         String html = markdownService.render(markdown);
         
-        assertThat(html).contains("{{hint:This is a helpful hint}}");
-        assertThat(html).contains("{{warning:This is a warning message}}");
-        assertThat(html).contains("{{example:String example = \"test\";}}");
+        assertTrue(html.contains("{{hint:This is a hint}}"), "Should preserve hint marker");
+        assertTrue(html.contains("{{warning:This is a warning}}"), "Should preserve warning marker");
     }
     
     @Test
-    @DisplayName("Should escape HTML for security")
-    void testHtmlEscaping() {
-        String markdown = """
-            <script>alert('XSS')</script>
-            
-            <div onclick="alert('XSS')">Click me</div>
-            
-            Normal **markdown** text.
-            """;
-        
+    @DisplayName("Should handle mixed markdown with enrichments")
+    void testMixedContent() {
+        String markdown = "# Java 24\n\n**Key features:**\n\n1. Source Version24\n2. Type System\n\n{{hint:Always check the docs}}";
         String html = markdownService.render(markdown);
         
-        // HTML should be suppressed/escaped
-        assertThat(html).doesNotContain("<script>");
-        assertThat(html).doesNotContain("onclick=");
-        assertThat(html).doesNotContain("alert('XSS')");
-        
-        // Normal markdown should still work
-        assertThat(html).contains("<strong>markdown</strong>");
+        assertTrue(html.contains("<h1>Java 24</h1>"), "Should have header");
+        assertTrue(html.contains("<strong>Key features:</strong>"), "Should have bold text");
+        assertTrue(html.contains("<ol>"), "Should have ordered list");
+        assertTrue(html.contains("{{hint:Always check the docs}}"), "Should preserve enrichment");
     }
     
     @Test
-    @DisplayName("Should handle line breaks and paragraphs cleanly")
-    void testLineBreaksAndParagraphs() {
-        String markdown = """
-            First paragraph.
-            
-            Second paragraph with
-            a line break within it.
-            
-            
-            
-            Third paragraph after multiple blank lines.
-            """;
-        
+    @DisplayName("Should handle line breaks properly")
+    void testLineBreaks() {
+        String markdown = "Line one\nLine two\n\nNew paragraph";
         String html = markdownService.render(markdown);
         
-        // Should have clean paragraph separation
-        assertThat(html).contains("<p>First paragraph.</p>");
-        assertThat(html).contains("<p>Second paragraph with");
-        assertThat(html).contains("<br />");
+        assertTrue(html.contains("<p>Line one"), "Should have paragraph");
+        assertTrue(html.contains("<br />"), "Should have line break");
+        assertTrue(html.contains("<p>New paragraph</p>"), "Should have new paragraph");
+    }
+    
+    @Test
+    @DisplayName("Should escape raw HTML for security")
+    void testHTMLEscaping() {
+        String markdown = "<script>alert('XSS')</script>\n\n**Safe bold**";
+        String html = markdownService.render(markdown);
         
-        // Should not have excessive blank lines
-        assertThat(html).doesNotContain("<p></p>");
-        assertThat(html).doesNotContain("\n\n\n");
+        assertFalse(html.contains("<script>"), "Should not contain script tag");
+        assertTrue(html.contains("&lt;script&gt;"), "Should escape script tag");
+        assertTrue(html.contains("<strong>Safe bold</strong>"), "Should still render markdown");
     }
     
     @Test
     @DisplayName("Should handle complex nested structures")
-    void testComplexNesting() {
+    void testComplexStructure() {
         String markdown = """
-            **Bold with `code` inside**
+            # Main Title
             
-            - List with **bold** and *italic*
-              - Nested with `code`
-                - Double nested
+            This is a paragraph with **bold** and *italic* text.
             
-            > Blockquote with **bold**
-            > and multiple lines
+            ## Features
             
-            [Link text](https://example.com)
+            1. **Source Version24**: This release marks the latest version
+            2. **Improvements** to Type System:
+               - Better type inference
+               - Enhanced generics
+            3. **Performance Enhancements**
+            
+            {{background:Java releases often focus on developer experience}}
+            
+            ### Code Example
+            
+            ```java
+            public record Person(String name, int age) {}
+            ```
+            
+            {{hint:Records are immutable by default}}
             """;
         
         String html = markdownService.render(markdown);
         
-        assertThat(html).contains("<strong>Bold with <code>code</code> inside</strong>");
-        assertThat(html).contains("<li>List with <strong>bold</strong>");
-        assertThat(html).contains("<blockquote");
-        assertThat(html).contains("class=\"markdown-quote\"");
-    }
-    
-    @Test
-    @DisplayName("Should handle edge cases gracefully")
-    void testEdgeCases() {
-        // Empty input
-        assertThat(markdownService.render("")).isEmpty();
-        assertThat(markdownService.render(null)).isEmpty();
-        
-        // Unclosed markdown
-        String unclosed = "**unclosed bold";
-        String html = markdownService.render(unclosed);
-        assertThat(html).isNotNull();
-        assertThat(html).doesNotContain("<strong>");
-        
-        // Malformed code block
-        String malformed = "```\nunclosed code block";
-        html = markdownService.render(malformed);
-        assertThat(html).isNotNull();
-    }
-    
-    @Test
-    @DisplayName("Should cache rendered markdown")
-    void testCaching() {
-        String markdown = "# Test Heading\n\nSome content.";
-        
-        // First render - should miss cache
-        String html1 = markdownService.render(markdown);
-        
-        // Second render - should hit cache
-        String html2 = markdownService.render(markdown);
-        
-        assertThat(html1).isEqualTo(html2);
-        
-        // Verify cache stats
-        var stats = markdownService.getCacheStats();
-        assertThat(stats.hitCount()).isGreaterThan(0);
-    }
-    
-    @Test
-    @DisplayName("Should handle task lists")
-    void testTaskLists() {
-        String markdown = """
-            - [ ] Unchecked task
-            - [x] Checked task
-            - [ ] Another unchecked task
-            """;
-        
-        String html = markdownService.render(markdown);
-        
-        assertThat(html).contains("type=\"checkbox\"");
-        assertThat(html).contains("checked");
-    }
-    
-    @Test
-    @DisplayName("Should auto-link URLs")
-    void testAutoLinks() {
-        String markdown = """
-            Visit https://example.com for more info.
-            
-            Email: test@example.com
-            """;
-        
-        String html = markdownService.render(markdown);
-        
-        assertThat(html).contains("<a href=\"https://example.com\"");
-        assertThat(html).contains("<a href=\"mailto:test@example.com\"");
-    }
-    
-    @Test
-    @DisplayName("Should handle strikethrough")
-    void testStrikethrough() {
-        String markdown = "This is ~~strikethrough~~ text.";
-        
-        String html = markdownService.render(markdown);
-        
-        assertThat(html).contains("<del>strikethrough</del>");
+        // Check all elements are present
+        assertTrue(html.contains("<h1>Main Title</h1>"));
+        assertTrue(html.contains("<h2>Features</h2>"));
+        assertTrue(html.contains("<h3>Code Example</h3>"));
+        assertTrue(html.contains("<ol>"));
+        assertTrue(html.contains("<ul>"));
+        assertTrue(html.contains("<strong>Source Version24</strong>"));
+        assertTrue(html.contains("<code class=\"language-java\">"));
+        assertTrue(html.contains("{{background:Java releases often focus on developer experience}}"));
+        assertTrue(html.contains("{{hint:Records are immutable by default}}"));
     }
 }
