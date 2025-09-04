@@ -151,12 +151,13 @@ public class ChatService {
     }
 
     private Flux<String> openAiOnce(String prompt) {
-        // Try primary inference endpoint first
+        // For fallback, prioritize OpenAI API (different rate limits than GitHub Models)
         if (openaiApiKey != null && !openaiApiKey.isBlank()) {
             logger.debug("Using OpenAI API for fallback");
             return tryOpenAiCompat(prompt, "https://api.openai.com", openaiApiKey);
         } else if (githubToken != null && !githubToken.isBlank()) {
-            logger.debug("Using GitHub Models for fallback");
+            logger.debug("Using GitHub Models for fallback (same rate limits apply)");
+            logger.warn("Fallback to GitHub Models may still hit rate limits - consider setting OPENAI_API_KEY");
             return tryOpenAiCompat(prompt, "https://models.github.ai/inference", githubToken);
         }
         // If no API keys available, return error
