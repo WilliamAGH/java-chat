@@ -188,7 +188,8 @@ public class MarkdownService {
         String protectedMd = protectCodeBlocks(markdown);
         String preserved = preserveInlineCode(protectedMd);
         preserved = fixInlineLists(preserved);
-        preserved = normalizeInlineOrderedLists(preserved);
+        preserved = normalizeInlineAndBulletLists(preserved);
+        preserved = mergeMarkerOnlyLines(preserved);
 
         if (!hasListMarkers(preserved)) {
             preserved = applySmartParagraphBreaksImproved(preserved);
@@ -355,7 +356,7 @@ public class MarkdownService {
         
         // Numbered lists after colon
         if (markdown.matches("(?s).*:\\s*\\d+[.)]\\s+.*")) {
-            markdown = markdown.replaceAll("(:\\s*)(\\d+[.)]\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(:\\s*)(\\d+[.)]\\s+)", "$1\n$2");
             // Break subsequent numbers
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d+[.)]\\s+)", "\n$2");
             logger.debug("Fixed numbered list after colon");
@@ -363,14 +364,14 @@ public class MarkdownService {
         
         // Roman numerals after colon (lowercase)
         if (markdown.matches("(?s).*:\\s*(?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+.*")) {
-            markdown = markdown.replaceAll("(:\\s*)((?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(:\\s*)((?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+)", "$1\n$2");
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)((?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\\s+)", "\n$2");
             logger.debug("Fixed roman numeral list after colon");
         }
         
         // Letters after colon  
         if (markdown.matches("(?s).*:\\s*[a-zA-Z][.)]\\s+.*")) {
-            markdown = markdown.replaceAll("(:\\s*)([a-zA-Z][.)]\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(:\\s*)([a-zA-Z][.)]\\s+)", "$1\n$2");
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)([a-zA-Z][.)]\\s+)", "\n$2");
             logger.debug("Fixed letter list after colon");
         }
@@ -378,7 +379,7 @@ public class MarkdownService {
         // Bullet lists after colon (including special characters)
         String bullets = "[-*+•→▸◆□▪]";
         if (markdown.matches("(?s).*:\\s*" + bullets + "\\s+.*")) {
-            markdown = markdown.replaceAll("(:\\s*)(" + bullets + "\\s+)", "$1\n\n$2");
+            markdown = markdown.replaceAll("(:\\s*)(" + bullets + "\\s+)", "$1\n$2");
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)(" + bullets + "\\s+)", "\n$2");
             logger.debug("Fixed bullet list after colon");
         }
@@ -388,7 +389,7 @@ public class MarkdownService {
         if (markdown.matches("(?s).*\\b(are|include|includes|such as|follows?)\\s+\\d+[.)]\\s+.*\\d+[.)]\\s+.*")) {
             markdown = markdown.replaceAll(
                 "\\b(are|include|includes|such as|follows?)\\s+(\\d+[.)]\\s+)",
-                "$1\n\n$2"
+                "$1\n$2"
             );
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)(\\d+[.)]\\s+)", "\n$2");
             logger.debug("Fixed inline numbered list with intro phrase");
@@ -412,6 +413,80 @@ public class MarkdownService {
         );
         
         return markdown;
+    }
+
+    /**
+     * Normalize inline numeric/lettered/bullet markers in prose into proper line starts.
+     * Parser-style scan; operates outside code blocks (blocks are protected earlier).
+     */
+    private String normalizeInlineAndBulletLists(String text) {
+        if (text == null || text.isEmpty()) return text;
+        char[] chars = text.toCharArray();
+        java.util.List<Integer> positions = new java.util.ArrayList<>();
+        for (int i = 0; i < chars.length; i++) {
+            char c = chars[i];
+            // bullets
+            if ((c == '-' || c == '*' || c == '+')) {
+                char prev = (i > 0) ? chars[i - 1] : '\n';
+                char next = (i + 1 < chars.length) ? chars[i + 1] : '\n';
+                boolean atStart = i == 0 || prev == '\n';
+                if (!atStart && Character.isWhitespace(prev) && Character.isWhitespace(next)) positions.add(i);
+                continue;
+            }
+            // numbers
+            if (Character.isDigit(c)) {
+                int start = i;
+                int j = i + 1;
+                while (j < chars.length && Character.isDigit(chars[j])) j++;
+                if (j < chars.length && (chars[j] == '.' || chars[j] == ')')) {
+                    char prev = (start > 0) ? chars[start - 1] : '\n';
+                    char next = (j + 1 < chars.length) ? chars[j + 1] : '\n';
+                    boolean atStart = start == 0 || prev == '\n';
+                    if (!atStart && (Character.isWhitespace(prev) || prev == '(' || prev == '[') && (Character.isWhitespace(next) || Character.isLetter(next))) positions.add(start);
+                    i = j; // advance
+                }
+                continue;
+            }
+            // letters with . or )
+            if (Character.isLetter(c) && i + 1 < chars.length && (chars[i + 1] == '.' || chars[i + 1] == ')')) {
+                char prev = (i > 0) ? chars[i - 1] : '\n';
+                char next = (i + 2 < chars.length) ? chars[i + 2] : '\n';
+                boolean atStart = i == 0 || prev == '\n';
+                if (!atStart && (Character.isWhitespace(prev) || prev == '(' || prev == '[') && (Character.isWhitespace(next) || Character.isLetter(next))) positions.add(i);
+                i++; // skip punctuation
+            }
+        }
+        if (positions.isEmpty()) return text;
+        StringBuilder out = new StringBuilder(text.length() + positions.size());
+        int last = 0;
+        for (int pos : positions) {
+            boolean atStart = pos == 0 || text.charAt(pos - 1) == '\n';
+            if (!atStart) {
+                out.append(text, last, pos).append('\n');
+                last = pos;
+            }
+        }
+        out.append(text.substring(last));
+        return out.toString();
+    }
+
+    /** Merge marker-only lines with the subsequent content line. */
+    private String mergeMarkerOnlyLines(String text) {
+        if (text == null || text.isEmpty()) return text;
+        String[] lines = text.split("\n", -1);
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < lines.length; i++) {
+            String ln = lines[i];
+            String trimmed = ln.trim();
+            if (trimmed.matches("^(?:\\d+[\\.)]|[A-Za-z][\\.)]|[-*+])\\s*$") && i + 1 < lines.length && !lines[i + 1].trim().isEmpty()) {
+                out.append(trimmed).append(' ').append(lines[i + 1].trim()).append('\n');
+                i++;
+            } else {
+                out.append(ln);
+                if (i < lines.length - 1) out.append('\n');
+            }
+        }
+        return out.toString();
     }
 
     /**
@@ -621,55 +696,6 @@ public class MarkdownService {
         String processed = result.toString().trim();
         logger.debug("Paragraph breaking: added {} breaks", processed.split("\n\n").length - 1);
         return processed;
-    }
-
-    /**
-     * Normalize inline ordered lists inside paragraphs by inserting a newline before
-     * numeric list markers (e.g., "1.text", "2. something").
-     * Conservative, idempotent: only triggers when two or more markers are detected.
-     */
-    private String normalizeInlineOrderedLists(String text) {
-        if (text == null || text.isEmpty()) return text;
-        // Fast path: if we already have list items at line starts, skip
-        if (java.util.regex.Pattern.compile("(?m)^\\s*\\d+\\.\\s").matcher(text).find()) return text;
-
-        char[] chars = text.toCharArray();
-        java.util.List<Integer> positions = new java.util.ArrayList<>();
-        int i = 0;
-        while (i < chars.length) {
-            int j = i;
-            int numStart = -1;
-            // collect digits
-            while (j < chars.length && Character.isDigit(chars[j])) {
-                if (numStart == -1) numStart = j;
-                j++;
-            }
-            if (numStart != -1 && j < chars.length && chars[j] == '.') {
-                char prev = (numStart > 0) ? chars[numStart - 1] : '\n';
-                char next = (j + 1 < chars.length) ? chars[j + 1] : '\n';
-                boolean prevOk = Character.isWhitespace(prev) || prev == '(' || prev == '[';
-                boolean nextOk = Character.isWhitespace(next) || Character.isLetter(next);
-                boolean notDecimal = !(Character.isDigit(next));
-                if (prevOk && nextOk && notDecimal) {
-                    positions.add(numStart);
-                }
-                i = j + 1;
-            } else {
-                i = (numStart != -1 ? numStart + 1 : j + 1);
-            }
-        }
-        if (positions.size() < 2) return text;
-        StringBuilder out = new StringBuilder(text.length() + positions.size());
-        int last = 0;
-        for (int pos : positions) {
-            boolean atStart = pos == 0 || text.charAt(pos - 1) == '\n';
-            if (!atStart) {
-                out.append(text, last, pos).append('\n');
-                last = pos;
-            }
-        }
-        out.append(text.substring(last));
-        return out.toString();
     }
 
 

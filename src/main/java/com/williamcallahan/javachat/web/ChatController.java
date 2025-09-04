@@ -96,7 +96,7 @@ public class ChatController extends BaseController {
                     boolean hasBreakPoint = buffered.endsWith("```\n") || // Code block just ended
                                            buffered.matches(".*[.!?]\\s*$") || 
                                            buffered.endsWith("\n\n") || // Paragraph break
-                                           buffered.matches(".*\\d+\\.\\s+.*") ||
+                                           buffered.matches(".*\\d+\\.\\s+\\S.*") || // list marker followed by visible content
                                            buffered.contains("- ") ||
                                            buffer.length() > 500;  // Force break for very long chunks
                     
@@ -226,5 +226,4 @@ public class ChatController extends BaseController {
         return ResponseEntity.ok(response);
     }
 }
-
 

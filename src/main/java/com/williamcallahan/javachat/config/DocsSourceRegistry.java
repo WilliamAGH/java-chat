@@ -42,6 +42,12 @@ public final class DocsSourceRegistry {
 
     public static final String JAVA24_API_BASE = propOrEnv("JAVA24_API_BASE", DEFAULT_JAVA24);
     public static final String JAVA25_EA_API_BASE = propOrEnv("JAVA25_EA_API_BASE", DEFAULT_JAVA25_EA);
+    
+    // Spring ecosystem base URLs
+    public static final String SPRING_BOOT_API_BASE = propOrEnv("SPRING_BOOT_API_BASE", "https://docs.spring.io/spring-boot/docs/current/api/");
+    public static final String SPRING_FRAMEWORK_API_BASE = propOrEnv("SPRING_FRAMEWORK_API_BASE", "https://docs.spring.io/spring-framework/docs/current/javadoc-api/");
+    public static final String SPRING_AI_API_BASE = propOrEnv("SPRING_AI_API_BASE", "https://docs.spring.io/spring-ai/reference/1.0/api/");
+    
     public static final String BOOKS_LOCAL_PREFIX = "/data/docs/books/";
     public static final String PUBLIC_PDFS_BASE = "/pdfs/";
 
@@ -66,6 +72,18 @@ public final class DocsSourceRegistry {
         LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/java/java25-ea-complete/", JAVA25_EA_API_BASE);
         // In case a GA mirror is stored under this name locally before GA, still point to EA docs
         LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/java/java25-complete/", JAVA25_EA_API_BASE);
+        
+        // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot/", "https://docs.spring.io/spring-boot/docs/current/");
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot-complete/", "https://docs.spring.io/spring-boot/docs/current/");
+        
+        // Spring Framework API documentation - map to base URL without /javadoc-api/ since local structure includes it
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework/", "https://docs.spring.io/spring-framework/docs/current/");
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework-complete/", "https://docs.spring.io/spring-framework/docs/current/");
+        
+        // Spring AI API documentation
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-ai/", SPRING_AI_API_BASE);
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-ai-complete/", SPRING_AI_API_BASE);
     }
 
     /**

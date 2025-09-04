@@ -139,11 +139,10 @@
                 const response = await fetch('/api/chat/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sessionId: 'web', latest: q }) });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
-                loadingDiv.remove();
+                // Keep loading animation until first content chunk arrives
                 const contentWrapper = document.createElement('div');
                 contentWrapper.className = 'streaming-text';
-                assistantBubble.appendChild(contentWrapper);
-                const cursor = document.createElement('span'); cursor.className = 'typing-cursor'; contentWrapper.appendChild(cursor);
+                const cursor = document.createElement('span'); cursor.className = 'typing-cursor';
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -151,9 +150,22 @@
                 let buffer = '';
                 // Debounced rendering: reduce /api/markdown/render churn and jitter
                 let renderTimer = null; let lastRendered = '';
+                let firstChunk = false;
+                // Track if we're in a list or code block
+                let inList = false;
+                let inCode = false;
                 const flushRender = async () => { 
                     try { 
                         if (fullText === lastRendered) return; 
+                        
+                        // Remove loading animation on first content chunk
+                        if (!firstChunk && fullText.trim()) {
+                            firstChunk = true;
+                            loadingDiv.remove();
+                            assistantBubble.appendChild(contentWrapper);
+                            contentWrapper.appendChild(cursor);
+                        }
+                        
                         const formatted = await formatText(fullText); 
                         contentWrapper.innerHTML = formatted; 
                         
@@ -170,7 +182,10 @@
                             console.debug('attachCodeCopyButtons error (non-critical):', err);
                         }
                         
-                        contentWrapper.appendChild(cursor);
+                        // Re-add cursor after content updates (only if content wrapper is in DOM)
+                        if (firstChunk) {
+                            contentWrapper.appendChild(cursor);
+                        }
                         
                         try { (window.MU?MU.safeHighlightUnder:Prism.highlightAllUnder)(contentWrapper); } catch (err) { console.debug('highlight error (non-critical):', err); }
                         
@@ -181,7 +196,6 @@
                     } 
                 };
                 const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
-                let firstChunk = false;
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
@@ -190,14 +204,95 @@
                     const lines = buffer.split('\n');
                     buffer = lines[lines.length - 1];
                     for (let i = 0; i < lines.length - 1; i++) {
-                        // Preserve literal spaces in SSE data payloads and reconstruct event data
-                        // per spec by joining multiple data lines with a single '\n'.
                         let line = lines[i];
                         if (line.endsWith('\r')) line = line.slice(0, -1);
                         if (line.startsWith('data:')) {
-                            const data = line.slice(5); // keep leading space after 'data:'
-                            // Reconstruct data by appending a newline for each data line
-                            fullText += data + '\n';
+                            const data = line.slice(5);
+                            
+                            // STEP 1: Check for code block boundaries FIRST
+                            if (data.includes('```')) {
+                                const beforeFence = data.indexOf('```');
+                                if (beforeFence > 0) {
+                                    fullText += data.substring(0, beforeFence);
+                                }
+                                inCode = !inCode;
+                                fullText += data.substring(beforeFence) + '\n';
+                                inList = false;
+                                continue;
+                            }
+                            
+                            // STEP 2: If in code block, preserve exactly
+                            if (inCode) {
+                                fullText += data + '\n';
+                                continue;
+                            }
+                            
+                            // STEP 3: Check for list markers
+                            const startsWithListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
+                            const nextListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
+                            
+                            // Handle empty lines - they end lists
+                            if (!data) {
+                                if (inList) {
+                                    fullText += '\n';
+                                    inList = false;
+                                } else {
+                                    fullText += '\n';
+                                }
+                                continue;
+                            }
+                            
+                            // Check for split list marker ("1." in one chunk, text in next)
+                            const tail = fullText.slice(-10).trim();
+                            const endsWithListMarker = /(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s*$/.test(tail);
+                            if (endsWithListMarker && /^\S/.test(data)) {
+                                // This is continuation of a list marker - just append with space
+                                fullText += ' ' + data;
+                                inList = true;
+                                continue;
+                            }
+                            
+                            // New list item starting
+                            if (startsWithListMarker) {
+                                if (fullText.length > 0 && !fullText.endsWith('\n')) {
+                                    // Add newline before new list item
+                                    fullText += inList ? '\n' : '\n\n';
+                                }
+                                fullText += data;  // NO NEWLINE HERE - let next chunks continue
+                                inList = true;
+                                continue;
+                            }
+                            
+                            // STEP 4: Are we in a list?
+                            if (inList) {
+                                // Check if this is a new list item or continuation
+                                if (nextListMarker) {
+                                    // New list item - add single newline before
+                                    fullText += '\n' + data;
+                                } else {
+                                    // Continuation of current list item - just add space
+                                    // Check if we need a space or not
+                                    const needsSpace = fullText.length > 0 && 
+                                                      !fullText.endsWith(' ') && 
+                                                      !fullText.endsWith('\n') &&
+                                                      !data.startsWith(' ');
+                                    fullText += needsSpace ? ' ' + data : data;
+                                }
+                                continue;
+                            }
+                            
+                            // STEP 5: Regular paragraph (not in list, not in code)
+                            if (fullText.length > 0) {
+                                // Need double newline before new paragraph
+                                if (!fullText.endsWith('\n\n')) {
+                                    if (fullText.endsWith('\n')) {
+                                        fullText += '\n';
+                                    } else {
+                                        fullText += '\n\n';
+                                    }
+                                }
+                            }
+                            fullText += data;
                         }
                     }
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
@@ -205,8 +300,7 @@
                     // to avoid rendering half-fences like "```javaimport ..." inline.
                     const immediate = window.MU ? MU.shouldImmediateFlush(fullText) : (/[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n'));
                     scheduleRender(immediate);
-                    if (!firstChunk) {
-                        firstChunk = true;
+                    if (firstChunk) {
                         try { window.parent.postMessage({ type: 'content-started' }, '*'); } catch(_){}
                     }
                 }
@@ -269,42 +363,16 @@
             }
             // Safety net: preserve enrichments, do minimal client markdown, then restore and enrich
             const preserved = preserveEnrichments(text);
-            const html = clientMarkdownFallback(preserved);
+            let html = clientMarkdownFallback(preserved);
+            if (window.MU && MU.hoistMarkerOnlyLines) html = MU.hoistMarkerOnlyLines(html);
             const restored = restoreEnrichments(html);
             return applyCustomEnrichments(restored);
         }
         
         function applyCustomEnrichments(text) {
-            console.debug('[DEBUG] applyCustomEnrichments called with text length:', text.length);
-            // CRITICAL: Only create enrichment divs if content is not empty!
-            text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g, (m, c) => {
-                const content = c.trim();
-                console.debug('[DEBUG] Processing inline hint:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
-                return content ? `\n<div class="inline-enrichment hint"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Helpful Hint</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
-            });
-            text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g, (m, c) => {
-                const content = c.trim();
-                console.debug('[DEBUG] Processing inline reminder:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
-                return content ? `\n<div class="inline-enrichment reminder"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg><span>Important Reminder</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
-            });
-            text = text.replace(/\{\{background:([\s\S]*?)\}\}/g, (m, c) => {
-                const content = c.trim();
-                console.debug('[DEBUG] Processing inline background:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
-                return content ? `\n<div class="inline-enrichment background"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M3 3h18v2H3zM3 7h18v2H3zM3 11h18v2H3z"/></svg><span>Background Context</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
-            });
-            text = text.replace(/\{\{example:([\s\S]*?)\}\}/g, (m, c) => {
-                const content = c.trim();
-                return content ? `\n<div class="inline-example"><div class="example-header">Example</div><pre><code class="language-java">${escapeHtml(content)}</code></pre></div>\n` : '';
-            });
-            text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g, (m, c) => {
-                const content = c.trim();
-                return content ? `\n<div class="inline-enrichment warning"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span>Warning</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
-            });
-            text = text.replace(/\[(\d+)\]/g, (m, n) => `<sup class="inline-citation" data-cite="${n}">[${n}]</sup>`);
-            
-            // Remove any stray empty enrichment patterns
-            text = text.replace(/\{\{\w+:\s*\}\}/g, '');
-            
+            if (window.MU && MU.applyInlineEnrichments) {
+                return MU.applyInlineEnrichments(text);
+            }
             return text;
         }
         
@@ -383,7 +451,6 @@
             if (window.MU) { 
                 text = MU.normalizeOpeningFences(text); 
                 text = MU.promoteLikelyJavaBlocks(text);
-                text = MU.normalizeInlineOrderedLists(text);
             }
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
@@ -391,6 +458,11 @@
                 const idx = codeBlocks.push({ lang: (lang||'').trim(), code: code.trim() }) - 1;
                 return `[[CODE_BLOCK_${idx}]]`;
             });
+
+            // Normalize lists safely now that code is protected
+            if (window.MU) {
+                try { s = MU.normalizeInlineOrderedLists(s); s = MU.hoistMarkerOnlyLines(s); } catch {}
+            }
 
             // Normalize inline list markers frequently produced by models
             s = s.replace(/(:)\s*-\s+(?=\S)/g, '$1\n\n- ');
@@ -486,7 +558,8 @@
                             pill.target = '_blank';
                             pill.rel = 'noopener noreferrer';
                         }
-                        pill.textContent = `${index + 1}. ${citation.title || 'Source'}`;
+                        const fallbackLabel = (citation.title || 'Source').replace(/::/g, '|');
+                        pill.textContent = `${index + 1}. ${fallbackLabel}`;
                         citationsRow.appendChild(pill);
                     });
                 }
@@ -513,12 +586,10 @@
                 const background = normalize(enrichment.background);
                 const reminders = normalize(enrichment.reminders);
 
-                console.debug('[DEBUG] Normalized enrichment counts - hints:', hints.length, 'background:', background.length, 'reminders:', reminders.length);
-
                 let appended = false;
-                if (hints.length > 0) { container.appendChild(createKnowledgeCard('tip', '💡 Helpful Hints', hints)); appended = true; }
-                if (background.length > 0) { container.appendChild(createKnowledgeCard('background', '📚 Background Context', background)); appended = true; }
-                if (reminders.length > 0) { container.appendChild(createKnowledgeCard('insight', '🔔 Important Reminders', reminders)); appended = true; }
+                if (hints.length > 0) { container.appendChild(MU.createEnrichmentBlock('hint', 'Helpful Hints', hints)); appended = true; }
+                if (background.length > 0) { container.appendChild(MU.createEnrichmentBlock('background', 'Background Context', background)); appended = true; }
+                if (reminders.length > 0) { container.appendChild(MU.createEnrichmentBlock('reminder', 'Important Reminders', reminders)); appended = true; }
 
                 console.debug('[DEBUG] Enrichment cards appended:', appended);
                 // If nothing valid, do not create any placeholders
@@ -529,14 +600,7 @@
             }
         }
         
-        function createKnowledgeCard(type, title, items) {
-            const card = document.createElement('div'); card.className = `knowledge-card type-${type}`; card.style.position = 'relative';
-            const header = document.createElement('div'); header.className = 'knowledge-card-header'; header.onclick = () => card.classList.toggle('expanded');
-            const titleEl = document.createElement('div'); titleEl.className = 'knowledge-card-title'; titleEl.innerHTML = `<span>${title}</span><svg width=\"20\" height=\"20\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"6 9 12 15 18 9\"></polyline></svg>`; header.appendChild(titleEl);
-            const content = document.createElement('div'); content.className = 'knowledge-card-content'; content.innerHTML = '<ul>' + items.map(item => `<li>${item}</li>`).join('') + '</ul>';
-            const copyBtn = document.createElement('button'); copyBtn.className = 'message-copy-btn'; copyBtn.style.top = 'var(--space-2)'; copyBtn.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path></svg>`; const cardText = `${title}\n${items.join('\n')}`; copyBtn.onclick = (e) => { e.stopPropagation(); copyMessage(cardText, copyBtn); };
-            card.appendChild(header); card.appendChild(content); card.appendChild(copyBtn); return card;
-        }
+        // knowledge-card is deprecated; unified enrichment blocks are used instead.
         
         function copyMessage(text, button) { navigator.clipboard.writeText(text).then(() => { button.classList.add('copied'); const originalHTML = button.innerHTML; button.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"20 6 9 17 4 12\"></polyline></svg>`; setTimeout(() => { button.classList.remove('copied'); button.innerHTML = originalHTML; }, 2000); }).catch(() => { showToast('Failed to copy', 'error'); }); }
 

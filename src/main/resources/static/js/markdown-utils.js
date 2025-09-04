@@ -51,9 +51,11 @@
           searchFrom = start + m[0].length;
           continue;
         }
-        const segment = tail.slice(0, relEnd).replace(/^java\s*/i, '');
+        const original = tail.slice(0, relEnd);
+        const segment = original.replace(/^java\s*/i, '');
         const fenced = '```java\n' + segment.trimEnd() + '\n```';
-        t = t.slice(0, start) + fenced + t.slice(start + segment.length);
+        // Replace the original span (before relEnd) with a fenced block.
+        t = t.slice(0, start) + fenced + t.slice(start + relEnd);
         changed = true;
         searchFrom = start + fenced.length;
       }
@@ -61,44 +63,51 @@
     return changed ? t : text;
   }
 
-  // Normalize inline ordered lists (1.text / 1. text ...) into true lists by
-  // inserting newlines before list markers. Parser-style, conservative rules:
-  // - A list item token is (\d{1,3}) '.' (space|letter)
-  // - Preceded by start or whitespace
-  // - Not part of a decimal like 3.14 (next char must not be digit)
-  // - Only commits when two or more items are found within 600 chars
+  // Normalize inline lists (numbers, bullets, lettered) into true lists by
+  // inserting newlines before list markers. Parser-style, conservative rules.
   function normalizeInlineOrderedLists(text){
     if (!text) return '';
-    // Fast path: if we already have multiple newlines with numbers, skip
-    if (/^\s*\d+\.\s/m.test(text)) return text;
     const chars = Array.from(text);
     let i = 0;
     const positions = [];
     while (i < chars.length) {
-      // find digits
       let j = i;
-      let numStart = -1;
-      let num = 0;
-      while (j < chars.length && chars[j] >= '0' && chars[j] <= '9') {
-        if (numStart === -1) numStart = j;
-        num = num*10 + (chars[j].charCodeAt(0) - 48);
-        j++;
-      }
-      if (numStart !== -1 && j < chars.length && chars[j] === '.') {
-        const prev = numStart > 0 ? chars[numStart-1] : '\n';
+      // bullets: - * +
+      if (chars[j] === '-' || chars[j] === '*' || chars[j] === '+') {
+        const prev = j > 0 ? chars[j-1] : '\n';
         const next = (j+1) < chars.length ? chars[j+1] : '\n';
-        const prevOk = /\s|[\(\[]/.test(prev);
-        const nextOk = /\s|[A-Za-z]/.test(next); // avoid 3.14 / 1.2.3
-        const notDecimal = !(next >= '0' && next <= '9');
-        if (prevOk && nextOk && notDecimal) {
-          positions.push(numStart);
-        }
-        i = j+1;
-        continue;
+        const atStart = j === 0 || prev === '\n';
+        if (!atStart && /\s/.test(prev) && /\s/.test(next)) positions.push(j);
+        i = j+2; continue;
       }
-      i = (numStart !== -1 ? numStart+1 : j+1);
+      // numbers: 1. or 1)
+      if (/[0-9]/.test(chars[j])) {
+        const start = j; j++;
+        while (j < chars.length && /[0-9]/.test(chars[j])) j++;
+        if (j < chars.length && (chars[j] === '.' || chars[j] === ')')) {
+          const prev = start > 0 ? chars[start-1] : '\n';
+          const next = (j+1) < chars.length ? chars[j+1] : '\n';
+          const atStart = start === 0 || prev === '\n';
+          const prevOk = /\s/.test(prev) || prev === '(' || prev === '[';
+          const nextOk = /\s/.test(next) || /[A-Za-z]/.test(next);
+          const notDecimal = !(/[0-9]/.test(next));
+          if (!atStart && prevOk && nextOk && notDecimal) positions.push(start);
+          i = j+1; continue;
+        }
+      }
+      // lettered: a) A) a. A.
+      if (/[A-Za-z]/.test(chars[j]) && (j+1) < chars.length && (chars[j+1] === ')' || chars[j+1] === '.')) {
+        const prev = j > 0 ? chars[j-1] : '\n';
+        const next = (j+2) < chars.length ? chars[j+2] : '\n';
+        const atStart = j === 0 || prev === '\n';
+        const prevOk = /\s/.test(prev) || prev === '(' || prev === '[';
+        const nextOk = /\s/.test(next) || /[A-Za-z]/.test(next);
+        if (!atStart && prevOk && nextOk) positions.push(j);
+        i = j+2; continue;
+      }
+      i = j+1;
     }
-    if (positions.length < 2) return text; // need at least two items
+    if (positions.length === 0) return text;
     // Commit: insert a newline before each detected item if not already at line start
     let out = '';
     let last = 0;
@@ -114,11 +123,26 @@
     return out;
   }
 
+  // If a line is a marker only ("1.", "-", "a)"), merge the next non-empty line as content
+  function hoistMarkerOnlyLines(text){
+    if (!text) return '';
+    const lines = text.split(/\r?\n/);
+    const out = [];
+    for (let i=0;i<lines.length;i++){
+      const ln = lines[i];
+      const t = ln.trim();
+      if (/^(?:\d+[.)]|[A-Za-z][.)]|[-*+])\s*$/.test(t) && i+1 < lines.length && lines[i+1].trim() !== ''){
+        out.push(t + ' ' + lines[i+1].trim()); i++;
+      } else { out.push(ln); }
+    }
+    return out.join('\n');
+  }
+
   function shouldImmediateFlush(fullText){
     if (!fullText) return false;
     const tail4 = fullText.slice(-4);
     const tail2 = fullText.slice(-2);
-    return /[.!?][\"')]*\s$/.test(tail4) || /\n\n/.test(tail2) || fullText.endsWith('```\n');
+    return /[.!?]["')]*\s$/.test(tail4) || /\n\n/.test(tail2) || fullText.endsWith('```\n');
   }
 
   function upgradeCodeBlocks(container){
@@ -180,16 +204,65 @@
         });
         pre.appendChild(btn);
       });
-    } catch(_){}
+    } catch {}
   }
 
   function safeHighlightUnder(el){
-    try { if (global.Prism && typeof Prism.highlightAllUnder === 'function') Prism.highlightAllUnder(el); } catch(_) {}
+    try { if (global.Prism && typeof Prism.highlightAllUnder === 'function') Prism.highlightAllUnder(el); } catch {}
+  }
+
+  // Shared enrichment rendering
+  const ENRICH_ICONS = {
+    hint: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z"/></svg>',
+    background: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z"/></svg>',
+    reminder: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
+    warning: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>',
+    example: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>'
+  };
+
+  function createEnrichmentBlock(type, title, items){
+    const card = document.createElement('div');
+    card.className = `inline-enrichment ${type}`;
+    const header = document.createElement('div');
+    header.className = 'inline-enrichment-header';
+    header.innerHTML = `${ENRICH_ICONS[type] || ''}<span>${title}</span>`;
+    const body = document.createElement('div');
+    body.className = 'enrichment-text';
+    const appendParagraph = (txt) => { const p = document.createElement('p'); p.textContent = txt || ''; body.appendChild(p); };
+    if (Array.isArray(items)) { items.filter(Boolean).forEach((txt) => appendParagraph(txt)); }
+    else if (typeof items === 'string') { appendParagraph(items); }
+    card.appendChild(header);
+    card.appendChild(body);
+    return card;
+  }
+
+  // Replace inline markers with unified enrichment blocks
+  function applyInlineEnrichments(text){
+    if (!text) return '';
+    let t = String(text);
+    t = t.replace(/\{\{hint:([\s\S]*?)\}\}/g, (m, c) => {
+      const el = createEnrichmentBlock('hint', 'Helpful Hint', [c.trim()]);
+      return `\n${el.outerHTML}\n`;
+    });
+    t = t.replace(/\{\{reminder:([\s\S]*?)\}\}/g, (m, c) => {
+      const el = createEnrichmentBlock('reminder', 'Important Reminder', [c.trim()]);
+      return `\n${el.outerHTML}\n`;
+    });
+    t = t.replace(/\{\{background:([\s\S]*?)\}\}/g, (m, c) => {
+      const el = createEnrichmentBlock('background', 'Background Context', [c.trim()]);
+      return `\n${el.outerHTML}\n`;
+    });
+    t = t.replace(/\{\{warning:([\s\S]*?)\}\}/g, (m, c) => {
+      const el = createEnrichmentBlock('warning', 'Warning', [c.trim()]);
+      return `\n${el.outerHTML}\n`;
+    });
+    return t;
   }
 
   /**
    * Creates a citation pill element with proper styling, icons, and link handling.
    * Extracted from chat.html to ensure consistent citation rendering across views.
+   * Fully restores the sophisticated URL handling logic from the original inline code.
    * 
    * @param {Object} citation - Citation object with url, title properties
    * @param {number} index - Zero-based index for numbering (will display as index + 1)
@@ -213,21 +286,24 @@
       pill.rel = 'noopener noreferrer';
     }
     
-    // Determine label
+    // RESTORED: Sophisticated label logic from original inline code
     let label = citation.title || 'Source';
     if (!citation.title && isHttpLink) {
       try {
+        // Extract hostname for external links when no title is provided
         label = new URL(href).hostname;
-      } catch (_) {
+      } catch {
         // Keep default label on URL parse error
       }
     }
+    // Replace :: separator with | for cleaner appearance
+    label = label.replace(/::/g, '|');
     
-    // Icon SVGs (consistent with chat.html implementation)
+    // RESTORED: Original SVG icons with exact same markup as inline code
     const iconExternal = `<svg class="citation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
     const iconPdf = `<svg class="citation-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5"/><path d="M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2"/></svg>`;
     
-    // Build pill content with structured HTML
+    // RESTORED: Exact same HTML structure as original inline code
     pill.innerHTML = `<span class="citation-number">${index + 1}</span><span class="citation-label">${label}${isPdf ? ' (PDF)' : ''}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
     
     return pill;
@@ -257,15 +333,32 @@
     return citationsRow;
   }
 
+  // Initialize metrics object for potential future use
+  const _metrics = {};
+
   global.MU = {
+    metrics: _metrics,
     normalizeOpeningFences: normalizeOpeningFences,
     promoteLikelyJavaBlocks: promoteLikelyJavaBlocks,
     normalizeInlineOrderedLists: normalizeInlineOrderedLists,
+    hoistMarkerOnlyLines: hoistMarkerOnlyLines,
     shouldImmediateFlush: shouldImmediateFlush,
     upgradeCodeBlocks: upgradeCodeBlocks,
     attachCodeCopyButtons: attachCodeCopyButtons,
     safeHighlightUnder: safeHighlightUnder,
+    createEnrichmentBlock: createEnrichmentBlock,
+    applyInlineEnrichments: applyInlineEnrichments,
     createCitationPill: createCitationPill,
     createCitationsRow: createCitationsRow,
+    setDebug: (v) => { try { global.MU_DEBUG = !!v; } catch {} },
   };
+
+  // Tiny list debug: auto-enable in dev contexts or via URL/localStorage
+  try {
+    const params = new URLSearchParams(global.location ? global.location.search : '');
+    const fromQuery = params.get('debug') === 'list';
+    const fromStorage = (global.localStorage && global.localStorage.getItem('mu_debug') === '1');
+    const isLocal = (global.location && (/localhost|127\.0\.0\.1/.test(global.location.hostname)));
+    if (fromQuery || fromStorage || isLocal) global.MU_DEBUG = true;
+  } catch {}
 })(window);
