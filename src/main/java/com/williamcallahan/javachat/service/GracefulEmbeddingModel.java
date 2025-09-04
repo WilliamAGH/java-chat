@@ -128,7 +128,7 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
             return hashingModel.dimensions();
         }
         
-        return 1536; // Default OpenAI embedding dimension
+        return 4096; // Default dimension to match Qdrant collection
     }
     
     @Override

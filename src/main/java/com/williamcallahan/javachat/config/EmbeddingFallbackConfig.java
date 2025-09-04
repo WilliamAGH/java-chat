@@ -81,8 +81,8 @@ public class EmbeddingFallbackConfig {
             log.info("[EMBEDDING] OpenAI API key available but embedding temporarily disabled");
         }
         
-        // Create hash-based fallback model
-        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(1536);
+        // Create hash-based fallback model with 4096 dimensions to match Qdrant collection
+        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(4096);
         
         // Since primaryModel is currently always null (OpenAI embedding disabled),
         // we always use fallback strategies
@@ -107,7 +107,7 @@ public class EmbeddingFallbackConfig {
         
         @Override
         public int dimensions() {
-            return 1536;
+            return 4096; // Match Qdrant collection dimensions
         }
         
         @Override

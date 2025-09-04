@@ -7,7 +7,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 
 @Configuration
 @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "true", matchIfMissing = false)
@@ -19,7 +18,6 @@ public class LocalEmbeddingConfig {
     }
     
     @Bean
-    @Primary
     public EmbeddingModel localEmbeddingModel(
             @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}") String baseUrl,
             @Value("${app.local-embedding.model:text-embedding-qwen3-embedding-8b}") String modelName,
