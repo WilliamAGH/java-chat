@@ -382,6 +382,10 @@
          */
         function clientMarkdownFallback(text) {
             if (!text) return '';
+            // Normalize opening fences that have code on the same line (e.g., "```javapublic …")
+            text = text
+                .replace(/```([A-Za-z0-9_-]+)[ \t]*([^\n])/g, '```$1\n$2')
+                .replace(/```[ \t]*([^\n])/g, '```\n$1');
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
             let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
@@ -398,6 +402,14 @@
 
             // Inline code
             s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${escapeHtml(c)}</code>`);
+
+            // Minimal headings (fallback only)
+            s = s.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+                 .replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+                 .replace(/^####\s+(.+)$/gm, '<h4>$1</h4>')
+                 .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+                 .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+                 .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
 
             const lines = s.split(/\r?\n/);
             let out = '';

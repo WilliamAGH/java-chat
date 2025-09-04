@@ -477,10 +477,22 @@
     function clientMarkdownFallback(text){
       if(!text) return '';
       const codeBlocks=[];
+      // Normalize opening fences with code on same line (e.g., "```javapublic …")
+      text = text
+        .replace(/```([A-Za-z0-9_-]+)[ \t]*([^\n])/g,'```$1\n$2')
+        .replace(/```[ \t]*([^\n])/g,'```\n$1');
+
       let s=text.replace(/```([\w-]+)?\n([\s\S]*?)```/g,(m,lang,code)=>{ const i=codeBlocks.push({lang:(lang||'').trim(),code})-1; return `[[CODE_BLOCK_${i}]]`; });
       s=s.replace(/(:)\s*-\s+(?=\S)/g,'$1\n\n- ');
       s=s.replace(/([.!?])\s+(\d+\.\s+)/g,'$1\n$2');
       s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      // Minimal headings (fallback only)
+      s=s.replace(/^######\s+(.+)$/gm,'<h6>$1</h6>')
+          .replace(/^#####\s+(.+)$/gm,'<h5>$1</h5>')
+          .replace(/^####\s+(.+)$/gm,'<h4>$1</h4>')
+          .replace(/^###\s+(.+)$/gm,'<h3>$1</h3>')
+          .replace(/^##\s+(.+)$/gm,'<h2>$1</h2>')
+          .replace(/^#\s+(.+)$/gm,'<h1>$1</h1>');
       s=s.replace(/`([^`]+)`/g,(m,c)=>`<code>${c}</code>`);
       const lines=s.split(/\r?\n/);
       let out='', inUl=false, inOl=false, para='';
