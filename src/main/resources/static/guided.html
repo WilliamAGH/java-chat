@@ -26,92 +26,62 @@
   <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
   <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
-  <style>
-    :root {
-      --dark-bg: #0b0d0f;
-      --dark-surface-1: #111318;
-      --dark-surface-2: #1a1d23;
-      --dark-border: #2a2f36;
-      --dark-text-primary: #f1f5f9;
-      --dark-text-secondary: #cbd5e1;
-      --radius-xl: 12px;
-      --space-4: 1rem;
-      --space-6: 1.5rem;
-    }
-    html, body { height: 100%; }
-    body { margin: 0; background: var(--dark-bg); color: var(--dark-text-primary); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-    .container { max-width: 1024px; margin: 0 auto; padding: var(--space-6); }
-    .card { background: var(--dark-surface-2); border: 1px solid var(--dark-border); border-radius: var(--radius-xl); padding: var(--space-6); }
-    .muted { color: var(--dark-text-secondary); }
-    .row { display:flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .select { background: var(--dark-surface-1); color: var(--dark-text-primary); border: 1px solid var(--dark-border); border-radius: 8px; padding: 8px 12px; }
-    .btn { background: #2b3040; color: var(--dark-text-primary); border: 1px solid var(--dark-border); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
-    .bubble { padding: 12px 16px; border-radius: 12px; margin: 8px 0; }
-    .bubble.assistant { background: var(--dark-surface-1); border: 1px solid var(--dark-border); }
-    .bubble.user { background: #2c2f3a; }
-    .lesson-content { background: var(--dark-surface-1); border:1px solid var(--dark-border); border-radius: 12px; padding: 16px; margin-top: 12px; }
-    .lesson-content h1, .lesson-content h2, .lesson-content h3 { margin: 12px 0 8px; }
-    .lesson-content p { margin: 0 0 10px; line-height: 1.6; }
-    .lesson-content ul, .lesson-content ol { margin: 8px 0 12px 22px; line-height: 1.8; }
-    .lesson-content pre { margin: 10px 0; }
-    .citations-row { display:flex; flex-wrap:wrap; gap:8px; margin-top: 12px; }
-    .citation-pill { display:inline-flex; gap:8px; align-items:center; padding:4px 10px; border-radius: 9999px; border:1px solid var(--dark-border); background: #181b22; color: var(--dark-text-secondary); text-decoration:none; }
-    .input-area { margin-top: 16px; background: var(--dark-surface-2); border:1px solid var(--dark-border); border-radius: 12px; padding: 12px; }
-    .input-row { display:flex; gap:10px; }
-    .input { flex:1; border-radius: 8px; border: 1px solid var(--dark-border); background: var(--dark-surface-1); color: var(--dark-text-primary); padding: 10px 12px; }
-    .message-copy-btn { border:1px solid var(--dark-border); background:#1f2330; color: var(--dark-text-secondary); border-radius:8px; padding:4px; cursor:pointer; }
-    /* Allow block-level markdown children to render correctly */
-    .streaming-text { display:block; }
-    .typing-cursor { display:inline-block; width:3px; height:1.2em; background:#667eea; animation: blink 1s infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-    /* Skeleton shimmer for lesson loading */
-    .skeleton { display: grid; gap: 10px; margin-top: 12px; }
-    .sk { position: relative; overflow: hidden; background: #1a1d23; border:1px solid var(--dark-border); border-radius: 10px; }
-    .sk::before { content:""; position:absolute; inset:0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); transform: translateX(-100%); animation: sk 1.6s infinite; }
-    @keyframes sk { 0% { transform: translateX(-100%);} 100% { transform: translateX(100%);} }
-    .sk.s { height: 12px; border-radius: 9999px; }
-    .sk.m { height: 16px; border-radius: 9999px; }
-    .sk.l { height: 46px; }
-    .sk.row { height: 72px; }
-    .hidden { display:none !important; }
-  </style>
+  <link href="/css/app.css" rel="stylesheet" />
 </head>
-<body>
+<body class="guided-learning">
   <div class="container">
-    <div class="card">
-      <div class="row" style="justify-content: space-between;">
-        <h1 style="margin:0">Guided Learning</h1>
-        <div class="row">
-          <button id="prevBtn" class="btn" aria-label="Previous lesson">◀</button>
-          <select id="lessonSelect" class="select" aria-label="Lesson selector"></select>
-          <button id="nextBtn" class="btn" aria-label="Next lesson">▶</button>
+    <div class="header">
+        <div class="header-left">
+            <h1 class="app-title">Guided Learning</h1>
         </div>
-      </div>
-      <div id="lessonSummary" class="muted" style="margin-top:12px"></div>
+    </div>
 
-      <!-- Skeleton placeholder while lessons/citations/enrichment load -->
-      <div id="lessonSkeleton" class="skeleton hidden" aria-hidden="true">
-        <div class="sk l"></div>
-        <div class="sk m"></div>
-        <div class="sk s"></div>
-        <div class="sk row"></div>
-      </div>
+    <div class="lesson-selector">
+        <button id="prevBtn" aria-label="Previous lesson">
+            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+        <select id="lessonSelect" aria-label="Lesson selector"></select>
+        <button id="nextBtn" aria-label="Next lesson">
+            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+    </div>
 
-      <div id="citations" class="citations-row" aria-label="Citations"></div>
-      <div id="lessonContent" class="lesson-content" aria-live="polite"></div>
-      <div id="enrichment" style="margin-top: 12px"></div>
+    <!-- Main content area -->
+    <div id="lesson-container">
+        <div id="lessonSummary" class="muted" style="margin-bottom: var(--space-4);"></div>
 
-      <div id="guidedChat" style="margin-top: 16px">
+        <div id="lessonSkeleton" class="skeleton-loader hidden" aria-hidden="true">
+            <div class="skeleton-loader title"></div>
+            <div class="skeleton-loader text"></div>
+            <div class="skeleton-loader text short"></div>
+        </div>
+
+        <div id="lessonContentWrapper">
+            <div id="citations" class="citations-row" aria-label="Citations"></div>
+            <div id="lessonContent" class="lesson-content" aria-live="polite"></div>
+            <div id="enrichment" style="margin-top: 12px"></div>
+        </div>
+    </div>
+
+    <div id="guidedChat">
         <div id="chatArea" aria-live="polite" aria-label="Guided chat messages"></div>
         <div class="input-area">
-          <div class="input-row">
-            <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()"/>
-            <button id="askBtn" class="btn" onclick="ask()">Ask</button>
-          </div>
+            <div class="input-row">
+                <div class="input-wrapper">
+                    <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()"/>
+                    <button id="askBtn" class="btn" onclick="ask()" aria-label="Send question">
+                        <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
         </div>
-      </div>
     </div>
   </div>
 
@@ -215,7 +185,7 @@
         let firstChunkShown = false;
         // Debounced rendering for smoother lesson updates
         let renderTimer = null; let lastRendered = '';
-        const flushRender = async () => { try { if (loadId !== currentLoadId) return; if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); el.innerHTML = html; Prism.highlightAllUnder(el); applyGlossaryTooltips(el); lastRendered = fullText; } catch(_){} };
+        const flushRender = async () => { try { if (loadId !== currentLoadId) return; if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); el.innerHTML = html; upgradeCodeBlocks(el); attachCodeCopyButtons(el); Prism.highlightAllUnder(el); applyGlossaryTooltips(el); lastRendered = fullText; } catch(_){} };
         const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while (true) {
           const { done, value } = await reader.read();
@@ -304,25 +274,45 @@
       const res = await fetch('/api/guided/enrich?slug=' + encodeURIComponent(slug), { signal: controller.signal });
       if (!res.ok) return; const enrichment = await res.json();
       if (loadId !== currentLoadId) return;
-      const sections = [
-        { key: 'hints', title: '💡 Helpful Hints' },
-        { key: 'background', title: '📚 Background Context' },
-        { key: 'reminders', title: '🔔 Important Reminders' }
-      ];
-      sections.forEach(({key, title}) => {
-        const normalized = (Array.isArray(enrichment[key]) ? enrichment[key] : [])
+
+      // Use the same rendering logic as chat.html for a consistent look and feel
+      const createEnrichmentBlock = (type, title, svgPath, items) => {
+        const normalized = (Array.isArray(items) ? items : [])
           .map(t => (typeof t === 'string' ? t.trim() : ''))
           .filter(t => t.length > 0);
-        if (normalized.length > 0) {
-          const card = document.createElement('div');
-          card.className = 'bubble assistant';
-          const h = document.createElement('div'); h.style.fontWeight='600'; h.textContent = title; card.appendChild(h);
-          const ul = document.createElement('ul');
-          normalized.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
-          card.appendChild(ul);
-          div.appendChild(card);
-        }
-      });
+        if (normalized.length === 0) return;
+
+        const card = document.createElement('div');
+        card.className = `inline-enrichment ${type}`;
+        
+        const header = document.createElement('div');
+        header.className = 'inline-enrichment-header';
+        header.innerHTML = `<svg viewbox="0 0 24 24" fill="currentColor">${svgPath}</svg><span>${title}</span>`;
+        
+        const body = document.createElement('div');
+        body.className = 'enrichment-text';
+        body.innerHTML = normalized.map(item => `<p>${item}</p>`).join('');
+
+        card.appendChild(header);
+        card.appendChild(body);
+        div.appendChild(card);
+      };
+
+      createEnrichmentBlock(
+        'hint', 'Helpful Hints',
+        '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>',
+        enrichment.hints
+      );
+      createEnrichmentBlock(
+        'background', 'Background Context',
+        '<path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>',
+        enrichment.background
+      );
+      createEnrichmentBlock(
+        'reminder', 'Important Reminders',
+        '<path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>',
+        enrichment.reminders
+      );
     }
 
     async function ask() {
@@ -340,7 +330,7 @@
         if (!response.ok) throw new Error('HTTP '+response.status);
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let fullText=''; let buffer='';
         let renderTimer=null; let lastRendered='';
-        const flushRender = async () => { try { if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); content.innerHTML = html; content.appendChild(cursor); Prism.highlightAllUnder(content); lastRendered = fullText; } catch(_){} };
+        const flushRender = async () => { try { if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); content.innerHTML = html; upgradeCodeBlocks(content); attachCodeCopyButtons(content); content.appendChild(cursor); Prism.highlightAllUnder(content); lastRendered = fullText; } catch(_){} };
         const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while(true){ const {done,value}=await reader.read(); if(done) break; const chunk=decoder.decode(value,{stream:true}); buffer+=chunk; const lines=buffer.split('\n'); buffer=lines[lines.length-1]; for(let i=0;i<lines.length-1;i++){ const line=lines[i].trim(); if(line.startsWith('data:')){ const data=line.substring(5); if(data.trim()) fullText+=data; } }
           const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
@@ -368,12 +358,20 @@
      */
     async function renderMarkdown(text){
       text = stripLeadingHeading(text);
-      try { const res = await fetch('/api/markdown/render', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content:text}) }); if(res.ok){ const data=await res.json(); return applyEnrichments(data.html); } } catch(e){}
-      // Safety net: preserve enrichments, client markdown, restore, then enrich
-      const preserved = preserveEnrichments(text);
-      const html = clientMarkdownFallback(preserved);
-      const restored = restoreEnrichments(html);
-      return applyEnrichments(restored);
+      try { 
+        const res = await fetch('/api/markdown/render', { 
+            method:'POST', 
+            headers:{'Content-Type':'application/json'}, 
+            body: JSON.stringify({content:text}) 
+        }); 
+        if(res.ok){ 
+            const data=await res.json(); 
+            // DO NOT process enrichments here; they are handled by loadEnrichment
+            return data.html; 
+        } 
+      } catch(e){}
+      // Safety net: client markdown ONLY
+      return clientMarkdownFallback(text);
     }
     function stripLeadingHeading(text){
       return text.replace(/^(\s*#{1,6}[^\n]*\n?)+/,'');
@@ -436,9 +434,56 @@
       return text;
     }
 
-    // Show skeleton immediately then load content
-    document.getElementById('lessonSkeleton').classList.remove('hidden');
+    function attachCodeCopyButtons(container){ try { const blocks=container.querySelectorAll('pre'); blocks.forEach(pre=>{ if(pre.querySelector('.code-copy-btn')) return; const btn=document.createElement('button'); btn.className='code-copy-btn'; btn.setAttribute('aria-label','Copy code'); btn.title='Copy code'; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`; btn.addEventListener('click',(e)=>{ e.stopPropagation(); const codeEl=pre.querySelector('code'); const text=codeEl?codeEl.innerText:pre.innerText; navigator.clipboard.writeText(text).then(()=>{ btn.classList.add('copied'); const orig=btn.innerHTML; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`; setTimeout(()=>{ btn.classList.remove('copied'); btn.innerHTML=orig; },1500); }); }); pre.appendChild(btn); }); } catch(_){} }
+
+    function upgradeCodeBlocks(container){
+      console.log('upgradeCodeBlocks called on:', container);
+      
+      // First, wrap multi-line inline <code>
+      const codeNodes = container.querySelectorAll('code');
+      console.log('Found code nodes:', codeNodes.length);
+      codeNodes.forEach(node => {
+        if (node.closest('pre') || node.closest('.inline-enrichment')) return;
+        const text = node.textContent || '';
+        if (text.indexOf('\n') === -1) return;
+        let body = text.trim();
+        body = body.replace(/^```?\s*([A-Za-z0-9_-]+)?\s*\n/, '');
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.className = 'language-java';
+        code.textContent = body;
+        pre.appendChild(code);
+        node.replaceWith(pre);
+        console.log('Converted inline code to pre');
+      });
+
+      // Now, wrap all <pre> in example wrapper
+      const preNodes = container.querySelectorAll('pre');
+      console.log('Found pre nodes:', preNodes.length);
+      preNodes.forEach(pre => {
+        if (pre.closest('.inline-enrichment')) {
+          console.log('Pre already wrapped, skipping');
+          return; // already wrapped
+        }
+        console.log('Wrapping pre in enrichment container');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'inline-enrichment example';
+        const header = document.createElement('div');
+        header.className = 'inline-enrichment-header';
+        header.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Code Example</span>`;
+        wrapper.appendChild(header);
+        const bodyDiv = document.createElement('div');
+        bodyDiv.className = 'enrichment-text';
+        bodyDiv.appendChild(pre.cloneNode(true));
+        wrapper.appendChild(bodyDiv);
+        pre.replaceWith(wrapper);
+        console.log('Successfully wrapped pre');
+      });
+    }
+
+    // Load the table of contents and the first lesson
     loadTOC().catch(() => setLessonLoading(false));
+    
     // Notify parent that page is ready (for top loader)
     try { window.parent.postMessage({ type: 'content-ready' }, '*'); } catch(_){}
   </script>
