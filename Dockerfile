@@ -83,6 +83,9 @@ ENV PORT=8085
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
 
+# Disable aggressive port management in container environment
+ENV APP_KILL_ON_CONFLICT=false
+
 # JSON array format for ENTRYPOINT (recommended by Docker)
 # Use shell form to allow PORT variable expansion
 ENTRYPOINT ["/bin/sh", "-c", "java -XX:+IgnoreUnrecognizedVMOptions -Xmx256m -Xms128m -XX:+UseSerialGC -XX:MaxRAM=256m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.security.egd=file:/dev/./urandom -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
