@@ -370,6 +370,9 @@
       const citations = await res.json();
       if (loadId !== currentLoadId) return;
       
+      // Early return if no citations - prevents empty styled containers (matches chat.html behavior)
+      if (!citations || citations.length === 0) return;
+      
       // Use shared citation rendering function with DOM parity (append the row)
       if (typeof MU !== 'undefined' && MU.createCitationsRow) {
         const citationsRow = MU.createCitationsRow(citations, 5);
@@ -379,7 +382,7 @@
         console.warn('MU.createCitationsRow not available, using fallback');
         const row = document.createElement('div');
         row.className = 'citations-row';
-        (citations || []).slice(0, 5).forEach((c, i) => {
+        citations.slice(0, 5).forEach((c, i) => {
           const a = document.createElement(c.url ? 'a' : 'div');
           a.className = 'citation-pill';
           if (c.url) { a.href = c.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
