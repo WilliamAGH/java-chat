@@ -95,10 +95,114 @@ public final class DocsSourceRegistry {
         for (String marker : EMBEDDED_HOST_MARKERS) {
             int idx = p.indexOf(marker);
             if (idx >= 0) {
-                return "https://" + p.substring(idx);
+                String url = "https://" + p.substring(idx);
+                
+                // Fix Spring URLs using proper string parsing
+                if (url.startsWith("https://docs.spring.io/")) {
+                    url = normalizeSpringUrl(url);
+                }
+                
+                return url;
             }
         }
         return null;
+    }
+    
+    /**
+     * Normalize Spring documentation URLs to their correct canonical form.
+     * Handles various malformed scraped URL patterns.
+     */
+    private static String normalizeSpringUrl(String url) {
+        // Parse the URL path after docs.spring.io/
+        String prefix = "https://docs.spring.io/";
+        if (!url.startsWith(prefix)) {
+            return url;
+        }
+        
+        String path = url.substring(prefix.length());
+        String[] parts = path.split("/");
+        
+        if (parts.length < 2) {
+            return url;
+        }
+        
+        String project = parts[0]; // e.g., "spring-framework" or "spring-boot"
+        
+        // Handle Spring Framework URLs
+        if (project.equals("spring-framework")) {
+            // Case 1: /spring-framework/docs/current/reference/6.1-SNAPSHOT/...
+            // Should be: /spring-framework/reference/current/...
+            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
+                // Skip docs/current/reference/VERSION and rebuild as reference/current/...
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-framework/reference/current");
+                for (int i = 5; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+            
+            // Case 2: /spring-framework/reference/7.0-SNAPSHOT/...
+            // Should be: /spring-framework/reference/current/...
+            if (parts.length > 2 && parts[1].equals("reference") && isVersionString(parts[2])) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-framework/reference/current");
+                for (int i = 3; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+            
+            // Case 3: /spring-framework/docs/current/api/current/javadoc-api/...
+            // Should be: /spring-framework/docs/current/javadoc-api/...
+            if (parts.length > 5 && parts[1].equals("docs") && parts[2].equals("current") 
+                && parts[3].equals("api") && parts[4].equals("current") && parts[5].equals("javadoc-api")) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-framework/docs/current/javadoc-api");
+                for (int i = 6; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+        }
+        
+        // Handle Spring Boot URLs
+        if (project.equals("spring-boot")) {
+            // Case 1: /spring-boot/docs/current/reference/VERSION/...
+            // Should be: /spring-boot/reference/current/...
+            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-boot/reference/current");
+                for (int i = 5; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+            
+            // Case 2: /spring-boot/reference/VERSION/...
+            // Should be: /spring-boot/reference/current/...
+            if (parts.length > 2 && parts[1].equals("reference") && isVersionString(parts[2])) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-boot/reference/current");
+                for (int i = 3; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+        }
+        
+        return url;
+    }
+    
+    /**
+     * Check if a string looks like a version (e.g., "6.1-SNAPSHOT", "7.0", "3.2.1")
+     */
+    private static boolean isVersionString(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        // Check for patterns like X.Y, X.Y.Z, X.Y-SNAPSHOT
+        return s.contains(".") && (Character.isDigit(s.charAt(0)) || s.charAt(0) == 'v');
     }
 
     /**
