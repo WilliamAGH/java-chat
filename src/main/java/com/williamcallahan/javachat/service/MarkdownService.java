@@ -17,6 +17,9 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Service for rendering Markdown to HTML with optimal formatting and caching.
@@ -40,6 +43,9 @@ public class MarkdownService {
         Pattern.MULTILINE
     );
     
+    private final Map<String, String> protectedBlocks = new ConcurrentHashMap<>();
+    private final AtomicInteger codeBlockIdCounter = new AtomicInteger(0);
+
     public MarkdownService() {
         // Configure Flexmark with optimal settings
         MutableDataSet options = new MutableDataSet()
@@ -174,24 +180,66 @@ public class MarkdownService {
     public String preprocessMarkdown(String markdown) {
         if (markdown == null) return "";
 
-        // Preserve inline code spans so we don't mutate their contents during preprocessing
-        String preserved = preserveInlineCode(markdown);
-
-        // Fix inline lists that run together or are attached to punctuation.
+        // The full, robust preprocessing pipeline.
+        String protectedMd = protectCodeBlocks(markdown);
+        String preserved = preserveInlineCode(protectedMd);
         preserved = fixInlineLists(preserved);
 
-        // Apply smart paragraph breaking, but never when list markers are present.
         if (!hasListMarkers(preserved)) {
             preserved = applySmartParagraphBreaksImproved(preserved);
         }
 
-        // Ensure proper separation for code fences. This is the most reliable way to handle fences.
         preserved = ensureFenceSeparation(preserved);
-
-        // Restore inline code placeholders back to their original `code` markdown.
         preserved = restoreInlineCode(preserved);
+        preserved = unprotectCodeBlocks(preserved);
 
         return preserved;
+    }
+
+    /**
+     * Replaces code blocks with placeholders to protect them from other processing.
+     * This version uses a robust line-by-line parser instead of a fragile regex.
+     */
+    private String protectCodeBlocks(String markdown) {
+        if (markdown == null || !markdown.contains("```")) {
+            return markdown;
+        }
+
+        StringBuilder result = new StringBuilder();
+        String[] lines = markdown.split("\\n");
+        boolean inCodeBlock = false;
+        StringBuilder currentBlock = new StringBuilder();
+
+        for (String line : lines) {
+            if (line.trim().startsWith("```")) {
+                if (!inCodeBlock) {
+                    // Start of a new code block
+                    inCodeBlock = true;
+                    currentBlock.append(line).append("\n");
+                } else {
+                    // End of the code block
+                    inCodeBlock = false;
+                    currentBlock.append(line);
+                    String placeholder = "___CODE_BLOCK_" + codeBlockIdCounter.getAndIncrement() + "___";
+                    protectedBlocks.put(placeholder, currentBlock.toString());
+                    result.append(placeholder).append("\n");
+                    currentBlock.setLength(0); // Reset for the next block
+                }
+            } else {
+                if (inCodeBlock) {
+                    currentBlock.append(line).append("\n");
+                } else {
+                    result.append(line).append("\n");
+                }
+            }
+        }
+
+        // If a block was opened but not closed (e.g., end of file), append it as is.
+        if (inCodeBlock) {
+            result.append(currentBlock);
+        }
+
+        return result.toString();
     }
 
     /**
@@ -370,112 +418,18 @@ public class MarkdownService {
     }
     
     /**
-     * Protects code block content from being consumed or altered by other regex patterns.
-     * Ensures code blocks maintain their content integrity.
+     * Restores protected code blocks to their original state.
      */
-    private String protectCodeBlocks(String markdown) {
-        if (markdown == null) return ""; // Guard against null input
-        logger.debug("protectCodeBlocks: ENTERING with input: {}", markdown.replace("\n", "\\\\n"));
-        logger.debug("protectCodeBlocks: Input contains ``` ? {}", markdown.contains("```"));
-        
-        // Match code blocks and ensure they have proper structure
-        StringBuilder result = new StringBuilder();
-        // ENHANCED: Support comprehensive language tags including java, cpp, c++, objective-c, etc.
-        // Handle preprocessing artifacts and edge cases with more robust pattern
-        java.util.regex.Pattern codeBlockPattern =
-            java.util.regex.Pattern.compile("```([\\w\\-\\+\\.]*)\\s*\\n?([\\s\\S]*?)```",
-                                           java.util.regex.Pattern.DOTALL);
-        java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
-        int blocks = 0;        
-        int lastEnd = 0;
-        while (matcher.find()) {
-            // Append text before code block
-            result.append(markdown.substring(lastEnd, matcher.start()));
-
-            String language = matcher.group(1);
-            String code = matcher.group(2);
-
-            blocks++;
-            // Ensure code content is not empty and properly formatted
-            if (code != null && !code.trim().isEmpty()) {
-                // Preserve the code block with proper formatting
-                // CRITICAL: Ensure paragraph break BEFORE code block if not at start
-                if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
-                    result.append("\n\n");
-                }
-                result.append("```").append(language).append("\n");
-                result.append(code.trim());
-                result.append("\n```\n\n");
-                logger.debug("Code block preserved: language='{}', {} characters", language, code.length());
-            } else {
-                // Handle empty code blocks gracefully
-                logger.debug("Empty code block detected at position {}, language: '{}'",
-                           matcher.start(), language);
-                if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
-                    result.append("\n\n");
-                }
-                result.append("```").append(language).append("\n");
-                result.append("// Code block content missing - check streaming");
-                result.append("\n```\n\n");
-            }
-
-            lastEnd = matcher.end();
+    private String unprotectCodeBlocks(String markdown) {
+        if (protectedBlocks.isEmpty()) {
+            return markdown;
         }
-        
-        // Append remaining text
-        if (lastEnd < markdown.length()) {
-            result.append(markdown.substring(lastEnd));
+        for (Map.Entry<String, String> entry : protectedBlocks.entrySet()) {
+            markdown = markdown.replace(entry.getKey(), entry.getValue());
         }
-        
-        String out = result.toString();
-
-        // ENHANCED: Fallback detection for edge cases where regex fails
-        if (blocks == 0 && markdown.contains("```")) {
-            // Try fallback pattern for cases with malformed language tags or preprocessing artifacts
-            java.util.regex.Pattern fallbackPattern =
-                java.util.regex.Pattern.compile("```([^\\n]*)\\s*([\\s\\S]*?)```",
-                                               java.util.regex.Pattern.DOTALL);
-            java.util.regex.Matcher fallbackMatcher = fallbackPattern.matcher(markdown);
-
-            if (fallbackMatcher.find()) {
-                logger.debug("protectCodeBlocks: using fallback pattern for edge case");
-                // Re-process with fallback pattern
-                result = new StringBuilder();
-                lastEnd = 0;
-                blocks = 0;
-
-                while (fallbackMatcher.find()) {
-                    result.append(markdown.substring(lastEnd, fallbackMatcher.start()));
-                    String language = fallbackMatcher.group(1);
-                    String code = fallbackMatcher.group(2);
-
-                    blocks++;
-                    if (code != null && !code.trim().isEmpty()) {
-                        if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
-                            result.append("\n\n");
-                        }
-                        result.append("```").append(language).append("\n");
-                        result.append(code.trim());
-                        result.append("\n```\n\n");
-                        logger.debug("Code block preserved via fallback: language='{}', {} characters", language, code.length());
-                    }
-                    lastEnd = fallbackMatcher.end();
-                }
-
-                if (lastEnd < markdown.length()) {
-                    result.append(markdown.substring(lastEnd));
-                }
-
-                out = result.toString();
-                logger.debug("protectCodeBlocks: fallback matched {} block(s)", blocks);
-            } else {
-                logger.warn("protectCodeBlocks: no blocks matched even with fallback; input contains fence. Sample={}...",
-                           markdown.substring(0, Math.min(80, markdown.length())).replace("\n","\\n"));
-            }
-        } else {
-            logger.debug("protectCodeBlocks: matched {} block(s)", blocks);
-        }
-        return out;
+        // It's critical to clear the map for the next request.
+        protectedBlocks.clear();
+        return markdown;
     }
     
     /**
