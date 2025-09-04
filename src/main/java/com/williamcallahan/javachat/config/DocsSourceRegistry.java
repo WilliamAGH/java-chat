@@ -110,6 +110,31 @@ public final class DocsSourceRegistry {
             String prefix = e.getKey();
             if (p.contains(prefix)) {
                 String rel = p.substring(p.indexOf(prefix) + prefix.length());
+                
+                // Special handling for Spring Framework paths
+                if (prefix.contains("spring-framework")) {
+                    // Handle various scraped path structures
+                    if (rel.startsWith("docs/current/api/current/javadoc-api/")) {
+                        // Fix double "current" in path: docs/current/api/current/javadoc-api/ -> javadoc-api/
+                        rel = rel.substring("docs/current/api/current/".length());
+                    } else if (rel.startsWith("api/current/javadoc-api/")) {
+                        // Remove api/current/ prefix: api/current/javadoc-api/ -> javadoc-api/
+                        rel = rel.substring("api/current/".length());
+                    } else if (rel.startsWith("docs/current/javadoc-api/")) {
+                        // Remove docs/current/ prefix: docs/current/javadoc-api/ -> javadoc-api/
+                        rel = rel.substring("docs/current/".length());
+                    }
+                }
+                
+                // Special handling for Spring Boot paths
+                if (prefix.contains("spring-boot")) {
+                    // Handle various scraped path structures
+                    if (rel.startsWith("docs/current/api/")) {
+                        // Remove docs/current/ prefix: docs/current/api/ -> api/
+                        rel = rel.substring("docs/current/".length());
+                    }
+                }
+                
                 return joinBaseAndRel(e.getValue(), rel);
             }
         }
