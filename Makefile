@@ -3,7 +3,8 @@ SHELL := /bin/bash
 APP_NAME := java-chat
 MVNW := ./mvnw
 # Compute JAR lazily so it's resolved after the build runs
-JAR = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
+# Use a function instead of variable to evaluate at runtime
+get_jar = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
 
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)
@@ -37,7 +38,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
 	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT 2>/dev/null || true); echo "Found PIDs on port $$SERVER_PORT: '$$PIDS'" >&2; if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 2; fi; \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
-	  java -Djava.net.preferIPv4Stack=true -jar $(JAR) --server.port=$$SERVER_PORT $(RUN_ARGS)
+	  java -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS)
 
 dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \

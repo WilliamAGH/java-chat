@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="warning"/>
+    <property name="fileExtensions" value="java, properties, xml"/>
+
+    <!-- Excludes all 'module-info.java' files -->
+    <module name="BeforeExecutionExclusionFileFilter">
+        <property name="fileNamePattern" value="module\-info\.java$"/>
+    </module>
+
+    <!-- Exclude data directory -->
+    <module name="BeforeExecutionExclusionFileFilter">
+        <property name="fileNamePattern" value=".*[/\\]data[/\\].*"/>
+    </module>
+
+    <module name="TreeWalker">
+        <!-- Dead code detection checks -->
+        <module name="UnusedImports">
+            <property name="processJavadoc" value="false"/>
+        </module>
+        
+        <module name="RedundantImport"/>
+        
+        <module name="UnusedLocalVariable"/>
+        
+        <module name="UnusedCatchParameter"/>
+        
+        <module name="UnusedLambdaParameter"/>
+        
+        <!-- Additional useful checks -->
+        <module name="EmptyBlock"/>
+        <module name="EmptyStatement"/>
+        <module name="UnnecessaryParentheses"/>
+        <module name="UnnecessarySemicolonAfterOuterTypeDeclaration"/>
+        <module name="UnnecessarySemicolonAfterTypeMemberDeclaration"/>
+        <module name="UnnecessarySemicolonInEnumeration"/>
+        <module name="UnnecessarySemicolonInTryWithResources"/>
+        
+        <!-- Code style that helps identify potential dead code -->
+        <module name="AvoidNestedBlocks"/>
+        <module name="EmptyCatchBlock">
+            <property name="exceptionVariableName" value="expected"/>
+        </module>
+        
+        <!-- Naming conventions to help identify unused elements -->
+        <module name="LocalVariableName"/>
+        <module name="MemberName"/>
+        <module name="MethodName"/>
+        <module name="PackageName"/>
+        <module name="ParameterName"/>
+        <module name="StaticVariableName"/>
+        <module name="TypeName"/>
+    </module>
+</module>

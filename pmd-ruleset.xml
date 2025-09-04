@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<ruleset name="Java Chat Dead Code Detection"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 
+                             https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>PMD ruleset focused on detecting dead code and unused elements</description>
+
+    <!-- Exclude data directory -->
+    <exclude-pattern>.*/data/.*</exclude-pattern>
+
+    <!-- Dead Code Detection Rules -->
+    <rule ref="category/java/bestpractices.xml/UnusedFormalParameter"/>
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod"/>
+    <rule ref="category/java/bestpractices.xml/UnusedAssignment"/>
+    
+    <!-- Import related -->
+    <rule ref="category/java/bestpractices.xml/UnusedImports"/>
+    <rule ref="category/java/bestpractices.xml/UnnecessaryFullyQualifiedName"/>
+    
+    <!-- Code Style that helps identify dead code -->
+    <rule ref="category/java/codestyle.xml/UnnecessaryLocalBeforeReturn"/>
+    <rule ref="category/java/codestyle.xml/UnnecessaryReturn"/>
+    <rule ref="category/java/codestyle.xml/UselessParentheses"/>
+    <rule ref="category/java/codestyle.xml/UselessQualifier"/>
+    
+    <!-- Design issues that often indicate dead code -->
+    <rule ref="category/java/design.xml/UnusedPrivateField"/>
+    <rule ref="category/java/design.xml/UnusedPrivateMethod"/>
+    
+    <!-- Error prone patterns -->
+    <rule ref="category/java/errorprone.xml/UnusedNullCheckInEquals"/>
+    <rule ref="category/java/errorprone.xml/UselessOperationOnImmutable"/>
+    <rule ref="category/java/errorprone.xml/UnconditionalIfStatement"/>
+    
+    <!-- Performance related unused code -->
+    <rule ref="category/java/performance.xml/RedundantFieldInitializer"/>
+    <rule ref="category/java/performance.xml/UnnecessaryWrapperObjectCreation"/>
+    
+</ruleset>
