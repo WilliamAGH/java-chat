@@ -330,6 +330,10 @@ public record StreamEvent(
     Map<String, Object> metadata,
     Long timestamp
 ) {}
+
+// ROBUST PROCESSING: Use structured objects, not regex
+public record CitationData(String url, String title, String snippet) {}
+public record EnrichmentData(String type, String content, Map<String, String> attributes) {}
 ```
 
 #### **Layered Response Service**
@@ -514,6 +518,12 @@ mvn clean compile     # Java compilation
 mvn test              # Unit + integration
 mvn spotbugs:check    # Bug detection
 mvn verify            # Full validation
+
+# ANTI-PATTERNS TO REJECT:
+# ❌ String.replace() for HTML/XML
+# ❌ Regex for structured data parsing  
+# ❌ innerHTML for dynamic content
+# ✅ DOM APIs, AST visitors, typed objects
 ```
 
 ## 🔧 DEVELOPMENT WORKFLOW
@@ -650,6 +660,14 @@ Quality:
 - Graceful degradation
 - Efficient resource usage
 
+### 6. **ALWAYS ROBUST & MAINTAINABLE**
+- **NO REGEX for HTML/Markdown processing** - Use proper parsers (DOM, Flexmark, etc.)
+- **Structured data over string manipulation** - Parse to objects, transform, serialize
+- **Idiomatic language patterns** - Use Java Streams, Optional, proper HTML APIs
+- **Separation of concerns** - Backend handles structure, frontend handles presentation
+- **Fail-safe defaults** - Graceful degradation when parsing fails
+- **Type safety** - Strong typing over string concatenation
+
 ## 📚 INSPIRATION & REFERENCES
 
 ### Design Inspiration
@@ -682,45 +700,45 @@ Apple Developer:
 
 ### Component Examples
 ```javascript
-// Beautiful streaming text
-<StreamingText
-  text={response}
-  speed={30}           // chars per second
-  cursor="▊"
-  highlight={terms}    // Tooltip triggers
-  onComplete={() => showEnrichments()}
-/>
+// ROBUST APPROACH: Use proper DOM APIs and structured data
+class CitationRenderer {
+  constructor(container) {
+    this.container = container;
+  }
+  
+  // NO REGEX: Use DOM createElement and structured objects
+  renderCitation(citationData) {
+    const pill = document.createElement('span');
+    pill.className = 'citation-pill';
+    pill.dataset.url = citationData.url;
+    
+    const icon = this.createIcon(citationData.url);
+    const text = document.createTextNode(citationData.title);
+    
+    pill.appendChild(icon);
+    pill.appendChild(text);
+    return pill;
+  }
+  
+  createIcon(url) {
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    // Proper SVG creation, not string manipulation
+    return icon;
+  }
+}
 
-// Elegant citation pills
-<CitationPill
-  citation={citation}
-  variant="primary"
-  showPreview={true}
-  previewDelay={500}
-  onHover={loadSnippet}
-  onClick={openInNewTab}
-/>
-
-// Rich knowledge cards
-<KnowledgeCard
-  type="insight"
-  title="Best Practice"
-  icon={LightbulbIcon}
-  expandable={true}
-  priority="high"
->
-  <MarkdownContent>{enrichment}</MarkdownContent>
-</KnowledgeCard>
-
-// Interactive code blocks
-<CodeBlock
-  language="java"
-  title="Example: Using Optional"
-  code={exampleCode}
-  runnable={true}
-  highlightLines={[3, 5, 7]}
-  onCopy={() => track('code_copied')}
-/>
+// BACKEND: Use Flexmark AST, not regex
+class MarkdownProcessor {
+  private final Parser parser = Parser.builder().build();
+  
+  public ProcessedContent process(String markdown) {
+    Document document = parser.parse(markdown);
+    // Use AST visitor pattern, not regex
+    CitationVisitor visitor = new CitationVisitor();
+    visitor.visit(document);
+    return new ProcessedContent(document, visitor.getCitations());
+  }
+}
 ```
 
 ## 🔄 CONTINUOUS IMPROVEMENT
