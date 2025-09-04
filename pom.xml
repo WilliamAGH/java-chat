@@ -89,11 +89,11 @@
             <artifactId>jsoup</artifactId>
             <version>${jsoup.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.azure</groupId>
-            <artifactId>azure-ai-inference</artifactId>
-            <version>1.0.0-beta.1</version>
-        </dependency>
+        <!-- REMOVED: Azure AI Inference dependency
+             This was causing Spring AI to auto-configure Azure endpoints instead of GitHub Models
+             GitHub Models uses standard OpenAI-compatible API, no Azure SDK needed
+             Reference: https://docs.github.com/en/github-models/prototyping-with-ai-models
+        -->
         <dependency>
             <groupId>it.unimi.dsi</groupId>
             <artifactId>fastutil</artifactId>

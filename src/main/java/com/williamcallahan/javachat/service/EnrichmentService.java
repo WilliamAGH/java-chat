@@ -50,10 +50,15 @@ public class EnrichmentService {
         try {
             json = chatClient.prompt().user(prompt.toString()).call().content();
         } catch (Exception ex) {
+            logger.warn("Enrichment service failed for query '{}': {}", userQuery, ex.getMessage());
             if (isUnauthorized(ex)) {
                 json = openaiFallback(prompt.toString());
+            } else if (isTimeoutOrConnectionError(ex)) {
+                logger.warn("Timeout or connection error in enrichment service, returning fallback");
+                json = "{}"; // Return empty JSON for graceful degradation
             } else {
-                throw ex;
+                logger.error("Unexpected error in enrichment service", ex);
+                json = "{}"; // Return empty JSON instead of throwing
             }
         }
 
@@ -100,6 +105,25 @@ public class EnrichmentService {
             String msg = t.getMessage();
             if (msg != null && msg.contains("401") && msg.toLowerCase().contains("unauthorized")) {
                 return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    private boolean isTimeoutOrConnectionError(Throwable ex) {
+        Throwable t = ex;
+        while (t != null) {
+            String msg = t.getMessage();
+            if (msg != null) {
+                String lowerMsg = msg.toLowerCase();
+                if (lowerMsg.contains("timeout") || 
+                    lowerMsg.contains("connection") || 
+                    lowerMsg.contains("504") ||
+                    lowerMsg.contains("context deadline exceeded") ||
+                    lowerMsg.contains("client.timeout exceeded")) {
+                    return true;
+                }
             }
             t = t.getCause();
         }

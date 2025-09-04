@@ -38,6 +38,9 @@ public class ChatService {
     @Value("${APP_INFERENCE_PRIMARY_URL:https://api.openai.com}")
     private String inferencePrimaryBaseUrl;
 
+    // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
+    // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
+    // DO NOT USE: Any azure.com domain (we don't have Azure instances)
     @Value("${APP_INFERENCE_SECONDARY_URL:https://models.github.ai/inference}")
     private String inferenceSecondaryBaseUrl;
 
@@ -167,6 +170,8 @@ public class ChatService {
         } else if (githubToken != null && !githubToken.isBlank()) {
             logger.debug("Using GitHub Models for fallback (same rate limits apply)");
             logger.warn("Fallback to GitHub Models may still hit rate limits - consider setting OPENAI_API_KEY");
+            // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
+            // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
             return tryOpenAiCompat(prompt, "https://models.github.ai/inference", githubToken);
         }
         // If no API keys available, return error

@@ -136,12 +136,15 @@ All config is env-driven. See `src/main/resources/application.properties` for de
 - `OPENAI_MODEL`: Model name, default `gpt-4o-mini` (used by all endpoints)
 - `OPENAI_TEMPERATURE`: default `0.7`
 - `OPENAI_BASE_URL`: Spring AI base URL (default: `https://models.github.ai/inference`)
+  - **CRITICAL**: Must be `https://models.github.ai/inference` for GitHub Models
+  - **DO NOT USE**: `models.inference.ai.azure.com` (this is a hallucinated URL)
+  - **DO NOT USE**: Any `azure.com` domain (we don't have Azure instances)
 
 **How APIs are used:**
 1. **Spring AI** (primary): Uses `OPENAI_BASE_URL` with `GITHUB_TOKEN` (preferred) or `OPENAI_API_KEY`
 2. **Direct fallbacks** (on 401 auth errors):
    - If `OPENAI_API_KEY` exists: Direct OpenAI API at `https://api.openai.com`
-   - If only `GITHUB_TOKEN` exists: GitHub Models at `https://models.github.ai/inference`
+   - If only `GITHUB_TOKEN` exists: GitHub Models at `https://models.github.ai/inference` (CORRECT endpoint)
 
 ### Local Embeddings (LM Studio)
 - `APP_LOCAL_EMBEDDING_ENABLED`: `true` to use local embeddings server

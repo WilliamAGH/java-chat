@@ -8,6 +8,7 @@ JAR = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)
 # - Base URL and model names have sensible defaults
+# - CRITICAL: GitHub Models endpoint is https://models.github.ai/inference (NOT azure.com)
 RUN_ARGS := \
   --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
   --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
