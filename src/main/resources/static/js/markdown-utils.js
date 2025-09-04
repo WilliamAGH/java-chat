@@ -223,6 +223,8 @@
   function createEnrichmentBlock(type, title, items){
     const card = document.createElement('div');
     card.className = `inline-enrichment ${type}`;
+    // Add data attribute for deduplication tracking
+    card.setAttribute('data-enrichment-type', type);
     const header = document.createElement('div');
     header.className = 'inline-enrichment-header';
     header.innerHTML = `${ENRICH_ICONS[type] || ''}<span>${title}</span>`;
@@ -240,12 +242,16 @@
   function applyInlineEnrichments(text){
     if (!text) return '';
     let t = String(text);
+    
+    // Convert inline HTML links to citation pills
+    t = processInlineLinks(t);
+    
     t = t.replace(/\{\{hint:([\s\S]*?)\}\}/g, (m, c) => {
-      const el = createEnrichmentBlock('hint', 'Helpful Hint', [c.trim()]);
+      const el = createEnrichmentBlock('hint', 'Helpful Hints', [c.trim()]);
       return `\n${el.outerHTML}\n`;
     });
     t = t.replace(/\{\{reminder:([\s\S]*?)\}\}/g, (m, c) => {
-      const el = createEnrichmentBlock('reminder', 'Important Reminder', [c.trim()]);
+      const el = createEnrichmentBlock('reminder', 'Important Reminders', [c.trim()]);
       return `\n${el.outerHTML}\n`;
     });
     t = t.replace(/\{\{background:([\s\S]*?)\}\}/g, (m, c) => {
@@ -257,6 +263,85 @@
       return `\n${el.outerHTML}\n`;
     });
     return t;
+  }
+
+  /**
+   * Processes inline HTML links and converts them to citation-pill style.
+   * Uses very specific patterns to avoid interfering with normal markdown.
+   */
+  function processInlineLinks(text) {
+    if (!text) return '';
+    
+    // Only process if we actually have malformed link patterns to avoid breaking normal content
+    const hasMalformedLinks = text.includes('&lt;a href=') && text.includes('&lt;/a&gt;');
+    if (!hasMalformedLinks) {
+      return text; // No malformed links, return unchanged
+    }
+    
+    // Very specific pattern for the exact malformed structure we see:
+    // &lt;a href="https://start.spring.io/"&gt;<a href="https://start.spring.io/">https://start.spring.io/</a>&lt;/a&gt;
+    text = text.replace(/&lt;a href="(https?:\/\/[^"]*)"&gt;<a href="[^"]*">([^<]*)<\/a>&lt;\/a&gt;/g, (match, url, linkText) => {
+      const citation = { url: url, title: linkText || url };
+      const pill = createInlineLinkPill(citation);
+      return pill.outerHTML;
+    });
+    
+    // Handle simple escaped HTML links (only if they're URLs)
+    text = text.replace(/&lt;a href="(https?:\/\/[^"]*)"&gt;([^&<]*?)&lt;\/a&gt;/g, (match, url, linkText) => {
+      const citation = { url: url, title: linkText || url };
+      const pill = createInlineLinkPill(citation);
+      return pill.outerHTML;
+    });
+    
+    return text;
+  }
+
+  /**
+   * Creates an inline link pill for links within text content.
+   * These appear inline and have different styling than regular citations.
+   * 
+   * @param {Object} citation - Citation object with url, title properties
+   * @returns {HTMLElement} - Configured inline link pill element
+   */
+  function createInlineLinkPill(citation) {
+    const href = citation.url || '';
+    const isHttpLink = href.startsWith('http://') || href.startsWith('https://');
+    const isLocalLink = href.startsWith('/');
+    const isPdf = href.toLowerCase().endsWith('.pdf');
+    const isLink = !!href && (isHttpLink || isLocalLink);
+    
+    // Create appropriate element type
+    const pill = document.createElement(isLink ? 'a' : 'div');
+    pill.className = 'citation-pill inline-link' + (isPdf ? ' citation-pill-pdf' : '');
+    
+    // Configure link properties
+    if (isLink) {
+      pill.href = href;
+      pill.target = '_blank';
+      pill.rel = 'noopener noreferrer';
+    }
+    
+    // Label logic for inline links
+    let label = citation.title || 'Source';
+    if (!citation.title && isHttpLink) {
+      try {
+        // Extract hostname for external links when no title is provided
+        label = new URL(href).hostname;
+      } catch {
+        // Keep default label on URL parse error
+      }
+    }
+    // Replace :: separator with | for cleaner appearance
+    label = label.replace(/::/g, '|');
+    
+    // SVG icons
+    const iconExternal = `<svg class="citation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+    const iconPdf = `<svg class="citation-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5"/><path d="M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2"/></svg>`;
+    
+    // Inline links: no number, just label and icon
+    pill.innerHTML = `<span class="citation-label">${label}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
+    
+    return pill;
   }
 
   /**
@@ -303,7 +388,7 @@
     const iconExternal = `<svg class="citation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
     const iconPdf = `<svg class="citation-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5"/><path d="M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2"/></svg>`;
     
-    // RESTORED: Exact same HTML structure as original inline code
+    // Regular citations: always show number, label, and icon
     pill.innerHTML = `<span class="citation-number">${index + 1}</span><span class="citation-label">${label}${isPdf ? ' (PDF)' : ''}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
     
     return pill;
@@ -348,6 +433,7 @@
     safeHighlightUnder: safeHighlightUnder,
     createEnrichmentBlock: createEnrichmentBlock,
     applyInlineEnrichments: applyInlineEnrichments,
+    createInlineLinkPill: createInlineLinkPill,
     createCitationPill: createCitationPill,
     createCitationsRow: createCitationsRow,
     setDebug: (v) => { try { global.MU_DEBUG = !!v; } catch {} },

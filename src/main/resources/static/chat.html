@@ -570,7 +570,7 @@
         
         async function loadEnrichment(query, container) {
             console.debug('[DEBUG] loadEnrichment called for query:', query);
-            // Robust enrichment loader: append nothing unless there are real items
+            // Robust enrichment loader with deduplication: check if enrichments already exist from inline markdown
             try {
                 const response = await fetch('/api/chat/enrich?q=' + encodeURIComponent(query));
                 if (!response.ok) return;
@@ -585,12 +585,28 @@
                 const background = normalize(enrichment.background);
                 const reminders = normalize(enrichment.reminders);
 
-                let appended = false;
-                if (hints.length > 0) { container.appendChild(MU.createEnrichmentBlock('hint', 'Helpful Hints', hints)); appended = true; }
-                if (background.length > 0) { container.appendChild(MU.createEnrichmentBlock('background', 'Background Context', background)); appended = true; }
-                if (reminders.length > 0) { container.appendChild(MU.createEnrichmentBlock('reminder', 'Important Reminders', reminders)); appended = true; }
+                // CRITICAL: Check for existing enrichments to prevent duplicates
+                const existingTypes = new Set();
+                container.querySelectorAll('[data-enrichment-type]').forEach(el => {
+                    existingTypes.add(el.getAttribute('data-enrichment-type'));
+                });
 
-                console.debug('[DEBUG] Enrichment cards appended:', appended);
+                let appended = false;
+                // Only append if this type doesn't already exist (from inline markdown)
+                if (hints.length > 0 && !existingTypes.has('hint')) { 
+                    container.appendChild(MU.createEnrichmentBlock('hint', 'Helpful Hints', hints)); 
+                    appended = true; 
+                }
+                if (background.length > 0 && !existingTypes.has('background')) { 
+                    container.appendChild(MU.createEnrichmentBlock('background', 'Background Context', background)); 
+                    appended = true; 
+                }
+                if (reminders.length > 0 && !existingTypes.has('reminder')) { 
+                    container.appendChild(MU.createEnrichmentBlock('reminder', 'Important Reminders', reminders)); 
+                    appended = true; 
+                }
+
+                console.debug('[DEBUG] Enrichment cards appended:', appended, 'Existing types:', Array.from(existingTypes));
                 // If nothing valid, do not create any placeholders
                 if (!appended) return;
             } catch (error) {

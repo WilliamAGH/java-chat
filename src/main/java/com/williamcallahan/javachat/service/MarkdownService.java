@@ -186,6 +186,11 @@ public class MarkdownService {
         
         // The full, robust preprocessing pipeline.
         String protectedMd = protectCodeBlocks(markdown);
+
+        // Protect enrichment markers so paragraph/list heuristics never split them
+        java.util.Map<String, String> enrichmentPlaceholders = new java.util.HashMap<>();
+        protectedMd = protectEnrichmentsForPreprocessing(protectedMd, enrichmentPlaceholders);
+
         String preserved = preserveInlineCode(protectedMd);
         preserved = fixInlineLists(preserved);
         preserved = normalizeInlineAndBulletLists(preserved);
@@ -201,6 +206,12 @@ public class MarkdownService {
         // Now that fences are visible again, enforce final separation/newline rules
         preserved = ensureFenceSeparation(preserved);
         preserved = ensureOpeningFenceNewline(preserved);
+
+        // Normalize emphasis markers like "** text **" -> "**text**" (outside code)
+        preserved = normalizeEmphasisSpacing(preserved);
+
+        // Finally, restore enrichment markers back to their original text form
+        preserved = unprotectEnrichmentsForPreprocessing(preserved, enrichmentPlaceholders);
 
         return preserved;
     }
@@ -574,6 +585,10 @@ public class MarkdownService {
         // Fixes cases where tags might have removed spaces
         html = html.replaceAll("([.!?])(<[^>]+>)?([A-Z])", "$1$2 $3");
         
+        // Fix escaped HTML tags that should be preserved as HTML
+        html = html.replace("&lt;br /&gt;", "<br />");
+        html = html.replace("&lt;br&gt;", "<br>");
+        
         // Remove any leading spaces from paragraph starts
         html = html.replaceAll("<p>\\s+", "<p>");
         
@@ -847,6 +862,53 @@ public class MarkdownService {
             if (i < lines.length - 1) { out.append("\n"); }
         }
         return out.toString();
+    }
+
+    /**
+     * Temporarily replace enrichment markers with placeholders so that 
+     * list/paragraph normalization never splits them. Restored before returning
+     * from preprocessMarkdown.
+     */
+    private String protectEnrichmentsForPreprocessing(String s, java.util.Map<String, String> stash) {
+        if (s == null || s.indexOf("{{") < 0) return s;
+        java.util.regex.Matcher m = ENRICHMENT_PATTERN.matcher(s);
+        StringBuffer sb = new StringBuffer();
+        int i = 0;
+        while (m.find()) {
+            String ph = "___ENRICH_" + (i++) + "___";
+            stash.put(ph, m.group());
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(ph));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    private String unprotectEnrichmentsForPreprocessing(String s, java.util.Map<String, String> stash) {
+        if (s == null || stash.isEmpty()) return s;
+        for (var e : stash.entrySet()) {
+            s = s.replace(e.getKey(), e.getValue());
+        }
+        return s;
+    }
+
+    /**
+     * Normalize emphasis spacing so sequences like "** text **" and "* ital *"
+     * are converted to canonical "**text**" and "*ital*". This improves bold/italic
+     * rendering reliability without touching code blocks (already protected).
+     */
+    private String normalizeEmphasisSpacing(String s) {
+        if (s == null || s.isEmpty()) return s;
+        if (s.indexOf('*') < 0) return s;
+        // Work line-by-line to avoid spanning across blocks
+        String[] lines = s.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            // Collapse single spaces immediately inside emphasis markers
+            line = line.replaceAll("\\*\\*\\s+([^*][^*]*?)\\s+\\*\\*", "**$1**");
+            line = line.replaceAll("(?<!\\*)\\*\\s+([^*][^*]*?)\\s+\\*(?!\\*)", "*$1*");
+            lines[i] = line;
+        }
+        return String.join("\n", lines);
     }
 
 }

@@ -45,6 +45,24 @@ class MarkdownServiceTest {
         assertTrue(html.contains("<em><strong>bold italic</strong></em>") || 
                    html.contains("<strong><em>bold italic</em></strong>"), "Should contain bold italic");
     }
+
+    @Test
+    @DisplayName("Should normalize spaced bold markers ** text ** -> <strong>text</strong>")
+    void testBoldWithSpacesInsideMarkers() {
+        String markdown = "This is ** bold ** and also **text**.";
+        String html = markdownService.render(markdown);
+        assertTrue(html.contains("<strong>bold</strong>"), "Should collapse spaces inside bold markers");
+        assertTrue(html.contains("<strong>text</strong>"), "Should still render regular bold");
+    }
+
+    @Test
+    @DisplayName("Should not split enrichment markers during preprocessing")
+    void testEnrichmentNotBrokenByPreprocessing() {
+        String markdown = "A sentence. {{hint:This should remain intact even after paragraph logic.}} Next.";
+        String html = markdownService.render(markdown);
+        assertTrue(html.contains("{{hint:This should remain intact even after paragraph logic.}}"),
+                "Enrichment marker should be preserved as a single unit");
+    }
     
     @Test
     @DisplayName("Should render unordered lists")

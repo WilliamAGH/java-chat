@@ -354,6 +354,28 @@ li:last-child { margin-bottom: 0; }
     flex-shrink: 0;
 }
 
+/* Inline link styling - appears inline within text content */
+.citation-pill.inline-link {
+    display: inline-flex;
+    margin: 0 var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-sm);
+    background: var(--dark-surface-2);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.citation-pill.inline-link:hover {
+    background: var(--accent-primary);
+    color: var(--dark-text-primary);
+    border-color: var(--accent-primary);
+}
+
+.citation-pill.inline-link .citation-icon {
+    width: 12px;
+    height: 12px;
+}
+
 /* Skeleton loader fix */
 .skeleton-loader.hidden, #lessonSkeleton.hidden { display: none; }
 .skeleton-loader { width: 100%; }

@@ -253,7 +253,6 @@
               
               // STEP 3: Check for list markers
               const startsWithListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
-              const nextListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
               
               // Handle empty lines - they end lists
               if (!data) {
@@ -282,26 +281,19 @@
                   // Add newline before new list item
                   fullText += inList ? '\n' : '\n\n';
                 }
-                fullText += data;  // NO NEWLINE HERE - let next chunks continue
+                fullText += data;
                 inList = true;
                 continue;
               }
               
               // STEP 4: Are we in a list?
               if (inList) {
-                // Check if this is a new list item or continuation
-                if (nextListMarker) {
-                  // New list item - add single newline before
-                  fullText += '\n' + data;
-                } else {
-                  // Continuation of current list item - just add space
-                  // Check if we need a space or not
-                  const needsSpace = fullText.length > 0 && 
-                                    !fullText.endsWith(' ') && 
-                                    !fullText.endsWith('\n') &&
-                                    !data.startsWith(' ');
-                  fullText += needsSpace ? ' ' + data : data;
-                }
+                // Continuation of current list item - just add space if needed
+                const needsSpace = fullText.length > 0 && 
+                                  !fullText.endsWith(' ') && 
+                                  !fullText.endsWith('\n') &&
+                                  !data.startsWith(' ');
+                fullText += needsSpace ? ' ' + data : data;
                 continue;
               }
               
@@ -407,9 +399,18 @@
       if (!res.ok) return; const enrichment = await res.json();
       if (loadId !== currentLoadId) return;
 
+      // Check for existing enrichments from inline markdown to avoid duplicates
+      const existingTypes = new Set();
+      document.querySelectorAll('[data-enrichment-type]').forEach(el => {
+        existingTypes.add(el.getAttribute('data-enrichment-type'));
+      });
+
       // Use shared enrichment block generator for DRY parity
       const createEnrichmentBlock = (type, title, _svgPath, items) => {
-        try { div.appendChild(MU.createEnrichmentBlock(type, title, items)); } catch (_) {}
+        // Only create if this type doesn't already exist
+        if (!existingTypes.has(type) && items && items.length > 0) {
+          try { div.appendChild(MU.createEnrichmentBlock(type, title, items)); } catch (_) {}
+        }
       };
 
       createEnrichmentBlock(
@@ -580,7 +581,6 @@
               }
             }
           }
-        }
           // Only treat a code-fence boundary as complete when followed by a newline
           const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
           scheduleRender(immediate);
@@ -671,6 +671,10 @@
       s=s.replace(/(:)\s*-\s+(?=\S)/g,'$1\n\n- ');
       s=s.replace(/([.!?])\s+(\d+\.\s+)/g,'$1\n$2');
       s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      // Minimal emphasis handling after HTML escape and code protection
+      s = s.replace(/\*\*\s+([\s\S]*?)\s+\*\*/g, '**$1**');
+      s = s.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/(^|[^*])\*\s*([^*][^\n]*?)\s*\*(?!\*)/g, (m,pfx,body)=> `${pfx}<em>${body}</em>`);
       // Minimal headings (fallback only)
       s=s.replace(/^######\s+(.+)$/gm,'<h6>$1</h6>')
           .replace(/^#####\s+(.+)$/gm,'<h5>$1</h5>')
