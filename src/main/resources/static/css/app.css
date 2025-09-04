@@ -248,9 +248,7 @@ li:last-child { margin-bottom: 0; }
 }
 
 /* Hide citations in guided learning specifically - use class-based approach for better browser support */
-.guided-learning .citations-row {
-    display: none;
-}
+/* Citations are shown in both Chat and Guided for parity */
 
 .citation-pill {
     display: inline-flex;
@@ -270,6 +268,12 @@ li:last-child { margin-bottom: 0; }
     border-color: var(--accent-primary);
     color: var(--dark-text-primary);
     transform: translateY(-1px);
+}
+
+.citation-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 /* Skeleton loader fix */

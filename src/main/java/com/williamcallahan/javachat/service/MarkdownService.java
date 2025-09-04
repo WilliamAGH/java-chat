@@ -188,6 +188,7 @@ public class MarkdownService {
         String protectedMd = protectCodeBlocks(markdown);
         String preserved = preserveInlineCode(protectedMd);
         preserved = fixInlineLists(preserved);
+        preserved = normalizeInlineOrderedLists(preserved);
 
         if (!hasListMarkers(preserved)) {
             preserved = applySmartParagraphBreaksImproved(preserved);
@@ -620,6 +621,55 @@ public class MarkdownService {
         String processed = result.toString().trim();
         logger.debug("Paragraph breaking: added {} breaks", processed.split("\n\n").length - 1);
         return processed;
+    }
+
+    /**
+     * Normalize inline ordered lists inside paragraphs by inserting a newline before
+     * numeric list markers (e.g., "1.text", "2. something").
+     * Conservative, idempotent: only triggers when two or more markers are detected.
+     */
+    private String normalizeInlineOrderedLists(String text) {
+        if (text == null || text.isEmpty()) return text;
+        // Fast path: if we already have list items at line starts, skip
+        if (java.util.regex.Pattern.compile("(?m)^\\s*\\d+\\.\\s").matcher(text).find()) return text;
+
+        char[] chars = text.toCharArray();
+        java.util.List<Integer> positions = new java.util.ArrayList<>();
+        int i = 0;
+        while (i < chars.length) {
+            int j = i;
+            int numStart = -1;
+            // collect digits
+            while (j < chars.length && Character.isDigit(chars[j])) {
+                if (numStart == -1) numStart = j;
+                j++;
+            }
+            if (numStart != -1 && j < chars.length && chars[j] == '.') {
+                char prev = (numStart > 0) ? chars[numStart - 1] : '\n';
+                char next = (j + 1 < chars.length) ? chars[j + 1] : '\n';
+                boolean prevOk = Character.isWhitespace(prev) || prev == '(' || prev == '[';
+                boolean nextOk = Character.isWhitespace(next) || Character.isLetter(next);
+                boolean notDecimal = !(Character.isDigit(next));
+                if (prevOk && nextOk && notDecimal) {
+                    positions.add(numStart);
+                }
+                i = j + 1;
+            } else {
+                i = (numStart != -1 ? numStart + 1 : j + 1);
+            }
+        }
+        if (positions.size() < 2) return text;
+        StringBuilder out = new StringBuilder(text.length() + positions.size());
+        int last = 0;
+        for (int pos : positions) {
+            boolean atStart = pos == 0 || text.charAt(pos - 1) == '\n';
+            if (!atStart) {
+                out.append(text, last, pos).append('\n');
+                last = pos;
+            }
+        }
+        out.append(text.substring(last));
+        return out.toString();
     }
 
 

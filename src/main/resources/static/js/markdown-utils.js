@@ -17,7 +17,9 @@
       /java\s*(?:import|public|class|package|record|enum)\b/i,
       /\bimport\s+java\b/i,
       /\bpublic\s+class\b/i,
-      /\bclass\s+\w+\s*\{/i
+      /\bclass\s+\w+\s*\{/i,
+      /java\s*:\s*\S/i,     // "java: ..."
+      /java\s*\/\//i        // "java// ..."
     ];
     let t = text;
     let changed = false;
@@ -57,6 +59,59 @@
       }
     }
     return changed ? t : text;
+  }
+
+  // Normalize inline ordered lists (1.text / 1. text ...) into true lists by
+  // inserting newlines before list markers. Parser-style, conservative rules:
+  // - A list item token is (\d{1,3}) '.' (space|letter)
+  // - Preceded by start or whitespace
+  // - Not part of a decimal like 3.14 (next char must not be digit)
+  // - Only commits when two or more items are found within 600 chars
+  function normalizeInlineOrderedLists(text){
+    if (!text) return '';
+    // Fast path: if we already have multiple newlines with numbers, skip
+    if (/^\s*\d+\.\s/m.test(text)) return text;
+    const chars = Array.from(text);
+    let i = 0;
+    const positions = [];
+    while (i < chars.length) {
+      // find digits
+      let j = i;
+      let numStart = -1;
+      let num = 0;
+      while (j < chars.length && chars[j] >= '0' && chars[j] <= '9') {
+        if (numStart === -1) numStart = j;
+        num = num*10 + (chars[j].charCodeAt(0) - 48);
+        j++;
+      }
+      if (numStart !== -1 && j < chars.length && chars[j] === '.') {
+        const prev = numStart > 0 ? chars[numStart-1] : '\n';
+        const next = (j+1) < chars.length ? chars[j+1] : '\n';
+        const prevOk = /\s|[\(\[]/.test(prev);
+        const nextOk = /\s|[A-Za-z]/.test(next); // avoid 3.14 / 1.2.3
+        const notDecimal = !(next >= '0' && next <= '9');
+        if (prevOk && nextOk && notDecimal) {
+          positions.push(numStart);
+        }
+        i = j+1;
+        continue;
+      }
+      i = (numStart !== -1 ? numStart+1 : j+1);
+    }
+    if (positions.length < 2) return text; // need at least two items
+    // Commit: insert a newline before each detected item if not already at line start
+    let out = '';
+    let last = 0;
+    for (const pos of positions) {
+      // If already at line start, skip
+      const atStart = pos === 0 || text.slice(Math.max(0,pos-1), pos) === '\n';
+      if (!atStart) {
+        out += text.slice(last, pos) + '\n';
+        last = pos;
+      }
+    }
+    out += text.slice(last);
+    return out;
   }
 
   function shouldImmediateFlush(fullText){
@@ -132,12 +187,85 @@
     try { if (global.Prism && typeof Prism.highlightAllUnder === 'function') Prism.highlightAllUnder(el); } catch(_) {}
   }
 
+  /**
+   * Creates a citation pill element with proper styling, icons, and link handling.
+   * Extracted from chat.html to ensure consistent citation rendering across views.
+   * 
+   * @param {Object} citation - Citation object with url, title properties
+   * @param {number} index - Zero-based index for numbering (will display as index + 1)
+   * @returns {HTMLElement} - Configured citation pill element (a or div)
+   */
+  function createCitationPill(citation, index) {
+    const href = citation.url || '';
+    const isHttpLink = href.startsWith('http://') || href.startsWith('https://');
+    const isLocalLink = href.startsWith('/');
+    const isPdf = href.toLowerCase().endsWith('.pdf');
+    const isLink = !!href && (isHttpLink || isLocalLink);
+    
+    // Create appropriate element type
+    const pill = document.createElement(isLink ? 'a' : 'div');
+    pill.className = 'citation-pill' + (isPdf ? ' citation-pill-pdf' : '');
+    
+    // Configure link properties
+    if (isLink) {
+      pill.href = href;
+      pill.target = '_blank';
+      pill.rel = 'noopener noreferrer';
+    }
+    
+    // Determine label
+    let label = citation.title || 'Source';
+    if (!citation.title && isHttpLink) {
+      try {
+        label = new URL(href).hostname;
+      } catch (_) {
+        // Keep default label on URL parse error
+      }
+    }
+    
+    // Icon SVGs (consistent with chat.html implementation)
+    const iconExternal = `<svg class="citation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+    const iconPdf = `<svg class="citation-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5"/><path d="M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2"/></svg>`;
+    
+    // Build pill content with structured HTML
+    pill.innerHTML = `<span class="citation-number">${index + 1}</span><span class="citation-label">${label}${isPdf ? ' (PDF)' : ''}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
+    
+    return pill;
+  }
+
+  /**
+   * Creates a citations row container with citation pills.
+   * Safe to call multiple times - will not duplicate citations.
+   * 
+   * @param {Array} citations - Array of citation objects
+   * @param {number} maxCount - Maximum number of citations to display (default: 5)
+   * @returns {HTMLElement} - Citations row container element
+   */
+  function createCitationsRow(citations, maxCount = 5) {
+    const citationsRow = document.createElement('div');
+    citationsRow.className = 'citations-row';
+    
+    if (!citations || citations.length === 0) {
+      return citationsRow; // Return empty container
+    }
+    
+    citations.slice(0, maxCount).forEach((citation, index) => {
+      const pill = createCitationPill(citation, index);
+      citationsRow.appendChild(pill);
+    });
+    
+    return citationsRow;
+  }
+
   global.MU = {
     normalizeOpeningFences: normalizeOpeningFences,
     promoteLikelyJavaBlocks: promoteLikelyJavaBlocks,
+    normalizeInlineOrderedLists: normalizeInlineOrderedLists,
     shouldImmediateFlush: shouldImmediateFlush,
     upgradeCodeBlocks: upgradeCodeBlocks,
     attachCodeCopyButtons: attachCodeCopyButtons,
     safeHighlightUnder: safeHighlightUnder,
+    createCitationPill: createCitationPill,
+    createCitationsRow: createCitationsRow,
   };
 })(window);

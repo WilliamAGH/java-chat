@@ -190,13 +190,14 @@
                     const lines = buffer.split('\n');
                     buffer = lines[lines.length - 1];
                     for (let i = 0; i < lines.length - 1; i++) {
-                        // Preserve literal spaces in SSE data payloads.
-                        // Do NOT trim the line; only strip a trailing CR.
+                        // Preserve literal spaces in SSE data payloads and reconstruct event data
+                        // per spec by joining multiple data lines with a single '\n'.
                         let line = lines[i];
                         if (line.endsWith('\r')) line = line.slice(0, -1);
                         if (line.startsWith('data:')) {
-                            const data = line.slice(5); // keep any leading space after 'data:'
-                            if (data.length) fullText += data;
+                            const data = line.slice(5); // keep leading space after 'data:'
+                            // Reconstruct data by appending a newline for each data line
+                            fullText += data + '\n';
                         }
                     }
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
@@ -379,7 +380,11 @@
          */
         function clientMarkdownFallback(text) {
             if (!text) return '';
-            if (window.MU) { text = MU.normalizeOpeningFences(text); text = MU.promoteLikelyJavaBlocks(text); }
+            if (window.MU) { 
+                text = MU.normalizeOpeningFences(text); 
+                text = MU.promoteLikelyJavaBlocks(text);
+                text = MU.normalizeInlineOrderedLists(text);
+            }
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
             let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
@@ -462,22 +467,30 @@
                 if (!response.ok) return;
                 const citations = await response.json();
                 if (!citations || citations.length === 0) return;
-                const citationsRow = document.createElement('div'); citationsRow.className = 'citations-row';
-                citations.slice(0, 5).forEach((citation, index) => {
-                    const href = citation.url || '';
-                    const isHttpLink = href.startsWith('http://') || href.startsWith('https://');
-                    const isLocalLink = href.startsWith('/');
-                    const isPdf = href.toLowerCase().endsWith('.pdf');
-                    const isLink = !!href && (isHttpLink || isLocalLink);
-                    const pill = document.createElement(isLink ? 'a' : 'div'); pill.className = 'citation-pill' + (isPdf ? ' citation-pill-pdf' : '');
-                    if (isLink) { pill.href = href; pill.target = '_blank'; pill.rel = 'noopener noreferrer'; }
-                    let label = citation.title || 'Source';
-                    if (!citation.title && isHttpLink) { try { label = new URL(href).hostname; } catch (_) {} }
-                    const iconExternal = `<svg class=\"citation-icon\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"></path><polyline points=\"15 3 21 3 21 9\"></polyline><line x1=\"10\" y1=\"14\" x2=\"21\" y2=\"3\"></line></svg>`;
-                    const iconPdf = `<svg class=\"citation-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5\"/><path d=\"M7 15h2.5a2 2 0 0 0 0-4H7v4zm5-4h1v4h-1a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2zm5 0h-2v4h2\"/></svg>`;
-                    pill.innerHTML = `<span class=\"citation-number\">${index + 1}</span><span class=\"citation-label\">${label}${isPdf ? ' (PDF)' : ''}</span>${isLink ? (isPdf ? iconPdf : iconExternal) : ''}`;
-                    citationsRow.appendChild(pill);
-                });
+                
+                let citationsRow;
+                
+                // Use shared citation rendering function with fallback
+                if (typeof MU !== 'undefined' && MU.createCitationsRow) {
+                    citationsRow = MU.createCitationsRow(citations, 5);
+                } else {
+                    // Fallback: create simple citations without icons (regression-safe)
+                    console.warn('MU.createCitationsRow not available, using fallback');
+                    citationsRow = document.createElement('div');
+                    citationsRow.className = 'citations-row';
+                    citations.slice(0, 5).forEach((citation, index) => {
+                        const pill = document.createElement(citation.url ? 'a' : 'div');
+                        pill.className = 'citation-pill';
+                        if (citation.url) {
+                            pill.href = citation.url;
+                            pill.target = '_blank';
+                            pill.rel = 'noopener noreferrer';
+                        }
+                        pill.textContent = `${index + 1}. ${citation.title || 'Source'}`;
+                        citationsRow.appendChild(pill);
+                    });
+                }
+                
                 const exportBtn = container.querySelector('.export-chat-btn');
                 if (exportBtn) { container.insertBefore(citationsRow, exportBtn); } else { container.appendChild(citationsRow); }
             } catch (error) { console.error('Error loading citations:', error); }
