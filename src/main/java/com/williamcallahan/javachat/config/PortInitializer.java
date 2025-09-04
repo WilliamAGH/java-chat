@@ -83,10 +83,25 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     }
 
     private static boolean isPortInUse(int port) {
+        // First check with lsof to see if any process is using the port
+        try {
+            Process list = new ProcessBuilder("/bin/sh", "-lc", "lsof -ti tcp:" + port).start();
+            String pids = readAll(list);
+            list.waitFor();
+            if (pids != null && !pids.trim().isEmpty()) {
+                System.err.println("[startup] Found process(es) on port " + port + ": " + pids.trim());
+                return true; // processes found
+            }
+        } catch (Exception e) {
+            System.err.println("[startup] Warning: lsof check failed for port " + port + ": " + e.getMessage());
+        }
+        
+        // Also try to bind to double-check
         try (ServerSocket socket = new ServerSocket(port)) {
             socket.setReuseAddress(true);
             return false; // successfully bound -> not in use
         } catch (IOException e) {
+            System.err.println("[startup] Port " + port + " binding failed: " + e.getMessage());
             return true; // exception means port is in use
         }
     }

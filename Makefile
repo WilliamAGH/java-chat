@@ -34,7 +34,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
 	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
 	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
-	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT || true); if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS || true; sleep 1; fi; \
+	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT 2>/dev/null || true); echo "Found PIDs on port $$SERVER_PORT: '$$PIDS'" >&2; if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 2; fi; \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
 	  java -Djava.net.preferIPv4Stack=true -jar $(JAR) --server.port=$$SERVER_PORT $(RUN_ARGS)
 
@@ -44,9 +44,9 @@ dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
 	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
 	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
-	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT || true); if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS || true; sleep 1; fi; \
+	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT 2>/dev/null || true); echo "Found PIDs on port $$SERVER_PORT: '$$PIDS'" >&2; if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 2; fi; \
 	  echo "Binding app (dev) to port $$SERVER_PORT" >&2; \
-	  SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run -Dspring-boot.run.jvmArguments="-Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true" -Dspring-boot.run.arguments="--server.port=$$SERVER_PORT $(RUN_ARGS)"
+	  SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true" -Dspring-boot.run.arguments="--server.port=$$SERVER_PORT $(RUN_ARGS)"
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
 	@for p in 8086 8087; do \
