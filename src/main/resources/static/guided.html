@@ -199,17 +199,8 @@
               console.debug('upgradeCodeBlocks error (non-critical):', err);
             }
             
-            try {
-              attachCodeCopyButtons(el);
-            } catch (err) {
-              console.debug('attachCodeCopyButtons error (non-critical):', err);
-            }
-            
-            try {
-              Prism.highlightAllUnder(el);
-            } catch (err) {
-              console.debug('Prism highlighting error (non-critical):', err);
-            }
+            try { (window.MU?MU.attachCodeCopyButtons:()=>{})(el); } catch (err) { console.debug('attachCodeCopyButtons error (non-critical):', err); }
+            try { (window.MU?MU.safeHighlightUnder:Prism.highlightAllUnder)(el); } catch (err) { console.debug('highlight error (non-critical):', err); }
             
             try {
               applyGlossaryTooltips(el);
@@ -240,7 +231,7 @@
           // If user switched lessons, drop work
           if (loadId !== currentLoadId) return;
           // Only treat a code-fence boundary as complete when followed by a newline
-          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
+          const immediate = window.MU ? MU.shouldImmediateFlush(fullText) : (/[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n'));
           scheduleRender(immediate);
           if (!firstChunkShown) {
             firstChunkShown = true;
@@ -387,12 +378,7 @@
             }
             
             content.appendChild(cursor);
-            
-            try {
-              Prism.highlightAllUnder(content);
-            } catch (err) {
-              console.debug('Prism highlighting error (non-critical):', err);
-            }
+            try { (window.MU?MU.safeHighlightUnder:Prism.highlightAllUnder)(content); } catch (err) { console.debug('highlight error (non-critical):', err); }
             
             lastRendered = fullText; 
           } catch(err){
@@ -477,10 +463,8 @@
     function clientMarkdownFallback(text){
       if(!text) return '';
       const codeBlocks=[];
-      // Normalize opening fences with code on same line (e.g., "```javapublic …")
-      text = text
-        .replace(/```([A-Za-z0-9_-]+)[ \t]*([^\n])/g,'```$1\n$2')
-        .replace(/```[ \t]*([^\n])/g,'```\n$1');
+      // Normalize opening fences with code on same line (shared util)
+      if (window.MU) text = MU.normalizeOpeningFences(text);
 
       let s=text.replace(/```([\w-]+)?\n([\s\S]*?)```/g,(m,lang,code)=>{ const i=codeBlocks.push({lang:(lang||'').trim(),code})-1; return `[[CODE_BLOCK_${i}]]`; });
       s=s.replace(/(:)\s*-\s+(?=\S)/g,'$1\n\n- ');

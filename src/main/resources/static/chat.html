@@ -84,6 +84,7 @@
     <!-- Prism.js for syntax highlighting -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+    <script src="/js/markdown-utils.js"></script>
     
     <script>
         // Enhanced streaming with character-by-character animation
@@ -171,11 +172,7 @@
                         
                         contentWrapper.appendChild(cursor);
                         
-                        try {
-                            Prism.highlightAllUnder(contentWrapper);
-                        } catch (err) {
-                            console.debug('Prism highlighting error (non-critical):', err);
-                        }
+                        try { (window.MU?MU.safeHighlightUnder:Prism.highlightAllUnder)(contentWrapper); } catch (err) { console.debug('highlight error (non-critical):', err); }
                         
                         lastRendered = fullText; 
                         chatEl.scrollTop = chatEl.scrollHeight; 
@@ -205,7 +202,7 @@
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
                     // IMPORTANT: Only treat a code-fence boundary as complete when followed by a newline
                     // to avoid rendering half-fences like "```javaimport ..." inline.
-                    const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
+                    const immediate = window.MU ? MU.shouldImmediateFlush(fullText) : (/[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n'));
                     scheduleRender(immediate);
                     if (!firstChunk) {
                         firstChunk = true;
@@ -382,10 +379,7 @@
          */
         function clientMarkdownFallback(text) {
             if (!text) return '';
-            // Normalize opening fences that have code on the same line (e.g., "```javapublic …")
-            text = text
-                .replace(/```([A-Za-z0-9_-]+)[ \t]*([^\n])/g, '```$1\n$2')
-                .replace(/```[ \t]*([^\n])/g, '```\n$1');
+            if (window.MU) text = MU.normalizeOpeningFences(text);
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
             let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
