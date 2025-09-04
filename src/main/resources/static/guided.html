@@ -356,23 +356,28 @@
      *   - render()
      * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
      */
-    async function renderMarkdown(text){
-      text = stripLeadingHeading(text);
-      try { 
-        const res = await fetch('/api/markdown/render', { 
-            method:'POST', 
-            headers:{'Content-Type':'application/json'}, 
-            body: JSON.stringify({content:text}) 
-        }); 
-        if(res.ok){ 
-            const data=await res.json(); 
-            // DO NOT process enrichments here; they are handled by loadEnrichment
-            return data.html; 
-        } 
-      } catch(e){}
-      // Safety net: client markdown ONLY
-      return clientMarkdownFallback(text);
-    }
+         async function renderMarkdown(text){
+       text = stripLeadingHeading(text);
+       try { 
+         const res = await fetch('/api/markdown/render', { 
+             method:'POST', 
+             headers:{'Content-Type':'application/json'}, 
+             body: JSON.stringify({content:text}) 
+         }); 
+         if(res.ok){ 
+             const data=await res.json(); 
+             console.log('Server markdown success:', data.html.substring(0, 200));
+             return data.html; 
+         } else {
+             console.error('Server markdown failed with status:', res.status);
+         }
+       } catch(e){
+         console.error('Server markdown error:', e);
+       }
+       // Safety net: client markdown ONLY
+       console.log('Using client fallback for markdown');
+       return clientMarkdownFallback(text);
+     }
     function stripLeadingHeading(text){
       return text.replace(/^(\s*#{1,6}[^\n]*\n?)+/,'');
     }

@@ -229,7 +229,13 @@ li:last-child { margin-bottom: 0; }
 .enrichment-text { display: block; color: var(--dark-text-primary); margin: 0; }
 .inline-enrichment.example { background: rgba(16, 185, 129, 0.15); color: var(--dark-text-primary); border-left: 3px solid var(--accent-success); }
 .inline-enrichment.example .inline-enrichment-header { color: var(--accent-success); }
-.inline-enrichment.example pre { margin: 0; background: transparent; border: none; }
+.inline-enrichment.example pre { 
+  margin: var(--space-2) 0 0 0; 
+  background: var(--dark-surface-3); 
+  border: 1px solid var(--dark-border); 
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
 
 /* Citations */
 .citations-row {
