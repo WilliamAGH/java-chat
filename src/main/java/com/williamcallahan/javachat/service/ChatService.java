@@ -51,6 +51,7 @@ public class ChatService {
     }
 
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
+        logger.debug("ChatService.streamAnswer called for query: {}", latestUserMessage);
         // Retrieve context and stream directly via ChatClient
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
         StringBuilder systemContext = new StringBuilder(
@@ -64,6 +65,7 @@ public class ChatService {
             "- [n] for citations with the source URL\n\n" +
             "Integrate these naturally into your explanation. Don't group them separately.\n"
         );
+        logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);

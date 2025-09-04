@@ -46,7 +46,16 @@ public class ChatController extends BaseController {
     }
 
     /**
-     * Stream answer with SSE. Body: { "sessionId": "s1", "latest": "question" }
+     * Streams a response to a user's chat message using Server-Sent Events (SSE).
+     *
+     * @param body A JSON object containing the user's request. Expected format:
+     *             <pre>{@code
+     *               {
+     *                 "sessionId": "some-session-id", // Optional, defaults to "default"
+     *                 "latest": "The user's question?"   // The user's message
+     *               }
+     *             }</pre>
+     * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> stream(@RequestBody Map<String, Object> body) {
@@ -98,9 +107,9 @@ public class ChatController extends BaseController {
                         String toSend = buffered;
                         buffer.setLength(0);  // Clear buffer
                         
-                        PIPELINE_LOG.debug("[{}] Sending chunk: '{}'", 
-                            requestId, toSend.replace("\n", "\\n"));
-                        
+                        PIPELINE_LOG.info("[{}] SENT CHUNK: '{}'",
+                                requestId, toSend.replace("\n", "\\n"));
+
                         return toSend;
                     } else {
                         // Keep buffering
@@ -119,8 +128,8 @@ public class ChatController extends BaseController {
                     // Send any remaining buffered content (without preprocessing)
                     if (buffer.length() > 0) {
                         String remaining = buffer.toString();
-                        PIPELINE_LOG.debug("[{}] Final buffer sent: '{}'", 
-                            requestId, remaining.replace("\n", "\\n"));
+                        PIPELINE_LOG.info("[{}] SENT FINAL CHUNK: '{}'",
+                                requestId, remaining.replace("\n", "\\n"));
                         return Flux.just(remaining);
                     }
                     return Flux.empty();
@@ -138,13 +147,22 @@ public class ChatController extends BaseController {
     }
 
     /**
-     * Return citations for a query.
+     * Retrieves a list of relevant citations for a given query.
+     *
+     * @param q The search query string.
+     * @return A {@link List} of {@link Citation} objects.
      */
     @GetMapping("/citations")
     public List<Citation> citations(@RequestParam("q") String q) {
         return chatService.citationsFor(q);
     }
 
+    /**
+     * Exports the last assistant message from a given chat session.
+     *
+     * @param sessionId The ID of the chat session. Defaults to "default".
+     * @return A plain text string of the last assistant message.
+     */
     @GetMapping(value = "/export/last", produces = MediaType.TEXT_PLAIN_VALUE)
     public String exportLast(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
         var turns = chatMemory.getTurns(sessionId);
@@ -155,6 +173,12 @@ public class ChatController extends BaseController {
         return "";
     }
 
+    /**
+     * Exports the entire history of a chat session as a formatted string.
+     *
+     * @param sessionId The ID of the chat session. Defaults to "default".
+     * @return A plain text string representing the full conversation.
+     */
     @GetMapping(value = "/export/session", produces = MediaType.TEXT_PLAIN_VALUE)
     public String exportSession(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
         var history = chatMemory.getTurns(sessionId);

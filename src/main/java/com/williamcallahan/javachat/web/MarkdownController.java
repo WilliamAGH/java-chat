@@ -25,10 +25,17 @@ public class MarkdownController {
     private MarkdownService markdownService;
     
     /**
-     * Renders markdown to HTML with caching.
-     * 
-     * @param request Map containing 'content' key with markdown text
-     * @return Map with 'html' key containing rendered HTML
+     * Renders markdown text to HTML. This endpoint uses server-side caching to improve performance
+     * for frequently rendered content.
+     *
+     * @param request A JSON object containing the markdown to render. Expected format:
+     *                <pre>{@code
+     *                  {
+     *                    "content": "Your **markdown** text here."
+     *                  }
+     *                }</pre>
+     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
+     *         <pre>{@code {"html": "<p>...", "source": "server", "cached": true|false}}</pre>
      */
     @PostMapping(value = "/render", 
                  consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -65,11 +72,17 @@ public class MarkdownController {
     }
     
     /**
-     * Renders markdown for preview without caching.
-     * Useful for real-time preview while typing.
-     * 
-     * @param request Map containing 'content' key with markdown text
-     * @return Map with 'html' key containing rendered HTML
+     * Renders markdown text to HTML for a real-time preview. This endpoint does *not* use caching,
+     * ensuring the latest content is always rendered.
+     *
+     * @param request A JSON object containing the markdown to render. Expected format:
+     *                <pre>{@code
+     *                  {
+     *                    "content": "Your **markdown** text here."
+     *                  }
+     *                }</pre>
+     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
+     *         <pre>{@code {"html": "<p>...", "source": "preview", "cached": false}}</pre>
      */
     @PostMapping(value = "/preview",
                  consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -104,7 +117,10 @@ public class MarkdownController {
     }
     
     /**
-     * Get cache statistics for monitoring.
+     * Retrieves statistics about the server-side markdown render cache.
+     * Provides metrics like hit count, miss count, size, and hit rate.
+     *
+     * @return A {@link ResponseEntity} with a {@link Map} containing cache statistics.
      */
     @GetMapping("/cache/stats")
     public ResponseEntity<Map<String, Object>> getCacheStats() {
@@ -128,7 +144,9 @@ public class MarkdownController {
     }
     
     /**
-     * Clear the markdown render cache.
+     * Clears the server-side markdown render cache.
+     *
+     * @return A {@link ResponseEntity} with a status message.
      */
     @PostMapping("/cache/clear")
     public ResponseEntity<Map<String, String>> clearCache() {

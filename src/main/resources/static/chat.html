@@ -5,6 +5,27 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>Java Chat - Beautiful AI-Powered Java Learning</title>
+    <link rel="apple-touch-icon" sizes="57x57" href="/apple-touch-icon-57x57.png" />
+    <link rel="apple-touch-icon" sizes="114x114" href="/apple-touch-icon-114x114.png" />
+    <link rel="apple-touch-icon" sizes="72x72" href="/apple-touch-icon-72x72.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/apple-touch-icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="60x60" href="/apple-touch-icon-60x60.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/apple-touch-icon-120x120.png" />
+    <link rel="apple-touch-icon" sizes="76x76" href="/apple-touch-icon-76x76.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png" />
+    <link rel="icon" type="image/png" href="/favicon-196x196.png" sizes="196x196" />
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16" />
+    <link rel="icon" type="image/png" href="/favicon-128.png" sizes="128x128" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="application-name" content="Java Chat"/>
+    <meta name="msapplication-TileColor" content="#FFFFFF" />
+    <meta name="msapplication-TileImage" content="/mstile-144x144.png" />
+    <meta name="msapplication-square70x70logo" content="/mstile-70x70.png" />
+    <meta name="msapplication-square150x150logo" content="/mstile-150x150.png" />
+    <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
+    <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
     
     <!-- Prism.js for syntax highlighting -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
@@ -459,26 +480,30 @@
         }
         
         function applyCustomEnrichments(text) {
+            console.debug('[DEBUG] applyCustomEnrichments called with text length:', text.length);
             // CRITICAL: Only create enrichment divs if content is not empty!
             text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g, (m, c) => {
                 const content = c.trim();
-                return content ? `<div class="inline-enrichment hint"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Helpful Hint</span></div><div class="enrichment-text">${content}</div></div>` : '';
+                console.debug('[DEBUG] Processing inline hint:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
+                return content ? `\n<div class="inline-enrichment hint"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Helpful Hint</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
             });
             text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g, (m, c) => {
                 const content = c.trim();
-                return content ? `<div class="inline-enrichment reminder"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg><span>Important Reminder</span></div><div class="enrichment-text">${content}</div></div>` : '';
+                console.debug('[DEBUG] Processing inline reminder:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
+                return content ? `\n<div class="inline-enrichment reminder"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg><span>Important Reminder</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
             });
             text = text.replace(/\{\{background:([\s\S]*?)\}\}/g, (m, c) => {
                 const content = c.trim();
-                return content ? `<div class="inline-enrichment background"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M3 3h18v2H3zM3 7h18v2H3zM3 11h18v2H3z"/></svg><span>Background Context</span></div><div class="enrichment-text">${content}</div></div>` : '';
+                console.debug('[DEBUG] Processing inline background:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
+                return content ? `\n<div class="inline-enrichment background"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M3 3h18v2H3zM3 7h18v2H3zM3 11h18v2H3z"/></svg><span>Background Context</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
             });
             text = text.replace(/\{\{example:([\s\S]*?)\}\}/g, (m, c) => {
                 const content = c.trim();
-                return content ? `<div class="inline-example"><div class="example-header">Example</div><pre><code class="language-java">${escapeHtml(content)}</code></pre></div>` : '';
+                return content ? `\n<div class="inline-example"><div class="example-header">Example</div><pre><code class="language-java">${escapeHtml(content)}</code></pre></div>\n` : '';
             });
             text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g, (m, c) => {
                 const content = c.trim();
-                return content ? `<div class="inline-enrichment warning"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span>Warning</span></div><div class="enrichment-text">${content}</div></div>` : '';
+                return content ? `\n<div class="inline-enrichment warning"><div class="inline-enrichment-header"><svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span>Warning</span></div><div class="enrichment-text">${content}</div></div>\n` : '';
             });
             text = text.replace(/\[(\d+)\]/g, (m, n) => `<sup class="inline-citation" data-cite="${n}">[${n}]</sup>`);
             
@@ -517,8 +542,8 @@
             if (!text) return '';
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
-            let s = text.replace(/```([\w-]+)?\n([\s\S]*?)```/g, (m, lang, code) => {
-                const idx = codeBlocks.push({ lang: (lang||'').trim(), code: code }) - 1;
+            let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
+                const idx = codeBlocks.push({ lang: (lang||'').trim(), code: code.trim() }) - 1;
                 return `[[CODE_BLOCK_${idx}]]`;
             });
 
@@ -530,7 +555,7 @@
             s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
             // Inline code
-            s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+            s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${escapeHtml(c)}</code>`);
 
             const lines = s.split(/\r?\n/);
             let out = '';
@@ -545,7 +570,7 @@
                     flushPara(); closeLists();
                     const idx = parseInt(codePh[1], 10);
                     const blk = codeBlocks[idx] || { lang: '', code: '' };
-                    const escaped = blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const escaped = escapeHtml(blk.code);
                     const langClass = blk.lang ? ` class="language-${blk.lang}"` : '';
                     out += `<pre><code${langClass}>${escaped}</code></pre>`;
                     continue;
@@ -576,7 +601,7 @@
             out = out.replace(/\[\[CODE_BLOCK_(\d+)\]\]/g, (m, i) => {
                 const idx = parseInt(i, 10);
                 const blk = codeBlocks[idx] || { lang: '', code: '' };
-                const escaped = blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const escaped = escapeHtml(blk.code);
                 const langClass = blk.lang ? ` class=\"language-${blk.lang}\"` : '';
                 return `<pre><code${langClass}>${escaped}</code></pre>`;
             });
@@ -611,11 +636,13 @@
         }
         
         async function loadEnrichment(query, container) {
+            console.debug('[DEBUG] loadEnrichment called for query:', query);
             // Robust enrichment loader: append nothing unless there are real items
             try {
                 const response = await fetch('/api/chat/enrich?q=' + encodeURIComponent(query));
                 if (!response.ok) return;
                 const enrichment = await response.json();
+                console.debug('[DEBUG] Enrichment API response:', enrichment);
 
                 const normalize = (arr) => (Array.isArray(arr) ? arr : [])
                     .map(v => (typeof v === 'string' ? v.trim() : ''))
@@ -625,11 +652,14 @@
                 const background = normalize(enrichment.background);
                 const reminders = normalize(enrichment.reminders);
 
+                console.debug('[DEBUG] Normalized enrichment counts - hints:', hints.length, 'background:', background.length, 'reminders:', reminders.length);
+
                 let appended = false;
                 if (hints.length > 0) { container.appendChild(createKnowledgeCard('tip', '💡 Helpful Hints', hints)); appended = true; }
                 if (background.length > 0) { container.appendChild(createKnowledgeCard('background', '📚 Background Context', background)); appended = true; }
                 if (reminders.length > 0) { container.appendChild(createKnowledgeCard('insight', '🔔 Important Reminders', reminders)); appended = true; }
 
+                console.debug('[DEBUG] Enrichment cards appended:', appended);
                 // If nothing valid, do not create any placeholders
                 if (!appended) return;
             } catch (error) {

@@ -437,16 +437,21 @@ public class MarkdownService {
      * Ensures code blocks maintain their content integrity.
      */
     private String protectCodeBlocks(String markdown) {
+        logger.debug("protectCodeBlocks: ENTERING with input: {}", markdown.replace("\n", "\\\\n"));
+        logger.debug("protectCodeBlocks: Input contains ``` ? {}", markdown.contains("```"));
+        
+        // TEMPORARY: Return original to test if method is the issue
+        return markdown;
+        
         // Match code blocks and ensure they have proper structure
         StringBuilder result = new StringBuilder();
         // ENHANCED: Support comprehensive language tags including java, cpp, c++, objective-c, etc.
         // Handle preprocessing artifacts and edge cases with more robust pattern
         java.util.regex.Pattern codeBlockPattern =
-            java.util.regex.Pattern.compile("```([\\w\\-\\+\\.]*)\\s*\\n?([\\s\\S]*?)```",
+            java.util.regex.Pattern.compile("```([\w\-\+\.]*)\s*\n?([\s\S]*?)```",
                                            java.util.regex.Pattern.DOTALL);
         java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
-        int blocks = 0;
-        
+        int blocks = 0;        
         int lastEnd = 0;
         while (matcher.find()) {
             // Append text before code block

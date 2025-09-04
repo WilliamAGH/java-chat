@@ -4,6 +4,8 @@ import com.williamcallahan.javachat.model.Enrichment;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 
 import org.springframework.stereotype.Service;
@@ -12,6 +14,8 @@ import java.util.List;
 
 @Service
 public class EnrichmentService {
+    private static final Logger logger = LoggerFactory.getLogger(EnrichmentService.class);
+
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
 
@@ -24,6 +28,7 @@ public class EnrichmentService {
     }
 
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
+        logger.debug("EnrichmentService.enrich called for query: {}", userQuery);
         StringBuilder prompt = new StringBuilder();
         prompt.append("Extract enrichment for a Java learning assistant to help users understand concepts better.\n");
         prompt.append("User query: ").append(userQuery).append("\n\n");

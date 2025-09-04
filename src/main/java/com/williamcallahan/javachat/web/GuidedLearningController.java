@@ -34,16 +34,34 @@ public class GuidedLearningController extends BaseController {
         this.markdownService = markdownService;
     }
 
+    /**
+     * Retrieves the table of contents for guided learning.
+     *
+     * @return A {@link List} of {@link GuidedLesson} objects representing the TOC.
+     */
     @GetMapping("/toc")
     public List<GuidedLesson> toc() {
         return guidedService.getTOC();
     }
 
+    /**
+     * Retrieves metadata for a specific guided learning lesson.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return The {@link GuidedLesson} object.
+     * @throws NoSuchElementException if the slug is not found.
+     */
     @GetMapping("/lesson")
     public GuidedLesson lesson(@RequestParam("slug") String slug) {
         return guidedService.getLesson(slug).orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: " + slug));
     }
 
+    /**
+     * Retrieves a list of citations relevant to a specific lesson.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return A {@link List} of {@link Citation} objects.
+     */
     @GetMapping("/citations")
     public List<Citation> citations(@RequestParam("slug") String slug) {
         return guidedService.citationsForLesson(slug);
@@ -65,13 +83,23 @@ public class GuidedLearningController extends BaseController {
                 .toList();
     }
 
+    /**
+     * Retrieves enrichment content (hints, reminders, background) for a specific lesson.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return An {@link Enrichment} object containing the lesson's enrichment data.
+     */
     @GetMapping("/enrich")
     public Enrichment enrich(@RequestParam("slug") String slug) {
         return sanitizeEnrichment(guidedService.enrichmentForLesson(slug));
     }
 
     /**
-     * Stream the core lesson content (markdown) for a lesson slug.
+     * Streams the core markdown content for a lesson slug using Server-Sent Events (SSE).
+     * This endpoint is designed for dynamically loading lesson text into the UI.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return A {@link Flux} of strings sending the markdown content as SSE data events.
      */
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamLesson(@RequestParam("slug") String slug) {
@@ -84,7 +112,12 @@ public class GuidedLearningController extends BaseController {
     }
 
     /**
-     * Non-streaming lesson content (markdown). Returns JSON with { markdown, cached }.
+     * Retrieves the full lesson content as a single JSON object.
+     * This is a non-streaming alternative to {@link #streamLesson(String)}.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return A {@link Map} containing the markdown content and a boolean indicating if it was from cache.
+     *         <pre>{@code {"markdown": "...", "cached": true|false}}</pre>
      */
     @GetMapping(value = "/content", produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> content(@RequestParam("slug") String slug) {
@@ -99,7 +132,11 @@ public class GuidedLearningController extends BaseController {
     }
 
     /**
-     * Non-streaming lesson content as HTML (server-rendered markdown).
+     * Retrieves the lesson content rendered as HTML.
+     * The markdown content is fetched (or generated) and then rendered by the server.
+     *
+     * @param slug The unique identifier for the lesson.
+     * @return A string containing the rendered HTML.
      */
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
     public String contentHtml(@RequestParam("slug") String slug) {
@@ -113,7 +150,17 @@ public class GuidedLearningController extends BaseController {
     }
 
     /**
-     * Stream guided answer with SSE. Body: { sessionId, slug, latest }
+     * Streams a response to a user's chat message within the context of a guided lesson.
+     *
+     * @param body A JSON object containing the user's request. Expected format:
+     *             <pre>{@code
+     *               {
+     *                 "sessionId": "guided:some-session-id", // Session ID, prefixed for guided mode
+     *                 "slug": "lesson-slug",               // The slug of the current lesson
+     *                 "latest": "The user's question?"     // The user's message
+     *               }
+     *             }</pre>
+     * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> stream(@RequestBody Map<String, Object> body) {

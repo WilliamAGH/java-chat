@@ -4,6 +4,8 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +29,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 
 @Service
 public class GuidedLearningService {
-
+    private static final Logger logger = LoggerFactory.getLogger(GuidedLearningService.class);
 
     private final GuidedTOCProvider tocProvider;
     private final RetrievalService retrievalService;
@@ -70,13 +72,17 @@ public class GuidedLearningService {
     }
 
     public Enrichment enrichmentForLesson(String slug) {
+        logger.debug("GuidedLearningService.enrichmentForLesson called for slug: {}", slug);
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         if (lesson == null) return emptyEnrichment();
         String query = buildLessonQuery(lesson);
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
         List<String> snippets = filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
-        return enrichmentService.enrich(query, jdkVersion, snippets);
+        Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
+        logger.debug("GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
+            enrichment.getHints().size(), enrichment.getReminders().size(), enrichment.getBackground().size());
+        return enrichment;
     }
 
     public Flux<String> streamGuidedAnswer(List<Message> history, String slug, String userMessage) {
