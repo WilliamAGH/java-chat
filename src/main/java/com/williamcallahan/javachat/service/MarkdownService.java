@@ -180,6 +180,10 @@ public class MarkdownService {
     public String preprocessMarkdown(String markdown) {
         if (markdown == null) return "";
 
+        // CRITICAL: Fix inline code blocks BEFORE protecting them
+        // This handles cases like "text: ```java" or "text: javapublic class"
+        markdown = fixInlineCodeBlocks(markdown);
+        
         // The full, robust preprocessing pipeline.
         String protectedMd = protectCodeBlocks(markdown);
         String preserved = preserveInlineCode(protectedMd);
@@ -199,6 +203,35 @@ public class MarkdownService {
         return preserved;
     }
 
+    /**
+     * CRITICAL: Fixes inline code blocks that are missing proper separation.
+     * Specifically targets the pattern where code immediately follows text without proper fencing.
+     * More conservative approach to avoid breaking existing content.
+     */
+    private String fixInlineCodeBlocks(String markdown) {
+        if (markdown == null || markdown.isEmpty()) return markdown;
+        
+        // Pattern 1: Fix "text: ```java" directly attached to code
+        // Look for ``` not at line start and ensure it starts on new line
+        markdown = markdown.replaceAll("([^\\n])(```[a-zA-Z]*)(public|private|protected|class|interface)", "$1\n\n$2\n$3");
+        
+        // Pattern 2: Fix "class: javapublic" where language and code run together
+        // Very specific pattern to avoid false positives
+        markdown = markdown.replaceAll(
+            "(class:|example:|Example:|code:)\\s*(java)(public\\s+class|private\\s+class|public\\s+static)",
+            "$1\n\n```java\n$3"
+        );
+        
+        // Pattern 3: Fix missing closing fence when code is followed by regular prose
+        // Look for }} In or }} This or similar patterns
+        markdown = markdown.replaceAll(
+            "(\\}\\s*\\})\\s+(In\\s+this|This\\s+|The\\s+|Here|Note|Notice)",
+            "$1\n```\n\n$2"
+        );
+        
+        return markdown;
+    }
+    
     /**
      * Replaces code blocks with placeholders to protect them from other processing.
      * This version uses a robust line-by-line parser instead of a fragile regex.
