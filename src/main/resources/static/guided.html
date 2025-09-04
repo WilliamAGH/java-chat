@@ -185,7 +185,43 @@
         let firstChunkShown = false;
         // Debounced rendering for smoother lesson updates
         let renderTimer = null; let lastRendered = '';
-        const flushRender = async () => { try { if (loadId !== currentLoadId) return; if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); el.innerHTML = html; upgradeCodeBlocks(el); attachCodeCopyButtons(el); Prism.highlightAllUnder(el); applyGlossaryTooltips(el); lastRendered = fullText; } catch(_){} };
+        const flushRender = async () => { 
+          try { 
+            if (loadId !== currentLoadId) return; 
+            if (fullText === lastRendered) return; 
+            const html = await renderMarkdown(fullText); 
+            el.innerHTML = html; 
+            
+            // Safe function calls with error handling
+            try {
+              upgradeCodeBlocks(el);
+            } catch (err) {
+              console.debug('upgradeCodeBlocks error (non-critical):', err);
+            }
+            
+            try {
+              attachCodeCopyButtons(el);
+            } catch (err) {
+              console.debug('attachCodeCopyButtons error (non-critical):', err);
+            }
+            
+            try {
+              Prism.highlightAllUnder(el);
+            } catch (err) {
+              console.debug('Prism highlighting error (non-critical):', err);
+            }
+            
+            try {
+              applyGlossaryTooltips(el);
+            } catch (err) {
+              console.debug('Glossary tooltips error (non-critical):', err);
+            }
+            
+            lastRendered = fullText; 
+          } catch(err){
+            console.error('flushRender error:', err);
+          } 
+        };
         const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while (true) {
           const { done, value } = await reader.read();
@@ -203,7 +239,8 @@
           }
           // If user switched lessons, drop work
           if (loadId !== currentLoadId) return;
-          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
+          // Only treat a code-fence boundary as complete when followed by a newline
+          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
           scheduleRender(immediate);
           if (!firstChunkShown) {
             firstChunkShown = true;
@@ -330,10 +367,42 @@
         if (!response.ok) throw new Error('HTTP '+response.status);
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let fullText=''; let buffer='';
         let renderTimer=null; let lastRendered='';
-        const flushRender = async () => { try { if (fullText === lastRendered) return; const html = await renderMarkdown(fullText); content.innerHTML = html; upgradeCodeBlocks(content); attachCodeCopyButtons(content); content.appendChild(cursor); Prism.highlightAllUnder(content); lastRendered = fullText; } catch(_){} };
+        const flushRender = async () => { 
+          try { 
+            if (fullText === lastRendered) return; 
+            const html = await renderMarkdown(fullText); 
+            content.innerHTML = html; 
+            
+            // Safe function calls with error handling
+            try {
+              upgradeCodeBlocks(content);
+            } catch (err) {
+              console.debug('upgradeCodeBlocks error (non-critical):', err);
+            }
+            
+            try {
+              attachCodeCopyButtons(content);
+            } catch (err) {
+              console.debug('attachCodeCopyButtons error (non-critical):', err);
+            }
+            
+            content.appendChild(cursor);
+            
+            try {
+              Prism.highlightAllUnder(content);
+            } catch (err) {
+              console.debug('Prism highlighting error (non-critical):', err);
+            }
+            
+            lastRendered = fullText; 
+          } catch(err){
+            console.error('flushRender error:', err);
+          } 
+        };
         const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
         while(true){ const {done,value}=await reader.read(); if(done) break; const chunk=decoder.decode(value,{stream:true}); buffer+=chunk; const lines=buffer.split('\n'); buffer=lines[lines.length-1]; for(let i=0;i<lines.length-1;i++){ const line=lines[i].trim(); if(line.startsWith('data:')){ const data=line.substring(5); if(data.trim()) fullText+=data; } }
-          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
+          // Only treat a code-fence boundary as complete when followed by a newline
+          const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
           scheduleRender(immediate);
         }
         await flushRender();
@@ -441,49 +510,48 @@
 
     function attachCodeCopyButtons(container){ try { const blocks=container.querySelectorAll('pre'); blocks.forEach(pre=>{ if(pre.querySelector('.code-copy-btn')) return; const btn=document.createElement('button'); btn.className='code-copy-btn'; btn.setAttribute('aria-label','Copy code'); btn.title='Copy code'; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`; btn.addEventListener('click',(e)=>{ e.stopPropagation(); const codeEl=pre.querySelector('code'); const text=codeEl?codeEl.innerText:pre.innerText; navigator.clipboard.writeText(text).then(()=>{ btn.classList.add('copied'); const orig=btn.innerHTML; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`; setTimeout(()=>{ btn.classList.remove('copied'); btn.innerHTML=orig; },1500); }); }); pre.appendChild(btn); }); } catch(_){} }
 
+    /**
+     * Safe code block upgrade for guided learning
+     * CONSERVATIVE APPROACH: Only process true code blocks, not inline code
+     * Preserves existing structure to prevent regression
+     */
     function upgradeCodeBlocks(container){
-      console.log('upgradeCodeBlocks called on:', container);
-      
-      // First, wrap multi-line inline <code>
-      const codeNodes = container.querySelectorAll('code');
-      console.log('Found code nodes:', codeNodes.length);
-      codeNodes.forEach(node => {
-        if (node.closest('pre') || node.closest('.inline-enrichment')) return;
-        const text = node.textContent || '';
-        if (text.indexOf('\n') === -1) return;
-        let body = text.trim();
-        body = body.replace(/^```?\s*([A-Za-z0-9_-]+)?\s*\n/, '');
-        const pre = document.createElement('pre');
-        const code = document.createElement('code');
-        code.className = 'language-java';
-        code.textContent = body;
-        pre.appendChild(code);
-        node.replaceWith(pre);
-        console.log('Converted inline code to pre');
-      });
-
-      // Now, wrap all <pre> in example wrapper
-      const preNodes = container.querySelectorAll('pre');
-      console.log('Found pre nodes:', preNodes.length);
-      preNodes.forEach(pre => {
-        if (pre.closest('.inline-enrichment')) {
-          console.log('Pre already wrapped, skipping');
-          return; // already wrapped
+      try {
+        // Safety check
+        if (!container || typeof container.querySelectorAll !== 'function') {
+          console.debug('upgradeCodeBlocks: Invalid container');
+          return;
         }
-        console.log('Wrapping pre in enrichment container');
-        const wrapper = document.createElement('div');
-        wrapper.className = 'inline-enrichment example';
-        const header = document.createElement('div');
-        header.className = 'inline-enrichment-header';
-        header.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span>Code Example</span>`;
-        wrapper.appendChild(header);
-        const bodyDiv = document.createElement('div');
-        bodyDiv.className = 'enrichment-text';
-        bodyDiv.appendChild(pre.cloneNode(true));
-        wrapper.appendChild(bodyDiv);
-        pre.replaceWith(wrapper);
-        console.log('Successfully wrapped pre');
-      });
+        
+        // REMOVED: Multi-line inline code conversion
+        // This was causing inline code with newlines to become blocks incorrectly
+        // Server-side markdown parser should handle this distinction
+        
+        // Only ensure proper language classes for syntax highlighting
+        const codeBlocks = container.querySelectorAll('pre > code');
+        codeBlocks.forEach(code => {
+          // Add language class if missing
+          if (!code.className || !code.className.includes('language-')) {
+            const text = code.textContent || '';
+            // Detect Java code patterns
+            if (text.includes('public class') || text.includes('import java') || 
+                text.includes('public static void') || text.includes('HashMap') ||
+                text.includes('String') || text.includes('System.out')) {
+              code.className = 'language-java';
+            }
+          }
+        });
+        
+        // REMOVED: Automatic wrapping in enrichment containers
+        // This was causing visual inconsistencies
+        // Let the server decide when to wrap code in special containers
+        
+        console.debug(`upgradeCodeBlocks: Processed ${codeBlocks.length} code blocks`);
+        
+      } catch (err) {
+        // Fail silently to prevent UI breakage
+        console.debug('upgradeCodeBlocks: Non-critical error', err);
+      }
     }
 
     // Load the table of contents and the first lesson

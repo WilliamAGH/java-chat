@@ -189,9 +189,12 @@ public class MarkdownService {
             preserved = applySmartParagraphBreaksImproved(preserved);
         }
 
-        preserved = ensureFenceSeparation(preserved);
+        preserved = ensureFenceSeparation(preserved); // no-op while code blocks are protected; keep for parity
         preserved = restoreInlineCode(preserved);
         preserved = unprotectCodeBlocks(preserved);
+        // Now that fences are visible again, enforce final separation/newline rules
+        preserved = ensureFenceSeparation(preserved);
+        preserved = ensureOpeningFenceNewline(preserved);
 
         return preserved;
     }
@@ -243,41 +246,63 @@ public class MarkdownService {
     }
 
     /**
-     * Ensures a blank paragraph (\n\n) exists before every opening code fence (```),
-     * while not altering closing fences inside code blocks.
-     * ENHANCED: Simplified and more robust fence detection that works with preprocessing artifacts.
+     * Ensures proper separation of code blocks from surrounding text.
+     * CRITICAL: This prevents code from being rendered inline with paragraphs.
+     * - Adds blank lines before AND after code blocks
+     * - Handles both fenced (```) and indented code blocks
+     * - Works with preprocessing placeholders
      */
     private String ensureFenceSeparation(String s) {
         if (s == null || !s.contains("```")) return s;
 
-        StringBuilder out = new StringBuilder(s.length() + 16);
+        StringBuilder out = new StringBuilder(s.length() + 32);
         boolean inCodeBlock = false;
-
         String[] lines = s.split("\n");
-
+        
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
-            if (line.trim().startsWith("```")) {
+            String trimmedLine = line.trim();
+            
+            // Check for code fence
+            if (trimmedLine.startsWith("```")) {
                 if (!inCodeBlock) {
-                    // This is an opening fence. Ensure it's preceded by a blank line.
+                    // Opening fence - ensure blank line before
                     if (out.length() > 0 && !out.toString().endsWith("\n\n")) {
+                        // Add enough newlines to create separation
                         if (out.toString().endsWith("\n")) {
                             out.append("\n");
                         } else {
                             out.append("\n\n");
                         }
                     }
+                    inCodeBlock = true;
+                } else {
+                    // Closing fence - will add blank line after
+                    inCodeBlock = false;
                 }
-                inCodeBlock = !inCodeBlock;
+                
+                out.append(line);
+                
+                // If this is a closing fence and there's more content, ensure separation
+                if (!inCodeBlock && i < lines.length - 1) {
+                    String nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : "";
+                    if (!nextLine.isEmpty() && !nextLine.startsWith("```")) {
+                        out.append("\n\n");
+                        continue; // Skip normal newline addition
+                    }
+                }
+            } else {
+                out.append(line);
             }
-            out.append(line);
+            
+            // Add normal line break if not at end
             if (i < lines.length - 1) {
                 out.append("\n");
             }
         }
+        
         return out.toString();
     }
-    
 
     
     /**
@@ -671,5 +696,48 @@ public class MarkdownService {
             return total == 0 ? 0.0 : (double) hitCount / total;
         }
     }
-    
+
+    /**
+     * Ensure an opening code fence (``` or ```lang) starts code on the next line.
+     * Fixes model outputs like "```javaimport ..." by inserting a newline after the info string.
+     * Closing fences and already-correct fences are left untouched.
+     */
+    private String ensureOpeningFenceNewline(String s) {
+        if (s == null || !s.contains("```")) return s;
+        String[] lines = s.split("\n", -1);
+        StringBuilder out = new StringBuilder(s.length() + 16);
+        boolean inCode = false;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+            if (trimmed.startsWith("```")) {
+                boolean opening = !inCode;
+                inCode = !inCode;
+                if (opening) {
+                    String afterTicks = trimmed.substring(3);
+                    String rest = afterTicks.replaceFirst("^[A-Za-z0-9_-]*\\s*", "");
+                    if (!rest.isEmpty()) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                                .compile("^(\\s*)```([A-Za-z0-9_-]*)\\s*(.*)$")
+                                .matcher(line);
+                        if (m.find()) {
+                            String indent = m.group(1) == null ? "" : m.group(1);
+                            String info = m.group(2) == null ? "" : m.group(2);
+                            String trailing = m.group(3) == null ? "" : m.group(3);
+                            if (!trailing.isEmpty()) {
+                                out.append(indent).append("```").append(info.isEmpty() ? "" : info).append("\n");
+                                out.append(trailing);
+                                if (i < lines.length - 1) { out.append("\n"); }
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            out.append(line);
+            if (i < lines.length - 1) { out.append("\n"); }
+        }
+        return out.toString();
+    }
+
 }

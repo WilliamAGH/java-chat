@@ -150,7 +150,39 @@
                 let buffer = '';
                 // Debounced rendering: reduce /api/markdown/render churn and jitter
                 let renderTimer = null; let lastRendered = '';
-                const flushRender = async () => { try { if (fullText === lastRendered) return; const formatted = await formatText(fullText); contentWrapper.innerHTML = formatted; upgradeCodeBlocks(contentWrapper); attachCodeCopyButtons(contentWrapper); contentWrapper.appendChild(cursor); Prism.highlightAllUnder(contentWrapper); lastRendered = fullText; chatEl.scrollTop = chatEl.scrollHeight; } catch(_){} };
+                const flushRender = async () => { 
+                    try { 
+                        if (fullText === lastRendered) return; 
+                        const formatted = await formatText(fullText); 
+                        contentWrapper.innerHTML = formatted; 
+                        
+                        // Safe function calls with error handling
+                        try {
+                            upgradeCodeBlocks(contentWrapper);
+                        } catch (err) {
+                            console.debug('upgradeCodeBlocks error (non-critical):', err);
+                        }
+                        
+                        try {
+                            attachCodeCopyButtons(contentWrapper);
+                        } catch (err) {
+                            console.debug('attachCodeCopyButtons error (non-critical):', err);
+                        }
+                        
+                        contentWrapper.appendChild(cursor);
+                        
+                        try {
+                            Prism.highlightAllUnder(contentWrapper);
+                        } catch (err) {
+                            console.debug('Prism highlighting error (non-critical):', err);
+                        }
+                        
+                        lastRendered = fullText; 
+                        chatEl.scrollTop = chatEl.scrollHeight; 
+                    } catch(err){
+                        console.error('flushRender error:', err);
+                    } 
+                };
                 const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
                 let firstChunk = false;
                 while (true) {
@@ -171,7 +203,9 @@
                         }
                     }
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
-                    const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```');
+                    // IMPORTANT: Only treat a code-fence boundary as complete when followed by a newline
+                    // to avoid rendering half-fences like "```javaimport ..." inline.
+                    const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
                     scheduleRender(immediate);
                     if (!firstChunk) {
                         firstChunk = true;
@@ -292,6 +326,51 @@
          */
         function restoreEnrichments(html) {
             return html.replace(/ZZENRICHZ(\w+)ZSTARTZZZ([\s\S]*?)ZZENRICHZ\1ZENDZZZ/g, (m, t, c) => `{{${t}:${c}}}`);
+        }
+
+        /**
+         * Safe code block upgrade function for chat.html
+         * CONSERVATIVE: Only ensures proper language classes for syntax highlighting
+         * Does NOT modify structure to avoid regressions
+         */
+        function upgradeCodeBlocks(container) {
+            try {
+                // Safety check: if container is invalid, return silently
+                if (!container || typeof container.querySelectorAll !== 'function') {
+                    console.debug('upgradeCodeBlocks: Invalid container, skipping');
+                    return;
+                }
+                
+                // CRITICAL: We do NOT convert inline code to blocks
+                // The server-side markdown parser already handles this distinction
+                // Converting multi-line inline code to blocks causes the exact issue we're fixing
+                
+                // Only ensure code blocks have proper language classes for Prism.js
+                const codeBlocks = container.querySelectorAll('pre > code');
+                codeBlocks.forEach(code => {
+                    // If no language class, try to detect from content
+                    if (!code.className || !code.className.includes('language-')) {
+                        const text = code.textContent || '';
+                        // Check for Java code patterns
+                        if (text.includes('public class') || text.includes('import java') || 
+                            text.includes('public static void') || text.includes('HashMap') ||
+                            text.includes('String') || text.includes('System.out') ||
+                            text.includes('Integer') || text.includes('ArrayList')) {
+                            code.className = 'language-java';
+                        }
+                    }
+                });
+                
+                // CRITICAL: We do NOT wrap pre blocks in enrichment containers
+                // This causes the rendering issue where code appears inline
+                // The server decides when to wrap code in special containers
+                
+                console.debug(`upgradeCodeBlocks: Processed ${codeBlocks.length} code blocks safely`);
+                
+            } catch (err) {
+                // Fail silently to prevent breaking the UI
+                console.debug('upgradeCodeBlocks: Non-critical error', err);
+            }
         }
 
         /**
@@ -461,6 +540,47 @@
                     pre.appendChild(btn);
                 });
             } catch (err) { console.warn('Failed to attach code copy buttons', err); }
+        }
+        
+        /**
+         * Safe code block upgrade function for chat.html
+         * MINIMAL APPROACH: Only ensures proper structure, doesn't modify content
+         * Prevents JavaScript errors while maintaining stable UI
+         */
+        function upgradeCodeBlocks(container) {
+            try {
+                // Safety check: if container is invalid, return silently
+                if (!container || typeof container.querySelectorAll !== 'function') {
+                    console.debug('upgradeCodeBlocks: Invalid container, skipping');
+                    return;
+                }
+                
+                // IMPORTANT: In chat.html context, we do NOT want to:
+                // 1. Convert inline code to blocks (that's for guided learning)
+                // 2. Wrap code blocks in enrichment containers
+                // 3. Modify the structure that the server already created
+                
+                // We only ensure code blocks have proper language classes for Prism
+                const codeBlocks = container.querySelectorAll('pre > code');
+                codeBlocks.forEach(code => {
+                    // If no language class, try to detect from content
+                    if (!code.className || !code.className.includes('language-')) {
+                        // Check if it looks like Java code
+                        const text = code.textContent || '';
+                        if (text.includes('public class') || text.includes('import java') || 
+                            text.includes('public static void') || text.includes('HashMap')) {
+                            code.className = 'language-java';
+                        }
+                    }
+                });
+                
+                // Log for debugging but don't throw errors
+                console.debug(`upgradeCodeBlocks: Processed ${codeBlocks.length} code blocks`);
+                
+            } catch (err) {
+                // Fail silently to prevent breaking the UI
+                console.debug('upgradeCodeBlocks: Non-critical error', err);
+            }
         }
         
         async function copyChat() {

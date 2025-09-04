@@ -372,8 +372,9 @@ Modes & objectives:
 - Logs/metrics: Spring Boot Actuator endpoints enabled for health/info/metrics.
  - Observability TODO: add tracing and custom metrics (query time, tokens, hit rates).
 
-### Troubleshooting (Qdrant Cloud)
+### Troubleshooting
 
+#### Qdrant Cloud
 - Error `Invalid host or port` or `Expected closing bracket for IPv6 address`:
   - Ensure `QDRANT_HOST` has no `https://` prefix; it must be the hostname only.
   - Ensure `QDRANT_PORT=6334` and `QDRANT_SSL=true`.
@@ -383,6 +384,11 @@ Modes & objectives:
   - Delete and recreate Qdrant collection if dimensions change
 - LM Studio tokenizer warnings:
   - "[WARNING] At least one last token in strings embedded is not SEP" is harmless
+
+#### Rate Limiting
+- **GitHub Models API**: ~15 requests/minute free tier. Set both `GITHUB_TOKEN` and `OPENAI_API_KEY` for automatic fallback.
+- **Built-in retry**: 5 attempts with exponential backoff (2s → 30s max). Configurable via `AI_RETRY_*` env vars.
+- **Fallback behavior**: On 429 errors, automatically switches to OpenAI API if `OPENAI_API_KEY` is available.
 
 ## Roadmap
 
