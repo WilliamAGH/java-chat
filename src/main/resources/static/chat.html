@@ -229,7 +229,6 @@
                             
                             // STEP 3: Check for list markers
                             const startsWithListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
-                            const nextListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
                             
                             // Handle empty lines - they end lists
                             if (!data) {
@@ -258,26 +257,19 @@
                                     // Add newline before new list item
                                     fullText += inList ? '\n' : '\n\n';
                                 }
-                                fullText += data;  // NO NEWLINE HERE - let next chunks continue
+                                fullText += data;
                                 inList = true;
                                 continue;
                             }
                             
                             // STEP 4: Are we in a list?
                             if (inList) {
-                                // Check if this is a new list item or continuation
-                                if (nextListMarker) {
-                                    // New list item - add single newline before
-                                    fullText += '\n' + data;
-                                } else {
-                                    // Continuation of current list item - just add space
-                                    // Check if we need a space or not
-                                    const needsSpace = fullText.length > 0 && 
-                                                      !fullText.endsWith(' ') && 
-                                                      !fullText.endsWith('\n') &&
-                                                      !data.startsWith(' ');
-                                    fullText += needsSpace ? ' ' + data : data;
-                                }
+                                // Continuation of current list item - just add space if needed
+                                const needsSpace = fullText.length > 0 && 
+                                                  !fullText.endsWith(' ') && 
+                                                  !fullText.endsWith('\n') &&
+                                                  !data.startsWith(' ');
+                                fullText += needsSpace ? ' ' + data : data;
                                 continue;
                             }
                             
@@ -473,6 +465,13 @@
 
             // Inline code
             s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${escapeHtml(c)}</code>`);
+
+            // Minimal emphasis handling (after code is protected)
+            // Normalize "** text **" -> "**text**" then render strong
+            s = s.replace(/\*\*\s+([\s\S]*?)\s+\*\*/g, '**$1**');
+            s = s.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+            // Optionally handle *italic* conservatively
+            s = s.replace(/(^|[^*])\*\s*([^*][^\n]*?)\s*\*(?!\*)/g, (m, pfx, body) => `${pfx}<em>${body}</em>`);
 
             // Minimal headings (fallback only)
             s = s.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
