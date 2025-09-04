@@ -82,9 +82,7 @@ public class ChatService {
 
         return chatClient
                 .prompt().messages(msgs).stream().content()
-                .onErrorResume(ex -> isUnauthorized(ex)
-                        ? openAiOnce(fallbackPrompt)
-                        : Flux.error(ex));
+                .onErrorResume(ex -> isFallbackRequired(ex) ? openAiOnce(fallbackPrompt) : Flux.error(ex));
     }
 
     /**
@@ -127,9 +125,7 @@ public class ChatService {
 
         return chatClient
                 .prompt().messages(msgs).stream().content()
-                .onErrorResume(ex -> isUnauthorized(ex)
-                        ? openAiOnce(fallbackPrompt)
-                        : Flux.error(ex));
+                .onErrorResume(ex -> isFallbackRequired(ex) ? openAiOnce(fallbackPrompt) : Flux.error(ex));
     }
 
     public List<Citation> citationsFor(String userQuery) {
@@ -137,13 +133,16 @@ public class ChatService {
         return retrievalService.toCitations(docs);
     }
 
-    private boolean isUnauthorized(Throwable ex) {
-        // Check for Spring AI NonTransientAiException or nested causes with 401 in message
+    private boolean isFallbackRequired(Throwable ex) {
         Throwable t = ex;
         while (t != null) {
             String msg = t.getMessage();
-            if (msg != null && msg.contains("401") && msg.toLowerCase().contains("unauthorized")) {
-                logger.warn("Authentication failed with primary API, attempting fallback");
+            if (msg != null && (msg.contains("401") || msg.contains("429"))) {
+                if (msg.contains("429")) {
+                    logger.warn("Rate limit hit with primary API, attempting fallback");
+                } else {
+                    logger.warn("Authentication failed with primary API, attempting fallback");
+                }
                 return true;
             }
             t = t.getCause();
