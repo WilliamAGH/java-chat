@@ -172,85 +172,26 @@ public class MarkdownService {
      * Ensures lists and code blocks are properly separated from preceding text.
      */
     public String preprocessMarkdown(String markdown) {
-        // CRITICAL FIX: Ensure opening fences ALWAYS start on new paragraph FIRST
-        // This handles cases like ":```java" or ".```python" etc.
-        // Do this BEFORE any other processing that might interfere
-        String beforeFenceHack = markdown;
-        markdown = markdown.replaceAll("(?<!^)```", "\n\n```");
-        if (!markdown.equals(beforeFenceHack) && markdown.contains("```")) {
-            logger.debug("[preprocess] inserted paragraph before opening fence");
+        if (markdown == null) return "";
+
+        // Preserve inline code spans so we don't mutate their contents during preprocessing
+        String preserved = preserveInlineCode(markdown);
+
+        // Fix inline lists that run together or are attached to punctuation.
+        preserved = fixInlineLists(preserved);
+
+        // Apply smart paragraph breaking, but never when list markers are present.
+        if (!hasListMarkers(preserved)) {
+            preserved = applySmartParagraphBreaksImproved(preserved);
         }
 
-        // Protect inline code spans so we don't mutate their contents during preprocessing
-        markdown = preserveInlineCode(markdown);
+        // Ensure proper separation for code fences. This is the most reliable way to handle fences.
+        preserved = ensureFenceSeparation(preserved);
 
-        // CRITICAL: Ensure single space after sentence-ending punctuation FIRST (outside code)
-        // Fixes: "operation.For example" -> "operation. For example" while avoiding decimals
-        markdown = markdown.replaceAll("(?<!\\d)([.!?])([\\\"'])?([A-Za-z(])", "$1$2 $3");
+        // Restore inline code placeholders back to their original `code` markdown.
+        preserved = restoreInlineCode(preserved);
 
-        // Fix inline lists FIRST - if we see "text. 1. Item 2. Item" pattern, it's a list!
-        // This catches malformed lists from AI that forgot newlines
-        markdown = fixInlineLists(markdown);
-
-        // Apply smart paragraph breaking AFTER fixing lists, but never when list markers are present
-        if (!hasListMarkers(markdown)) {
-            markdown = applySmartParagraphBreaksImproved(markdown);
-        }
-
-        // DO NOT auto-detect lists from inline text like "are:1."
-        // Only treat as list if it's at the start of a line or after explicit list marker
-        // This prevents "are:1. boolean" from becoming a list
-        // markdown = markdown.replaceAll(":\\s+(\\d+\\.\\s+[A-Z])", ":\n\n$1");
-        // COMMENTED OUT - causing false positives
-
-        // Fix inline bullet lists only in safe contexts to avoid false positives like math "x - y"
-        // 1) After a colon: "such as:- Item" or "such as: - Item" -> break into a proper list
-        // Also handle when items are concatenated like "- Item1- Item2"
-        markdown = markdown.replaceAll("(?<=:)\\s*-\\s*(?=\\S)", "\n\n- ");
-        markdown = markdown.replaceAll("(?<!^)(?<!\\n)-\\s+(?=[A-Z])", "\n- ");  // Line break before subsequent items
-        markdown = markdown.replaceAll("(?<=:)\\s*\\*\\s+(?=\\S)", "\n\n* ");
-        markdown = markdown.replaceAll("(?<=:)\\s*\\+\\s+(?=\\S)", "\n\n+ ");
-
-        // 2) When multiple inline hyphen items appear, likely an inline list. Only convert when preceded by punctuation/closer
-        // Detect two or more occurrences of "- Word" to reduce risk of converting a single minus usage
-        if (markdown.matches("(?s).* - \\p{L}+.* - \\p{L}+.*")) {
-            // Add a newline before "- " when it follows punctuation or a closing bracket/paren
-            markdown = markdown.replaceAll("(?<=[:;,.\\)\\]])\\s*-\\s+(?=\\p{L})", "\n- ");
-        }
-        
-        // Ensure proper separation before opening code fences, without touching closing fences
-        markdown = ensureFenceSeparation(markdown);
-        
-        // CRITICAL: Protect code block content from being consumed by other patterns
-        // Ensure code blocks are properly delimited and content is preserved
-        // Note: This must happen AFTER ensureFenceSeparation since it looks for the pattern
-        markdown = protectCodeBlocks(markdown);
-
-        // Final guard: ensure paragraph break before any fence attached to punctuation
-        // Handle all common punctuation cases: : . ! ? ) ] } ; ,
-        markdown = markdown.replaceAll("([:.!?)\\]};,])```", "$1\n\n```");
-        
-        // Also ensure space after punctuation before next word (but not before code fence)
-        // This fixes "approach.```java" -> "approach.\n\n```java"
-        markdown = markdown.replaceAll("([.!?])```([a-zA-Z])", "$1\n\n```$2");
-
-        // Ensure headings don't run into body text on the same logical line (common with streaming)
-        // Insert a paragraph break when an ATX heading appears to be concatenated directly
-        // with the next capitalized word (start of a sentence)
-        // Example: "## TitleBody starts here" -> "## Title\n\nBody starts here"
-        try {
-            markdown = markdown.replaceAll("(?m)^(#{1,6}\\s+[^\\n]*?[a-z])([A-Z][a-z])", "$1\n\n$2");
-        } catch (Exception ignored) {}
-        
-        // Clean up: collapse horizontal spaces (preserve newlines!)
-        markdown = markdown.replaceAll("[ \\t]{2,}", " ");
-        
-        // Never allow leading spaces at start of lines (except in code blocks)
-        markdown = markdown.replaceAll("(?m)^[ \\t]+(?!```)", "");
-        
-        // Restore inline code placeholders back to markdown
-        markdown = restoreInlineCode(markdown);
-        return markdown;
+        return preserved;
     }
 
     /**
@@ -262,32 +203,28 @@ public class MarkdownService {
         if (s == null || !s.contains("```")) return s;
 
         StringBuilder out = new StringBuilder(s.length() + 16);
+        boolean inCodeBlock = false;
 
-        for (int i = 0; i < s.length();) {
-            if (i + 2 < s.length() && s.charAt(i) == '`' && s.charAt(i + 1) == '`' && s.charAt(i + 2) == '`') {
-                // Found a fence - check if we need to add separation before it
-                int len = out.length();
-                if (len == 0) {
-                    // Start of string, no spacing needed
-                    logger.debug("[ensureFenceSeparation] Fence at start of string, no spacing needed");
-                } else if (len >= 2 && out.charAt(len - 1) == '\n' && out.charAt(len - 2) == '\n') {
-                    // Already has paragraph break, good
-                    logger.debug("[ensureFenceSeparation] Fence already has paragraph break");
-                } else if (len >= 1 && out.charAt(len - 1) == '\n') {
-                    // Single newline, add one more for paragraph break
-                    out.append('\n');
-                    logger.debug("[ensureFenceSeparation] Added newline before opening fence");
-                } else {
-                    // No newline at all, add paragraph break
-                    out.append("\n\n");
-                    logger.debug("[ensureFenceSeparation] Added paragraph break before opening fence at position {}", i);
+        String[] lines = s.split("\n");
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (line.trim().startsWith("```")) {
+                if (!inCodeBlock) {
+                    // This is an opening fence. Ensure it's preceded by a blank line.
+                    if (out.length() > 0 && !out.toString().endsWith("\n\n")) {
+                        if (out.toString().endsWith("\n")) {
+                            out.append("\n");
+                        } else {
+                            out.append("\n\n");
+                        }
+                    }
                 }
-                // Append the fence itself
-                out.append("```");
-                i += 3;
-            } else {
-                out.append(s.charAt(i));
-                i++;
+                inCodeBlock = !inCodeBlock;
+            }
+            out.append(line);
+            if (i < lines.length - 1) {
+                out.append("\n");
             }
         }
         return out.toString();
@@ -437,6 +374,7 @@ public class MarkdownService {
      * Ensures code blocks maintain their content integrity.
      */
     private String protectCodeBlocks(String markdown) {
+        if (markdown == null) return ""; // Guard against null input
         logger.debug("protectCodeBlocks: ENTERING with input: {}", markdown.replace("\n", "\\\\n"));
         logger.debug("protectCodeBlocks: Input contains ``` ? {}", markdown.contains("```"));
         
@@ -445,7 +383,7 @@ public class MarkdownService {
         // ENHANCED: Support comprehensive language tags including java, cpp, c++, objective-c, etc.
         // Handle preprocessing artifacts and edge cases with more robust pattern
         java.util.regex.Pattern codeBlockPattern =
-            java.util.regex.Pattern.compile("```([\\w\\-\\+\\.]*)\\s*\n?([\\s\\S]*?)```",
+            java.util.regex.Pattern.compile("```([\\w\\-\\+\\.]*)\\s*\\n?([\\s\\S]*?)```",
                                            java.util.regex.Pattern.DOTALL);
         java.util.regex.Matcher matcher = codeBlockPattern.matcher(markdown);
         int blocks = 0;        
@@ -465,11 +403,9 @@ public class MarkdownService {
                 if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
                     result.append("\n\n");
                 }
-                result.append("```").append(language);
-                // CRITICAL: NO newline after opening fence inside code block
-                result.append(code);
-                // CRITICAL: NO newline before closing fence inside code block
-                result.append("```\n\n"); // Only paragraph separation AFTER code block
+                result.append("```").append(language).append("\n");
+                result.append(code.trim());
+                result.append("\n```\n\n");
                 logger.debug("Code block preserved: language='{}', {} characters", language, code.length());
             } else {
                 // Handle empty code blocks gracefully
@@ -478,11 +414,9 @@ public class MarkdownService {
                 if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
                     result.append("\n\n");
                 }
-                result.append("```").append(language);
-                // CRITICAL: NO newline after opening fence inside code block
+                result.append("```").append(language).append("\n");
                 result.append("// Code block content missing - check streaming");
-                // CRITICAL: NO newline before closing fence inside code block
-                result.append("```\n\n"); // Only paragraph separation AFTER code block
+                result.append("\n```\n\n");
             }
 
             lastEnd = matcher.end();
@@ -520,11 +454,9 @@ public class MarkdownService {
                         if (result.length() > 0 && !result.toString().endsWith("\n\n")) {
                             result.append("\n\n");
                         }
-                        result.append("```").append(language);
-                        // CRITICAL: NO newline after opening fence inside code block
-                        result.append(code);
-                        // CRITICAL: NO newline before closing fence inside code block
-                        result.append("```\n\n"); // Only paragraph separation AFTER code block
+                        result.append("```").append(language).append("\n");
+                        result.append(code.trim());
+                        result.append("\n```\n\n");
                         logger.debug("Code block preserved via fallback: language='{}', {} characters", language, code.length());
                     }
                     lastEnd = fallbackMatcher.end();

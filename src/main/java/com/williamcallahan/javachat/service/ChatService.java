@@ -56,14 +56,14 @@ public class ChatService {
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
         StringBuilder systemContext = new StringBuilder(
             "You are a Java learning assistant with knowledge of Java 24, Java 25, and Java 25 EA features. Use the provided context to answer questions.\n" +
-            "CRITICAL: Embed learning insights directly in your response using these markers:\n" +
+            "CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.\n" +
             "- {{hint:Text here}} for helpful tips and best practices\n" +
             "- {{reminder:Text here}} for important things to remember\n" +
             "- {{background:Text here}} for conceptual explanations\n" +
             "- {{example:code here}} for inline code examples\n" +
             "- {{warning:Text here}} for common pitfalls to avoid\n" +
             "- [n] for citations with the source URL\n\n" +
-            "Integrate these naturally into your explanation. Don't group them separately.\n"
+            "Integrate these naturally into your explanation. Don't group them at the end.\n"
         );
         logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
 
@@ -102,14 +102,14 @@ public class ChatService {
         }
         systemContext.append(
             "Use the provided context to answer questions.\n" +
-            "CRITICAL: Embed learning insights directly in your response using these markers:\n" +
+            "CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.\n" +
             "- {{hint:Text here}} for helpful tips and best practices\n" +
             "- {{reminder:Text here}} for important things to remember\n" +
             "- {{background:Text here}} for conceptual explanations\n" +
             "- {{example:code here}} for inline code examples\n" +
             "- {{warning:Text here}} for common pitfalls to avoid\n" +
             "- [n] for citations with the source URL\n\n" +
-            "Integrate these naturally into your explanation. Don't group them separately.\n"
+            "Integrate these naturally into your explanation. Don't group them at the end.\n"
         );
 
         for (int i = 0; i < contextDocs.size(); i++) {
