@@ -83,6 +83,9 @@ ENV PORT=8085
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
 
+# Enable hash-based fallback for graceful degradation when embeddings fail
+ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
+
 # Disable aggressive port management in container environment
 ENV APP_KILL_ON_CONFLICT=false
 

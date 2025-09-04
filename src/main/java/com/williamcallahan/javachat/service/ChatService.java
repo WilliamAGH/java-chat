@@ -52,8 +52,11 @@ public class ChatService {
 
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
         logger.debug("ChatService.streamAnswer called for query: {}", latestUserMessage);
-        // Retrieve context and stream directly via ChatClient
+        
+        // Retrieve context and provide user feedback about search quality
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
+        String searchQualityNote = determineSearchQuality(contextDocs);
+        
         StringBuilder systemContext = new StringBuilder(
             "You are a Java learning assistant with knowledge of Java 24, Java 25, and Java 25 EA features. Use the provided context to answer questions.\n" +
             "CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.\n" +
@@ -65,6 +68,12 @@ public class ChatService {
             "- [n] for citations with the source URL\n\n" +
             "Integrate these naturally into your explanation. Don't group them at the end.\n"
         );
+        
+        // Add search quality context for the AI
+        if (!searchQualityNote.isEmpty()) {
+            systemContext.append("\nSEARCH CONTEXT: ").append(searchQualityNote).append("\n");
+        }
+        
         logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
 
         for (int i = 0; i < contextDocs.size(); i++) {
@@ -164,6 +173,7 @@ public class ChatService {
         logger.error("No API key configured for chat service");
         return Flux.error(new RuntimeException("No API key configured. Please set either OPENAI_API_KEY or GITHUB_TOKEN"));
     }
+    
 
     private Flux<String> tryOpenAiCompat(String prompt, String baseUrl, String apiKey) {
         String url = baseUrl.endsWith("/") ? baseUrl + "v1/chat/completions" : baseUrl + "/v1/chat/completions";
@@ -244,5 +254,40 @@ public class ChatService {
         // This is complex for streaming, so typically markdown is applied client-side
         // or after the full response is received
         return baseStream;
+    }
+    
+    /**
+     * Determine the quality of search results and provide context to the AI
+     */
+    private String determineSearchQuality(List<Document> docs) {
+        if (docs.isEmpty()) {
+            return "No relevant documents found. Using general knowledge only.";
+        }
+        
+        // Check if documents seem to be from keyword search (less semantic relevance)
+        boolean likelyKeywordSearch = docs.stream()
+            .anyMatch(doc -> {
+                String url = String.valueOf(doc.getMetadata().getOrDefault("url", ""));
+                return url.contains("local-search") || url.contains("keyword");
+            });
+        
+        if (likelyKeywordSearch) {
+            return String.format("Found %d documents via keyword search (embedding service unavailable). Results may be less semantically relevant.", docs.size());
+        }
+        
+        // Check document relevance quality
+        long highQualityDocs = docs.stream()
+            .filter(doc -> {
+                String content = doc.getText(); // Use getText() instead of getContent()
+                return content != null && content.length() > 100; // Basic quality check
+            })
+            .count();
+        
+        if (highQualityDocs == docs.size()) {
+            return String.format("Found %d high-quality relevant documents via semantic search.", docs.size());
+        } else {
+            return String.format("Found %d documents (%d high-quality) via search. Some results may be less relevant.", 
+                docs.size(), highQualityDocs);
+        }
     }
 }

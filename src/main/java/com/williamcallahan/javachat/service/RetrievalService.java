@@ -58,7 +58,20 @@ public class RetrievalService {
                     docs.get(0).getText().substring(0, Math.min(200, docs.get(0).getText().length())));
             }
         } catch (Exception e) {
-            log.warn("Vector search unavailable; falling back to local keyword search", e);
+            String errorType = determineErrorType(e);
+            log.warn("Vector search unavailable ({}); falling back to local keyword search", errorType, e);
+            
+            // Provide user-friendly error context
+            if (e.getCause() instanceof com.williamcallahan.javachat.service.GracefulEmbeddingModel.EmbeddingServiceUnavailableException) {
+                log.info("Embedding services are unavailable. Using keyword-based search with limited semantic understanding.");
+            } else if (errorType.contains("404")) {
+                log.info("Embedding API endpoint not found. Check configuration for spring.ai.openai.embedding.base-url");
+            } else if (errorType.contains("401") || errorType.contains("403")) {
+                log.info("Embedding API authentication failed. Check OPENAI_API_KEY or GITHUB_TOKEN configuration");
+            } else if (errorType.contains("429")) {
+                log.info("Embedding API rate limit exceeded. Consider using local embeddings or upgrading API tier");
+            }
+            
             var results = localSearch.search(query, props.getRag().getSearchReturnK());
             return results.stream()
                 .map(r -> documentFactory.createLocalDocument(r.text, r.url))
@@ -152,6 +165,44 @@ public class RetrievalService {
         String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
         rest = rest.replaceAll("/+", "/");
         return prefix + rest;
+    }
+    
+    /**
+     * Determine the type of error for better user feedback
+     */
+    private String determineErrorType(Exception e) {
+        String message = e.getMessage();
+        if (message == null) {
+            message = "";
+        }
+        
+        // Check the entire exception chain
+        Throwable current = e;
+        while (current != null) {
+            String currentMessage = current.getMessage();
+            if (currentMessage != null) {
+                message += " " + currentMessage;
+            }
+            current = current.getCause();
+        }
+        
+        message = message.toLowerCase();
+        
+        if (message.contains("404") || message.contains("not found")) {
+            return "404 Not Found";
+        } else if (message.contains("401") || message.contains("unauthorized")) {
+            return "401 Unauthorized";
+        } else if (message.contains("403") || message.contains("forbidden")) {
+            return "403 Forbidden";
+        } else if (message.contains("429") || message.contains("too many requests")) {
+            return "429 Rate Limited";
+        } else if (message.contains("connection") || message.contains("timeout")) {
+            return "Connection Error";
+        } else if (message.contains("embedding") && message.contains("unavailable")) {
+            return "Embedding Service Unavailable";
+        } else {
+            return "Unknown Error";
+        }
     }
 
 
