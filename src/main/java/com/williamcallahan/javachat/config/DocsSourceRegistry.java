@@ -133,10 +133,14 @@ public final class DocsSourceRegistry {
             // Case 1: /spring-framework/docs/current/reference/6.1-SNAPSHOT/...
             // Should be: /spring-framework/reference/current/...
             if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
-                // Skip docs/current/reference/VERSION and rebuild as reference/current/...
+                // Check if parts[4] is a version string, if so skip it
+                int startIndex = 4;
+                if (isVersionString(parts[4])) {
+                    startIndex = 5; // Skip the version
+                }
                 StringBuilder newPath = new StringBuilder(prefix);
                 newPath.append("spring-framework/reference/current");
-                for (int i = 5; i < parts.length; i++) {
+                for (int i = startIndex; i < parts.length; i++) {
                     newPath.append("/").append(parts[i]);
                 }
                 return newPath.toString();
@@ -171,9 +175,14 @@ public final class DocsSourceRegistry {
             // Case 1: /spring-boot/docs/current/reference/VERSION/...
             // Should be: /spring-boot/reference/current/...
             if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
+                // Check if parts[4] is a version string, if so skip it
+                int startIndex = 4;
+                if (isVersionString(parts[4])) {
+                    startIndex = 5; // Skip the version
+                }
                 StringBuilder newPath = new StringBuilder(prefix);
                 newPath.append("spring-boot/reference/current");
-                for (int i = 5; i < parts.length; i++) {
+                for (int i = startIndex; i < parts.length; i++) {
                     newPath.append("/").append(parts[i]);
                 }
                 return newPath.toString();
