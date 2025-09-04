@@ -8,6 +8,57 @@
       .replace(/```[ \t]*([^\n])/g, '```\n$1');
   }
 
+  // Conservative promotion of likely Java snippets into fenced blocks (fallback only).
+  // Idempotent: skips when backticks already exist near the target.
+  function promoteLikelyJavaBlocks(text){
+    if (!text || text.indexOf('```') !== -1) return text;
+    const cues = /(example\s*(code)?|here(?:'| i)s\s*a\s*(?:simple\s*)?example|for\s+example)/i;
+    const triggers = [
+      /java\s*(?:import|public|class|package|record|enum)\b/i,
+      /\bimport\s+java\b/i,
+      /\bpublic\s+class\b/i,
+      /\bclass\s+\w+\s*\{/i
+    ];
+    let t = text;
+    let changed = false;
+    for (const trig of triggers) {
+      let searchFrom = 0;
+      while (searchFrom < t.length) {
+        const m = trig.exec(t.slice(searchFrom));
+        if (!m) break;
+        const start = searchFrom + m.index;
+        // Skip if already inside fences
+        const lastOpen = t.lastIndexOf('```', start);
+        const nextOpen = t.indexOf('```', start);
+        if (lastOpen !== -1 && (nextOpen === -1 || lastOpen > start || (lastOpen < start && nextOpen > start))) {
+          searchFrom = start + m[0].length;
+          continue;
+        }
+        // Require a cue within 120 chars before
+        const preStart = Math.max(0, start - 120);
+        const before = t.slice(preStart, start);
+        if (!cues.test(before)) {
+          searchFrom = start + m[0].length;
+          continue;
+        }
+        // Find a safe end: next blank line or enrichment or end
+        const tail = t.slice(start);
+        const endMatch = /(\n\s*\n|ZZENRICHZ|\{\{|^###|\n#{2,}|$)/m.exec(tail);
+        const relEnd = endMatch ? endMatch.index : tail.length;
+        if (relEnd < 8) { // too short to be useful
+          searchFrom = start + m[0].length;
+          continue;
+        }
+        const segment = tail.slice(0, relEnd).replace(/^java\s*/i, '');
+        const fenced = '```java\n' + segment.trimEnd() + '\n```';
+        t = t.slice(0, start) + fenced + t.slice(start + segment.length);
+        changed = true;
+        searchFrom = start + fenced.length;
+      }
+    }
+    return changed ? t : text;
+  }
+
   function shouldImmediateFlush(fullText){
     if (!fullText) return false;
     const tail4 = fullText.slice(-4);
@@ -83,10 +134,10 @@
 
   global.MU = {
     normalizeOpeningFences: normalizeOpeningFences,
+    promoteLikelyJavaBlocks: promoteLikelyJavaBlocks,
     shouldImmediateFlush: shouldImmediateFlush,
     upgradeCodeBlocks: upgradeCodeBlocks,
     attachCodeCopyButtons: attachCodeCopyButtons,
     safeHighlightUnder: safeHighlightUnder,
   };
 })(window);
-

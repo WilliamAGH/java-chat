@@ -379,7 +379,7 @@
          */
         function clientMarkdownFallback(text) {
             if (!text) return '';
-            if (window.MU) text = MU.normalizeOpeningFences(text);
+            if (window.MU) { text = MU.normalizeOpeningFences(text); text = MU.promoteLikelyJavaBlocks(text); }
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
             let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
