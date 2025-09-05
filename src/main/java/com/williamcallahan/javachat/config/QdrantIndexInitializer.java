@@ -12,7 +12,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -74,9 +76,22 @@ public class QdrantIndexInitializer {
     }
 
     private void createPayloadIndex(String field, String schema) {
-        RestTemplate rt = new RestTemplate();
+        // Create RestTemplate with timeouts to prevent hanging
+        // Using connectTimeout and readTimeout (new API since Spring Boot 3.4)
+        RestTemplate rt = new RestTemplateBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .readTimeout(Duration.ofSeconds(15))
+                .build();
+        
+        // Add connection management
+        rt.getInterceptors().add((request, body, execution) -> {
+            request.getHeaders().add("Connection", "close");
+            return execution.execute(request, body);
+        });
+        
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Connection", "close"); // Prevent connection reuse issues
         if (apiKey != null && !apiKey.isBlank()) {
             headers.set("api-key", apiKey);
         }
@@ -85,10 +100,9 @@ public class QdrantIndexInitializer {
                 "field_schema", schema
         );
 
-        // Qdrant payload index endpoints differ by version; try the known variants.
+        // Qdrant payload index endpoint (official API)
         String[] pathCandidates = new String[] {
-                "/collections/" + collection + "/points/index", // common
-                "/collections/" + collection + "/index"          // older variant
+                "/collections/" + collection + "/index"          // official Qdrant API endpoint
         };
 
         Exception lastError = null;
