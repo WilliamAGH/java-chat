@@ -10,6 +10,8 @@ import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Service for rendering Markdown to HTML with optimal formatting and caching.
  * Configured for clean output with proper spacing and code block support.
+ * 
+ * <p><strong>Migration Notice:</strong> This service is being migrated to use AST-based processing
+ * instead of regex for better compliance with AGENTS.md guidelines. New code should use
+ * {@link #processStructured(String)} for structured processing with type-safe citations and enrichments.</p>
+ * 
+ * <p><strong>Recommended Usage:</strong> Use {@link #processStructured(String)} for new code.
+ * Legacy methods ({@code render}, {@code renderPreview}, {@code preprocessMarkdown}) are deprecated 
+ * and use regex-based processing.</p>
+ * 
+ * @see UnifiedMarkdownService for the new AST-based approach
  */
 @Service
 public class MarkdownService {
@@ -36,6 +48,9 @@ public class MarkdownService {
     private final Parser parser;
     private final HtmlRenderer renderer;
     private final Cache<String, String> renderCache;
+    
+    // New AST-based service for structured processing
+    private final UnifiedMarkdownService unifiedService;
     
     // Pattern for custom enrichment markers
     private static final Pattern ENRICHMENT_PATTERN = Pattern.compile(
@@ -63,10 +78,10 @@ public class MarkdownService {
             .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true) // Clean code blocks
             
             // Renderer options for clean output
-            .set(HtmlRenderer.ESCAPE_HTML, true) // Escape raw HTML input for XSS protection
+.set(HtmlRenderer.ESCAPE_HTML, true) // Escape raw HTML input for XSS protection
             .set(HtmlRenderer.SUPPRESS_HTML, false) // Allow markdown-generated HTML output
-            .set(HtmlRenderer.SOFT_BREAK, "<br />\n") // Line breaks as <br>
-            .set(HtmlRenderer.HARD_BREAK, "<br />\n") // Consistent line breaks
+            .set(HtmlRenderer.SOFT_BREAK, "\n") // Preserve as newline (no forced <br>)
+            .set(HtmlRenderer.HARD_BREAK, "<br />\n") // Only hard breaks become <br>
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-") // For Prism.js
             .set(HtmlRenderer.INDENT_SIZE, 2) // Clean indentation
             
@@ -86,15 +101,38 @@ public class MarkdownService {
             .recordStats()
             .build();
         
-        logger.info("MarkdownService initialized with Flexmark and caching");
+        // Initialize new AST-based service
+        this.unifiedService = new UnifiedMarkdownService();
+        
+        logger.info("MarkdownService initialized with Flexmark and caching (with AST-based processing available)");
+    }
+    
+    /**
+     * Processes markdown using the new AST-based approach.
+     * This method provides structured output with type-safe citations and enrichments.
+     * 
+     * <p><strong>Recommended:</strong> This method uses the new AST-based processing
+     * and is the preferred way to process markdown with structured output.</p>
+     * 
+     * @param markdown The markdown text to process
+     * @return ProcessedMarkdown with structured data
+     */
+    public ProcessedMarkdown processStructured(String markdown) {
+        return unifiedService.process(markdown);
     }
     
     /**
      * Renders markdown to HTML with caching and optimal formatting.
      * 
+     * <p><strong>Deprecation Notice:</strong> This method uses regex-based processing which violates
+     * AGENTS.md guidelines. Use {@link #processStructured(String)} for new code to get structured
+     * output with type-safe citations and enrichments.</p>
+     * 
      * @param markdown The markdown text to render
      * @return Clean HTML output with proper spacing
+     * @deprecated Use {@link #processStructured(String)} for AST-based processing
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     public String render(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
@@ -152,7 +190,10 @@ public class MarkdownService {
     
     /**
      * Renders markdown without caching (for preview/draft content).
+     * 
+     * @deprecated Use {@link #processStructured(String)} for AST-based processing
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     public String renderPreview(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
@@ -176,7 +217,14 @@ public class MarkdownService {
     /**
      * Pre-processes markdown to fix common formatting issues.
      * Ensures lists and code blocks are properly separated from preceding text.
+     * 
+     * <p><strong>Deprecation Notice:</strong> This method uses extensive regex processing which
+     * violates AGENTS.md guidelines. The new AST-based processing handles formatting issues
+     * during parsing without regex.</p>
+     * 
+     * @deprecated Regex-based preprocessing is replaced by AST-based processing
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     public String preprocessMarkdown(String markdown) {
         if (markdown == null) return "";
 
@@ -220,7 +268,10 @@ public class MarkdownService {
      * CRITICAL: Fixes inline code blocks that are missing proper separation.
      * Specifically targets the pattern where code immediately follows text without proper fencing.
      * More conservative approach to avoid breaking existing content.
+     * 
+     * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String fixInlineCodeBlocks(String markdown) {
         if (markdown == null || markdown.isEmpty()) return markdown;
         
@@ -248,7 +299,10 @@ public class MarkdownService {
     /**
      * Replaces code blocks with placeholders to protect them from other processing.
      * This version uses a robust line-by-line parser instead of a fragile regex.
+     * 
+     * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String protectCodeBlocks(String markdown) {
         if (markdown == null || !markdown.contains("```")) {
             return markdown;
@@ -354,7 +408,10 @@ public class MarkdownService {
     /**
      * COMPREHENSIVE list formatting - handles ALL list types reliably.
      * Supports numbered lists, roman numerals, letters, bullets, and special markers.
+     * 
+     * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String fixInlineLists(String markdown) {
         // Support ALL list types:
         // - Arabic numerals: 1. 2. 3. or 1) 2) 3)
@@ -387,12 +444,12 @@ public class MarkdownService {
             logger.debug("Fixed letter list after colon");
         }
         
-        // Bullet lists after colon (including special characters)
+        // Bullet lists after colon (including Unicode special characters)
         String bullets = "[-*+•→▸◆□▪]";
         if (markdown.matches("(?s).*:\\s*" + bullets + "\\s+.*")) {
             markdown = markdown.replaceAll("(:\\s*)(" + bullets + "\\s+)", "$1\n$2");
             markdown = markdown.replaceAll("(?<!\\n)(\\s+)(" + bullets + "\\s+)", "\n$2");
-            logger.debug("Fixed bullet list after colon");
+            logger.debug("Fixed Unicode bullet list after colon");
         }
         
         // STEP 2: Fix multiple inline numbered items (moderate confidence)
@@ -506,7 +563,7 @@ public class MarkdownService {
      */
     private boolean hasListMarkers(String text) {
         if (text == null || text.isEmpty()) return false;
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^(\\s*)(?:[-+*]|\\d+\\.)\\s+");
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^(\\s*)(?:[-+*•→▸◆□▪]|\\d+\\.)\\s+");
         return p.matcher(text).find();
     }
 
@@ -564,7 +621,10 @@ public class MarkdownService {
     
     /**
      * Restores protected code blocks to their original state.
+     * 
+     * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String unprotectCodeBlocks(String markdown) {
         if (protectedBlocks.isEmpty()) {
             return markdown;
@@ -579,11 +639,13 @@ public class MarkdownService {
     
     /**
      * Post-processes HTML for optimal spacing and formatting.
+     * 
+     * @deprecated Part of regex-based post-processing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String postProcessHtml(String html) {
-        // CRITICAL: Ensure space between sentences in HTML content
-        // Fixes cases where tags might have removed spaces
-        html = html.replaceAll("([.!?])(<[^>]+>)?([A-Z])", "$1$2 $3");
+        // NOTE: Avoid heuristic sentence spacing – rely on Flexmark output and CSS
+        // (previous regex could corrupt content by injecting spaces across tags)
         
         // Fix escaped HTML tags that should be preserved as HTML
         html = html.replace("&lt;br /&gt;", "<br />");
@@ -635,7 +697,10 @@ public class MarkdownService {
     
     /**
      * Improved paragraph breaking that supports '.', '?', '!' and respects code blocks.
+     * 
+     * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String applySmartParagraphBreaksImproved(String markdown) {
         if (markdown == null || markdown.isEmpty()) return markdown;
         // If code blocks are present, process only non-code segments to preserve code
@@ -718,7 +783,10 @@ public class MarkdownService {
     /**
      * Preserves custom enrichment markers during markdown processing.
      * Uses unique placeholders that won't be affected by markdown parsing or HTML filtering.
+     * 
+     * @deprecated Part of regex-based enrichment processing. Use AST-based EnrichmentProcessor instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String preserveEnrichments(String markdown) {
         // Log if we're about to process enrichments
         if (markdown.contains("{{")) {
@@ -735,7 +803,10 @@ public class MarkdownService {
     /**
      * Restores custom enrichment markers after markdown processing.
      * Works with unique text placeholders that survive HTML processing.
+     * 
+     * @deprecated Part of regex-based enrichment processing. Use AST-based EnrichmentProcessor instead.
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     private String restoreEnrichments(String html) {
         // Restore from unique text placeholders ONLY if they have content
         // Pattern: ZZENRICHZ(type)ZSTARTZZZ(content)ZZENRICHZ(type)ZENDZZZ
@@ -787,7 +858,10 @@ public class MarkdownService {
     
     /**
      * Get cache statistics for monitoring.
+     * 
+     * @deprecated Use {@link UnifiedMarkdownService#getCacheStats()} for AST-based processing
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     public CacheStats getCacheStats() {
         var stats = renderCache.stats();
         return new CacheStats(
@@ -800,7 +874,10 @@ public class MarkdownService {
     
     /**
      * Clear the render cache.
+     * 
+     * @deprecated Use {@link UnifiedMarkdownService#clearCache()} for AST-based processing
      */
+    @Deprecated(since = "1.0", forRemoval = false)
     public void clearCache() {
         renderCache.invalidateAll();
         logger.info("Markdown render cache cleared");
