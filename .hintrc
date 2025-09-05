@@ -8,9 +8,18 @@
       "default",
       {
         "ignore": [
-          "user-select"
+          "user-select",
+          "-webkit-overflow-scrolling"
         ]
       }
     ]
-  }
+  },
+  "browserslist": [
+    "defaults",
+    "not ie 11",
+    "not firefox <= 139",
+    "not safari <= 18.5",
+    "not ios_saf <= 18.5",
+    "not and_ff <= 139"
+  ]
 }

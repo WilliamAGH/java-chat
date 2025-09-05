@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.14.1
     container_name: qdrant
     ports:
       - "8087:6333"  # REST (mapped into allowed range)

@@ -46,3 +46,7 @@ build/
 ### Logs ###
 logs/
 *.log
+-e 
+# Build artifacts
+BOOT-INF/
+classpath.txt
