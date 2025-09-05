@@ -1,56 +1,35 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.config.SystemPromptConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
     
-    private final ChatClient chatClient;
+    private final ResilientApiClient apiClient;
     private final RetrievalService retrievalService;
-    private final WebClient webClient;
+    private final SystemPromptConfig systemPromptConfig;
     
     @Autowired
     private MarkdownService markdownService;
 
-    @Value("${OPENAI_API_KEY:}")
-    private String openaiApiKey;
-
-    @Value("${GITHUB_TOKEN:}")
-    private String githubToken;
-
-    @Value("${APP_INFERENCE_PRIMARY_URL:https://api.openai.com}")
-    private String inferencePrimaryBaseUrl;
-
-    // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
-    // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
-    // DO NOT USE: Any azure.com domain (we don't have Azure instances)
-    @Value("${APP_INFERENCE_SECONDARY_URL:https://models.github.ai/inference}")
-    private String inferenceSecondaryBaseUrl;
-
-    @Value("${OPENAI_MODEL:gpt-4o-mini}")
-    private String openaiModel;
-
-    public ChatService(ChatClient chatClient, RetrievalService retrievalService, WebClient.Builder webClientBuilder) {
-        this.chatClient = chatClient;
+    public ChatService(ResilientApiClient apiClient, RetrievalService retrievalService, 
+                      SystemPromptConfig systemPromptConfig) {
+        this.apiClient = apiClient;
         this.retrievalService = retrievalService;
-        this.webClient = webClientBuilder.build();
+        this.systemPromptConfig = systemPromptConfig;
     }
 
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
@@ -60,21 +39,17 @@ public class ChatService {
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
         String searchQualityNote = determineSearchQuality(contextDocs);
         
-        StringBuilder systemContext = new StringBuilder(
-            "You are a Java learning assistant with knowledge of Java 24, Java 25, and Java 25 EA features. Use the provided context to answer questions.\n" +
-            "CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.\n" +
-            "- {{hint:Text here}} for helpful tips and best practices\n" +
-            "- {{reminder:Text here}} for important things to remember\n" +
-            "- {{background:Text here}} for conceptual explanations\n" +
-            "- {{example:code here}} for inline code examples\n" +
-            "- {{warning:Text here}} for common pitfalls to avoid\n" +
-            "- [n] for citations with the source URL\n\n" +
-            "Integrate these naturally into your explanation. Don't group them at the end.\n"
-        );
+        // Build system prompt using centralized configuration
+        StringBuilder systemContext = new StringBuilder(systemPromptConfig.getCoreSystemPrompt());
         
-        // Add search quality context for the AI
+        // Add search quality context if needed
         if (!searchQualityNote.isEmpty()) {
-            systemContext.append("\nSEARCH CONTEXT: ").append(searchQualityNote).append("\n");
+            systemContext.append("\n\nSEARCH CONTEXT: ").append(searchQualityNote);
+            
+            // Add low quality search guidance if applicable
+            if (searchQualityNote.contains("less relevant") || searchQualityNote.contains("keyword search")) {
+                systemContext.append("\n").append(systemPromptConfig.getLowQualitySearchPrompt());
+            }
         }
         
         logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
@@ -88,13 +63,14 @@ public class ChatService {
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        Message[] msgs = messages.toArray(new Message[0]);
+        
+        String fullPrompt = buildPromptFromMessages(messages);
 
-        String fallbackPrompt = systemContext + "\n\n" + latestUserMessage;
-
-        return chatClient
-                .prompt().messages(msgs).stream().content()
-                .onErrorResume(ex -> isFallbackRequired(ex) ? openAiOnce(fallbackPrompt) : Flux.error(ex));
+        return apiClient.streamLLM(fullPrompt, 0.7)
+                .onErrorResume(ex -> {
+                    logger.error("Streaming failed", ex);
+                    return Flux.error(ex);
+                });
     }
 
     /**
@@ -106,21 +82,14 @@ public class ChatService {
                                                 List<Document> contextDocs,
                                                 String guidance) {
         if (contextDocs == null) contextDocs = List.of();
-        StringBuilder systemContext = new StringBuilder();
-        if (guidance != null && !guidance.isBlank()) {
-            systemContext.append(guidance).append("\n\n");
-        }
-        systemContext.append(
-            "Use the provided context to answer questions.\n" +
-            "CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.\n" +
-            "- {{hint:Text here}} for helpful tips and best practices\n" +
-            "- {{reminder:Text here}} for important things to remember\n" +
-            "- {{background:Text here}} for conceptual explanations\n" +
-            "- {{example:code here}} for inline code examples\n" +
-            "- {{warning:Text here}} for common pitfalls to avoid\n" +
-            "- [n] for citations with the source URL\n\n" +
-            "Integrate these naturally into your explanation. Don't group them at the end.\n"
-        );
+        
+        // Build system prompt with optional guidance
+        String basePrompt = systemPromptConfig.getCoreSystemPrompt();
+        String completePrompt = guidance != null && !guidance.isBlank() 
+            ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
+            : basePrompt;
+        
+        StringBuilder systemContext = new StringBuilder(completePrompt);
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);
@@ -131,13 +100,14 @@ public class ChatService {
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        Message[] msgs = messages.toArray(new Message[0]);
+        
+        String fullPrompt = buildPromptFromMessages(messages);
 
-        String fallbackPrompt = systemContext + "\n\n" + latestUserMessage;
-
-        return chatClient
-                .prompt().messages(msgs).stream().content()
-                .onErrorResume(ex -> isFallbackRequired(ex) ? openAiOnce(fallbackPrompt) : Flux.error(ex));
+        return apiClient.streamLLM(fullPrompt, 0.7)
+                .onErrorResume(ex -> {
+                    logger.error("Streaming failed", ex);
+                    return Flux.error(ex);
+                });
     }
 
     public List<Citation> citationsFor(String userQuery) {
@@ -145,76 +115,15 @@ public class ChatService {
         return retrievalService.toCitations(docs);
     }
 
-    private boolean isFallbackRequired(Throwable ex) {
-        Throwable t = ex;
-        while (t != null) {
-            String msg = t.getMessage();
-            if (msg != null && (msg.contains("401") || msg.contains("429"))) {
-                if (msg.contains("429")) {
-                    logger.warn("Rate limit hit with primary API, attempting fallback");
-                } else {
-                    logger.warn("Authentication failed with primary API, attempting fallback");
-                }
-                return true;
+    private String buildPromptFromMessages(List<Message> messages) {
+        StringBuilder prompt = new StringBuilder();
+        for (Message msg : messages) {
+            if (msg instanceof UserMessage) {
+                UserMessage userMsg = (UserMessage) msg;
+                prompt.append(userMsg.getText()).append("\n\n");
             }
-            t = t.getCause();
         }
-        return false;
-    }
-
-    private Flux<String> openAiOnce(String prompt) {
-        // For fallback, prioritize OpenAI API (different rate limits than GitHub Models)
-        if (openaiApiKey != null && !openaiApiKey.isBlank()) {
-            logger.debug("Using OpenAI API for fallback");
-            return tryOpenAiCompat(prompt, "https://api.openai.com", openaiApiKey);
-        } else if (githubToken != null && !githubToken.isBlank()) {
-            logger.debug("Using GitHub Models for fallback (same rate limits apply)");
-            logger.warn("Fallback to GitHub Models may still hit rate limits - consider setting OPENAI_API_KEY");
-            // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
-            // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
-            return tryOpenAiCompat(prompt, "https://models.github.ai/inference", githubToken);
-        }
-        // If no API keys available, return error
-        logger.error("No API key configured for chat service");
-        return Flux.error(new RuntimeException("No API key configured. Please set either OPENAI_API_KEY or GITHUB_TOKEN"));
-    }
-    
-
-    private Flux<String> tryOpenAiCompat(String prompt, String baseUrl, String apiKey) {
-        String url = baseUrl.endsWith("/") ? baseUrl + "v1/chat/completions" : baseUrl + "/v1/chat/completions";
-        logger.debug("Attempting API call to: {}", baseUrl);
-        
-        Map<String, Object> body = Map.of(
-                "model", openaiModel,
-                "messages", List.of(Map.of("role", "user", "content", prompt)),
-                "temperature", 0.7
-        );
-        WebClient.RequestBodySpec req = webClient.post()
-                .uri(url)
-                .contentType(MediaType.APPLICATION_JSON);
-        if (apiKey != null && !apiKey.isBlank()) {
-            req = req.header("Authorization", "Bearer " + apiKey);
-        }
-        return req
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .map(resp -> {
-                    try {
-                        @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> choices = (List<Map<String, Object>>) resp.get("choices");
-                        if (choices != null && !choices.isEmpty()) {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                            Object content = message != null ? message.get("content") : null;
-                            return content != null ? content.toString() : "";
-                        }
-                        return "";
-                    } catch (Exception e) {
-                        return "";
-                    }
-                })
-                .flatMapMany(text -> Flux.just(text));
+        return prompt.toString().trim();
     }
     
     /**
@@ -249,16 +158,7 @@ public class ChatService {
      * Each chunk can be processed through markdown if needed.
      */
     public Flux<String> streamAnswerWithMarkdown(List<Message> history, String latestUserMessage, boolean renderMarkdown) {
-        Flux<String> baseStream = streamAnswer(history, latestUserMessage);
-        
-        if (!renderMarkdown) {
-            return baseStream;
-        }
-        
-        // For streaming with markdown, we need to buffer complete sentences/paragraphs
-        // This is complex for streaming, so typically markdown is applied client-side
-        // or after the full response is received
-        return baseStream;
+        return streamAnswer(history, latestUserMessage);
     }
     
     /**

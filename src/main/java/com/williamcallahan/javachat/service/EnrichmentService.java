@@ -6,8 +6,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -16,21 +15,21 @@ import java.util.List;
 public class EnrichmentService {
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentService.class);
 
-    private final ChatClient chatClient;
+    private final ResilientApiClient apiClient;
     private final ObjectMapper objectMapper;
 
-
-
-
-    public EnrichmentService(ChatClient chatClient, ObjectMapper objectMapper) {
-        this.chatClient = chatClient;
+    public EnrichmentService(ResilientApiClient apiClient, ObjectMapper objectMapper) {
+        this.apiClient = apiClient;
         this.objectMapper = objectMapper;
     }
 
+    @Cacheable(value = "enrichment-cache", key = "#userQuery + ':' + #jdkVersion")
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
         logger.debug("EnrichmentService.enrich called for query: {}", userQuery);
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Extract enrichment for a Java learning assistant to help users understand concepts better.\n");
+        // Add base system context for consistency
+        prompt.append("You are operating as part of the Java learning assistant system.\n");
+        prompt.append("Extract enrichment metadata to enhance learning from the provided context.\n\n");
         prompt.append("User query: ").append(userQuery).append("\n\n");
         prompt.append("Context snippets from Java documentation:\n");
         for (int i = 0; i < contextSnippets.size(); i++) {
@@ -45,21 +44,18 @@ public class EnrichmentService {
         prompt.append("- resource: Primary documentation source\n");
         prompt.append("- resourceVersion: Version of the resource\n");
         prompt.append("\nMake each item concise but informative. Focus on learning value.\n");
+        prompt.append("Use your knowledge of Java best practices and common pitfalls.\n");
 
         String json;
         try {
-            json = chatClient.prompt().user(prompt.toString()).call().content();
+            json = apiClient.callLLM(prompt.toString(), 0.7).block();
+            if (json == null || json.isEmpty()) {
+                logger.warn("Empty response from API, using fallback");
+                json = "{}";
+            }
         } catch (Exception ex) {
             logger.warn("Enrichment service failed for query '{}': {}", userQuery, ex.getMessage());
-            if (isUnauthorized(ex)) {
-                json = openaiFallback(prompt.toString());
-            } else if (isTimeoutOrConnectionError(ex)) {
-                logger.warn("Timeout or connection error in enrichment service, returning fallback");
-                json = "{}"; // Return empty JSON for graceful degradation
-            } else {
-                logger.error("Unexpected error in enrichment service", ex);
-                json = "{}"; // Return empty JSON instead of throwing
-            }
+            json = "{}"; // Return empty JSON for graceful degradation
         }
 
         String cleanedJson = cleanJson(json);
@@ -99,42 +95,6 @@ public class EnrichmentService {
                 .toList();
     }
 
-    private boolean isUnauthorized(Throwable ex) {
-        Throwable t = ex;
-        while (t != null) {
-            String msg = t.getMessage();
-            if (msg != null && msg.contains("401") && msg.toLowerCase().contains("unauthorized")) {
-                return true;
-            }
-            t = t.getCause();
-        }
-        return false;
-    }
-
-    private boolean isTimeoutOrConnectionError(Throwable ex) {
-        Throwable t = ex;
-        while (t != null) {
-            String msg = t.getMessage();
-            if (msg != null) {
-                String lowerMsg = msg.toLowerCase();
-                if (lowerMsg.contains("timeout") || 
-                    lowerMsg.contains("connection") || 
-                    lowerMsg.contains("504") ||
-                    lowerMsg.contains("context deadline exceeded") ||
-                    lowerMsg.contains("client.timeout exceeded")) {
-                    return true;
-                }
-            }
-            t = t.getCause();
-        }
-        return false;
-    }
-
-    private String openaiFallback(String prompt) {
-        // Return empty JSON if no fallback available
-        // Local inference servers not configured/running
-        return "{}";
-    }
 
 
 
