@@ -404,12 +404,59 @@ Modes & objectives:
  - [ ] Per-session rate limiting.
  - [ ] DigitalOcean Spaces S3 offload for snapshots & parsed text.
  - [ ] Docker Compose app service + optional local embedding model.
+## 📱 Mobile Responsive Design
+
+The Java Chat application is fully optimized for mobile devices with comprehensive responsive design and mobile-specific safety measures.
+
+### Mobile Features
+- **Full-width chat containers** on mobile with comfortable margins
+- **16px minimum font size** on all inputs to prevent iOS Safari zoom
+- **Enhanced touch targets** (44px minimum) for all interactive elements
+- **Touch-optimized scrolling** with momentum scrolling support
+- **Safe area insets** for devices with notches (iPhone X+)
+- **Zoom prevention** on double-tap for chat areas
+- **Horizontal scroll prevention** with proper text wrapping
+- **Improved focus visibility** for keyboard navigation
+- **Reduced motion support** for accessibility preferences
+
+### Mobile Breakpoints
+- **Mobile**: ≤768px - Full mobile optimization
+- **Tablet**: 769px-1024px - Intermediate responsive layout
+- **Desktop**: >1024px - Full desktop experience
+
+### Mobile Safety Measures
+- **Viewport Configuration**: Prevents unwanted zooming and ensures proper scaling
+- **Text Size Adjustment**: Prevents browser text inflation on mobile
+- **Touch Action Optimization**: Improves touch responsiveness and prevents conflicts
+- **Performance Optimizations**: CSS containment and will-change for smooth animations
+- **Accessibility**: Respects `prefers-reduced-motion` for users with motion sensitivity
+
+### Mobile Testing Checklist
+- ✅ iOS Safari (iPhone/iPad)
+- ✅ Chrome Mobile (Android)
+- ✅ Samsung Internet
+- ✅ Firefox Mobile
+- ✅ Edge Mobile
+
+### Things to Avoid (Mobile Anti-Patterns)
+1. **Font sizes < 16px on inputs** - Causes iOS Safari to zoom
+2. **Touch targets < 44px** - Poor accessibility and usability
+3. **Fixed positioning without safe-area-insets** - Content hidden by notches
+4. **Horizontal overflow** - Breaks mobile UX
+5. **user-scalable=yes without maximum-scale** - Allows accidental zoom
+6. **Missing touch-action: manipulation** - Slower tap response (300ms delay)
+7. **Viewport units (vh/vw) without fallbacks** - Inconsistent on mobile browsers
+8. **Hover-only interactions** - Inaccessible on touch devices
+9. **Small click areas** - Difficult to tap accurately
+10. **Ignoring prefers-reduced-motion** - Accessibility violation
+
 ## Stack details
 
 - Spring Boot 3.5.5 (WebFlux, Actuator)
 - Spring AI 1.0.1 (OpenAI client, VectorStore Qdrant)
 - Qdrant (HNSW vector DB); `docker-compose.yml` includes a local dev service
 - JSoup (HTML parsing), JTokkit (tokenization), Fastutil (utils)
+- **Mobile-First CSS**: Responsive design with mobile-specific optimizations
 
 Docker Compose (Qdrant only, optional fallback when you outgrow the free Qdrant Cloud plan or for offline dev):
 ```bash
