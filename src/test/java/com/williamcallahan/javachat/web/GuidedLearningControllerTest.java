@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -34,6 +35,9 @@ class GuidedLearningControllerTest {
 
     @MockitoBean
     MarkdownService markdownService;
+
+    @MockitoBean
+    UnifiedMarkdownService unifiedMarkdownService;
 
     @MockitoBean
     ExceptionResponseBuilder exceptionResponseBuilder;
