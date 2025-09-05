@@ -93,3 +93,4 @@ public class ErrorTestController {
         throw new NullPointerException("Test null pointer exception for error handling");
     }
 }
+

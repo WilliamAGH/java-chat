@@ -408,10 +408,48 @@ li:last-child { margin-bottom: 0; }
 .input-wrapper .btn:hover { filter: brightness(1.05); transform: translateY(-50%) scale(1.03); box-shadow: var(--shadow-lg), var(--shadow-glow); }
 
 /* Export button */
-.export-chat-btn { position: fixed; right: 24px; bottom: 24px; background: var(--dark-surface-3); border: 1px solid var(--dark-border); border-radius: var(--radius-full); padding: 10px 12px; color: var(--dark-text-secondary); cursor: pointer; box-shadow: var(--shadow-xl); transition: all var(--transition-fast); z-index: 100; }
-.export-chat-btn:hover { background: var(--accent-primary); color: white; transform: translateY(-2px); box-shadow: var(--shadow-2xl), var(--shadow-glow); }
-.export-chat-btn::after { content: 'Copy entire chat'; position: absolute; right: 0; bottom: 46px; white-space: nowrap; background: var(--dark-surface-2); border: 1px solid var(--dark-border); padding: 6px 10px; border-radius: var(--radius-md); font-size: var(--text-xs); color: var(--dark-text-secondary); opacity: 0; transform: translateY(6px); pointer-events: none; transition: all var(--transition-fast); }
-.export-chat-btn:hover::after { opacity: 1; transform: translateY(0); }
+.export-chat-btn { 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  margin: var(--space-3) auto var(--space-2) auto; 
+  background: var(--dark-surface-3); 
+  border: 1px solid var(--dark-border); 
+  border-radius: var(--radius-full); 
+  padding: 10px 12px; 
+  color: var(--dark-text-secondary); 
+  cursor: pointer; 
+  box-shadow: var(--shadow-md); 
+  transition: all var(--transition-fast); 
+  position: relative;
+}
+.export-chat-btn:hover { 
+  background: var(--accent-primary); 
+  color: white; 
+  transform: translateY(-2px); 
+  box-shadow: var(--shadow-lg); 
+}
+.export-chat-btn::after { 
+  content: 'Copy entire chat'; 
+  position: absolute; 
+  top: -40px; 
+  left: 50%; 
+  transform: translateX(-50%); 
+  white-space: nowrap; 
+  background: var(--dark-surface-2); 
+  border: 1px solid var(--dark-border); 
+  padding: 6px 10px; 
+  border-radius: var(--radius-md); 
+  font-size: var(--text-xs); 
+  color: var(--dark-text-secondary); 
+  opacity: 0; 
+  pointer-events: none; 
+  transition: all var(--transition-fast); 
+}
+.export-chat-btn:hover::after { 
+  opacity: 1; 
+  transform: translateX(-50%) translateY(-2px); 
+}
 
 /* Utility */
 .hidden { display: none !important; }

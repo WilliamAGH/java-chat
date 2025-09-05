@@ -72,6 +72,14 @@
 
     <div id="guidedChat">
         <div id="chatArea" aria-live="polite" aria-label="Guided chat messages"></div>
+        
+        <button class="export-chat-btn" onclick="copyGuidedChat()" aria-label="Copy entire chat" title="Copy entire chat">
+            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+        </button>
+        
         <div class="input-area">
             <div class="input-row">
                 <div class="input-wrapper">
@@ -755,6 +763,38 @@
       } catch (err) {
         // Fail silently to prevent UI breakage
         console.debug('upgradeCodeBlocks: Non-critical error', err);
+      }
+    }
+
+    async function copyGuidedChat() {
+      try {
+        const lesson = toc[currentIndex];
+        const slug = lesson ? lesson.slug : 'unknown';
+        const sessionId = 'guided:' + slug;
+        
+        const res = await fetch('/api/chat/export/session?sessionId=' + encodeURIComponent(sessionId));
+        const txt = await res.text();
+        await navigator.clipboard.writeText(txt);
+        
+        const btn = document.querySelector('.export-chat-btn');
+        if (btn) {
+          btn.style.background = 'var(--accent-success)';
+          btn.style.color = 'white';
+          setTimeout(() => {
+            btn.style.background = '';
+            btn.style.color = '';
+          }, 2000);
+        }
+        
+        // Show toast notification (if available)
+        if (typeof showToast === 'function') {
+          showToast('Chat session exported to clipboard!');
+        }
+      } catch (error) {
+        console.error('Failed to export guided chat:', error);
+        if (typeof showToast === 'function') {
+          showToast('Failed to export', 'error');
+        }
       }
     }
 
