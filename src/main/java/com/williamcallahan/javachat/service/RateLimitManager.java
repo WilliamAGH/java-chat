@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -24,9 +25,10 @@ public class RateLimitManager {
     private final Map<String, ApiEndpointState> endpointStates = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> dailyUsage = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> resetTimes = new ConcurrentHashMap<>();
+    private final Environment env;
     
     public enum ApiProvider {
-        OPENAI("openai", 150, "24h"),
+        OPENAI("openai", 500, "24h"),
         GITHUB_MODELS("github_models", 150, "24h"),
         LOCAL("local", Integer.MAX_VALUE, null);
         
@@ -45,8 +47,16 @@ public class RateLimitManager {
     }
     
     public static class ApiEndpointState {
+        // Testing live refresh functionality
         private volatile boolean circuitOpen = false;
         private volatile Instant nextRetryTime;
+        /**
+         * Tracks consecutive failures for future circuit breaker implementation.
+         * Currently incremented but not used for decision making.
+         * Future enhancement: After N consecutive failures, apply longer backoff periods
+         * or temporarily disable the provider to prevent cascading failures.
+         */
+        @SuppressWarnings("unused") // Reserved for future circuit breaker logic
         private volatile int consecutiveFailures = 0;
         private volatile int backoffMultiplier = 1;
         private final AtomicInteger requestsToday = new AtomicInteger(0);
@@ -92,9 +102,23 @@ public class RateLimitManager {
         }
     }
     
-    public RateLimitManager(RateLimitState rateLimitState) {
+    public RateLimitManager(RateLimitState rateLimitState, Environment env) {
         this.rateLimitState = rateLimitState;
+        this.env = env;
         log.info("RateLimitManager initialized with persistent state");
+    }
+    
+    private boolean isProviderConfigured(ApiProvider provider) {
+        // Skip providers that are not configured to avoid noisy failures
+        return switch (provider) {
+            case OPENAI -> hasText(env.getProperty("OPENAI_API_KEY"));
+            case GITHUB_MODELS -> hasText(env.getProperty("GITHUB_TOKEN"));
+            case LOCAL -> true;
+        };
+    }
+    
+    private boolean hasText(String s) {
+        return s != null && !s.trim().isEmpty();
     }
     
     public boolean isProviderAvailable(ApiProvider provider) {
@@ -264,6 +288,10 @@ public class RateLimitManager {
             ApiProvider.GITHUB_MODELS,
             ApiProvider.LOCAL
         }) {
+            if (!isProviderConfigured(provider)) {
+                log.debug("Skipping provider {}: not configured", provider.getName());
+                continue;
+            }
             if (isProviderAvailable(provider)) {
                 log.debug("Selected provider: {}", provider.getName());
                 return provider;
@@ -272,6 +300,10 @@ public class RateLimitManager {
         
         // Log detailed status for debugging
         for (ApiProvider provider : ApiProvider.values()) {
+            if (!isProviderConfigured(provider)) {
+                log.warn("Provider {} unavailable - missing configuration (API key/token)", provider.getName());
+                continue;
+            }
             Duration remaining = rateLimitState.getRemainingWaitTime(provider.getName());
             if (!remaining.isZero()) {
                 log.warn("Provider {} unavailable - rate limited for {}", 

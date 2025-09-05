@@ -28,70 +28,82 @@ import java.util.concurrent.TimeUnit;
 public class RateLimitState {
     private static final Logger log = LoggerFactory.getLogger(RateLimitState.class);
     private static final String STATE_FILE = "./data/rate-limit-state.json";
-    
+
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-    
+
     private Map<String, ProviderState> providerStates = new ConcurrentHashMap<>();
-    
-    public RateLimitState() {
-        this.objectMapper = new ObjectMapper();
-        // Register JavaTimeModule to handle Java 8 time types
-        this.objectMapper.registerModule(new JavaTimeModule());
-        // Configure to write timestamps as ISO-8601 strings instead of numbers
-        this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    // Prefer Spring Boot's auto-configured ObjectMapper (with modules) and fall back to a local one.
+    public RateLimitState(ObjectMapper objectMapper) {
+        if (objectMapper != null) {
+            this.objectMapper = objectMapper;
+        } else {
+            ObjectMapper fallback = new ObjectMapper();
+            // Register JavaTimeModule to handle Java time types
+            fallback.registerModule(new JavaTimeModule());
+            // Configure to write timestamps as ISO-8601 strings instead of numbers
+            fallback.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            this.objectMapper = fallback;
+        }
     }
-    
+
     @PostConstruct
     public void init() {
         loadState();
         // Periodically save state every 5 minutes
-        scheduler.scheduleAtFixedRate(this::saveState, 5, 5, TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(this::safeSaveState, 5, 5, TimeUnit.MINUTES);
         log.info("RateLimitState initialized with persistent storage at: {}", STATE_FILE);
     }
-    
+
     @PreDestroy
     public void shutdown() {
-        saveState();
+        // Be defensive during shutdown so failures here never take down the app with NoClassDefFoundError
+        try {
+            safeSaveState();
+        } catch (Throwable t) {
+            // Avoid logging frameworks during teardown if classloading is unstable
+            System.err.println("[RateLimitState] Failed to save state on shutdown: " + t);
+        }
         scheduler.shutdown();
     }
-    
+
     /**
      * Record a rate limit hit with proper backoff calculation
      */
     public void recordRateLimit(String provider, Instant resetTime, String rateLimitWindow) {
         ProviderState state = providerStates.computeIfAbsent(provider, k -> new ProviderState());
-        
+
         // Parse rate limit window (e.g., "24h", "1d", "6h")
         Duration windowDuration = parseRateLimitWindow(rateLimitWindow);
-        
+
         // If we don't have a reset time from headers, calculate based on window
         if (resetTime == null) {
             resetTime = Instant.now().plus(windowDuration);
         }
-        
+
         state.rateLimitedUntil = resetTime;
         state.consecutiveFailures++;
         state.lastFailure = Instant.now();
-        
+
         // Implement exponential backoff for repeated failures
         if (state.consecutiveFailures > 1) {
             Duration additionalBackoff = Duration.ofHours((long) Math.pow(2, state.consecutiveFailures - 1));
             Duration maxBackoff = Duration.ofDays(7); // Never back off more than a week
-            
+
             if (additionalBackoff.compareTo(maxBackoff) > 0) {
                 additionalBackoff = maxBackoff;
             }
-            
+
             state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
-            log.warn("Provider {} has {} consecutive failures. Extended backoff until: {}", 
+            log.warn("Provider {} has {} consecutive failures. Extended backoff until: {}",
                 provider, state.consecutiveFailures, state.rateLimitedUntil);
         }
-        
-        saveState();
+
+        safeSaveState();
         log.info("Provider {} rate limited until: {} (window: {})", provider, resetTime, rateLimitWindow);
     }
-    
+
     /**
      * Record a successful API call
      */
@@ -101,7 +113,7 @@ public class RateLimitState {
         state.lastSuccess = Instant.now();
         state.totalSuccesses++;
     }
-    
+
     /**
      * Check if a provider is currently available
      */
@@ -110,21 +122,21 @@ public class RateLimitState {
         if (state == null) {
             return true;
         }
-        
+
         if (state.rateLimitedUntil != null && Instant.now().isBefore(state.rateLimitedUntil)) {
             return false;
         }
-        
+
         // Clear rate limit if it has expired
         if (state.rateLimitedUntil != null && Instant.now().isAfter(state.rateLimitedUntil)) {
             state.rateLimitedUntil = null;
             state.consecutiveFailures = 0;
-            saveState();
+            safeSaveState();
         }
-        
+
         return true;
     }
-    
+
     /**
      * Get remaining wait time for a provider
      */
@@ -133,11 +145,11 @@ public class RateLimitState {
         if (state == null || state.rateLimitedUntil == null) {
             return Duration.ZERO;
         }
-        
+
         Duration remaining = Duration.between(Instant.now(), state.rateLimitedUntil);
         return remaining.isNegative() ? Duration.ZERO : remaining;
     }
-    
+
     /**
      * Parse rate limit window strings like "24h", "1d", "6h"
      */
@@ -145,9 +157,9 @@ public class RateLimitState {
         if (window == null || window.isEmpty()) {
             return Duration.ofHours(1); // Default to 1 hour
         }
-        
+
         window = window.toLowerCase().trim();
-        
+
         try {
             if (window.endsWith("d")) {
                 int days = Integer.parseInt(window.substring(0, window.length() - 1));
@@ -167,7 +179,7 @@ public class RateLimitState {
             return Duration.ofHours(1);
         }
     }
-    
+
     private void loadState() {
         File file = new File(STATE_FILE);
         if (file.exists()) {
@@ -176,12 +188,12 @@ public class RateLimitState {
                 if (data != null && data.providers != null) {
                     providerStates = new ConcurrentHashMap<>(data.providers);
                     log.info("Loaded rate limit state for {} providers", providerStates.size());
-                    
+
                     // Log current state
                     for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
                         if (!isAvailable(entry.getKey())) {
                             Duration remaining = getRemainingWaitTime(entry.getKey());
-                            log.warn("Provider {} is rate limited for {} more", 
+                            log.warn("Provider {} is rate limited for {} more",
                                 entry.getKey(), formatDuration(remaining));
                         }
                     }
@@ -191,27 +203,34 @@ public class RateLimitState {
             }
         }
     }
-    
-    private void saveState() {
-        File file = new File(STATE_FILE);
-        file.getParentFile().mkdirs();
-        
+
+    private void safeSaveState() {
         try {
-            StateData data = new StateData();
-            data.providers = new ConcurrentHashMap<>(providerStates);
-            data.savedAt = Instant.now();
-            
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
-        } catch (IOException e) {
-            log.error("Failed to save rate limit state", e);
+            saveState();
+        } catch (Throwable t) {
+            // Avoid failing the app for persistence errors; log and continue
+            log.error("Failed to save rate limit state", t);
         }
     }
-    
+
+    private void saveState() throws IOException {
+        File file = new File(STATE_FILE);
+        if (file.getParentFile() != null) {
+            file.getParentFile().mkdirs();
+        }
+
+        StateData data = new StateData();
+        data.providers = new ConcurrentHashMap<>(providerStates);
+        data.savedAt = Instant.now();
+
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
+    }
+
     private String formatDuration(Duration duration) {
         long days = duration.toDays();
         long hours = duration.toHours() % 24;
         long minutes = duration.toMinutes() % 60;
-        
+
         if (days > 0) {
             return String.format("%dd %dh %dm", days, hours, minutes);
         } else if (hours > 0) {
@@ -220,13 +239,13 @@ public class RateLimitState {
             return String.format("%dm", minutes);
         }
     }
-    
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class StateData {
         public Map<String, ProviderState> providers;
         public Instant savedAt;
     }
-    
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderState {
         public Instant rateLimitedUntil;
