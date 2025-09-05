@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
     <title>Java Chat - Beautiful AI-Powered Java Learning</title>
     <link rel="apple-touch-icon" sizes="57x57" href="/apple-touch-icon-57x57.png" />
     <link rel="apple-touch-icon" sizes="114x114" href="/apple-touch-icon-114x114.png" />
@@ -27,33 +27,28 @@
     <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
     <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
     
+    <!-- Mobile-specific meta tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    
     <!-- Prism.js for syntax highlighting -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
-    <link href="/css/app.css" rel="stylesheet" />
+    <link href="/css/app.css?v=mobile-responsive" rel="stylesheet" />
     
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="header-left">
-                <h1 class="app-title">Java Chat</h1>
-                <span class="pill">
-                    <span class="status-indicator"></span>
-                    JDK 24 Docs
-                </span>
-                <span class="pill">AI-Powered Learning</span>
-            </div>
-            <div class="header-right"></div>
-        </div>
-        
         <div id="chat" role="log" aria-live="polite" aria-label="Chat messages"></div>
         
         <button class="export-chat-btn" onclick="copyChat()" aria-label="Copy entire chat" title="Copy entire chat">
-            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path>
             </svg>
         </button>
+        
         
         <div class="input-area">
             <div class="input-row">
@@ -67,7 +62,7 @@
                         onkeypress="if(event.key==='Enter') ask()"
                     />
                     <button class="btn" onclick="ask()" id="askBtn" aria-label="Send question">
-                        <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>
@@ -86,6 +81,10 @@
     <script src="/js/markdown-utils.js"></script>
     
     <script>
+        // Generate unique session ID for this page load
+        const sessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
+        console.log('Session ID:', sessionId);
+        
         // Enhanced streaming with character-by-character animation
         class StreamingText {
             constructor(element, text, speed = 30) { this.element = element; this.text = text; this.speed = speed; this.index = 0; }
@@ -109,13 +108,14 @@
             userCopyBtn.className = 'message-copy-btn';
             userCopyBtn.setAttribute('aria-label', 'Copy message');
             userCopyBtn.title = 'Copy message';
-            userCopyBtn.innerHTML = `<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            userCopyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>`;
             userCopyBtn.onclick = () => copyMessage(q, userCopyBtn);
             userBubble.appendChild(userCopyBtn);
             chatEl.appendChild(userBubble);
+            
             
             input.value = '';
             askBtn.disabled = true;
@@ -135,7 +135,7 @@
             chatEl.scrollTop = chatEl.scrollHeight;
             
             try {
-                const response = await fetch('/api/chat/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sessionId: 'web', latest: q }) });
+                const response = await fetch('/api/chat/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sessionId: sessionId, latest: q }) });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 // Keep loading animation until first content chunk arrives
@@ -147,12 +147,13 @@
                 const decoder = new TextDecoder();
                 let fullText = '';
                 let buffer = '';
+                // Accumulate per SSE event (all data: lines until blank line)
+                let eventBuf = '';
+                let hasEventData = false;
                 // Debounced rendering: reduce /api/markdown/render churn and jitter
                 let renderTimer = null; let lastRendered = '';
                 let firstChunk = false;
-                // Track if we're in a list or code block
-                let inList = false;
-                let inCode = false;
+                
                 const flushRender = async () => { 
                     try { 
                         if (fullText === lastRendered) return; 
@@ -195,9 +196,18 @@
                     } 
                 };
                 const scheduleRender = (immediate=false) => { if (immediate) { if (renderTimer) { clearTimeout(renderTimer); renderTimer=null; } flushRender(); } else { if (renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 120); } };
+                
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        // Commit any in-flight SSE event at stream end
+                        if (hasEventData) {
+                            fullText += eventBuf;
+                            eventBuf = '';
+                            hasEventData = false;
+                        }
+                        break;
+                    }
                     const chunk = decoder.decode(value, { stream: true });
                     buffer += chunk;
                     const lines = buffer.split('\n');
@@ -205,90 +215,35 @@
                     for (let i = 0; i < lines.length - 1; i++) {
                         let line = lines[i];
                         if (line.endsWith('\r')) line = line.slice(0, -1);
+                        // Skip SSE comments (keepalive etc.)
+                        if (line.startsWith(':')) { continue; }
                         if (line.startsWith('data:')) {
                             const data = line.slice(5);
-                            
-                            // STEP 1: Check for code block boundaries FIRST
-                            if (data.includes('```')) {
-                                const beforeFence = data.indexOf('```');
-                                if (beforeFence > 0) {
-                                    fullText += data.substring(0, beforeFence);
-                                }
-                                inCode = !inCode;
-                                fullText += data.substring(beforeFence) + '\n';
-                                inList = false;
-                                continue;
+                            // Accumulate within the current SSE event; join multiple data lines with a newline
+                            if (hasEventData) { eventBuf += '\n'; }
+                            eventBuf += data;
+                            hasEventData = true;
+                        } else if (line.trim() === '') {
+                            // Blank line marks the end of an SSE event; commit accumulated data
+                            if (hasEventData) {
+                                fullText += eventBuf;
+                                eventBuf = '';
+                                hasEventData = false;
                             }
-                            
-                            // STEP 2: If in code block, preserve exactly
-                            if (inCode) {
-                                fullText += data + '\n';
-                                continue;
-                            }
-                            
-                            // STEP 3: Check for list markers
-                            const startsWithListMarker = /^\s*(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s+/.test(data);
-                            
-                            // Handle empty lines - they end lists
-                            if (!data) {
-                                if (inList) {
-                                    fullText += '\n';
-                                    inList = false;
-                                } else {
-                                    fullText += '\n';
-                                }
-                                continue;
-                            }
-                            
-                            // Check for split list marker ("1." in one chunk, text in next)
-                            const tail = fullText.slice(-10).trim();
-                            const endsWithListMarker = /(?:\d+[.)]|[a-zA-Z][.)]|[-*+])\s*$/.test(tail);
-                            if (endsWithListMarker && /^\S/.test(data)) {
-                                // This is continuation of a list marker - just append with space
-                                fullText += ' ' + data;
-                                inList = true;
-                                continue;
-                            }
-                            
-                            // New list item starting
-                            if (startsWithListMarker) {
-                                if (fullText.length > 0 && !fullText.endsWith('\n')) {
-                                    // Add newline before new list item
-                                    fullText += inList ? '\n' : '\n\n';
-                                }
-                                fullText += data;
-                                inList = true;
-                                continue;
-                            }
-                            
-                            // STEP 4: Are we in a list?
-                            if (inList) {
-                                // Continuation of current list item - just add space if needed
-                                const needsSpace = fullText.length > 0 && 
-                                                  !fullText.endsWith(' ') && 
-                                                  !fullText.endsWith('\n') &&
-                                                  !data.startsWith(' ');
-                                fullText += needsSpace ? ' ' + data : data;
-                                continue;
-                            }
-                            
-                            // STEP 5: Regular paragraph (not in list, not in code)
-                            if (fullText.length > 0) {
-                                // Need double newline before new paragraph
-                                if (!fullText.endsWith('\n\n')) {
-                                    if (fullText.endsWith('\n')) {
-                                        fullText += '\n';
-                                    } else {
-                                        fullText += '\n\n';
-                                    }
-                                }
-                            }
-                            fullText += data;
+                        }
+                        // Client-side DIAG: log first few frames safely
+                        if (i < 4 && line) {
+                            try { console.debug('[DIAG] SSE line', line.slice(0, 160)); } catch(_) {}
                         }
                     }
+                    // Safety: strip any leaked SSE tokens that made it into payload text
+                    if (fullText.indexOf('data:') !== -1) {
+                        // Remove only line-anchored SSE prefixes; preserve legitimate words (e.g., "metadata:")
+                        fullText = fullText.replace(/(^|\n)\s*data:\s*/g, '$1');
+                        // Also remove mid-word injections caused by token joins (e.g., "worddata:")
+                        fullText = fullText.replace(/([A-Za-z0-9])data:\s*/g, '$1');
+                    }
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
-                    // IMPORTANT: Only treat a code-fence boundary as complete when followed by a newline
-                    // to avoid rendering half-fences like "```javaimport ..." inline.
                     const immediate = window.MU ? MU.shouldImmediateFlush(fullText) : (/[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n'));
                     scheduleRender(immediate);
                     if (firstChunk) {
@@ -302,7 +257,7 @@
                 assistantCopyBtn.className = 'message-copy-btn';
                 assistantCopyBtn.setAttribute('aria-label', 'Copy assistant response');
                 assistantCopyBtn.title = 'Copy assistant response';
-                assistantCopyBtn.innerHTML = `<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                assistantCopyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                 </svg>`;
@@ -322,21 +277,47 @@
         }
         
         /**
-         * FALLBACK-AWARE: Markdown rendering with server-side support and a minimal client-side fallback.
-         * Source of truth: com.williamcallahan.javachat.service.MarkdownService (server).
-         * If the server endpoint /api/markdown/render fails, we use a BASIC client parser
-         * solely to maintain readability (paragraphs, UL/OL, inline code, fenced code).
-         * Keep this fallback aligned with server logic:
-         *   - preprocessMarkdown()
-         *   - applySmartParagraphBreaksImproved()
-         *   - fixInlineLists()
-         *   - protectCodeBlocks()
-         *   - restoreEnrichments()
-         *   - render()
-         * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
+         * ENHANCED: AST-based markdown rendering with structured data support.
+         * Uses the new UnifiedMarkdownService for AGENTS.md compliant processing.
+         * Falls back to legacy processing if needed for backward compatibility.
+         * 
+         * @param {string} text - The markdown text to process
+         * @param {boolean} useStructured - Whether to use the new structured endpoint
+         * @param {boolean} useServerMarkdown - Whether to use server-side processing
+         * @returns {Promise<string>} - Processed HTML content
          */
-        async function formatText(text, useServerMarkdown = true) {
+        async function formatText(text, useStructured = true, useServerMarkdown = true) {
+            // NOTE: We removed the HTML detection check because streaming responses from GPT-5
+            // come as raw markdown text and need processing. The MarkdownStreamProcessor
+            // is only used for special cases, not the main streaming path.
+            
             if (useServerMarkdown) {
+                // Try the new structured endpoint first for better processing
+                if (useStructured) {
+                    try {
+                        const response = await fetch('/api/markdown/render/structured', { 
+                            method: 'POST', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify({ content: text }) 
+                        });
+                        if (response.ok) { 
+                            const data = await response.json();
+                            console.debug('AST-based processing:', {
+                                citations: data.citations?.length || 0,
+                                enrichments: data.enrichments?.length || 0,
+                                processingTime: data.processingTimeMs,
+                                isClean: data.isClean
+                            });
+                            // Server already renders enrichment cards; apply client-side link pills and styling only
+                            return applyCustomEnrichments(data.html); 
+                        }
+                        console.warn('Structured markdown failed, falling back to legacy:', response.status);
+                    } catch (error) { 
+                        console.warn('Structured markdown error, falling back to legacy:', error); 
+                    }
+                }
+                
+                // Fallback to legacy endpoint (still uses new processStructured internally)
                 try {
                     const response = await fetch('/api/markdown/render', { 
                         method: 'POST', 
@@ -429,6 +410,31 @@
                 console.debug('upgradeCodeBlocks: Non-critical error', err);
             }
         }
+        
+        // Mobile-specific optimizations
+        function initMobileOptimizations() {
+            // Prevent iOS Safari from pausing timers when scrolling
+            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                document.addEventListener('scroll', function() {
+                    // Keep timers active during scroll
+                }, { passive: true });
+            }
+            
+            // Improve touch responsiveness
+            document.addEventListener('touchstart', function() {}, { passive: true });
+            
+            // Handle orientation change
+            window.addEventListener('orientationchange', function() {
+                // Small delay to let the browser finish the orientation change
+                setTimeout(() => {
+                    // Scroll to maintain position
+                    const chatEl = document.getElementById('chat');
+                    if (chatEl) {
+                        chatEl.scrollTop = chatEl.scrollHeight;
+                    }
+                }, 100);
+            });
+        }
 
         /**
          * FALLBACK: Minimal, safe client markdown renderer.
@@ -445,9 +451,9 @@
             }
             // Extract fenced code blocks and replace with placeholders
             const codeBlocks = [];
-            let s = text.replace(/```([\w-]+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
+            let s = text.replace(/```([\w-]+)?\n?([\s\S]*?)\n?```/g, (m, lang, code) => {
                 const idx = codeBlocks.push({ lang: (lang||'').trim(), code: code.trim() }) - 1;
-                return `[[CODE_BLOCK_${idx}]]`;
+                return `\n\n[[CODE_BLOCK_${idx}]]\n\n`;
             });
 
             // Normalize lists safely now that code is protected
@@ -456,8 +462,9 @@
             }
 
             // Normalize inline list markers frequently produced by models
-            s = s.replace(/(:)\s*-\s+(?=\S)/g, '$1\n\n- ');
-            s = s.replace(/([.!?])\s+(\d+\.\s+)/g, '$1\n$2');
+            s = s.replace(/(:)\s*[-*+•→▸◆□▪]\s+(?=\S)/g, '$1\n\n- ');
+            s = s.replace(/([.!?])\s+(\d+\.\s+)/g, '$1\n\n$2');
+            s = s.replace(/([.!?])\s+([-*+•→▸◆□▪]\s+)/g, '$1\n\n$2');
 
             // Escape HTML globally
             s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -503,10 +510,10 @@
                     flushPara(); closeLists();
                     continue;
                 }
-                if (/^-\s+/.test(line)) {
+                if (/^[-*+•→▸◆□▪]\s+/.test(line)) {
                     flushPara();
                     if (!inUl) { closeLists(); out += '<ul>'; inUl = true; }
-                    out += `<li>${line.replace(/^-\s+/, '')}</li>`;
+                    out += `<li>${line.replace(/^[-*+•→▸◆□▪]\s+/, '')}</li>`;
                     continue;
                 }
                 if (/^\d+\.\s+/.test(line)) {
@@ -562,8 +569,8 @@
                     });
                 }
                 
-                const exportBtn = container.querySelector('.export-chat-btn');
-                if (exportBtn) { container.insertBefore(citationsRow, exportBtn); } else { container.appendChild(citationsRow); }
+                // Always append citations at the end (export button is now positioned absolutely)
+                container.appendChild(citationsRow);
             } catch (error) { console.error('Error loading citations:', error); }
         }
         
@@ -616,7 +623,7 @@
         
         // knowledge-card is deprecated; unified enrichment blocks are used instead.
         
-        function copyMessage(text, button) { navigator.clipboard.writeText(text).then(() => { button.classList.add('copied'); const originalHTML = button.innerHTML; button.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"20 6 9 17 4 12\"></polyline></svg>`; setTimeout(() => { button.classList.remove('copied'); button.innerHTML = originalHTML; }, 2000); }).catch(() => { showToast('Failed to copy', 'error'); }); }
+        function copyMessage(text, button) { navigator.clipboard.writeText(text).then(() => { button.classList.add('copied'); const originalHTML = button.innerHTML; button.innerHTML = `<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"20 6 9 17 4 12\"></polyline></svg>`; setTimeout(() => { button.classList.remove('copied'); button.innerHTML = originalHTML; }, 2000); }).catch(() => { showToast('Failed to copy', 'error'); }); }
 
         function attachCodeCopyButtons(container) {
             try {
@@ -627,7 +634,7 @@
                     btn.className = 'code-copy-btn';
                     btn.setAttribute('aria-label', 'Copy code');
                     btn.title = 'Copy code';
-                    btn.innerHTML = `<svg width=\"16\" height=\"16\" viewbox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n                        <rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect>\n                        <path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path>\n                    </svg>`;
+                    btn.innerHTML = `<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n                        <rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect>\n                        <path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path>\n                    </svg>`;
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         const codeEl = pre.querySelector('code');
@@ -639,49 +646,9 @@
             } catch (err) { console.warn('Failed to attach code copy buttons', err); }
         }
         
-        /**
-         * Safe code block upgrade function for chat.html
-         * MINIMAL APPROACH: Only ensures proper structure, doesn't modify content
-         * Prevents JavaScript errors while maintaining stable UI
-         */
-        function upgradeCodeBlocks(container) {
-            try {
-                // Safety check: if container is invalid, return silently
-                if (!container || typeof container.querySelectorAll !== 'function') {
-                    console.debug('upgradeCodeBlocks: Invalid container, skipping');
-                    return;
-                }
-                
-                // IMPORTANT: In chat.html context, we do NOT want to:
-                // 1. Convert inline code to blocks (that's for guided learning)
-                // 2. Wrap code blocks in enrichment containers
-                // 3. Modify the structure that the server already created
-                
-                // We only ensure code blocks have proper language classes for Prism
-                const codeBlocks = container.querySelectorAll('pre > code');
-                codeBlocks.forEach(code => {
-                    // If no language class, try to detect from content
-                    if (!code.className || !code.className.includes('language-')) {
-                        // Check if it looks like Java code
-                        const text = code.textContent || '';
-                        if (text.includes('public class') || text.includes('import java') || 
-                            text.includes('public static void') || text.includes('HashMap')) {
-                            code.className = 'language-java';
-                        }
-                    }
-                });
-                
-                // Log for debugging but don't throw errors
-                console.debug(`upgradeCodeBlocks: Processed ${codeBlocks.length} code blocks`);
-                
-            } catch (err) {
-                // Fail silently to prevent breaking the UI
-                console.debug('upgradeCodeBlocks: Non-critical error', err);
-            }
-        }
         
         async function copyChat() {
-            try { const res = await fetch('/api/chat/export/session?sessionId=web'); const txt = await res.text(); await navigator.clipboard.writeText(txt); const btn = document.querySelector('.export-chat-btn'); if (btn) { btn.style.background = 'var(--accent-success)'; btn.style.color = 'white'; setTimeout(() => { btn.style.background = ''; btn.style.color = ''; }, 2000); } showToast('Chat session exported to clipboard!'); } catch (error) { showToast('Failed to export', 'error'); }
+            try { const res = await fetch('/api/chat/export/session?sessionId=' + encodeURIComponent(sessionId)); const txt = await res.text(); await navigator.clipboard.writeText(txt); const btn = document.querySelector('.export-chat-btn'); if (btn) { btn.style.background = 'var(--accent-success)'; btn.style.color = 'white'; setTimeout(() => { btn.style.background = ''; btn.style.color = ''; }, 2000); } showToast('Chat session exported to clipboard!'); } catch (error) { showToast('Failed to export', 'error'); }
         }
         
         function cleanupEmptyElements(container) {
@@ -728,10 +695,15 @@
         function showToast(message, type = 'success') { const toast = document.createElement('div'); toast.style.cssText = `position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: ${type === 'error' ? 'var(--accent-error)' : 'var(--accent-success)'}; color: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); z-index: 1000; animation: fadeIn 0.3s ease;`; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => { toast.style.animation = 'fadeIn 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, 3000); }
         
         document.addEventListener('DOMContentLoaded', () => {
+            // Each page load gets a unique session ID, no need to clear
+            
             // Signal parent that DOM is ready (prevents skeleton overlay)
             if (window.parent !== window) {
                 window.parent.postMessage({ type: 'dom-ready' }, '*');
             }
+            
+            // Initialize mobile optimizations
+            initMobileOptimizations();
             
             const input = document.getElementById('q');
             input.focus();

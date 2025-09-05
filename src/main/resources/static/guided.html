@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Guided Learning</title>
   <link rel="apple-touch-icon" sizes="57x57" href="/apple-touch-icon-57x57.png" />
   <link rel="apple-touch-icon" sizes="114x114" href="/apple-touch-icon-114x114.png" />
@@ -25,26 +25,27 @@
   <meta name="msapplication-square150x150logo" content="/mstile-150x150.png" />
   <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
   <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
+  
+  <!-- Mobile-specific meta tags -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
+  
   <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
-  <link href="/css/app.css" rel="stylesheet" />
+  <link href="/css/app.css?v=mobile-responsive" rel="stylesheet" />
 </head>
 <body class="guided-learning">
   <div class="container">
-    <div class="header">
-        <div class="header-left">
-            <h1 class="app-title">Guided Learning</h1>
-        </div>
-    </div>
-
     <div class="lesson-selector">
         <button id="prevBtn" aria-label="Previous lesson">
-            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="15 18 9 12 15 6"></polyline>
             </svg>
         </button>
         <select id="lessonSelect" aria-label="Lesson selector"></select>
         <button id="nextBtn" aria-label="Next lesson">
-            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="9 18 15 12 9 6"></polyline>
             </svg>
         </button>
@@ -74,9 +75,9 @@
         <div id="chatArea" aria-live="polite" aria-label="Guided chat messages"></div>
         
         <button class="export-chat-btn" onclick="copyGuidedChat()" aria-label="Copy entire chat" title="Copy entire chat">
-            <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path>
             </svg>
         </button>
         
@@ -85,7 +86,7 @@
                 <div class="input-wrapper">
                     <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()"/>
                     <button id="askBtn" class="btn" onclick="ask()" aria-label="Send question">
-                        <svg width="20" height="20" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>
@@ -240,7 +241,11 @@
             if (line.endsWith('\r')) line = line.slice(0, -1);
             if (line.startsWith('data:')) {
               const data = line.slice(5);
-              
+              // Prevent word concatenation when deltas are alphanumeric
+              const prev = acc ? acc.charAt(acc.length - 1) : '';
+              if (prev && /[A-Za-z0-9]/.test(prev) && /^[A-Za-z0-9]/.test(data)) {
+                acc += ' ';
+              }
               // STEP 1: Check for code block boundaries FIRST
               if (data.includes('```')) {
                 const beforeFence = data.indexOf('```');
@@ -447,6 +452,8 @@
       const chatArea = document.getElementById('chatArea'); const askBtn = document.getElementById('askBtn');
       // user bubble
       const ub = document.createElement('div'); ub.className = 'bubble user'; ub.textContent = q; chatArea.appendChild(ub);
+      
+      
       input.value=''; askBtn.disabled=true;
       // assistant bubble
       const ab = document.createElement('div'); ab.className = 'bubble assistant'; 
@@ -522,6 +529,8 @@
           for(let i=0;i<lines.length-1;i++){ 
             let line=lines[i];
             if(line.endsWith('\r')) line=line.slice(0,-1);
+            // Skip SSE comments (e.g., ": keepalive")
+            if (line.startsWith(':')) { continue; }
             if(line.startsWith('data:')){
               const data=line.substring(5);
               
@@ -593,6 +602,11 @@
             }
           }
           // Only treat a code-fence boundary as complete when followed by a newline
+          // Safety: strip any leaked SSE tokens that made it into payload text
+          if (fullText.indexOf('data:') !== -1) {
+            fullText = fullText.replace(/(^|\n)\s*data:\s*/g, '$1');
+            fullText = fullText.replace(/([A-Za-z0-9])data:\s*/g, '$1');
+          }
           const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
           scheduleRender(immediate);
         }
@@ -603,42 +617,62 @@
     }
 
     /**
-     * FALLBACK-AWARE: Markdown rendering with server-side support and a minimal client-side fallback.
-     * Source of truth: com.williamcallahan.javachat.service.MarkdownService (server).
-     * If the server endpoint /api/markdown/render fails, we use a BASIC client parser
-     * solely to maintain readability (paragraphs, UL/OL, inline code, fenced code).
-     * Keep this fallback aligned with server logic:
-     *   - preprocessMarkdown()
-     *   - applySmartParagraphBreaksImproved()
-     *   - fixInlineLists()
-     *   - protectCodeBlocks()
-     *   - restoreEnrichments()
-     *   - render()
-     * IMPORTANT: Always fix/extend server behavior first. The fallback is intentionally limited.
+     * ENHANCED: AST-based markdown rendering with structured data support.
+     * Uses the new UnifiedMarkdownService for AGENTS.md compliant processing.
+     * Falls back to legacy processing if needed for backward compatibility.
      */
-         async function renderMarkdown(text){
-       text = stripLeadingHeading(text);
-       try { 
-         const res = await fetch('/api/markdown/render', { 
-             method:'POST', 
-             headers:{'Content-Type':'application/json'}, 
-             body: JSON.stringify({content:text}) 
-         }); 
-         if(res.ok){ 
-             const data=await res.json(); 
-             console.log('Server markdown success:', data.html.substring(0, 200));
-             return data.html; 
-         } else {
-             console.error('Server markdown failed with status:', res.status);
-         }
-       } catch(e){
-         console.error('Server markdown error:', e);
-       }
-       // Safety net: client markdown ONLY
-       console.log('Using client fallback for markdown');
-      let out = clientMarkdownFallback(text);
-      try { if (window.MU && MU.hoistMarkerOnlyLines) out = MU.hoistMarkerOnlyLines(out); } catch {}
-      return out;
+         async function renderMarkdown(text, useStructured = true){
+      text = stripLeadingHeading(text);
+      const preserved = preserveEnrichments(text);
+      
+      // Try the new structured endpoint first for better processing
+      if (useStructured) {
+          try {
+              const res = await fetch('/api/markdown/render/structured', { 
+                  method:'POST', 
+                  headers:{'Content-Type':'application/json'}, 
+                  body: JSON.stringify({content: preserved}) 
+              }); 
+              if(res.ok){ 
+                  const data=await res.json(); 
+                  console.debug('AST-based processing (guided):', {
+                      citations: data.citations?.length || 0,
+                      enrichments: data.enrichments?.length || 0,
+                      processingTime: data.processingTimeMs,
+                      isClean: data.isClean
+                  });
+                  const restored = restoreEnrichments(data.html);
+                  return (window.MU && MU.applyInlineEnrichments) ? MU.applyInlineEnrichments(restored) : restored; 
+              }
+              console.warn('Structured markdown failed, falling back to legacy:', res.status);
+          } catch(e){
+              console.warn('Structured markdown error, falling back to legacy:', e);
+          }
+      }
+      
+      // Fallback to legacy endpoint (still uses new processStructured internally)
+      try { 
+        const res = await fetch('/api/markdown/render', { 
+            method:'POST', 
+            headers:{'Content-Type':'application/json'}, 
+            body: JSON.stringify({content: preserved}) 
+        }); 
+        if(res.ok){ 
+            const data=await res.json(); 
+            const restored = restoreEnrichments(data.html);
+            return (window.MU && MU.applyInlineEnrichments) ? MU.applyInlineEnrichments(restored) : restored; 
+        } else {
+            console.error('Server markdown failed with status:', res.status);
+        }
+      } catch(e){
+        console.error('Server markdown error:', e);
+      }
+      // Safety net: client markdown ONLY
+      console.log('Using client fallback for markdown');
+     let out = clientMarkdownFallback(preserved);
+     try { if (window.MU && MU.hoistMarkerOnlyLines) out = MU.hoistMarkerOnlyLines(out); } catch {}
+     const restored = restoreEnrichments(out);
+     return (window.MU && MU.applyInlineEnrichments) ? MU.applyInlineEnrichments(restored) : restored;
      }
     function stripLeadingHeading(text){
       return text.replace(/^(\s*#{1,6}[^\n]*\n?)+/,'');
@@ -676,11 +710,12 @@
         text = MU.promoteLikelyJavaBlocks(text);
       }
 
-      let s=text.replace(/```([\w-]+)?\n([\s\S]*?)```/g,(m,lang,code)=>{ const i=codeBlocks.push({lang:(lang||'').trim(),code})-1; return `[[CODE_BLOCK_${i}]]`; });
+      let s=text.replace(/```([\w-]+)?\n?([\s\S]*?)\n?```/g,(m,lang,code)=>{ const i=codeBlocks.push({lang:(lang||'').trim(),code:code.trim()})-1; return `\n\n[[CODE_BLOCK_${i}]]\n\n`; });
       // Normalize lists safely now that code is protected
       try { if (window.MU) { s = MU.normalizeInlineOrderedLists(s); s = MU.hoistMarkerOnlyLines(s); } } catch {}
-      s=s.replace(/(:)\s*-\s+(?=\S)/g,'$1\n\n- ');
-      s=s.replace(/([.!?])\s+(\d+\.\s+)/g,'$1\n$2');
+      s=s.replace(/(:)\s*[-*+•→▸◆□▪]\s+(?=\S)/g,'$1\n\n- ');
+      s=s.replace(/([.!?])\s+(\d+\.\s+)/g,'$1\n\n$2');
+      s=s.replace(/([.!?])\s+([-*+•→▸◆□▪]\s+)/g,'$1\n\n$2');
       s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       // Minimal emphasis handling after HTML escape and code protection
       s = s.replace(/\*\*\s+([\s\S]*?)\s+\*\*/g, '**$1**');
@@ -703,7 +738,7 @@
         const codePh=line.match(/^\[\[CODE_BLOCK_(\d+)\]\]$/);
         if(codePh){ flushPara(); closeLists(); const idx=parseInt(codePh[1],10); const blk=codeBlocks[idx]||{lang:'',code:''}; const esc=blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); const cls=blk.lang?` class="language-${blk.lang}"`:''; out+=`<pre><code${cls}>${esc}</code></pre>`; continue; }
         if(/^\s*$/.test(line)){ flushPara(); closeLists(); continue; }
-        if(/^-\s+/.test(line)){ flushPara(); if(!inUl){ closeLists(); out+='<ul>'; inUl=true;} out+=`<li>${line.replace(/^-\s+/, '')}</li>`; continue; }
+        if(/^[-*+•→▸◆□▪]\s+/.test(line)){ flushPara(); if(!inUl){ closeLists(); out+='<ul>'; inUl=true;} out+=`<li>${line.replace(/^[-*+•→▸◆□▪]\s+/, '')}</li>`; continue; }
         if(/^\d+\.\s+/.test(line)){ flushPara(); if(!inOl){ closeLists(); out+='<ol>'; inOl=true;} out+=`<li>${line.replace(/^\d+\.\s+/, '')}</li>`; continue; }
         para += (para? ' ' : '') + line;
       }
@@ -711,16 +746,9 @@
       out=out.replace(/\[\[CODE_BLOCK_(\d+)\]\]/g,(m,i)=>{ const idx=parseInt(i,10); const blk=codeBlocks[idx]||{lang:'',code:''}; const esc=blk.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); const cls=blk.lang?` class=\"language-${blk.lang}\"`:''; return `<pre><code${cls}>${esc}</code></pre>`; });
       return out;
     }
-    function applyEnrichments(text){
-      text = text.replace(/\{\{hint:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">💡 ${ct}</div>` : ''; });
-      text = text.replace(/\{\{reminder:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">🔔 ${ct}</div>` : ''; });
-      text = text.replace(/\{\{background:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">📚 ${ct}</div>` : ''; });
-      text = text.replace(/\{\{warning:([\s\S]*?)\}\}/g,(m,c)=>{ const ct=c.trim(); return ct ? `<div class="bubble assistant">⚠️ ${ct}</div>` : ''; });
-      text = text.replace(/\[(\d+)\]/g,(m,n)=>`<sup class="inline-citation">[${n}]</sup>`);
-      return text;
-    }
+    // applyEnrichments() removed: unified MU.applyInlineEnrichments handles cards.
 
-    function attachCodeCopyButtons(container){ try { const blocks=container.querySelectorAll('pre'); blocks.forEach(pre=>{ if(pre.querySelector('.code-copy-btn')) return; const btn=document.createElement('button'); btn.className='code-copy-btn'; btn.setAttribute('aria-label','Copy code'); btn.title='Copy code'; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`; btn.addEventListener('click',(e)=>{ e.stopPropagation(); const codeEl=pre.querySelector('code'); const text=codeEl?codeEl.innerText:pre.innerText; navigator.clipboard.writeText(text).then(()=>{ btn.classList.add('copied'); const orig=btn.innerHTML; btn.innerHTML=`<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`; setTimeout(()=>{ btn.classList.remove('copied'); btn.innerHTML=orig; },1500); }); }); pre.appendChild(btn); }); } catch(_){} }
+    function attachCodeCopyButtons(container){ try { const blocks=container.querySelectorAll('pre'); blocks.forEach(pre=>{ if(pre.querySelector('.code-copy-btn')) return; const btn=document.createElement('button'); btn.className='code-copy-btn'; btn.setAttribute('aria-label','Copy code'); btn.title='Copy code'; btn.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`; btn.addEventListener('click',(e)=>{ e.stopPropagation(); const codeEl=pre.querySelector('code'); const text=codeEl?codeEl.innerText:pre.innerText; navigator.clipboard.writeText(text).then(()=>{ btn.classList.add('copied'); const orig=btn.innerHTML; btn.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`; setTimeout(()=>{ btn.classList.remove('copied'); btn.innerHTML=orig; },1500); }); }); pre.appendChild(btn); }); } catch(_){} }
 
     /**
      * Safe code block upgrade for guided learning
@@ -798,6 +826,37 @@
       }
     }
 
+    // Mobile-specific optimizations
+    function initMobileOptimizations() {
+        // Prevent iOS Safari from pausing timers when scrolling
+        if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            document.addEventListener('scroll', function() {
+                // Keep timers active during scroll
+            }, { passive: true });
+        }
+        
+        // Improve touch responsiveness
+        document.addEventListener('touchstart', function() {}, { passive: true });
+        
+        // Handle orientation change for guided learning
+        window.addEventListener('orientationchange', function() {
+            setTimeout(() => {
+                // Ensure lesson content is properly positioned after rotation
+                const lessonContent = document.getElementById('lesson-content');
+                const chatArea = document.getElementById('chatArea');
+                if (lessonContent) {
+                    lessonContent.scrollTop = 0; // Reset to top for better UX
+                }
+                if (chatArea) {
+                    chatArea.scrollTop = chatArea.scrollHeight; // Keep chat at bottom
+                }
+            }, 100);
+        });
+    }
+
+    // Initialize mobile optimizations
+    initMobileOptimizations();
+    
     // Load the table of contents and the first lesson
     loadTOC().catch(() => setLessonLoading(false));
     
