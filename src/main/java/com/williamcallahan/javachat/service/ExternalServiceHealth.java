@@ -36,6 +36,12 @@ public class ExternalServiceHealth {
     @Value("${QDRANT_SSL:false}")
     private boolean qdrantSsl;
     
+    @Value("${QDRANT_API_KEY:}")
+    private String qdrantApiKey;
+    
+    @Value("${QDRANT_COLLECTION:java-chat}")
+    private String qdrantCollection;
+    
     // Health check intervals
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
@@ -135,23 +141,29 @@ public class ExternalServiceHealth {
         String protocol = qdrantSsl ? "https" : "http";
         String healthUrl;
         
-        if (qdrantSsl) {
-            // For Qdrant Cloud, use standard HTTPS port (443) without explicit port in URL
-            healthUrl = String.format("%s://%s/health", protocol, qdrantHost);
+        if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+            // For Qdrant Cloud, check collections endpoint instead of /health (which returns 403)
+            healthUrl = String.format("%s://%s/collections", protocol, qdrantHost);
         } else {
-            // For local instances, use the configured port (typically 6333 for REST)
+            // For local instances, use the health endpoint
             int restPort = (qdrantPort == 6334) ? 6333 : qdrantPort; // Convert gRPC port to REST port
             healthUrl = String.format("%s://%s:%d/health", protocol, qdrantHost, restPort);
         }
         
-        webClient.get()
-            .uri(healthUrl)
+        var requestSpec = webClient.get().uri(healthUrl);
+        
+        // Add API key for cloud instances
+        if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+            requestSpec = requestSpec.header("api-key", qdrantApiKey);
+        }
+        
+        requestSpec
             .retrieve()
             .toBodilessEntity()
             .timeout(Duration.ofSeconds(5))
             .doOnSuccess(response -> {
                 status.markHealthy();
-                log.debug("Qdrant health check succeeded");
+                log.debug("Qdrant health check succeeded via {}", healthUrl);
             })
             .doOnError(error -> {
                 status.markUnhealthy();
