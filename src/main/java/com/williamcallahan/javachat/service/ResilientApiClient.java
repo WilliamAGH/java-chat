@@ -19,6 +19,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.concurrent.TimeoutException;
 
 @Service
+@SuppressWarnings("unchecked")
 public class ResilientApiClient {
     private static final Logger log = LoggerFactory.getLogger(ResilientApiClient.class);
     
@@ -77,15 +78,15 @@ public class ResilientApiClient {
         
         return switch (provider) {
             case OPENAI -> callOpenAI(prompt, temperature, stream)
-                .doOnNext(s -> rateLimitManager.recordSuccess(provider))
+                .doOnSubscribe(s -> rateLimitManager.recordSuccess(provider))
                 .onErrorResume(e -> handleError(e, provider, prompt, temperature, stream));
                 
             case GITHUB_MODELS -> callGitHubModels(prompt, temperature, stream)
-                .doOnNext(s -> rateLimitManager.recordSuccess(provider))
+                .doOnSubscribe(s -> rateLimitManager.recordSuccess(provider))
                 .onErrorResume(e -> handleError(e, provider, prompt, temperature, stream));
                 
             case LOCAL -> callLocalModel(prompt, temperature, stream)
-                .doOnNext(s -> rateLimitManager.recordSuccess(provider))
+                .doOnSubscribe(s -> rateLimitManager.recordSuccess(provider))
                 .onErrorResume(e -> handleError(e, provider, prompt, temperature, stream));
         };
     }
@@ -114,16 +115,38 @@ public class ResilientApiClient {
             return Flux.error(new RuntimeException("OpenAI API key not configured"));
         }
         
-        Map<String, Object> body = Map.of(
-            "model", model,
-            "messages", List.of(Map.of("role", "user", "content", prompt)),
-            "temperature", temperature,
-            "stream", stream
-        );
+        // GPT-5 uses a different API structure
+        Map<String, Object> body;
+        String endpoint;
+        
+        if ("gpt-5".equals(model)) {
+            // GPT-5 uses the new responses API with minimal reasoning
+            body = Map.of(
+                "model", model,
+                "input", List.of(
+                    Map.of(
+                        "role", "user",
+                        "content", prompt
+                    )
+                ),
+                "reasoning", Map.of("effort", "minimal"),
+                "stream", stream
+            );
+            endpoint = "https://api.openai.com/v1/responses";
+        } else {
+            // GPT-4 and earlier use chat completions
+            body = Map.of(
+                "model", model,
+                "messages", List.of(Map.of("role", "user", "content", prompt)),
+                "temperature", temperature,
+                "stream", stream
+            );
+            endpoint = "https://api.openai.com/v1/chat/completions";
+        }
         
         if (!stream) {
             return webClient.post()
-                .uri("https://api.openai.com/v1/chat/completions")
+                .uri(endpoint)
                 .header("Authorization", "Bearer " + openaiApiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
@@ -135,7 +158,7 @@ public class ResilientApiClient {
                 .flux();
         } else {
             return webClient.post()
-                .uri("https://api.openai.com/v1/chat/completions")
+                .uri(endpoint)
                 .header("Authorization", "Bearer " + openaiApiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
@@ -155,9 +178,16 @@ public class ResilientApiClient {
         // GitHub Models requires "openai/" prefix for OpenAI models
         String githubModel = model.startsWith("openai/") ? model : "openai/" + model;
         
+        // GitHub Models has stricter payload size limits - truncate if necessary
+        String truncatedPrompt = truncateForGitHubModels(prompt);
+        if (truncatedPrompt.length() < prompt.length()) {
+            log.info("Truncated prompt for GitHub Models: {} chars -> {} chars", 
+                prompt.length(), truncatedPrompt.length());
+        }
+        
         Map<String, Object> body = Map.of(
             "model", githubModel,
-            "messages", List.of(Map.of("role", "user", "content", prompt)),
+            "messages", List.of(Map.of("role", "user", "content", truncatedPrompt)),
             "temperature", temperature,
             "stream", stream
         );
@@ -196,14 +226,43 @@ public class ResilientApiClient {
     
     private String extractContent(Map<String, Object> response) {
         try {
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                if (message != null) {
-                    Object content = message.get("content");
-                    return content != null ? content.toString() : "";
+            // Check if this is a GPT-5 response format
+            if (response.containsKey("output")) {
+                Object outputObj = response.get("output");
+                if (outputObj instanceof List) {
+                    List<?> output = (List<?>) outputObj;
+                    if (!output.isEmpty()) {
+                        Object firstOutputObj = output.get(0);
+                        if (firstOutputObj instanceof Map) {
+                            Map<?, ?> firstOutput = (Map<?, ?>) firstOutputObj;
+                            Object content = firstOutput.get("content");
+                            if (content instanceof String) {
+                                return (String) content;
+                            } else if (content instanceof Map) {
+                                Map<?, ?> contentMap = (Map<?, ?>) content;
+                                Object text = contentMap.get("text");
+                                return text != null ? text.toString() : "";
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Traditional GPT-4 format
+            Object choicesObj = response.get("choices");
+            if (choicesObj instanceof List) {
+                List<?> choices = (List<?>) choicesObj;
+                if (!choices.isEmpty()) {
+                    Object firstChoiceObj = choices.get(0);
+                    if (firstChoiceObj instanceof Map) {
+                        Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
+                        Object messageObj = firstChoice.get("message");
+                        if (messageObj instanceof Map) {
+                            Map<?, ?> message = (Map<?, ?>) messageObj;
+                            Object content = message.get("content");
+                            return content != null ? content.toString() : "";
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
@@ -220,16 +279,36 @@ public class ResilientApiClient {
             if (chunk.equals("[DONE]")) {
                 return "";
             }
-            
+
             Map<String, Object> data = objectMapper.readValue(chunk, new TypeReference<Map<String, Object>>() {});
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) data.get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> delta = (Map<String, Object>) choices.get(0).get("delta");
-                if (delta != null) {
-                    Object content = delta.get("content");
-                    return content != null ? content.toString() : "";
+
+            // Check if this is a GPT-5 streaming event
+            String type = (String) data.get("type");
+            if (type != null) {
+                // Handle GPT-5 streaming events
+                if ("response.output_text.delta".equals(type)) {
+                    // In GPT-5, the delta field contains the text directly
+                    Object delta = data.get("delta");
+                    return delta != null ? delta.toString() : "";
+                }
+                return ""; // Other event types don't contain text deltas
+            }
+
+            // Traditional GPT-4 streaming format
+            Object choicesObj = data.get("choices");
+            if (choicesObj instanceof List) {
+                List<?> choices = (List<?>) choicesObj;
+                if (!choices.isEmpty()) {
+                    Object firstChoiceObj = choices.get(0);
+                    if (firstChoiceObj instanceof Map) {
+                        Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
+                        Object deltaObj = firstChoice.get("delta");
+                        if (deltaObj instanceof Map) {
+                            Map<?, ?> delta = (Map<?, ?>) deltaObj;
+                            Object content = delta.get("content");
+                            return content != null ? content.toString() : "";
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
@@ -264,5 +343,37 @@ public class ResilientApiClient {
             message.contains("timeout") || 
             message.contains("connection")
         );
+    }
+    
+    private String truncateForGitHubModels(String prompt) {
+        // GitHub Models has a roughly 128K character limit for the entire request
+        // We'll be conservative and limit the prompt to 100K characters to leave room for metadata
+        final int MAX_PROMPT_LENGTH = 100000;
+        
+        if (prompt.length() <= MAX_PROMPT_LENGTH) {
+            return prompt;
+        }
+        
+        // Keep the most recent context and the current question
+        // Try to find the last user message in the prompt
+        String marker = "User:";
+        int lastUserIndex = prompt.lastIndexOf(marker);
+        
+        if (lastUserIndex > 0 && lastUserIndex > prompt.length() - 10000) {
+            // If the last user message is near the end, preserve it and truncate older history
+            String recentContext = prompt.substring(Math.max(0, prompt.length() - MAX_PROMPT_LENGTH));
+            
+            // Try to find a clean break point (paragraph or message boundary)
+            int breakPoint = recentContext.indexOf("\n\n");
+            if (breakPoint > 0 && breakPoint < 1000) {
+                recentContext = recentContext.substring(breakPoint + 2);
+            }
+            
+            return "[Previous context truncated due to size limits]\n\n" + recentContext;
+        } else {
+            // Fallback: just take the most recent portion
+            return "[Previous context truncated due to size limits]\n\n" + 
+                   prompt.substring(prompt.length() - MAX_PROMPT_LENGTH);
+        }
     }
 }
