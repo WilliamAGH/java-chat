@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@org.springframework.context.annotation.Profile("!test")
 @Component
 public class QdrantIndexInitializer {
     private static final Logger log = LoggerFactory.getLogger(QdrantIndexInitializer.class);
@@ -38,6 +39,8 @@ public class QdrantIndexInitializer {
 
     @Value("${spring.ai.vectorstore.qdrant.collection-name}")
     private String collection;
+
+    private final AppProperties appProperties;
 
     /**
      * Build candidate REST base URLs for Qdrant.
@@ -64,8 +67,16 @@ public class QdrantIndexInitializer {
         return bases;
     }
 
+    public QdrantIndexInitializer(AppProperties appProperties) {
+        this.appProperties = appProperties;
+    }
+
     @EventListener(ApplicationReadyEvent.class)
     public void ensurePayloadIndexes() {
+        if (!appProperties.getQdrant().isEnsurePayloadIndexes()) {
+            log.info("[QDRANT] Skipping payload index ensure (app.qdrant.ensure-payload-indexes=false)");
+            return;
+        }
         try {
             createPayloadIndex("url", "keyword");
             createPayloadIndex("hash", "keyword");

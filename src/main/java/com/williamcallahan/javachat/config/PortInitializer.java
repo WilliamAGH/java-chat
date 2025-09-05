@@ -20,6 +20,19 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+        // Disable port manipulation entirely when running under the 'test' profile
+        for (String p : environment.getActiveProfiles()) {
+            if ("test".equalsIgnoreCase(p)) {
+                System.err.println("[startup] PortInitializer disabled under 'test' profile");
+                return;
+            }
+        }
+        String activeEnv = System.getenv("SPRING_PROFILES_ACTIVE");
+        if (activeEnv != null && activeEnv.toLowerCase().contains("test")) {
+            System.err.println("[startup] PortInitializer disabled via SPRING_PROFILES_ACTIVE=test");
+            return;
+        }
+
         int min = getInt(environment, "app.ports.min", "APP_PORT_MIN", DEFAULT_MIN);
         int max = getInt(environment, "app.ports.max", "APP_PORT_MAX", DEFAULT_MAX);
 

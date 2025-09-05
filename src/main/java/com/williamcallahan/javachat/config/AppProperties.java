@@ -10,6 +10,8 @@ public class AppProperties {
     private Rag rag = new Rag();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
     private Docs docs = new Docs();
+    private Diagnostics diagnostics = new Diagnostics();
+    private Qdrant qdrant = new Qdrant();
     
     public Rag getRag() {
         return rag;
@@ -34,6 +36,11 @@ public class AppProperties {
     public void setDocs(Docs docs) {
         this.docs = docs;
     }
+    
+    public Diagnostics getDiagnostics() { return diagnostics; }
+    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = diagnostics; }
+    public Qdrant getQdrant() { return qdrant; }
+    public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
     
     public static class Rag {
         private int searchTopK = 10;
@@ -136,5 +143,25 @@ private int dimensions = 4096;
 
         public String getIndexDir() { return indexDir; }
         public void setIndexDir(String indexDir) { this.indexDir = indexDir; }
+    }
+    
+    public static class Diagnostics {
+        // Whether to log each raw streaming chunk (DEBUG). Default false to avoid flooding logs.
+        private boolean streamChunkLogging = false;
+        // Sample every Nth chunk when logging is enabled. 0 => log every chunk.
+        private int streamChunkSample = 0;
+        
+        public boolean isStreamChunkLogging() { return streamChunkLogging; }
+        public void setStreamChunkLogging(boolean streamChunkLogging) { this.streamChunkLogging = streamChunkLogging; }
+        public int getStreamChunkSample() { return streamChunkSample; }
+        public void setStreamChunkSample(int streamChunkSample) { this.streamChunkSample = streamChunkSample; }
+    }
+
+    public static class Qdrant {
+        // Mirror app.qdrant.ensure-payload-indexes
+        private boolean ensurePayloadIndexes = true;
+
+        public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
+        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
     }
 }
