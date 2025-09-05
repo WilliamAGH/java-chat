@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,9 @@ public class MarkdownController {
     
     @Autowired
     private MarkdownService markdownService;
+    
+    @Autowired
+    private UnifiedMarkdownService unifiedMarkdownService;
     
     /**
      * Renders markdown text to HTML. This endpoint uses server-side caching to improve performance
@@ -52,14 +56,16 @@ public class MarkdownController {
                 ));
             }
             
-            logger.debug("Rendering markdown of length: {}", markdown.length());
+            logger.debug("Processing markdown of length: {}", markdown.length());
             
-            String html = markdownService.render(markdown);
+            var processed = markdownService.processStructured(markdown);
             
             return ResponseEntity.ok(Map.of(
-                "html", html,
+                "html", processed.html(),
                 "source", "server",
-                "cached", true  // Will be true if it was cached
+                "cached", true,  // Will be true if it was cached
+                "citations", processed.citations().size(),
+                "enrichments", processed.enrichments().size()
             ));
             
         } catch (Exception e) {
@@ -99,7 +105,8 @@ public class MarkdownController {
                 ));
             }
             
-            String html = markdownService.renderPreview(markdown);
+            var processed = markdownService.processStructured(markdown);
+            String html = processed.html();
             
             return ResponseEntity.ok(Map.of(
                 "html", html,
@@ -125,7 +132,7 @@ public class MarkdownController {
     @GetMapping("/cache/stats")
     public ResponseEntity<Map<String, Object>> getCacheStats() {
         try {
-            var stats = markdownService.getCacheStats();
+            var stats = unifiedMarkdownService.getCacheStats();
             
             return ResponseEntity.ok(Map.of(
                 "hitCount", stats.hitCount(),
@@ -151,7 +158,7 @@ public class MarkdownController {
     @PostMapping("/cache/clear")
     public ResponseEntity<Map<String, String>> clearCache() {
         try {
-            markdownService.clearCache();
+            unifiedMarkdownService.clearCache();
             logger.info("Markdown cache cleared via API");
             
             return ResponseEntity.ok(Map.of(
@@ -164,6 +171,56 @@ public class MarkdownController {
             return ResponseEntity.status(500).body(Map.of(
                 "status", "error",
                 "message", "Failed to clear cache"
+            ));
+        }
+    }
+    
+    /**
+     * Renders markdown using the new AST-based UnifiedMarkdownService directly.
+     * This endpoint provides structured output with type-safe citations and enrichments.
+     * 
+     * @param request A JSON object containing the markdown to render
+     * @return A {@link ResponseEntity} with structured markdown processing results
+     */
+    @PostMapping(value = "/render/structured", 
+                 consumes = MediaType.APPLICATION_JSON_VALUE,
+                 produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Map<String, Object>> renderStructured(@RequestBody Map<String, String> request) {
+        try {
+            String markdown = request.get("content");
+            
+            if (markdown == null || markdown.isEmpty()) {
+                return ResponseEntity.ok(Map.of(
+                    "html", "",
+                    "citations", 0,
+                    "enrichments", 0,
+                    "warnings", 0,
+                    "processingTimeMs", 0L,
+                    "source", "unified-service"
+                ));
+            }
+            
+            logger.debug("Processing markdown with UnifiedMarkdownService, length: {}", markdown.length());
+            
+            var processed = unifiedMarkdownService.process(markdown);
+            
+            return ResponseEntity.ok(Map.of(
+                "html", processed.html(),
+                "citations", processed.citations(),
+                "enrichments", processed.enrichments(),
+                "warnings", processed.warnings(),
+                "processingTimeMs", processed.processingTimeMs(),
+                "source", "unified-service",
+                "structuredElementCount", processed.getStructuredElementCount(),
+                "isClean", processed.isClean()
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error rendering structured markdown", e);
+            return ResponseEntity.status(500).body(Map.of(
+                "error", "Failed to render structured markdown",
+                "message", e.getMessage(),
+                "source", "unified-service"
             ));
         }
     }

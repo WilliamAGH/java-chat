@@ -3,17 +3,21 @@ package com.williamcallahan.javachat.web;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
-import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -22,13 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController extends BaseController {
-    @SuppressWarnings("unused") // Used by logging framework
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
-    private final MarkdownService markdownService;
+    private final UnifiedMarkdownService unifiedMarkdownService;
+    // Deprecated stream processor removed from active use; unified AST processing handles markdown.
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
@@ -37,12 +41,34 @@ public class ChatController extends BaseController {
     @Value("${app.local-embedding.enabled:false}")
     private boolean localEmbeddingEnabled;
 
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory, 
-                         MarkdownService markdownService, ExceptionResponseBuilder exceptionBuilder) {
+    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
+                         UnifiedMarkdownService unifiedMarkdownService,
+                         ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
-        this.markdownService = markdownService;
+        this.unifiedMarkdownService = unifiedMarkdownService;
+    }
+
+    // Normalize token joining to prevent artifacts like "worddata:" or space-before-punctuation
+    private String normalizeDelta(String delta, StringBuilder full) {
+        if (delta == null || delta.isEmpty()) return "";
+        String d = delta;
+        char prev = full.length() > 0 ? full.charAt(full.length() - 1) : '\0';
+        // Remove space before punctuation
+        if (d.length() > 0 && 
+            (d.charAt(0) == '.' || d.charAt(0) == ',' || d.charAt(0) == '!' || d.charAt(0) == '?' || d.charAt(0) == ';' || d.charAt(0) == ':')) {
+            if (full.length() > 0 && full.charAt(full.length() - 1) == ' ') {
+                full.setLength(full.length() - 1);
+            }
+        }
+        // Remove space before apostrophe contractions
+        if (d.startsWith("'") && full.length() > 0 && Character.isLetterOrDigit(prev)) {
+            if (full.charAt(full.length() - 1) == ' ') {
+                full.setLength(full.length() - 1);
+            }
+        }
+        return d;
     }
 
     /**
@@ -58,10 +84,18 @@ public class ChatController extends BaseController {
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody Map<String, Object> body) {
+    public Flux<String> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
+        // Critical proxy headers for streaming
+        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
+        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
         String requestId = "REQ-" + System.currentTimeMillis() + "-" + Thread.currentThread().threadId();
-        String sessionId = String.valueOf(body.getOrDefault("sessionId", "default"));
-        String latest = String.valueOf(body.getOrDefault("latest", ""));
+        
+        // Generate session ID if not provided using same logic as frontend
+        String sessionId = body.get("sessionId") != null 
+            ? String.valueOf(body.get("sessionId"))
+            : "chat-" + System.currentTimeMillis() + "-" + Math.random();
+        // Support both "message" (from curl/API) and "latest" (from web UI) field names
+        String latest = String.valueOf(body.getOrDefault("message", body.getOrDefault("latest", "")));
         
         PIPELINE_LOG.info("[{}] ============================================", requestId);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST - Session: {}", requestId, sessionId);
@@ -73,73 +107,57 @@ public class ChatController extends BaseController {
         
         chatMemory.addUser(sessionId, latest);
         StringBuilder fullResponse = new StringBuilder();
-        StringBuilder buffer = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
         
-        return chatService.streamAnswer(history, latest)
-                .map(chunk -> {
-                    buffer.append(chunk);
-                    fullResponse.append(chunk);
-                    
-                    String buffered = buffer.toString();
-                    
-                    // CRITICAL: Check if we're inside a code block - don't break if so!
-                    int openFences = countOccurrences(buffered, "```");
-                    boolean insideCodeBlock = (openFences % 2) == 1; // Odd count means we're inside
-                    
-                    if (insideCodeBlock) {
-                        // We're inside a code block - keep buffering until we close it
-                        return "";
-                    }
-                    
-                    // Check for natural break points: sentence ends, newlines, list markers, or code block end
-                    boolean hasBreakPoint = buffered.endsWith("```\n") || // Code block just ended
-                                           buffered.matches(".*[.!?]\\s*$") || 
-                                           buffered.endsWith("\n\n") || // Paragraph break
-                                           buffered.matches(".*\\d+\\.\\s+\\S.*") || // list marker followed by visible content
-                                           buffered.contains("- ") ||
-                                           buffer.length() > 500;  // Force break for very long chunks
-                    
-                    if (hasBreakPoint) {
-                        // IMPORTANT: Don't preprocess during streaming!
-                        // The client will call /api/markdown/render which does full preprocessing.
-                        // Double preprocessing causes corruption of markdown structures.
-                        String toSend = buffered;
-                        buffer.setLength(0);  // Clear buffer
-                        
-                        PIPELINE_LOG.info("[{}] SENT CHUNK: '{}'",
-                                requestId, toSend.replace("\n", "\\n"));
+        // Create heartbeat stream for keeping connections alive through proxies
+        Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                .map(i -> ": keepalive\n\n");  // SSE comment format
 
-                        return toSend;
-                    } else {
-                        // Keep buffering
-                        return "";
+        // Main data stream - buffer small tokens to avoid flooding with SSE events
+        Flux<String> dataStream = chatService.streamAnswer(history, latest)
+                .bufferTimeout(10, Duration.ofMillis(100))  // Buffer up to 10 tokens or 100ms timeout
+                .filter(chunks -> !chunks.isEmpty())  // Skip empty buffers
+                .map(chunks -> {
+                    // Combine all chunks in this buffer
+                    StringBuilder buffer = new StringBuilder();
+                    for (String chunk : chunks) {
+                        String normalized = normalizeDelta(chunk, fullResponse);
+                        fullResponse.append(normalized);
+                        buffer.append(normalized);
+                        chunkCount.incrementAndGet();
                     }
-                })
-                .filter(s -> !s.isEmpty())  // Only send non-empty processed chunks
-                .doOnNext(chunk -> {
-                    int count = chunkCount.incrementAndGet();
-                    if (count % 10 == 0) {
-                        PIPELINE_LOG.debug("[{}] Streaming processed chunk #{}: {} chars total", 
-                            requestId, count, fullResponse.length());
+                    
+                    String combined = buffer.toString();
+                    if (combined.isEmpty()) {
+                        return "";  // Will be filtered out
                     }
+                    
+                    // MDN SSE: an event is a block separated by a blank line; use only data: lines
+                    // Ensure no accidental CR characters get through
+                    String payload = combined.replace("\r", "");
+                    // Prefix each line with "data: " per SSE spec so proxies/clients don't mangle multi-line payloads
+                    String perLine = payload.replace("\n", "\ndata: ");
+                    return "data: " + perLine + "\n\n";
                 })
+                .filter(event -> !event.isEmpty())  // Remove empty events
                 .concatWith(Flux.defer(() -> {
-                    // Send any remaining buffered content (without preprocessing)
-                    if (buffer.length() > 0) {
-                        String remaining = buffer.toString();
-                        PIPELINE_LOG.info("[{}] SENT FINAL CHUNK: '{}'",
-                                requestId, remaining.replace("\n", "\\n"));
-                        return Flux.just(remaining);
-                    }
-                    return Flux.empty();
+                    // Send any remaining buffered content 
+                    return Flux.empty(); // No additional final content needed
                 }))
+                .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+
+        // Append terminal event and merge with heartbeats; complete stream after [DONE]
+        Flux<String> framed = dataStream.concatWith(reactor.core.publisher.Mono.just("event: done\ndata: [DONE]\n\n"));
+        return Flux.merge(framed, heartbeats)
+                .takeUntil(s -> s.contains("[DONE]"))
                 .doOnComplete(() -> {
-                    // Store the full preprocessed response in memory
-                    String processed = markdownService.preprocessMarkdown(fullResponse.toString());
+                    // Store the full response using AST-based processing
+                    ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
+                    String processed = processedResult.html();
                     chatMemory.addAssistant(sessionId, processed);
-                    PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars", 
-                        requestId, chunkCount.get(), processed.length());
+                    PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments", 
+                        requestId, chunkCount.get(), processed.length(), 
+                        processedResult.citations().size(), processedResult.enrichments().size());
                 })
                 .doOnError(error -> {
                     PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage());
@@ -164,7 +182,10 @@ public class ChatController extends BaseController {
      * @return A plain text string of the last assistant message.
      */
     @GetMapping(value = "/export/last", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String exportLast(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+    public String exportLast(@RequestParam(name = "sessionId", required = false) String sessionId) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            return "No session ID provided";
+        }
         var turns = chatMemory.getTurns(sessionId);
         for (int i = turns.size() - 1; i >= 0; i--) {
             var t = turns.get(i);
@@ -180,7 +201,10 @@ public class ChatController extends BaseController {
      * @return A plain text string representing the full conversation.
      */
     @GetMapping(value = "/export/session", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String exportSession(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+    public String exportSession(@RequestParam(name = "sessionId", required = false) String sessionId) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            return "No session ID provided";
+        }
         var history = chatMemory.getTurns(sessionId);
         StringBuilder sb = new StringBuilder();
         for (var t : history) {
@@ -190,14 +214,21 @@ public class ChatController extends BaseController {
         return sb.toString();
     }
 
-    private int countOccurrences(String str, String substr) {
-        int count = 0;
-        int idx = 0;
-        while ((idx = str.indexOf(substr, idx)) != -1) {
-            count++;
-            idx += substr.length();
+    
+    /**
+     * Clears the chat history for a given session.
+     *
+     * @param sessionId The ID of the chat session. Defaults to "default".
+     * @return A simple success message.
+     */
+    @PostMapping("/clear")
+    public ResponseEntity<String> clearSession(@RequestParam(name = "sessionId", required = false) String sessionId) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            return ResponseEntity.badRequest().body("No session ID provided");
         }
-        return count;
+        chatMemory.clear(sessionId);
+        PIPELINE_LOG.info("Cleared chat session: {}", sessionId);
+        return ResponseEntity.ok("Session cleared");
     }
     
     @GetMapping("/health/embeddings")
@@ -224,6 +255,32 @@ public class ChatController extends BaseController {
         }
 
         return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Processes text using the new AST-based markdown processing.
+     * This endpoint provides structured output with better list formatting and Unicode bullet support.
+     * 
+     * @param body JSON object containing the text to process
+     * @return ProcessedMarkdown with structured citations and enrichments
+     */
+    @PostMapping("/process-structured")
+    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody Map<String, String> body) {
+        try {
+            String text = body.get("text");
+            if (text == null || text.trim().isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+            
+            ProcessedMarkdown result = unifiedMarkdownService.process(text);
+            PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments", 
+                             result.citations().size(), result.enrichments().size());
+            
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error processing structured markdown", e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
 }
 

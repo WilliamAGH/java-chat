@@ -6,10 +6,13 @@ import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 
 import java.util.*;
 import java.time.Duration;
@@ -23,15 +26,19 @@ public class GuidedLearningController extends BaseController {
     private final ChatMemoryService chatMemory;
 
     private final MarkdownService markdownService;
+    @SuppressWarnings("unused")
+    private final UnifiedMarkdownService unifiedMarkdownService;
 
     public GuidedLearningController(GuidedLearningService guidedService,
                                     ChatMemoryService chatMemory,
                                     ExceptionResponseBuilder exceptionBuilder,
-                                    MarkdownService markdownService) {
+                                    MarkdownService markdownService,
+                                    UnifiedMarkdownService unifiedMarkdownService) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
         this.markdownService = markdownService;
+        this.unifiedMarkdownService = unifiedMarkdownService;
     }
 
     /**
@@ -146,7 +153,7 @@ public class GuidedLearningController extends BaseController {
             guidedService.putLessonCache(slug, text);
             return text;
         });
-        return markdownService.render(md);
+        return markdownService.processStructured(md).html();
     }
 
     /**
@@ -162,8 +169,12 @@ public class GuidedLearningController extends BaseController {
      *             }</pre>
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
-    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody Map<String, Object> body) {
+@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
+        // Critical proxy headers for streaming
+        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
+        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        
         String sessionId = String.valueOf(body.getOrDefault("sessionId", "guided:default"));
         String latest = String.valueOf(body.getOrDefault("latest", ""));
         String slug = String.valueOf(body.getOrDefault("slug", ""));
@@ -172,8 +183,32 @@ public class GuidedLearningController extends BaseController {
         List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         StringBuilder sb = new StringBuilder();
 
-        return guidedService.streamGuidedAnswer(history, slug, latest)
-                .doOnNext(sb::append)
-                .doOnComplete(() -> chatMemory.addAssistant(sessionId, sb.toString()));
+        // Create heartbeat stream for keeping connections alive through proxies
+        Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                .map(i -> ": keepalive\n\n");  // SSE comment format
+
+        // Main data stream with backpressure handling
+        Flux<String> dataStream = guidedService.streamGuidedAnswer(history, slug, latest)
+                .map(chunk -> chunk.replace("\r", ""))
+                .bufferTimeout(10, Duration.ofMillis(100))
+                .filter(chunks -> !chunks.isEmpty())
+                .map(chunks -> {
+                    String combined = String.join("", chunks);
+                    sb.append(combined);
+                    String payload = combined.replace("\r", "");
+                    String perLine = payload.replace("\n", "\ndata: ");
+                    return "data: " + perLine + "\n\n";
+                })
+                .onBackpressureLatest()  // Handle backpressure to prevent memory buildup
+                .doOnComplete(() -> {
+                    // Store processed HTML for consistency with Chat
+                    var processed = markdownService.processStructured(sb.toString());
+                    chatMemory.addAssistant(sessionId, processed.html());
+                });
+
+        // Append terminal event and merge with heartbeats; complete stream after [DONE]
+        Flux<String> framed = dataStream.concatWith(reactor.core.publisher.Mono.just("event: done\ndata: [DONE]\n\n"));
+        return Flux.merge(framed, heartbeats)
+                .takeUntil(s -> s.contains("[DONE]"));
     }
 }
