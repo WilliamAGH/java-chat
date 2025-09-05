@@ -105,6 +105,23 @@
             <version>${jtokkit.version}</version>
         </dependency>
         
+        <!-- gRPC for Qdrant client -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>1.68.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <version>1.68.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <version>1.68.1</version>
+        </dependency>
+        
         <!-- Flexmark for Markdown processing -->
         <dependency>
             <groupId>com.vladsch.flexmark</groupId>
