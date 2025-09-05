@@ -76,11 +76,11 @@ public class QdrantIndexInitializer {
     }
 
     private void createPayloadIndex(String field, String schema) {
-        // Create RestTemplate with timeouts to prevent hanging
+        // Create RestTemplate with longer timeouts for Qdrant Cloud
         // Using connectTimeout and readTimeout (new API since Spring Boot 3.4)
         RestTemplate rt = new RestTemplateBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .readTimeout(Duration.ofSeconds(15))
+                .connectTimeout(Duration.ofSeconds(15))
+                .readTimeout(Duration.ofSeconds(30))
                 .build();
         
         // Add connection management
@@ -110,21 +110,15 @@ public class QdrantIndexInitializer {
             for (String path : pathCandidates) {
                 String url = base + path;
                 try {
-                    // Try POST first (modern API)
-                    rt.postForEntity(url, new HttpEntity<>(body, headers), String.class);
-                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via POST {}", field, schema, url);
+                    // Use PUT for Qdrant payload index creation (official API)
+                    ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
+                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT {} (status={})",
+                            field, schema, url, resp.getStatusCode());
                     return;
-                } catch (Exception postEx) {
-                    lastError = postEx;
-                    try {
-                        // Some deployments expect PUT
-                        ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
-                        log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT {} (status={})",
-                                field, schema, url, resp.getStatusCode());
-                        return;
-                    } catch (Exception putEx) {
-                        lastError = putEx; // continue trying other candidates
-                    }
+                } catch (Exception putEx) {
+                    lastError = putEx;
+                    log.debug("[QDRANT] PUT failed for index '{}': {}", field, putEx.getMessage());
+                    // Continue to next URL candidate if available
                 }
             }
         }
