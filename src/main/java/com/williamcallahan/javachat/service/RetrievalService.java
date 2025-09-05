@@ -90,6 +90,12 @@ public class RetrievalService {
                 .collect(Collectors.toList());
 
         List<Document> reranked = rerankerService.rerank(query, uniqueByUrl, props.getRag().getSearchReturnK());
+        // DIAGNOSTIC: Log top reranked doc preview (truncated)
+        if (!reranked.isEmpty()) {
+            String txt = reranked.get(0).getText();
+            String preview = txt.substring(0, Math.min(500, txt.length()));
+            log.info("[DIAG] RAG top doc (post-rerank) preview=\n{}", preview);
+        }
         return reranked;
     }
 

@@ -66,6 +66,10 @@ public class ChatService {
         
         String fullPrompt = buildPromptFromMessages(messages);
 
+        // DIAGNOSTIC: Log prompt and context (truncated)
+        String promptPreview = fullPrompt.substring(0, Math.min(500, fullPrompt.length()));
+        logger.info("[DIAG] LLM prompt length={} preview=\n{}", fullPrompt.length(), promptPreview);
+
         return apiClient.streamLLM(fullPrompt, 0.7)
                 .onErrorResume(ex -> {
                     logger.error("Streaming failed", ex);
@@ -139,10 +143,10 @@ public class ChatService {
         }
         
         try {
-            // Render markdown to HTML
-            String html = markdownService.render(text);
-            logger.debug("Processed response with markdown rendering");
-            return html;
+            // Use new AST-based processing for better compliance
+            var processed = markdownService.processStructured(text);
+            logger.debug("Processed response with AST-based markdown rendering");
+            return processed.html();
         } catch (Exception e) {
             logger.error("Error processing response with markdown", e);
             // Fallback to plain text with basic escaping

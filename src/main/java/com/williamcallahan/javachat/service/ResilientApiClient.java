@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.core.ParameterizedTypeReference;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -19,7 +21,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.concurrent.TimeoutException;
 
 @Service
-@SuppressWarnings("unchecked")
 public class ResilientApiClient {
     private static final Logger log = LoggerFactory.getLogger(ResilientApiClient.class);
     
@@ -41,10 +42,36 @@ public class ResilientApiClient {
     
     @Value("${APP_MAX_RETRIES:3}")
     private int maxRetries;
+
+    // Diagnostics: control raw chunk logging noise during streaming
+    @Autowired
+    private com.williamcallahan.javachat.config.AppProperties appProps;
     
     public ResilientApiClient(WebClient.Builder webClientBuilder, RateLimitManager rateLimitManager) {
         this.webClient = webClientBuilder.build();
         this.rateLimitManager = rateLimitManager;
+    }
+    
+    /**
+     * Remove any leaked SSE protocol artifacts from model text deltas.
+     * Some providers or proxies can forward merged lines that still include
+     * "data:" or "event:" prefixes. We normalize by stripping those prefixes
+     * both at line starts and when accidentally left inline between tokens.
+     */
+    @SuppressWarnings("unused")
+    private String stripSseArtifacts(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        String out = text;
+        // Remove line-start SSE fields
+        out = out.replaceAll("(?m)^\\s*data:\\s*", "");
+        out = out.replaceAll("(?m)^\\s*event:\\s*\\w+\\s*", "");
+        out = out.replaceAll("(?m)^\\s*id:\\s*.*$", "");
+        // Remove stray inline occurrences caused by merged lines
+        out = out.replaceAll("\\sdata:\\s*", " ");
+        out = out.replaceAll("\\sevent:\\s*\\w+\\s*", " ");
+        return out;
     }
     
     public Mono<String> callLLM(String prompt, double temperature) {
@@ -60,6 +87,9 @@ public class ResilientApiClient {
     }
     
     public Flux<String> streamLLM(String prompt, double temperature) {
+        // DIAGNOSTIC: raw prompt preview
+        String preview = prompt.substring(0, Math.min(500, prompt.length()));
+        log.info("[DIAG] API submission preview=\n{}", preview);
         return callWithFallback(prompt, temperature, true)
             .timeout(Duration.ofSeconds(apiTimeoutSeconds))
             .doOnError(TimeoutException.class, e -> 
@@ -99,6 +129,10 @@ public class ResilientApiClient {
             log.warn("Provider {} hit rate limit, trying next provider", failedProvider.getName());
         } else {
             log.error("Provider {} failed with error: {}", failedProvider.getName(), error.getMessage());
+            if (error instanceof WebClientResponseException) {
+                WebClientResponseException wce = (WebClientResponseException) error;
+                log.error("Response body: {}", wce.getResponseBodyAsString());
+            }
         }
         
         RateLimitManager.ApiProvider nextProvider = rateLimitManager.selectBestProvider();
@@ -114,59 +148,101 @@ public class ResilientApiClient {
         if (openaiApiKey == null || openaiApiKey.isBlank()) {
             return Flux.error(new RuntimeException("OpenAI API key not configured"));
         }
-        
-        // GPT-5 uses a different API structure
+
+        // GPT-5 is available and working!
+        String openaiModel = model;
+
+        // Build request body based on model requirements
         Map<String, Object> body;
-        String endpoint;
-        
-        if ("gpt-5".equals(model)) {
-            // GPT-5 uses the new responses API with minimal reasoning
+        if (model.equals("gpt-5") || model.equals("gpt-5-chat")) {
+            // GPT-5 specific requirements:
+            // 1. Use max_completion_tokens instead of max_tokens
+            // 2. Temperature must be 1 or omitted
+            // 3. Use minimal reasoning_effort for faster responses
             body = Map.of(
-                "model", model,
-                "input", List.of(
-                    Map.of(
-                        "role", "user",
-                        "content", prompt
-                    )
-                ),
-                "reasoning", Map.of("effort", "minimal"),
+                "model", "gpt-5",
+                "messages", List.of(Map.of("role", "user", "content", prompt)),
+                "max_completion_tokens", 2000,
+                "reasoning_effort", "minimal",
                 "stream", stream
             );
-            endpoint = "https://api.openai.com/v1/responses";
         } else {
-            // GPT-4 and earlier use chat completions
+            // Standard OpenAI models (gpt-4o-mini, etc)
             body = Map.of(
-                "model", model,
+                "model", openaiModel,
                 "messages", List.of(Map.of("role", "user", "content", prompt)),
                 "temperature", temperature,
                 "stream", stream
             );
-            endpoint = "https://api.openai.com/v1/chat/completions";
         }
-        
+
         if (!stream) {
             return webClient.post()
-                .uri(endpoint)
+                .uri("https://api.openai.com/v1/chat/completions")
                 .header("Authorization", "Bearer " + openaiApiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
+.retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(1))
                     .filter(this::isRetryableError))
                 .map(this::extractContent)
                 .flux();
         } else {
+            // diag counter toggled via log level; suppress unused warning when disabled
+            @SuppressWarnings("unused") final java.util.concurrent.atomic.AtomicInteger diagCounter = new java.util.concurrent.atomic.AtomicInteger(0);
+            // For SSE streaming, we need to handle the event stream format properly
             return webClient.post()
-                .uri(endpoint)
+                .uri("https://api.openai.com/v1/chat/completions")
                 .header("Authorization", "Bearer " + openaiApiKey)
+                .header("Accept", "text/event-stream")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .retrieve()
                 .bodyToFlux(String.class)
                 .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(1))
                     .filter(this::isRetryableError))
-                .map(this::extractStreamContent);
+                // WebFlux returns raw JSON chunks, not SSE format
+                .flatMap(chunk -> {
+                    if (chunk == null || chunk.trim().isEmpty() || chunk.equals("[DONE]")) {
+                        return Flux.empty();
+                    }
+                    
+                    try {
+                        // Parse the raw JSON chunk directly
+                        Map<String, Object> data = objectMapper.readValue(chunk, new TypeReference<Map<String, Object>>() {});
+                        
+                        // Extract content from the delta field
+                        Object choicesObj = data.get("choices");
+                        if (choicesObj instanceof List) {
+                            List<?> choices = (List<?>) choicesObj;
+                            if (!choices.isEmpty()) {
+                                Object firstChoiceObj = choices.get(0);
+                                if (firstChoiceObj instanceof Map) {
+                                    Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
+                                    Object deltaObj = firstChoice.get("delta");
+                                    if (deltaObj instanceof Map) {
+                                        Map<?, ?> delta = (Map<?, ?>) deltaObj;
+                                        Object content = delta.get("content");
+                                        if (content != null && !content.toString().isEmpty()) {
+                                            String text = content.toString();
+                                            log.debug("[GPT-5] Extracted content: {}", text);
+                                            return Flux.just(text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.debug("Failed to parse chunk as JSON, might be SSE format: {}", e.getMessage());
+                        // Fall back to SSE parsing if it's not raw JSON
+                        String content = extractStreamContent(chunk);
+                        if (content != null && !content.isEmpty()) {
+                            return Flux.just(content);
+                        }
+                    }
+                    return Flux.empty();
+                });
         }
     }
     
@@ -174,17 +250,19 @@ public class ResilientApiClient {
         if (githubToken == null || githubToken.isBlank()) {
             return Flux.error(new RuntimeException("GitHub token not configured"));
         }
-        
+
         // GitHub Models requires "openai/" prefix for OpenAI models
-        String githubModel = model.startsWith("openai/") ? model : "openai/" + model;
-        
+        // Fallback to gpt-4o-mini if gpt-5 is not available
+        String baseModel = model.equals("gpt-5") ? "gpt-4o-mini" : model;
+        String githubModel = baseModel.startsWith("openai/") ? baseModel : "openai/" + baseModel;
+
         // GitHub Models has stricter payload size limits - truncate if necessary
         String truncatedPrompt = truncateForGitHubModels(prompt);
         if (truncatedPrompt.length() < prompt.length()) {
-            log.info("Truncated prompt for GitHub Models: {} chars -> {} chars", 
+            log.info("Truncated prompt for GitHub Models: {} chars -> {} chars",
                 prompt.length(), truncatedPrompt.length());
         }
-        
+
         Map<String, Object> body = Map.of(
             "model", githubModel,
             "messages", List.of(Map.of("role", "user", "content", truncatedPrompt)),
@@ -200,13 +278,14 @@ public class ResilientApiClient {
                 .header("Authorization", "Bearer " + githubToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
+.retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(1))
                     .filter(this::isRetryableError))
                 .map(this::extractContent)
                 .flux();
         } else {
+            final java.util.concurrent.atomic.AtomicInteger diagCounter = new java.util.concurrent.atomic.AtomicInteger(0);
             return webClient.post()
                 .uri(url)
                 .header("Authorization", "Bearer " + githubToken)
@@ -216,7 +295,18 @@ public class ResilientApiClient {
                 .bodyToFlux(String.class)
                 .retryWhen(Retry.backoff(maxRetries, Duration.ofSeconds(1))
                     .filter(this::isRetryableError))
-                .map(this::extractStreamContent);
+                .map(chunk -> {
+                    boolean diagStreamChunkLogging = appProps.getDiagnostics().isStreamChunkLogging();
+                    int diagStreamChunkSample = appProps.getDiagnostics().getStreamChunkSample();
+                    if (diagStreamChunkLogging) {
+                        int n = diagCounter.incrementAndGet();
+                        if (diagStreamChunkSample <= 0 || (n % diagStreamChunkSample) == 0) {
+                            String p = chunk.length() > 200 ? chunk.substring(0, 200) + "…" : chunk;
+                            log.debug("[DIAG] raw stream chunk: {}", p.replace("\n", "\\n"));
+                        }
+                    }
+                    return extractStreamContent(chunk);
+                });
         }
     }
     
@@ -226,29 +316,7 @@ public class ResilientApiClient {
     
     private String extractContent(Map<String, Object> response) {
         try {
-            // Check if this is a GPT-5 response format
-            if (response.containsKey("output")) {
-                Object outputObj = response.get("output");
-                if (outputObj instanceof List) {
-                    List<?> output = (List<?>) outputObj;
-                    if (!output.isEmpty()) {
-                        Object firstOutputObj = output.get(0);
-                        if (firstOutputObj instanceof Map) {
-                            Map<?, ?> firstOutput = (Map<?, ?>) firstOutputObj;
-                            Object content = firstOutput.get("content");
-                            if (content instanceof String) {
-                                return (String) content;
-                            } else if (content instanceof Map) {
-                                Map<?, ?> contentMap = (Map<?, ?>) content;
-                                Object text = contentMap.get("text");
-                                return text != null ? text.toString() : "";
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Traditional GPT-4 format
+            // Standard OpenAI chat completions format
             Object choicesObj = response.get("choices");
             if (choicesObj instanceof List) {
                 List<?> choices = (List<?>) choicesObj;
@@ -272,49 +340,98 @@ public class ResilientApiClient {
     }
     
     private String extractStreamContent(String chunk) {
-        try {
-            if (chunk.startsWith("data: ")) {
-                chunk = chunk.substring(6);
+        if (chunk == null || chunk.isEmpty()) {
+            return "";
+        }
+        
+        StringBuilder result = new StringBuilder();
+        
+        // Log the raw chunk for debugging
+        if (chunk.contains("data:") && !chunk.contains("[DONE]")) {
+            log.debug("[SSE] Processing chunk: {}", 
+                chunk.length() > 500 ? chunk.substring(0, 500) + "..." : chunk);
+        }
+        
+        // Split by newlines to handle multiple SSE events in one chunk
+        String[] lines = chunk.split("\n");
+        
+        for (String line : lines) {
+            // Skip empty lines and SSE comments
+            if (line.trim().isEmpty() || line.startsWith(":")) {
+                continue;
             }
-            if (chunk.equals("[DONE]")) {
-                return "";
-            }
-
-            Map<String, Object> data = objectMapper.readValue(chunk, new TypeReference<Map<String, Object>>() {});
-
-            // Check if this is a GPT-5 streaming event
-            String type = (String) data.get("type");
-            if (type != null) {
-                // Handle GPT-5 streaming events
-                if ("response.output_text.delta".equals(type)) {
-                    // In GPT-5, the delta field contains the text directly
-                    Object delta = data.get("delta");
-                    return delta != null ? delta.toString() : "";
+            
+            // Process each data line
+            if (line.startsWith("data: ")) {
+                String dataContent = line.substring(6).trim();
+                
+                // Skip [DONE] marker
+                if (dataContent.equals("[DONE]") || dataContent.isEmpty()) {
+                    continue;
                 }
-                return ""; // Other event types don't contain text deltas
-            }
-
-            // Traditional GPT-4 streaming format
-            Object choicesObj = data.get("choices");
-            if (choicesObj instanceof List) {
-                List<?> choices = (List<?>) choicesObj;
-                if (!choices.isEmpty()) {
-                    Object firstChoiceObj = choices.get(0);
-                    if (firstChoiceObj instanceof Map) {
-                        Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
-                        Object deltaObj = firstChoice.get("delta");
-                        if (deltaObj instanceof Map) {
-                            Map<?, ?> delta = (Map<?, ?>) deltaObj;
-                            Object content = delta.get("content");
-                            return content != null ? content.toString() : "";
+                
+                try {
+                    Map<String, Object> data = objectMapper.readValue(dataContent, new TypeReference<Map<String, Object>>() {});
+                    
+                    // Standard OpenAI chat completions streaming format
+                    Object choicesObj = data.get("choices");
+                    if (choicesObj instanceof List) {
+                        List<?> choices = (List<?>) choicesObj;
+                        if (!choices.isEmpty()) {
+                            Object firstChoiceObj = choices.get(0);
+                            if (firstChoiceObj instanceof Map) {
+                                Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
+                                Object deltaObj = firstChoice.get("delta");
+                                if (deltaObj instanceof Map) {
+                                    Map<?, ?> delta = (Map<?, ?>) deltaObj;
+                                    Object content = delta.get("content");
+                                    if (content != null && !content.toString().isEmpty()) {
+                                        String text = content.toString();
+                                        result.append(text);
+                                        log.debug("[SSE] Extracted text: {}", text);
+                                    }
+                                }
+                            }
                         }
+                    }
+                } catch (Exception e) {
+                    log.warn("[SSE] Failed to parse data line: {} - Error: {}", 
+                        dataContent.length() > 100 ? dataContent.substring(0, 100) + "..." : dataContent,
+                        e.getMessage());
+                }
+            } else if (line.startsWith("data:")) {
+                // Handle case where there's no space after "data:"
+                String dataContent = line.substring(5).trim();
+                if (!dataContent.isEmpty() && !dataContent.equals("[DONE]")) {
+                    try {
+                        Map<String, Object> data = objectMapper.readValue(dataContent, new TypeReference<Map<String, Object>>() {});
+                        // Same parsing logic as above
+                        Object choicesObj = data.get("choices");
+                        if (choicesObj instanceof List) {
+                            List<?> choices = (List<?>) choicesObj;
+                            if (!choices.isEmpty()) {
+                                Object firstChoiceObj = choices.get(0);
+                                if (firstChoiceObj instanceof Map) {
+                                    Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
+                                    Object deltaObj = firstChoice.get("delta");
+                                    if (deltaObj instanceof Map) {
+                                        Map<?, ?> delta = (Map<?, ?>) deltaObj;
+                                        Object content = delta.get("content");
+                                        if (content != null && !content.toString().isEmpty()) {
+                                            result.append(content.toString());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Ignore parse errors for malformed data
                     }
                 }
             }
-        } catch (Exception e) {
-            log.debug("Failed to parse streaming chunk: {}", chunk);
         }
-        return "";
+        
+        return result.toString();
     }
     
     private boolean isRateLimitError(Throwable error) {
