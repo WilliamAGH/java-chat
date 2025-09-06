@@ -257,6 +257,13 @@ public class RetrievalService {
         // Collapse duplicated segments for Oracle and EA docs
         out = out.replace("/docs/api/api/", "/docs/api/");
         out = out.replace("/api/api/", "/api/");
+        // Fix malformed Spring docs paths that accidentally include '/java/' segment
+        if (out.contains("https://docs.spring.io/")) {
+            // Spring Boot Javadoc
+            out = out.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
+            // Spring Framework Javadoc
+            out = out.replace("/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
+        }
         // Remove accidental double slashes (but keep protocol)
         int protoIdx = out.indexOf("://");
         String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
