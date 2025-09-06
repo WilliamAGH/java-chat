@@ -37,7 +37,7 @@ This document provides a comprehensive analysis of all parsing and markdown proc
 │       └── createCitationPill() - citation UI components
 │
 ├── 📊 STREAMING FLOW (GPT-5 → User)
-│   ├── ChatService.streamAnswer() → Flux<String>
+│   ├── ChatService.streamAnswer() → Flux<String> (uses OpenAIStreamingService)
 │   ├── ChatController.stream() → SSE events
 │   ├── normalizeDelta() - token joining/cleanup
 │   ├── UnifiedMarkdownService.process() - final markdown processing
@@ -486,94 +486,28 @@ GPT-5 (tokens)
 
 ### Server Components and Behaviors
 
-- ChatController.stream (`src/main/java/.../web/ChatController.java`)
-  - Buffers model deltas (`bufferTimeout(10, 100ms)`) to reduce SSE event spam.
-  - Normalizes token joins via `normalizeDelta()` (removes stray spaces before punctuation and contractions).
-  - Frames SSE correctly (`data:` per line + blank line separator) and sends keepalive comments every 20s.
-  - On completion, runs `UnifiedMarkdownService.process(fullResponse)` and stores the processed HTML in `ChatMemory` as the assistant turn.
-
-- GuidedLearningController.stream (`.../web/GuidedLearningController.java`)
-  - Same SSE framing/backpressure strategy. Combines chunks, appends to buffer, and on completion processes final `sb.toString()` via `MarkdownService.processStructured()` (which calls `UnifiedMarkdownService`).
-
-- ResilientApiClient (`.../service/ResilientApiClient.java`)
-  - Handles OpenAI and GitHub Models streaming variants.
-  - For OpenAI: attempts to parse raw JSON chunks first, falls back to SSE JSON decoding via `extractStreamContent()` (reads `data:` lines → parse JSON → `choices[0].delta.content`).
-  - For GitHub Models: always parses `data:` JSON lines from `https://models.github.ai/inference/v1/chat/completions`.
-  - Strips accidental SSE artifacts when necessary.
-
-- ChatService (`.../service/ChatService.java`)
-  - Builds prompt with retrieval context and hands off to `ResilientApiClient.streamLLM()`.
-  - Provides `processResponseWithMarkdown()` using `MarkdownService.processStructured()` for non-streaming use if needed.
-
-- MarkdownController (`.../web/MarkdownController.java`)
-  - `/api/markdown/render` → legacy wrapper that now routes to `processStructured()`.
-  - `/api/markdown/preview` → uncached preview via `processStructured()`.
-  - `/api/markdown/render/structured` → direct `UnifiedMarkdownService.process()` returning structured fields: HTML, citations, enrichments, warnings, timing, cleanliness.
-  - Cache stats/clear endpoints proxy `UnifiedMarkdownService` cache.
-
-- UnifiedMarkdownService (primary, AST-based) (`.../service/markdown/UnifiedMarkdownService.java`)
-  - Pre-normalizes markdown without regex: ensures code-fence separation and closure; promotes bullets in prose conservatively before parsing.
-  - Extracts `{{hint|warning|background|example|reminder:...}}` as placeholders to avoid AST fragmentation; builds enrichment HTML cards on reinsert.
-  - Flexmark AST → HTML with options:
-    - Escape raw HTML; soft-breaks are newlines; hard breaks become `<br />`.
-    - Code blocks get `language-` classes for Prism.
-  - DOM-safe post-processing with Jsoup:
-    - `renderInlineLists()` converts inline bullets/ordered markers in paragraphs into `<ul>/<ol>` with preserved leading text and nested blocks (skips within `pre/code/enrichment`).
-    - Adds styling hooks: `table.markdown-table`, `blockquote.markdown-quote`.
-    - Readability helpers: sentence spacing normalization and splitting of very long paragraphs (heuristic, conservative).
-  - Returns `ProcessedMarkdown(html, citations, enrichments, warnings, processingTimeMs)` and caches results (Caffeine).
-
-- MarkdownService (legacy wrapper, deprecated methods) (`.../service/MarkdownService.java`)
-  - New code should call `processStructured()` which delegates to `UnifiedMarkdownService`.
-  - Retains older regex-heavy preprocessors (deprecated) for fallback compatibility only; not used in primary paths.
-
-- MarkdownStreamProcessor (deprecated) (`.../service/MarkdownStreamProcessor.java`)
-  - Intelligent buffering for block boundaries during streaming (code/list/sentence/paragraph). No longer in active use; replaced by client debounced re-renders + server AST processing.
+- ChatController.stream: buffer tokens (10/100ms); clean joins via `normalizeDelta()`; frame SSE (`data:` + blank line) with 20s heartbeats; on complete, `UnifiedMarkdownService.process(fullResponse)` → persist to `ChatMemory`.
+- GuidedLearningController.stream: same SSE framing/backpressure; combine chunks; on complete process via `MarkdownService.processStructured()` (delegates to unified service) and persist.
+- OpenAIStreamingService: primary streaming via official OpenAI Java SDK; no manual SSE parsing.
+- ChatService: assemble prompt with retrieval context; stream via `ResilientApiClient`; optional non-streaming `processResponseWithMarkdown()`.
+- MarkdownController: `/render` and `/preview` route to `processStructured()`; `/render/structured` returns HTML + structured metadata; cache stats/clear proxy unified service.
+- UnifiedMarkdownService: pre-normalize (no regex), extract/restore enrichments, Flexmark AST → HTML (escaped raw HTML; soft=`\n`, hard=`<br />`; `language-` code), DOM post-process (`renderInlineLists`, styling hooks, readability helpers), cache result.
+- MarkdownService: legacy wrapper; call `processStructured()`; deprecated regex preprocessors retained only for fallback.
+- MarkdownStreamProcessor: deprecated streaming bufferer; replaced by client debounced re-renders + server AST.
 
 ### Client Components and Behaviors
 
-- chat.html (`src/main/resources/static/chat.html`)
-  - SSE consumption: assembles SSE events correctly (multiple `data:` lines per event; commit on blank line). Accumulates `fullText` and strips leaked `data:` tokens.
-  - Debounces rendering (~120ms) with immediate flush triggers when:
-    - Sentence end `[.!?]["')]*\s$`, double newline, or closing code fence ``````\n`.
-  - On flush: posts `fullText` to `/api/markdown/render/structured`; injects returned HTML; then:
-    - Calls `upgradeCodeBlocks` (conservative: ensure `language-` classes only), attach copy buttons, Prism highlight.
-  - UX affordances: loading dots until first content, live typing cursor, copy buttons, citations/enrichment loaded after completion.
-
-- guided.html (`src/main/resources/static/guided.html`)
-  - Similar streaming/read loop with `renderMarkdown(text)` posting to `/api/markdown/render/structured` first, fallback to legacy render.
-  - After injection: upgrades code blocks, attaches copy buttons, highlights, applies tooltips.
-
-- markdown-utils.js (MU) (`src/main/resources/static/js/markdown-utils.js`)
-  - Fallback-only transformations (kept minimal to avoid fighting server):
-    - Normalize opening fences; conservative promotion of likely Java blocks when no fences (
-      deprecated for primary paths).
-    - Normalize inline ordered/bullet markers in prose when server is unavailable.
-    - Enrichment rendering on client only if server left raw `{{...}}` (server usually emits cards).
-    - Citation pills: converts inline `<a>` to consistent pills per UX standard.
+- chat.html: assemble SSE events (multi `data:` lines; commit on blank line); maintain `fullText`; debounce ~120ms with immediate flush on sentence end, double newline, or closing code fence; on flush POST `/api/markdown/render/structured` → inject HTML → conservative `upgradeCodeBlocks`, copy buttons, Prism; UX: loading dots, typing cursor, citations/enrichment after completion.
+- guided.html: similar streaming + `renderMarkdown(text)` → structured endpoint first; then code upgrades, copy, highlight, tooltips.
+- markdown-utils.js (MU): fallback-only transforms (normalize opening fences; conservative Java promo; inline list normalization); client enrichments only if server didn’t render; build citation pills from anchors.
 
 ### What processes what, where, and when
 
-- Markdown parsing
-  - Primary: server (`UnifiedMarkdownService.process`) during streaming flushes from client and once at completion for persistence.
-  - Client: only as minimal fallback (`clientMarkdownFallback`) when server API is unavailable.
-
-- Code blocks
-  - Server: pre-normalizes malformed fences; Flexmark renders `<pre><code class="language-...">`; example enrichments parse fenced code inside cards.
-  - Client: no structural conversion; only applies missing `language-` class heuristics and adds copy buttons; Prism highlights post-injection.
-
-- HTML
-  - Server escapes raw HTML; allows markdown-produced HTML; Jsoup post-processing adds structural classes; avoids regex HTML edits.
-  - Client never uses `innerHTML` string hacks for transforms beyond the intentional content injection point; visual components created via DOM APIs.
-
-- Line breaks and paragraphs
-  - Soft breaks preserved as `\n` (browser renders as spaces in paragraphs); hard breaks become `<br />`.
-  - Long paragraphs can be split (server heuristic) for readability; client avoids re-paragraphing.
-
-- Streaming from GPT‑5 and timing
-  - Tokens → buffered at server (10 tokens/100ms) → SSE `data:` frames.
-  - Client accumulates `fullText`; debounced POST to `/api/markdown/render/structured` → inject returned HTML.
-  - Final server-side processing occurs once at stream completion for persistence.
+- Markdown: server authoritative (`UnifiedMarkdownService.process`) during streaming flushes and once at completion; client fallback only if server unavailable.
+- Code blocks: server pre-normalizes/AST → `<pre><code class="language-...">`; client adds classes if missing + copy + highlight.
+- HTML: server escapes raw HTML and adds structural classes (no regex); client only injects returned HTML and creates DOM components.
+- Paragraphs: soft=`\n` (space in paragraphs), hard=`<br />`; server may split long paragraphs; client doesn’t re-paragraph.
+- Streaming: server buffers (10/100ms) → SSE; client debounces and calls structured render; server processes once more on completion for persistence.
 
 ### Server vs Client boundaries (single source of truth)
 
@@ -586,30 +520,17 @@ GPT-5 (tokens)
 
 ### Known issues, duplications, and rough edges
 
-- Dual caches (legacy vs unified) — unified is the one that matters; legacy retained only for compat.
-- Enrichments may be processed twice in edge cases (client fallback vs server cards). Client now no-ops if cards present, but duplication risk exists in fallback.
-- Streaming jitter:
-  - Re-rendering entire accumulated HTML each flush can cause layout jumps and repeated Prism work.
-  - Code blocks may briefly lack `language-` classes until the next pass (minor)
-  - Cursor repositioning after DOM replacement can flicker.
-- List normalization exists both server-side (DOM-safe) and in MU fallback (parser-like). Keep server authoritative; avoid client mutations when server reachable.
-- Citation pills are client-rendered; server provides structured citations but not pill HTML; duplication is intentional separation of concerns, but should be documented.
+- Dual caches (legacy vs unified) — unified matters; legacy only for compat.
+- Enrichments may double-render in fallback; client no-ops when cards exist, but edge risk remains.
+- Streaming jitter: whole-bubble re-render causes layout shifts + repeated Prism; transient missing `language-` class; cursor flicker.
+- List normalization in both server and MU fallback; prefer server and avoid client mutations when reachable.
+- Citations: client renders pills; server supplies structured data (by design, but document clearly).
 
 ### Improvements to reduce “momentary ugliness” during streaming
 
-Short-term (no protocol change):
-- Render-diff instead of replace: preserve subtrees where possible (e.g., patch only changed tail container) to reduce reflow and Prism re-run scope.
-- Scope Prism highlighting to only newly inserted nodes (track last child index) to avoid full re-highlight.
-- Use `requestAnimationFrame` to coalesce DOM work and cursor updates into a single frame.
-- Make debounce adaptive: 60–180ms based on frame budget; flush immediately on fence closures and double newlines (already done) plus at list item boundaries when a second item appears.
-
-Medium-term (protocol-lite):
-- Add server hint events: `event: status\ndata: {"block":"paragraph|list|code","state":"open|close"}` to guide client flush timing more precisely without sending HTML.
-
-Recommended (cleanest UX): Server-streamed HTML blocks
-- Implement a `StreamingMarkdownRenderer` on the server that buffers tokens and emits completed block HTML chunks via SSE with a structured envelope, e.g. `{type:"html", blockType:"paragraph|list|code", content:"..."}`.
-- Client simply appends block HTML; no frequent re-posting to `/api/markdown/render/structured` during stream, which removes round-trips and reduces jitter.
-- See `docs/potential-sse-migration-plan-sep-2-2025.md` for outline; aligns with `StreamEventType` vision.
+- Short-term: render-diff tail only; Prism on newly inserted nodes; batch updates via `requestAnimationFrame`; adaptive debounce (60–180ms) with immediate flush on fence closes/double newlines/2nd list item.
+- Medium-term: server hint events (`event: status` with `{block,state}`) to guide client flush timing.
+- Recommended: server-streamed block HTML via a `StreamingMarkdownRenderer` envelope `{type:"html", blockType, content}`; client appends blocks; no per-flush `/render/structured` round-trips (see `docs/potential-sse-migration-plan-sep-2-2025.md`).
 
 ### Bottom line
 
@@ -702,26 +623,9 @@ This plan targets four user-reported issues and the broader goals of idempotence
 
 ### Implementation checklist (high level)
 
-- Server
-  - `UnifiedMarkdownService`:
-    - Add `renderEnrichmentMarkdown` and integrate into `buildEnrichmentHtml`.
-    - Add `removeContextMarkers(doc)` and `normalizeWhitespace(doc)` to `postProcessHtml` pipeline.
-  - `ChatController`/`GuidedLearningController`:
-    - Remove `data: [DONE]` terminal payload; optionally keep `event: done` without data.
-  - `ChatController.normalizeDelta`:
-    - Expand punctuation set and add hyphen join rules.
-
-- Client
-  - SSE reader (chat.html/guided.html):
-    - Discard `[DONE]` data frames; remove global `data:` stripping.
-    - Implement two-lane shadow rendering with cross-fade; scope Prism to appended nodes.
-  - MU utilities:
-    - Keep fallback-only transforms; ensure idempotent class additions (copy buttons/Prism) via presence checks.
+- Server: (a) UnifiedMarkdownService → add `renderEnrichmentMarkdown`; integrate into `buildEnrichmentHtml`; add `removeContextMarkers(doc)` and `normalizeWhitespace(doc)` in post-process; (b) Controllers → drop `data: [DONE]` (optionally keep `event: done` without data); (c) `normalizeDelta` → expand punctuation/hyphen rules.
+- Client: (a) SSE reader → discard `[DONE]`; remove global `data:` stripping; (b) implement two-lane shadow with cross-fade; Prism scoped to appended nodes; (c) MU utilities → fallback-only; idempotent copy/highlight additions.
 
 ### Acceptance criteria
 
-- Enrichment cards render inline code and fenced code blocks correctly across all types.
-- No `[CTX n]` artifacts in output prose; citations continue to appear as pills.
-- No stray spaces before punctuation/closers; hyphenated words render correctly; no regressions inside code/pre/enrichment blocks.
-- No `event: done`/`[DONE]` appears in chat UI text.
-- Streaming visual polish: reduced layout shifts; cursor flicker eliminated; frame budget a respected.
+- Enrichment cards render inline/fenced code correctly across all types; `[CTX n]` never appears in prose; punctuation/hyphen spacing correct without touching code/pre/enrichment; no `event: done`/`[DONE]` in UI; streaming polish: fewer layout shifts, no cursor flicker, frame budget respected.
