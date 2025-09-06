@@ -91,7 +91,8 @@ ENV APP_KILL_ON_CONFLICT=false
 
 # JSON array format for ENTRYPOINT (recommended by Docker)
 # Use shell form to allow PORT variable expansion
-ENTRYPOINT ["/bin/sh", "-c", "java -XX:+IgnoreUnrecognizedVMOptions -Xmx256m -Xms128m -XX:+UseSerialGC -XX:MaxRAM=256m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.security.egd=file:/dev/./urandom -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
+# Disable Netty native OpenSSL (tcnative) to avoid segfaults on Alpine/musl
+ENTRYPOINT ["/bin/sh", "-c", "java -XX:+IgnoreUnrecognizedVMOptions -Xmx256m -Xms128m -XX:+UseSerialGC -XX:MaxRAM=256m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.security.egd=file:/dev/./urandom -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
 
 # ================================
 # IMAGE SIZE OPTIMIZATION
