@@ -9,6 +9,7 @@ public class AppProperties {
     
     private Rag rag = new Rag();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
+    private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private Docs docs = new Docs();
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
@@ -41,6 +42,8 @@ public class AppProperties {
     public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = diagnostics; }
     public Qdrant getQdrant() { return qdrant; }
     public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
+    public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
+    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = remoteEmbedding; }
     
     public static class Rag {
         private int searchTopK = 10;
@@ -103,7 +106,7 @@ public class AppProperties {
         private boolean enabled = false;
         private String serverUrl = "http://127.0.0.1:1234";
         private String model = "text-embedding-qwen3-embedding-8b";
-private int dimensions = 4096;
+        private int dimensions = 4096;
         private boolean useHashWhenDisabled = false;
 
         public boolean isEnabled() { return enabled; }
@@ -120,6 +123,22 @@ private int dimensions = 4096;
 
         public boolean isUseHashWhenDisabled() { return useHashWhenDisabled; }
         public void setUseHashWhenDisabled(boolean useHashWhenDisabled) { this.useHashWhenDisabled = useHashWhenDisabled; }
+    }
+
+    public static class RemoteEmbedding {
+        private String serverUrl = ""; // e.g., https://api.novita.ai/openai
+        private String model = "text-embedding-3-small";
+        private String apiKey = "";
+        private int dimensions = 4096;
+
+        public String getServerUrl() { return serverUrl; }
+        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+        public String getApiKey() { return apiKey; }
+        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+        public int getDimensions() { return dimensions; }
+        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
     }
 
     public static class Docs {
