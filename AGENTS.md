@@ -244,7 +244,7 @@ Backend:
   ai: Spring AI with GitHub Models
   vectorDB: Qdrant
   embedding: text-embedding-3-small
-  chat: gpt-4o-mini
+  chat: gpt-5
   
 Frontend (Current):
   type: Static HTML/CSS/JS
@@ -571,7 +571,7 @@ LOCAL_EMBEDDING_URL=http://localhost:11434
 EMBEDDING_MODEL=text-embedding-3-small
 
 # Chat Model
-CHAT_MODEL=gpt-4o-mini
+CHAT_MODEL=gpt-5
 CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=2000
 
@@ -627,6 +627,19 @@ Quality:
 ```
 
 ## 🚨 CRITICAL REQUIREMENTS
+
+### 7. ALWAYS RESPECT LLM CONFIGURATION (Non‑Negotiable)
+- Do not change any LLM settings in code or config without explicit written approval.
+- Do not alter provider, base URL, model name, temperature, max tokens, or any runtime options.
+- Do not auto‑fallback or regress models across providers (e.g., mapping `gpt-5` → `gpt-4o`). If the primary provider is rate‑limited or fails, surface a clear error/status to the user instead of switching models.
+- THE ENTIRE REASON WE HAVE A FALLBACK TO OTHER PROVIDERS FOR LLMS, INFERENCE, RERANKING, AND EMBEDDINGS IS WHEN RATE LIMITED! DO NOT BREAK THE FALLBACK LOGIC. UNDERSTAND THE MEANING OF AUTOMATIC FALLBACK.
+- Always use the values provided by environment variables and `application.properties` exactly as configured:
+  - `spring.ai.openai.base-url`
+  - `spring.ai.openai.api-key` / `spring.ai.openai.chat.api-key`
+  - `spring.ai.openai.chat.options.model`
+  - embedding/base‑url/api‑key/model
+- Any PR/commit that changes LLM settings, introduces hidden fallbacks, or overrides configured models is rejected by policy.
+- Allowed: logging diagnostic details and returning actionable error messages; Not allowed: silently changing LLM behavior.
 
 ### 1. **ALWAYS BEAUTIFUL**
 - Every component meets design standards

@@ -13,7 +13,7 @@ get_jar = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
 RUN_ARGS := \
   --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
   --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-  --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-4o-mini}" \
+  --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
 
 .PHONY: help clean build test run dev compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline
@@ -42,7 +42,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  # Add conservative JVM memory limits to prevent OS-level SIGKILL (exit 137) under memory pressure
 	  # Tuned for local dev: override via JAVA_OPTS env if needed
 	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m}"; \
-	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS)
+	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS) & disown
 
 dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
@@ -98,5 +98,4 @@ full-pipeline: ## Complete pipeline: fetch docs, process, and upload to Qdrant
 	@./scripts/process_all_to_qdrant.sh
 	@echo ""
 	@echo "✅ Full pipeline complete!"
-
 

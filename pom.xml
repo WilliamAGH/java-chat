@@ -60,12 +60,20 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-advisors-vector-store</artifactId>
         </dependency>
-         <dependency>
-             <groupId>org.springframework.ai</groupId>
-             <artifactId>spring-ai-starter-model-openai</artifactId>
-             <!-- Using OpenAI-compatible client pointed at GitHub Models via properties
-                  See README for required env vars and Makefile runtime args. -->
-         </dependency>
+        <!-- OpenAI Java SDK for reliable streaming -->
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+            <version>3.0.1</version>
+        </dependency>
+        
+        <!-- Keep Spring AI OpenAI for gradual migration -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+            <!-- Using OpenAI-compatible client pointed at GitHub Models via properties
+                 See README for required env vars and Makefile runtime args. -->
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -117,22 +125,8 @@
             <version>${jtokkit.version}</version>
         </dependency>
         
-        <!-- gRPC for Qdrant client -->
-        <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-stub</artifactId>
-            <version>1.68.1</version>
-        </dependency>
-        <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-protobuf</artifactId>
-            <version>1.68.1</version>
-        </dependency>
-        <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-netty-shaded</artifactId>
-            <version>1.68.1</version>
-        </dependency>
+        <!-- gRPC managed transitively by io.qdrant:client; avoid pinning to prevent mismatches -->
+        <!-- Ensure grpc-core present (BackoffPolicyRetryScheduler is in grpc-core) -->
         
         <!-- Flexmark for Markdown processing -->
         <dependency>
@@ -151,6 +145,12 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
             <version>3.1.8</version>
+        </dependency>
+
+        <!-- Ensure grpc-core is present and aligned via grpc-bom (1.68.1) to match Qdrant client -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-core</artifactId>
         </dependency>
         
         <!-- Apache PDFBox for PDF processing -->
@@ -172,6 +172,11 @@
             <artifactId>spring-boot-devtools</artifactId>
             <scope>runtime</scope>
             <optional>true</optional>
+        </dependency>
+        <!-- Explicitly include Logback classic in case starter packaging omits it in some runs -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
         </dependency>
         
         <!-- macOS DNS resolver to avoid Netty warning on Mac -->
@@ -211,6 +216,14 @@
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
                 <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Align all gRPC libs to 1.68.1 to include BackoffPolicyRetryScheduler -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>1.68.1</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

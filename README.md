@@ -133,7 +133,7 @@ All config is env-driven. See `src/main/resources/application.properties` for de
 ### API Configuration
 - `GITHUB_TOKEN`: GitHub personal access token for GitHub Models
 - `OPENAI_API_KEY`: OpenAI API key (separate, independent service)
-- `OPENAI_MODEL`: Model name, default `gpt-4o-mini` (used by all endpoints)
+- `OPENAI_MODEL`: Model name, default `gpt-5` (used by all endpoints)
 - `OPENAI_TEMPERATURE`: default `0.7`
 - `OPENAI_BASE_URL`: Spring AI base URL (default: `https://models.github.ai/inference`)
   - **CRITICAL**: Must be `https://models.github.ai/inference` for GitHub Models
@@ -343,9 +343,19 @@ Modes & objectives:
 ## Models & Architecture
 
 ### Chat Model
-- **OpenAI GPT-4o-mini**: Fast, cost-effective, high-quality responses
-- Direct OpenAI API integration (GitHub Models API deprecated due to authentication issues)
-- Streaming via Server-Sent Events (SSE) for real-time interaction
+- **OpenAI Java SDK (standardized)**: All streaming and non-streaming chat uses `OpenAIStreamingService`
+  - ✅ Official SDK streaming, no manual SSE parsing
+  - ✅ Prompt truncation for GPT‑5 (8K input) handled centrally
+  - ✅ Clean, reliable streaming and consolidated error handling
+
+### Legacy Deletions
+- Removed `ResilientApiClient` and all manual SSE parsing
+- Controllers (`ChatController`, `GuidedLearningController`) stream via SDK only
+
+### Service Responsibilities
+- `OpenAIStreamingService`: streaming + complete() helper
+- `ChatService`: builds prompts (RAG-aware); may stream via SDK for internal flows
+- `EnrichmentService` / `RerankerService`: use SDK `complete()` for JSON/ordering
 - Session memory management for context preservation
 
 ### Embeddings
