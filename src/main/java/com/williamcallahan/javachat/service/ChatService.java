@@ -61,7 +61,9 @@ public class ChatService {
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            String normUrl = normalizeUrlForPrompt(rawUrl);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(normUrl).append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -80,6 +82,44 @@ public class ChatService {
                     logger.error("Streaming failed", ex);
                     return Flux.error(ex);
                 });
+    }
+
+    /**
+     * Normalize URLs placed into the LLM prompt so the model never sees local file:/// paths
+     * or malformed mirrors. This mirrors RetrievalService's normalization without exposing it.
+     */
+    private String normalizeUrlForPrompt(String url) {
+        if (url == null || url.isBlank()) return url;
+        String u = url.trim();
+        // Already HTTP(S): canonicalize and fix common spring paths
+        if (u.startsWith("http://") || u.startsWith("https://")) {
+            return canonicalizeHttpDocUrl(u);
+        }
+        // Map book PDFs to public server path
+        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(u.startsWith("file://") ? u.substring("file://".length()) : u);
+        if (publicPdf != null) return publicPdf;
+        // Only handle file:// beyond this point
+        if (!u.startsWith("file://")) return u;
+        String p = u.substring("file://".length());
+        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
+        if (embedded != null) return canonicalizeHttpDocUrl(embedded);
+        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
+        return mapped != null ? canonicalizeHttpDocUrl(mapped) : u; // final fallback: keep original
+    }
+
+    private String canonicalizeHttpDocUrl(String url) {
+        String out = url;
+        out = out.replace("/docs/api/api/", "/docs/api/");
+        out = out.replace("/api/api/", "/api/");
+        if (out.contains("https://docs.spring.io/")) {
+            out = out.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
+            out = out.replace("/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
+        }
+        int protoIdx = out.indexOf("://");
+        String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
+        String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
+        rest = rest.replaceAll("/+", "/");
+        return prefix + rest;
     }
 
     /**

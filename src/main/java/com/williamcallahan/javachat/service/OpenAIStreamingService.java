@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.JsonValue;
 import com.openai.core.http.StreamResponse;
 import com.openai.helpers.ChatCompletionAccumulator;
 import com.openai.models.ChatModel;
@@ -266,17 +267,16 @@ public class OpenAIStreamingService {
                 }
             }
 
-            // 2) Fallback: builder.extraBody(Map.of("reasoning_effort", "minimal")) or similar
-            for (Method m : builder.getClass().getMethods()) {
-                boolean nameMatches = "extraBody".equals(m.getName()) || "additionalProperties".equals(m.getName());
-                if (nameMatches && m.getParameterCount() == 1 && Map.class.isAssignableFrom(m.getParameterTypes()[0])) {
-                    m.invoke(builder, Map.of("reasoning_effort", "minimal"));
-                    log.info("[LLM] reasoning_effort=\"minimal\" (extra body map)");
-                    return;
-                }
-            }
-
-            log.info("[LLM] SDK has no reasoning fields; proceeding without explicit reasoning_effort");
+            // 2) Standards-based escape hatch supported by the SDK:
+            //    pass additional body properties even if no typed field exists.
+            //    Set both shapes for maximum compatibility:
+            //    - Responses-style: { reasoning: { effort: "minimal" } }
+            //    - ChatCompletions-style: { reasoning_effort: "minimal" }
+            builder
+                .putAdditionalBodyProperty("reasoning", JsonValue.from(Map.of("effort", "minimal")))
+                .putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
+            log.info("[LLM] reasoning set via additional body properties (reasoning.effort=minimal; reasoning_effort=minimal)");
+            return;
         } catch (Exception ex) {
             log.debug("Skipping reasoning_effort due to SDK compatibility: {}", ex.toString());
         }

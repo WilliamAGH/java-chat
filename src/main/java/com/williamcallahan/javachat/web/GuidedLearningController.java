@@ -13,7 +13,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import com.williamcallahan.javachat.service.MarkdownService;
-import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 
 import java.util.*;
 import java.time.Duration;
@@ -28,21 +27,17 @@ public class GuidedLearningController extends BaseController {
     private final OpenAIStreamingService openAIStreamingService;
 
     private final MarkdownService markdownService;
-    @SuppressWarnings("unused")
-    private final UnifiedMarkdownService unifiedMarkdownService;
 
     public GuidedLearningController(GuidedLearningService guidedService,
                                     ChatMemoryService chatMemory,
                                     OpenAIStreamingService openAIStreamingService,
                                     ExceptionResponseBuilder exceptionBuilder,
-                                    MarkdownService markdownService,
-                                    UnifiedMarkdownService unifiedMarkdownService) {
+                                    MarkdownService markdownService) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
-        this.unifiedMarkdownService = unifiedMarkdownService;
     }
 
     /**

@@ -689,8 +689,6 @@ public class UnifiedMarkdownService {
                 out.append("```");
                 i += 3;
                 // Capture language token (letters, digits, dash, underscore)
-                // language token starts at current index; variable kept for potential diagnostics
-                @SuppressWarnings("unused") int langStart = i;
                 while (i < md.length()) {
                     char ch = md.charAt(i);
                     if (Character.isLetterOrDigit(ch) || ch == '-' || ch == '_') { out.append(ch); i++; }

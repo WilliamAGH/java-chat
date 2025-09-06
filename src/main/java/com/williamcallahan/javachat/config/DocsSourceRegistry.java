@@ -157,13 +157,23 @@ public final class DocsSourceRegistry {
                 return newPath.toString();
             }
             
-            // Case 3: /spring-framework/docs/current/api/current/javadoc-api/...
+            // Case 3a: /spring-framework/docs/current/api/current/javadoc-api/...
             // Should be: /spring-framework/docs/current/javadoc-api/...
             if (parts.length > 5 && parts[1].equals("docs") && parts[2].equals("current") 
                 && parts[3].equals("api") && parts[4].equals("current") && parts[5].equals("javadoc-api")) {
                 StringBuilder newPath = new StringBuilder(prefix);
                 newPath.append("spring-framework/docs/current/javadoc-api");
                 for (int i = 6; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+            // Case 3b: /spring-framework/docs/current/javadoc-api/java/... -> remove spurious 'java/'
+            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current")
+                && parts[3].equals("javadoc-api") && parts[4].equals("java")) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-framework/docs/current/javadoc-api");
+                for (int i = 5; i < parts.length; i++) {
                     newPath.append("/").append(parts[i]);
                 }
                 return newPath.toString();
@@ -188,12 +198,22 @@ public final class DocsSourceRegistry {
                 return newPath.toString();
             }
             
-            // Case 2: /spring-boot/reference/VERSION/...
+            // Case 2a: /spring-boot/reference/VERSION/...
             // Should be: /spring-boot/reference/current/...
             if (parts.length > 2 && parts[1].equals("reference") && isVersionString(parts[2])) {
                 StringBuilder newPath = new StringBuilder(prefix);
                 newPath.append("spring-boot/reference/current");
                 for (int i = 3; i < parts.length; i++) {
+                    newPath.append("/").append(parts[i]);
+                }
+                return newPath.toString();
+            }
+            // Case 2b: /spring-boot/docs/current/api/java/... -> remove spurious 'java/'
+            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current")
+                && parts[3].equals("api") && parts[4].equals("java")) {
+                StringBuilder newPath = new StringBuilder(prefix);
+                newPath.append("spring-boot/docs/current/api");
+                for (int i = 5; i < parts.length; i++) {
                     newPath.append("/").append(parts[i]);
                 }
                 return newPath.toString();
@@ -237,6 +257,10 @@ public final class DocsSourceRegistry {
                         // Remove docs/current/ prefix: docs/current/javadoc-api/ -> javadoc-api/
                         rel = rel.substring("docs/current/".length());
                     }
+                    // Remove spurious leading 'java/' in mirrors
+                    if (rel.startsWith("javadoc-api/java/")) {
+                        rel = "javadoc-api/" + rel.substring("javadoc-api/java/".length());
+                    }
                 }
                 
                 // Special handling for Spring Boot paths
@@ -245,6 +269,10 @@ public final class DocsSourceRegistry {
                     if (rel.startsWith("docs/current/api/")) {
                         // Remove docs/current/ prefix: docs/current/api/ -> api/
                         rel = rel.substring("docs/current/".length());
+                    }
+                    // Remove spurious leading 'java/' in mirrors
+                    if (rel.startsWith("api/java/")) {
+                        rel = "api/" + rel.substring("api/java/".length());
                     }
                 }
                 
