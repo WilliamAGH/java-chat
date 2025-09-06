@@ -14,11 +14,11 @@ import java.util.List;
 @Service
 public class RerankerService {
     private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
-    private final ResilientApiClient apiClient;
+    private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public RerankerService(ResilientApiClient apiClient) {
-        this.apiClient = apiClient;
+    public RerankerService(OpenAIStreamingService openAIStreamingService) {
+        this.openAIStreamingService = openAIStreamingService;
     }
 
     @Cacheable(value = "reranker-cache", key = "#query + ':' + #docs.size() + ':' + #returnK")
@@ -41,8 +41,25 @@ public class RerankerService {
         }
         
         try {
-            String response = apiClient.callLLM(prompt.toString(), 0.0)
-                .block();
+            String response;
+            if (openAIStreamingService != null && openAIStreamingService.isAvailable()) {
+                // Cap reranker latency aggressively; fall back on original order fast
+                response = openAIStreamingService
+                        .complete(prompt.toString(), 0.0)
+                        .timeout(java.time.Duration.ofSeconds(4))
+                        .onErrorResume(e -> {
+                            log.debug("Reranker LLM call short-circuited: {}", e.toString());
+                            return reactor.core.publisher.Mono.empty();
+                        })
+                        .blockOptional()
+                        .orElse(null);
+                if (response == null || response.isBlank()) {
+                    return docs.subList(0, Math.min(returnK, docs.size()));
+                }
+            } else {
+                log.warn("OpenAIStreamingService unavailable; skipping LLM rerank and returning original order");
+                return docs.subList(0, Math.min(returnK, docs.size()));
+            }
             // Clean up response - remove markdown code blocks if present
             String json = response;
             if (json.contains("```")) {
