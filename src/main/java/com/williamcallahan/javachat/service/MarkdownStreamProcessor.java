@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * - Lists that don't format as HTML structures
  * - Missing paragraph breaks
  */
-@Deprecated(since = "1.0", forRemoval = false)
+@Deprecated(since = "1.0", forRemoval = true)
 @Component
 public class MarkdownStreamProcessor {
     

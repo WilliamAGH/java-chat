@@ -18,20 +18,25 @@ import java.util.List;
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
     
-    private final ResilientApiClient apiClient;
+    // OpenAI streaming preferred; ChatService builds prompts and can stream via SDK for internal uses
+    private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
     
     @Autowired
     private MarkdownService markdownService;
 
-    public ChatService(ResilientApiClient apiClient, RetrievalService retrievalService, 
-                      SystemPromptConfig systemPromptConfig) {
-        this.apiClient = apiClient;
+    public ChatService(OpenAIStreamingService openAIStreamingService,
+                       RetrievalService retrievalService,
+                       SystemPromptConfig systemPromptConfig) {
+        this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
     }
 
+    /**
+     * Streaming via {@link OpenAIStreamingService}. This builds the prompt and streams with the SDK.
+     */
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
         logger.debug("ChatService.streamAnswer called for query: {}", latestUserMessage);
         
@@ -70,7 +75,7 @@ public class ChatService {
         String promptPreview = fullPrompt.substring(0, Math.min(500, fullPrompt.length()));
         logger.info("[DIAG] LLM prompt length={} preview=\n{}", fullPrompt.length(), promptPreview);
 
-        return apiClient.streamLLM(fullPrompt, 0.7)
+        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
                 .onErrorResume(ex -> {
                     logger.error("Streaming failed", ex);
                     return Flux.error(ex);
@@ -80,6 +85,11 @@ public class ChatService {
     /**
      * Stream answer reusing existing pipeline but with preselected context documents
      * and optional guidance to prepend to the system context.
+     */
+    /**
+     * Legacy streaming with preselected context. Prefer building a prompt with
+     * {@link #buildPromptWithContextAndGuidance(List, String, List, String)} and
+     * using {@link OpenAIStreamingService} to stream.
      */
     public Flux<String> streamAnswerWithContext(List<Message> history,
                                                 String latestUserMessage,
@@ -107,7 +117,7 @@ public class ChatService {
         
         String fullPrompt = buildPromptFromMessages(messages);
 
-        return apiClient.streamLLM(fullPrompt, 0.7)
+        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
                 .onErrorResume(ex -> {
                     logger.error("Streaming failed", ex);
                     return Flux.error(ex);
@@ -131,12 +141,91 @@ public class ChatService {
     }
     
     /**
+     * Build a complete prompt with context for OpenAI streaming service.
+     * This reuses the existing prompt building logic from streamAnswer.
+     */
+    public String buildPromptWithContext(List<Message> history, String latestUserMessage) {
+        return buildPromptWithContext(history, latestUserMessage, null);
+    }
+    
+    public String buildPromptWithContext(List<Message> history, String latestUserMessage, String modelHint) {
+        // For GPT-5, use fewer RAG documents due to 8K token input limit
+        List<Document> contextDocs;
+        if ("gpt-5".equals(modelHint) || "gpt-5-chat".equals(modelHint)) {
+            // Limit RAG for GPT-5: use fewer, shorter documents
+            contextDocs = retrievalService.retrieveWithLimit(latestUserMessage, 3, 600); // 3 docs, 600 tokens each = ~1800 tokens
+            logger.debug("Using reduced RAG for GPT-5: {} documents with max 600 tokens each", contextDocs.size());
+        } else {
+            contextDocs = retrievalService.retrieve(latestUserMessage);
+        }
+        
+        String searchQualityNote = determineSearchQuality(contextDocs);
+        
+        // Build system prompt using centralized configuration
+        StringBuilder systemContext = new StringBuilder(systemPromptConfig.getCoreSystemPrompt());
+        
+        // Add search quality context if needed
+        if (!searchQualityNote.isEmpty()) {
+            systemContext.append("\n\nSEARCH CONTEXT: ").append(searchQualityNote);
+            
+            // Add low quality search guidance if applicable
+            if (searchQualityNote.contains("less relevant") || searchQualityNote.contains("keyword search")) {
+                systemContext.append("\n").append(systemPromptConfig.getLowQualitySearchPrompt());
+            }
+        }
+
+        for (int i = 0; i < contextDocs.size(); i++) {
+            Document d = contextDocs.get(i);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+        }
+
+        List<Message> messages = new ArrayList<>();
+        messages.add(new UserMessage(systemContext.toString()));
+        messages.addAll(history);
+        messages.add(new UserMessage(latestUserMessage));
+        
+        return buildPromptFromMessages(messages);
+    }
+    
+    /**
+     * Build a complete prompt with context and guidance for OpenAI streaming service.
+     * Used by GuidedLearningService for lesson-specific prompts.
+     */
+    public String buildPromptWithContextAndGuidance(List<Message> history, String latestUserMessage, 
+                                                   List<Document> contextDocs, String guidance) {
+        // Build system prompt with guidance
+        String basePrompt = systemPromptConfig.getCoreSystemPrompt();
+        String completePrompt = guidance != null && !guidance.isBlank() 
+            ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
+            : basePrompt;
+        
+        StringBuilder systemContext = new StringBuilder(completePrompt);
+
+        for (int i = 0; i < contextDocs.size(); i++) {
+            Document d = contextDocs.get(i);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+        }
+
+        List<Message> messages = new ArrayList<>();
+        messages.add(new UserMessage(systemContext.toString()));
+        messages.addAll(history);
+        messages.add(new UserMessage(latestUserMessage));
+        
+        return buildPromptFromMessages(messages);
+    }
+    
+    /**
      * Process response text with markdown rendering.
      * This can be used to pre-render markdown on the server side.
      * 
      * @param text The raw text response from AI
      * @return HTML-rendered markdown
      */
+    /**
+     * Legacy markdown rendering path. Prefer {@link UnifiedMarkdownService}
+     * integration where possible and avoid rendering on the hot path.
+     */
+    @Deprecated(since = "1.0", forRemoval = true)
     public String processResponseWithMarkdown(String text) {
         if (text == null || text.isEmpty()) {
             return "";
@@ -161,6 +250,10 @@ public class ChatService {
      * Stream answers with optional markdown processing.
      * Each chunk can be processed through markdown if needed.
      */
+    /**
+     * Legacy streaming with optional markdown render. Use OpenAIStreamingService instead.
+     */
+    @Deprecated(since = "1.0", forRemoval = true)
     public Flux<String> streamAnswerWithMarkdown(List<Message> history, String latestUserMessage, boolean renderMarkdown) {
         return streamAnswer(history, latestUserMessage);
     }

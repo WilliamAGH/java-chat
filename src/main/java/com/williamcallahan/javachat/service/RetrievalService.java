@@ -11,7 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -97,6 +99,96 @@ public class RetrievalService {
             log.info("[DIAG] RAG top doc (post-rerank) preview=\n{}", preview);
         }
         return reranked;
+    }
+    
+    /**
+     * Retrieve documents with custom limits for token-constrained models.
+     * Used for GPT-5 which has an 8K input token limit.
+     */
+    public List<Document> retrieveWithLimit(String query, int maxDocs, int maxTokensPerDoc) {
+        // Initial vector search with custom topK
+        List<Document> docs;
+        try {
+            int topK = Math.max(1, Math.max(maxDocs, props.getRag().getSearchTopK()));
+            log.info("=== LIMITED RETRIEVAL DEBUG ===");
+            log.info("Query: '{}', MaxDocs: {}, MaxTokensPerDoc: {}", query, maxDocs, maxTokensPerDoc);
+            log.info("TopK requested: {}", topK);
+            
+            SearchRequest searchRequest = SearchRequest.builder()
+                    .query(query)
+                    .topK(topK)
+                    .build();
+            
+            docs = vectorStore.similaritySearch(searchRequest);
+            log.info("VectorStore returned {} documents for limited retrieval", docs.size());
+            
+        } catch (Exception e) {
+            String errorType = determineErrorType(e);
+            log.warn("Vector search unavailable ({}); falling back to local keyword search with limits", errorType);
+            
+            // Fallback to local search with limits
+            var results = localSearch.search(query, maxDocs);
+            docs = results.stream()
+                .map(r -> documentFactory.createLocalDocument(r.text, r.url))
+                .collect(Collectors.toList());
+        }
+        
+        // Truncate documents to token limits and return limited count
+        List<Document> truncatedDocs = docs.stream()
+            .limit(maxDocs)
+            .map(doc -> truncateDocumentToTokenLimit(doc, maxTokensPerDoc))
+            .collect(Collectors.toList());
+            
+        // Apply reranking with limited return count  
+        List<Document> uniqueByUrl = truncatedDocs.stream()
+                .collect(Collectors.toMap(
+                        d -> String.valueOf(d.getMetadata().get("url")),
+                        d -> d,
+                        (first, dup) -> first
+                ))
+                .values()
+                .stream()
+                .collect(Collectors.toList());
+
+        return rerankerService.rerank(query, uniqueByUrl, maxDocs);
+    }
+    
+    /**
+     * Truncate a document to a maximum token count.
+     */
+    private Document truncateDocumentToTokenLimit(Document doc, int maxTokens) {
+        String content = doc.getText();
+        if (content == null || content.isEmpty()) {
+            return doc;
+        }
+        
+        // Conservative estimation: ~4 chars per token
+        int maxChars = maxTokens * 4;
+        
+        if (content.length() <= maxChars) {
+            return doc;
+        }
+        
+        // Truncate and add indicator
+        String truncated = content.substring(0, maxChars);
+        
+        // Try to break at a sentence or paragraph boundary
+        int lastPeriod = truncated.lastIndexOf('.');
+        int lastNewline = truncated.lastIndexOf('\n');
+        int breakPoint = Math.max(lastPeriod, lastNewline);
+        
+        if (breakPoint > maxChars * 0.8) { // Only break if we're not losing too much
+            truncated = truncated.substring(0, breakPoint + 1);
+        }
+        
+        truncated += "\n[...content truncated for token limits...]";
+        
+        // Create new document with truncated content
+        Map<String, Object> metadata = new HashMap<>(doc.getMetadata());
+        metadata.put("truncated", true);
+        metadata.put("originalLength", content.length());
+        
+        return documentFactory.createLocalDocument(truncated, String.valueOf(metadata.get("url")));
     }
 
     public List<Citation> toCitations(List<Document> docs) {

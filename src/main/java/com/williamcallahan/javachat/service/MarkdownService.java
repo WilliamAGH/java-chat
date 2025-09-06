@@ -132,7 +132,7 @@ public class MarkdownService {
      * @return Clean HTML output with proper spacing
      * @deprecated Use {@link #processStructured(String)} for AST-based processing
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     public String render(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
@@ -193,7 +193,7 @@ public class MarkdownService {
      * 
      * @deprecated Use {@link #processStructured(String)} for AST-based processing
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     public String renderPreview(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
@@ -224,7 +224,7 @@ public class MarkdownService {
      * 
      * @deprecated Regex-based preprocessing is replaced by AST-based processing
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     public String preprocessMarkdown(String markdown) {
         if (markdown == null) return "";
 
@@ -271,7 +271,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String fixInlineCodeBlocks(String markdown) {
         if (markdown == null || markdown.isEmpty()) return markdown;
         
@@ -302,7 +302,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String protectCodeBlocks(String markdown) {
         if (markdown == null || !markdown.contains("```")) {
             return markdown;
@@ -352,6 +352,7 @@ public class MarkdownService {
      * - Handles both fenced (```) and indented code blocks
      * - Works with preprocessing placeholders
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String ensureFenceSeparation(String s) {
         if (s == null || !s.contains("```")) return s;
 
@@ -411,7 +412,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String fixInlineLists(String markdown) {
         // Support ALL list types:
         // - Arabic numerals: 1. 2. 3. or 1) 2) 3)
@@ -487,6 +488,7 @@ public class MarkdownService {
      * Normalize inline numeric/lettered/bullet markers in prose into proper line starts.
      * Parser-style scan; operates outside code blocks (blocks are protected earlier).
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String normalizeInlineAndBulletLists(String text) {
         if (text == null || text.isEmpty()) return text;
         char[] chars = text.toCharArray();
@@ -539,6 +541,7 @@ public class MarkdownService {
     }
 
     /** Merge marker-only lines with the subsequent content line. */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String mergeMarkerOnlyLines(String text) {
         if (text == null || text.isEmpty()) return text;
         String[] lines = text.split("\n", -1);
@@ -561,6 +564,7 @@ public class MarkdownService {
      * Detect if the text contains markdown list markers at line starts.
      * Used to avoid paragraph-breaking around list structures.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private boolean hasListMarkers(String text) {
         if (text == null || text.isEmpty()) return false;
         java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^(\\s*)(?:[-+*•→▸◆□▪]|\\d+\\.)\\s+");
@@ -571,6 +575,7 @@ public class MarkdownService {
      * Replace inline code spans `code` with placeholders carrying base64 content to avoid
      * punctuation/paragraph mutations inside code. Restored before parsing markdown.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String preserveInlineCode(String text) {
         if (text == null || text.indexOf('`') < 0) return text;
         java.util.regex.Pattern p = java.util.regex.Pattern.compile("`([^`]+)`");
@@ -588,6 +593,7 @@ public class MarkdownService {
     /**
      * Restore inline code placeholders back to markdown `code`.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String restoreInlineCode(String text) {
         if (text == null || text.indexOf('Z') < 0) return text;
         // Use a NON-GREEDY capture to avoid spanning across multiple placeholders
@@ -624,7 +630,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String unprotectCodeBlocks(String markdown) {
         if (protectedBlocks.isEmpty()) {
             return markdown;
@@ -642,7 +648,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based post-processing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String postProcessHtml(String html) {
         // NOTE: Avoid heuristic sentence spacing – rely on Flexmark output and CSS
         // (previous regex could corrupt content by injecting spaces across tags)
@@ -700,7 +706,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based preprocessing pipeline. Use AST-based processing instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String applySmartParagraphBreaksImproved(String markdown) {
         if (markdown == null || markdown.isEmpty()) return markdown;
         // If code blocks are present, process only non-code segments to preserve code
@@ -729,6 +735,7 @@ public class MarkdownService {
      * Handles '.', '?', '!' ends and respects closing quotes/parentheses.
      * Avoids abbreviations and ordered-list false positives.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String applySmartParagraphBreaksNoCode(String text) {
         if (text == null || text.isEmpty()) return text;
         if (text.contains("\n\n")) return text; // honor existing paragraphs
@@ -786,7 +793,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based enrichment processing. Use AST-based EnrichmentProcessor instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String preserveEnrichments(String markdown) {
         // Log if we're about to process enrichments
         if (markdown.contains("{{")) {
@@ -806,7 +813,7 @@ public class MarkdownService {
      * 
      * @deprecated Part of regex-based enrichment processing. Use AST-based EnrichmentProcessor instead.
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     private String restoreEnrichments(String html) {
         // Restore from unique text placeholders ONLY if they have content
         // Pattern: ZZENRICHZ(type)ZSTARTZZZ(content)ZZENRICHZ(type)ZENDZZZ
@@ -846,6 +853,7 @@ public class MarkdownService {
     /**
      * Escapes HTML for security.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String escapeHtml(String text) {
         if (text == null) return "";
         return text
@@ -861,7 +869,7 @@ public class MarkdownService {
      * 
      * @deprecated Use {@link UnifiedMarkdownService#getCacheStats()} for AST-based processing
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     public CacheStats getCacheStats() {
         var stats = renderCache.stats();
         return new CacheStats(
@@ -877,7 +885,7 @@ public class MarkdownService {
      * 
      * @deprecated Use {@link UnifiedMarkdownService#clearCache()} for AST-based processing
      */
-    @Deprecated(since = "1.0", forRemoval = false)
+    @Deprecated(since = "1.0", forRemoval = true)
     public void clearCache() {
         renderCache.invalidateAll();
         logger.info("Markdown render cache cleared");
@@ -903,6 +911,7 @@ public class MarkdownService {
      * Fixes model outputs like "```javaimport ..." by inserting a newline after the info string.
      * Closing fences and already-correct fences are left untouched.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String ensureOpeningFenceNewline(String s) {
         if (s == null || !s.contains("```")) return s;
         String[] lines = s.split("\n", -1);
@@ -946,6 +955,7 @@ public class MarkdownService {
      * list/paragraph normalization never splits them. Restored before returning
      * from preprocessMarkdown.
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String protectEnrichmentsForPreprocessing(String s, java.util.Map<String, String> stash) {
         if (s == null || s.indexOf("{{") < 0) return s;
         java.util.regex.Matcher m = ENRICHMENT_PATTERN.matcher(s);
@@ -960,6 +970,7 @@ public class MarkdownService {
         return sb.toString();
     }
 
+    @Deprecated(since = "1.0", forRemoval = true)
     private String unprotectEnrichmentsForPreprocessing(String s, java.util.Map<String, String> stash) {
         if (s == null || stash.isEmpty()) return s;
         for (var e : stash.entrySet()) {
@@ -973,6 +984,7 @@ public class MarkdownService {
      * are converted to canonical "**text**" and "*ital*". This improves bold/italic
      * rendering reliability without touching code blocks (already protected).
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     private String normalizeEmphasisSpacing(String s) {
         if (s == null || s.isEmpty()) return s;
         if (s.indexOf('*') < 0) return s;
