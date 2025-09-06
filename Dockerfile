@@ -68,11 +68,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # JVM OPTIMIZATION FOR <512MB RAM
 # ================================
 # Memory settings optimized for container constraints (512MB limit):
-# -Xmx256m: Max heap 256MB (room for metaspace, code cache, direct buffers)
+# -Xmx192m: Max heap 192MB (shift budget to metaspace)
 # -Xms64m:  Small initial heap for faster start and lower RSS
-# -XX:MaxMetaspaceSize=96m: Cap class metadata
-# -XX:ReservedCodeCacheSize=64m: Cap JIT code cache
-# -XX:MaxDirectMemorySize=64m: Cap Netty/gRPC direct buffers
+# -XX:MaxMetaspaceSize=192m: Allow more classes to prevent metaspace OOM
+# -XX:ReservedCodeCacheSize=32m: Cap JIT code cache
+# -XX:MaxDirectMemorySize=32m: Cap Netty/gRPC direct buffers
 # -Xss256k: Smaller thread stacks
 # -XX:+UseStringDeduplication: Reduce duplicate string overhead
 # -Dreactor.schedulers.defaultBoundedElasticSize=32: Limit elastic threads
@@ -100,10 +100,10 @@ ENV APP_KILL_ON_CONFLICT=false
 # Disable Netty native OpenSSL (tcnative) to avoid segfaults on Alpine/musl
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
-  -Xms64m -Xmx256m \
-  -XX:MaxMetaspaceSize=96m \
-  -XX:ReservedCodeCacheSize=64m \
-  -XX:MaxDirectMemorySize=64m \
+  -Xms64m -Xmx192m \
+  -XX:MaxMetaspaceSize=192m \
+  -XX:ReservedCodeCacheSize=32m \
+  -XX:MaxDirectMemorySize=32m \
   -Xss256k \
   -XX:+UseStringDeduplication \
   -XX:+ExitOnOutOfMemoryError \
