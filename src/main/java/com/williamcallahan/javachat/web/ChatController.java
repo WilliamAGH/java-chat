@@ -3,6 +3,9 @@ package com.williamcallahan.javachat.web;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
+import com.williamcallahan.javachat.service.RetrievalService;
+import org.springframework.ai.document.Document;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import org.slf4j.Logger;
@@ -16,6 +19,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
+import org.springframework.http.codec.ServerSentEvent;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,6 +36,8 @@ public class ChatController extends BaseController {
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
     private final UnifiedMarkdownService unifiedMarkdownService;
+    private final OpenAIStreamingService openAIStreamingService;
+    private final RetrievalService retrievalService;
     // Deprecated stream processor removed from active use; unified AST processing handles markdown.
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -43,36 +49,22 @@ public class ChatController extends BaseController {
 
     public ChatController(ChatService chatService, ChatMemoryService chatMemory,
                          UnifiedMarkdownService unifiedMarkdownService,
+                         OpenAIStreamingService openAIStreamingService,
+                         RetrievalService retrievalService,
                          ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
         this.unifiedMarkdownService = unifiedMarkdownService;
+        this.openAIStreamingService = openAIStreamingService;
+        this.retrievalService = retrievalService;
     }
 
-    // Normalize token joining to prevent artifacts like "worddata:" or space-before-punctuation
-    private String normalizeDelta(String delta, StringBuilder full) {
-        if (delta == null || delta.isEmpty()) return "";
-        String d = delta;
-        char prev = full.length() > 0 ? full.charAt(full.length() - 1) : '\0';
-        // Remove space before punctuation
-        if (d.length() > 0 && 
-            (d.charAt(0) == '.' || d.charAt(0) == ',' || d.charAt(0) == '!' || d.charAt(0) == '?' || d.charAt(0) == ';' || d.charAt(0) == ':')) {
-            if (full.length() > 0 && full.charAt(full.length() - 1) == ' ') {
-                full.setLength(full.length() - 1);
-            }
-        }
-        // Remove space before apostrophe contractions
-        if (d.startsWith("'") && full.length() > 0 && Character.isLetterOrDigit(prev)) {
-            if (full.charAt(full.length() - 1) == ' ') {
-                full.setLength(full.length() - 1);
-            }
-        }
-        return d;
-    }
+    
 
     /**
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
+     * Uses the OpenAI Java SDK for clean, reliable streaming without manual SSE parsing.
      *
      * @param body A JSON object containing the user's request. Expected format:
      *             <pre>{@code
@@ -84,7 +76,7 @@ public class ChatController extends BaseController {
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
         // Critical proxy headers for streaming
         response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
         response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
@@ -109,59 +101,75 @@ public class ChatController extends BaseController {
         StringBuilder fullResponse = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
         
-        // Create heartbeat stream for keeping connections alive through proxies
-        Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                .map(i -> ": keepalive\n\n");  // SSE comment format
+        // Build the complete prompt using existing ChatService logic
+        // Pass model hint to optimize RAG for GPT-5's 8K token input limit
+        String fullPrompt = chatService.buildPromptWithContext(history, latest, "gpt-5");
+        
+        // Use OpenAI streaming only (legacy fallback removed)
+        if (openAIStreamingService.isAvailable()) {
+            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestId);
+            
+            // Create heartbeat stream for keeping connections alive through proxies
+            // Use proper SSE comment frames so clients can safely ignore them
+            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                    .map(i -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
-        // Main data stream - buffer small tokens to avoid flooding with SSE events
-        Flux<String> dataStream = chatService.streamAnswer(history, latest)
-                .bufferTimeout(10, Duration.ofMillis(100))  // Buffer up to 10 tokens or 100ms timeout
-                .filter(chunks -> !chunks.isEmpty())  // Skip empty buffers
-                .map(chunks -> {
-                    // Combine all chunks in this buffer
-                    StringBuilder buffer = new StringBuilder();
-                    for (String chunk : chunks) {
-                        String normalized = normalizeDelta(chunk, fullResponse);
-                        fullResponse.append(normalized);
-                        buffer.append(normalized);
+            // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
+            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
+                    .doOnNext(chunk -> {
+                        fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
-                    }
-                    
-                    String combined = buffer.toString();
-                    if (combined.isEmpty()) {
-                        return "";  // Will be filtered out
-                    }
-                    
-                    // MDN SSE: an event is a block separated by a blank line; use only data: lines
-                    // Ensure no accidental CR characters get through
-                    String payload = combined.replace("\r", "");
-                    // Prefix each line with "data: " per SSE spec so proxies/clients don't mangle multi-line payloads
-                    String perLine = payload.replace("\n", "\ndata: ");
-                    return "data: " + perLine + "\n\n";
-                })
-                .filter(event -> !event.isEmpty())  // Remove empty events
-                .concatWith(Flux.defer(() -> {
-                    // Send any remaining buffered content 
-                    return Flux.empty(); // No additional final content needed
-                }))
-                .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+                    })
+                    .filter(chunk -> chunk != null && !chunk.isEmpty())
+                    .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
 
-        // Append terminal event and merge with heartbeats; complete stream after [DONE]
-        Flux<String> framed = dataStream.concatWith(reactor.core.publisher.Mono.just("event: done\ndata: [DONE]\n\n"));
-        return Flux.merge(framed, heartbeats)
-                .takeUntil(s -> s.contains("[DONE]"))
-                .doOnComplete(() -> {
-                    // Store the full response using AST-based processing
-                    ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
-                    String processed = processedResult.html();
-                    chatMemory.addAssistant(sessionId, processed);
-                    PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments", 
-                        requestId, chunkCount.get(), processed.length(), 
-                        processedResult.citations().size(), processedResult.enrichments().size());
-                })
-                .doOnError(error -> {
-                    PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage());
-                });
+            Flux<ServerSentEvent<String>> dataEvents = dataStream
+                    .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build());
+
+            return Flux.merge(dataEvents, heartbeats)
+                    .doOnComplete(() -> {
+                        // Store the full response using AST-based processing
+                        ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
+                        String processed = processedResult.html();
+                        chatMemory.addAssistant(sessionId, processed);
+                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments", 
+                            requestId, chunkCount.get(), processed.length(), 
+                            processedResult.citations().size(), processedResult.enrichments().size());
+                    })
+                    .doOnError(error -> {
+                        PIPELINE_LOG.error("[{}] FINAL STREAMING ERROR: {}", requestId, error.getMessage());
+                    });
+                    
+        } else {
+            // If SDK unavailable, return minimal message
+            return Flux.just(ServerSentEvent.<String>builder().data("Service temporarily unavailable. Try again shortly.").build());
+        }
+    }
+
+    /**
+     * Diagnostics: Return the RAG retrieval context for a given query.
+     * Dev-only usage in UI; kept simple and safe.
+     */
+    @GetMapping("/diagnostics/retrieval")
+    public Map<String, Object> retrievalDiagnostics(@RequestParam("q") String q) {
+        try {
+            // Mirror GPT-5 constraints used in buildPromptWithContext
+            List<Document> docs = retrievalService.retrieveWithLimit(q, 3, 600);
+            // Normalize URLs the same way as citations so we never emit file:// links
+            List<Citation> citations = retrievalService.toCitations(docs);
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Citation c : citations) {
+                Map<String, Object> m = new java.util.HashMap<>();
+                m.put("url", c.getUrl());
+                m.put("title", c.getTitle());
+                m.put("snippet", c.getSnippet());
+                out.add(m);
+            }
+            return Map.of("docs", out);
+        } catch (Exception e) {
+            log.warn("retrieval diagnostics error: {}", e.toString());
+            return Map.of("docs", List.of(), "error", "unavailable");
+        }
     }
 
     /**
@@ -264,6 +272,7 @@ public class ChatController extends BaseController {
      * @param body JSON object containing the text to process
      * @return ProcessedMarkdown with structured citations and enrichments
      */
+    @Deprecated(since = "1.0", forRemoval = true)
     @PostMapping("/process-structured")
     public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody Map<String, String> body) {
         try {
