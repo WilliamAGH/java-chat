@@ -324,6 +324,11 @@ public class OpenAIStreamingService {
     }
 
     private OpenAIClient selectClientForStreaming() {
+        // Fast-fail preference for the day: if manager says OpenAI is available, use it directly
+        if (rateLimitManager != null && clientSecondary != null && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+            return clientSecondary;
+        }
+
         boolean githubOk = clientPrimary != null && !isPrimaryInBackoff();
         if (rateLimitManager != null && clientPrimary != null) {
             githubOk = githubOk && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS);
@@ -369,8 +374,13 @@ public class OpenAIStreamingService {
     }
     
     private boolean isRetryablePrimaryFailure(Throwable t) {
-        return isRateLimit(t) || t instanceof java.util.concurrent.TimeoutException
-                || t.toString().contains("401") || t.toString().contains("403");
+        // Treat common transient failures as retryable to enable fast fallback
+        return isRateLimit(t)
+                || t instanceof java.util.concurrent.TimeoutException
+                || t instanceof InterruptedException
+                || (t.getMessage() != null && t.getMessage().toLowerCase().contains("sleep interrupted"))
+                || t.toString().contains("401")
+                || t.toString().contains("403");
     }
     
     private boolean isPrimaryInBackoff() {
