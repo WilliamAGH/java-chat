@@ -40,14 +40,39 @@
 </head>
 <body>
     <div class="container">
-        <div id="chat" role="log" aria-live="polite" aria-label="Chat messages"></div>
+        <!-- Dev Diagnostics: visible only on localhost -->
+        <div id="devDiagnostics" class="dev-diagnostics" style="display: none;">
+            <details class="dev-panel" id="devRawSsePanel">
+                <summary>Raw SSE (dev)</summary>
+                <pre id="rawSseText" class="dev-pre"></pre>
+            </details>
+            <details class="dev-panel" id="devRagPanel">
+                <summary>RAG Retrieval Context (dev)</summary>
+                <div id="ragContext" class="dev-rag"></div>
+            </details>
+        </div>
+        <div id="chat" role="log" aria-live="polite" aria-label="Chat messages">
+        </div>
         
-        <button class="export-chat-btn" onclick="copyChat()" aria-label="Copy entire chat" title="Copy entire chat">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path>
-            </svg>
-        </button>
+        <!-- Action buttons container -->
+        <div class="chat-actions">
+            <button type="button" class="export-chat-btn" onclick="copyChat()" aria-label="Copy all messages" title="Copy all messages" style="display: none;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 2H9a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6Z"></path>
+                    <path d="M9 6h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7a 1 1 0 0 1 1-1Z"></path>
+                    <path d="M14 2v4a1 1 0 0 0 1 1h1"></path>
+                    <path d="M8 12h8"></path>
+                    <path d="M8 16h6"></path>
+                </svg>
+            </button>
+            
+            <button type="button" class="scroll-indicator" onclick="scrollToBottom()" aria-label="New messages below" title="New messages below" style="display: none;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="7 13 12 18 17 13"></polyline>
+                    <polyline points="7 6 12 11 17 6"></polyline>
+                </svg>
+            </button>
+        </div>
         
         
         <div class="input-area">
@@ -61,7 +86,7 @@
                         autocomplete="off"
                         onkeypress="if(event.key==='Enter') ask()"
                     />
-                    <button class="btn" onclick="ask()" id="askBtn" aria-label="Send question">
+                    <button type="button" class="btn" onclick="ask()" id="askBtn" aria-label="Send question">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -73,7 +98,7 @@
     </div>
     
     <!-- Theme Toggle Placeholder (kept for parity) -->
-    <button class="theme-toggle" style="display:none" aria-hidden="true"></button>
+    <button type="button" class="theme-toggle" style="display:none" aria-hidden="true"></button>
     
     <!-- Prism.js for syntax highlighting -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
@@ -81,6 +106,23 @@
     <script src="/js/markdown-utils.js"></script>
     
     <script>
+        // Dev gating: show diagnostics only in local/dev (hostname OR dev ports OR ?dev)
+        const __host = location.hostname;
+        const __port = Number(location.port || (location.href.match(/:(\d+)/)?.[1] || (location.protocol === 'https:' ? 443 : 80)));
+        const __isLocalHostName = (__host === 'localhost' || __host === '127.0.0.1' || __host === '::1');
+        const __isDevPort = (__port >= 8085 && __port <= 8090);
+        const __qs = new URLSearchParams(location.search);
+        const __hasDevFlag = (__qs.has('dev') || __qs.has('debug'));
+        const isLocalhost = (__isLocalHostName || __isDevPort || __hasDevFlag);
+        function showDevDiagnosticsIfLocal() { 
+            try { 
+                console.debug('[dev-diag] host=%s port=%s isLocalHostName=%s isDevPort=%s hasDevFlag=%s => show=%s', __host, __port, __isLocalHostName, __isDevPort, __hasDevFlag, isLocalhost);
+                if (!isLocalhost) return; 
+                const dev = document.getElementById('devDiagnostics'); 
+                if (dev) dev.style.display = 'block'; 
+            } catch(_) {} 
+        }
+
         // Generate unique session ID for this page load
         const sessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
         console.log('Session ID:', sessionId);
@@ -116,6 +158,9 @@
             userBubble.appendChild(userCopyBtn);
             chatEl.appendChild(userBubble);
             
+            // Check if we should show scroll indicator after adding user message
+            setTimeout(checkScrollIndicator, 50);
+            
             
             input.value = '';
             askBtn.disabled = true;
@@ -132,11 +177,20 @@
             `;
             assistantBubble.appendChild(loadingDiv);
             chatEl.appendChild(assistantBubble);
-            chatEl.scrollTop = chatEl.scrollHeight;
+            // Don't auto-scroll - let user control their view
             
             try {
+                // Reset dev panels per question and fetch RAG diagnostics
+                if (isLocalhost) {
+                    const rawEl = document.getElementById('rawSseText'); if (rawEl) rawEl.textContent = '';
+                    const ragEl = document.getElementById('ragContext'); if (ragEl) ragEl.innerHTML = '';
+                    renderRagDiagnostics(q).catch(() => {});
+                }
                 const response = await fetch('/api/chat/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sessionId: sessionId, latest: q }) });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                // Mark as streaming
+                window.isStreaming = true;
                 
                 // Keep loading animation until first content chunk arrives
                 const contentWrapper = document.createElement('div');
@@ -167,19 +221,46 @@
                         }
                         
                         const formatted = await formatText(fullText); 
-                        contentWrapper.innerHTML = formatted; 
                         
-                        // Safe function calls with error handling
+                        // SMART UPDATE: Only update if content actually changed
+                        // This prevents flickering from redundant DOM replacements
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = formatted;
+                        
+                        // Enhance BEFORE inserting to avoid flicker
                         try {
-                            upgradeCodeBlocks(contentWrapper);
+                            enhanceServerHtml(tempDiv);
                         } catch (err) {
-                            console.debug('upgradeCodeBlocks error (non-critical):', err);
+                            console.debug('enhanceServerHtml error (non-critical):', err);
                         }
                         
-                        try {
-                            attachCodeCopyButtons(contentWrapper);
-                        } catch (err) {
-                            console.debug('attachCodeCopyButtons error (non-critical):', err);
+                        // Now check if the enhanced HTML is actually different
+                        if (tempDiv.innerHTML !== contentWrapper.innerHTML) {
+                            contentWrapper.innerHTML = tempDiv.innerHTML;
+                            
+                            try {
+                                attachCodeCopyButtons(contentWrapper);
+                            } catch (err) {
+                                console.debug('attachCodeCopyButtons error (non-critical):', err);
+                            }
+                            
+                            // Apply syntax highlighting only to new content
+                            try { 
+                                if (window.Prism) {
+                                    // Only highlight unhighlighted code blocks
+                                    const unhighlighted = contentWrapper.querySelectorAll('pre code:not(.prism-highlighted)');
+                                    unhighlighted.forEach(code => {
+                                        Prism.highlightElement(code);
+                                        code.classList.add('prism-highlighted');
+                                    });
+                                }
+                            } catch (err) { 
+                                console.debug('highlight error (non-critical):', err); 
+                            }
+                        }
+                        // Update dev raw SSE panel with unformatted text
+                        if (isLocalhost) {
+                            const rawEl = document.getElementById('rawSseText'); if (rawEl) rawEl.textContent = fullText;
                         }
                         
                         // Re-add cursor after content updates (only if content wrapper is in DOM)
@@ -187,10 +268,14 @@
                             contentWrapper.appendChild(cursor);
                         }
                         
-                        try { (window.MU?MU.safeHighlightUnder:Prism.highlightAllUnder)(contentWrapper); } catch (err) { console.debug('highlight error (non-critical):', err); }
-                        
                         lastRendered = fullText; 
-                        chatEl.scrollTop = chatEl.scrollHeight; 
+                        // Check if user is near bottom before auto-scrolling
+                        const isNearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 100;
+                        if (isNearBottom) {
+                            chatEl.scrollTop = chatEl.scrollHeight;
+                        }
+                        // Always check if indicator should be shown
+                        checkScrollIndicator(); 
                     } catch(err){
                         console.error('flushRender error:', err);
                     } 
@@ -218,17 +303,31 @@
                         // Skip SSE comments (keepalive etc.)
                         if (line.startsWith(':')) { continue; }
                         if (line.startsWith('data:')) {
-                            const data = line.slice(5);
+                            // Preserve model whitespace EXACTLY as sent. Do not trim or strip
+                            // leading spaces, since many providers (including OpenAI/GitHub
+                            // Models) emit chunks that begin with a leading space to separate
+                            // words across tokens. Removing it causes word concatenation.
+                            // Per SSE spec, senders may optionally include a single space
+                            // after the colon for readability, but since our server does not
+                            // insert that space, we must not strip anything here.
+                            let data = line.slice(5);
+                            // Skip [DONE] token
+                            if (data === '[DONE]') {
+                                continue;
+                            }
                             // Accumulate within the current SSE event; join multiple data lines with a newline
                             if (hasEventData) { eventBuf += '\n'; }
                             eventBuf += data;
                             hasEventData = true;
+                            // Dev: update raw SSE panel incrementally so it's never empty
+                            if (isLocalhost) { const rawEl = document.getElementById('rawSseText'); if (rawEl) rawEl.textContent = fullText + eventBuf; }
                         } else if (line.trim() === '') {
                             // Blank line marks the end of an SSE event; commit accumulated data
                             if (hasEventData) {
                                 fullText += eventBuf;
                                 eventBuf = '';
                                 hasEventData = false;
+                                if (isLocalhost) { const rawEl = document.getElementById('rawSseText'); if (rawEl) rawEl.textContent = fullText; }
                             }
                         }
                         // Client-side DIAG: log first few frames safely
@@ -236,12 +335,9 @@
                             try { console.debug('[DIAG] SSE line', line.slice(0, 160)); } catch(_) {}
                         }
                     }
-                    // Safety: strip any leaked SSE tokens that made it into payload text
-                    if (fullText.indexOf('data:') !== -1) {
-                        // Remove only line-anchored SSE prefixes; preserve legitimate words (e.g., "metadata:")
-                        fullText = fullText.replace(/(^|\n)\s*data:\s*/g, '$1');
-                        // Also remove mid-word injections caused by token joins (e.g., "worddata:")
-                        fullText = fullText.replace(/([A-Za-z0-9])data:\s*/g, '$1');
+                    // Drop terminal DONE frames if received (defense-in-depth)
+                    if (fullText.trim() === '[DONE]') {
+                        fullText = '';
                     }
                     // Decide whether to flush immediately based on sentence/paragraph/code boundaries
                     const immediate = window.MU ? MU.shouldImmediateFlush(fullText) : (/[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n'));
@@ -249,10 +345,20 @@
                     if (firstChunk) {
                         try { window.parent.postMessage({ type: 'content-started' }, '*'); } catch(_){}
                     }
+                    // Check scroll indicator during streaming
+                    if (typeof checkScrollIndicator === 'function') {
+                        checkScrollIndicator();
+                    }
                 }
                 // Final flush
                 await flushRender();
                 cursor.remove();
+                
+                // Streaming complete
+                window.isStreaming = false;
+                // Check if indicator should still be shown
+                checkScrollIndicator();
+                
                 const assistantCopyBtn = document.createElement('button');
                 assistantCopyBtn.className = 'message-copy-btn';
                 assistantCopyBtn.setAttribute('aria-label', 'Copy assistant response');
@@ -270,6 +376,18 @@
                 
                 // CRITICAL: Clean up any empty elements that might create visual artifacts
                 cleanupEmptyElements(chatEl);
+                
+                // Show the copy all button after all processing is complete
+                const exportBtn = document.querySelector('.export-chat-btn');
+                if (exportBtn) {
+                    // Wait a bit more to ensure everything is settled
+                    setTimeout(() => {
+                        exportBtn.style.display = 'flex';
+                        setTimeout(() => {
+                            exportBtn.classList.add('visible');
+                        }, 50);
+                    }, 500);
+                }
             } catch (error) {
                 console.error('Streaming error:', error);
                 assistantBubble.innerHTML = `<div style="color: var(--accent-error);">⚠️ Error: Failed to get response. Please try again.</div>`;
@@ -367,48 +485,74 @@
         }
 
         /**
-         * Safe code block upgrade function for chat.html
-         * CONSERVATIVE: Only ensures proper language classes for syntax highlighting
-         * Does NOT modify structure to avoid regressions
+         * Enhance server HTML with our beautiful formatting
+         * Applied AFTER server markdown rendering to preserve our CSS styles
          */
-        function upgradeCodeBlocks(container) {
+        function enhanceServerHtml(container) {
             try {
-                // Safety check: if container is invalid, return silently
                 if (!container || typeof container.querySelectorAll !== 'function') {
-                    console.debug('upgradeCodeBlocks: Invalid container, skipping');
+                    console.debug('enhanceServerHtml: Invalid container, skipping');
                     return;
                 }
                 
-                // CRITICAL: We do NOT convert inline code to blocks
-                // The server-side markdown parser already handles this distinction
-                // Converting multi-line inline code to blocks causes the exact issue we're fixing
-                
-                // Only ensure code blocks have proper language classes for Prism.js
-                const codeBlocks = container.querySelectorAll('pre > code');
-                codeBlocks.forEach(code => {
-                    // If no language class, try to detect from content
-                    if (!code.className || !code.className.includes('language-')) {
-                        const text = code.textContent || '';
-                        // Check for Java code patterns
-                        if (text.includes('public class') || text.includes('import java') || 
-                            text.includes('public static void') || text.includes('HashMap') ||
-                            text.includes('String') || text.includes('System.out') ||
-                            text.includes('Integer') || text.includes('ArrayList')) {
-                            code.className = 'language-java';
+                // 1. Enhance code blocks with language classes and proper structure
+                const codeBlocks = container.querySelectorAll('pre');
+                codeBlocks.forEach(pre => {
+                    // Ensure proper structure for our CSS
+                    const code = pre.querySelector('code');
+                    if (code) {
+                        // Add language class if missing
+                        if (!code.className || !code.className.includes('language-')) {
+                            const text = code.textContent || '';
+                            // Auto-detect Java
+                            if (text.includes('public class') || text.includes('import java') || 
+                                text.includes('public static void') || text.includes('HashMap') ||
+                                text.includes('String') || text.includes('System.out')) {
+                                code.className = 'language-java';
+                                pre.className = 'language-java';
+                                pre.setAttribute('data-language', 'java');
+                            }
+                        } else if (code.className) {
+                            // Copy language class to pre for our CSS
+                            const langMatch = code.className.match(/language-(\w+)/);
+                            if (langMatch) {
+                                pre.className = `language-${langMatch[1]}`;
+                                // Also set data attribute for CSS ::after content
+                                pre.setAttribute('data-language', langMatch[1]);
+                            }
                         }
                     }
                 });
                 
-                // CRITICAL: We do NOT wrap pre blocks in enrichment containers
-                // This causes the rendering issue where code appears inline
-                // The server decides when to wrap code in special containers
+                // 2. Enhance lists - Server returns plain <ul>/<ol>, we need our styles
+                const lists = container.querySelectorAll('ul, ol');
+                lists.forEach(list => {
+                    // Our CSS expects specific structure, server provides basic HTML
+                    // No need to modify, our CSS handles it with proper selectors
+                });
                 
-                console.debug(`upgradeCodeBlocks: Processed ${codeBlocks.length} code blocks safely`);
+                // 3. Ensure inline code gets proper styling
+                const inlineCodes = container.querySelectorAll('code:not(pre code)');
+                inlineCodes.forEach(code => {
+                    // Our CSS handles this with the code selector
+                });
+                
+                // 4. Enhance strong/bold text
+                const bolds = container.querySelectorAll('strong, b');
+                bolds.forEach(bold => {
+                    // Our CSS handles this with gradient text
+                });
+                
+                console.debug(`enhanceServerHtml: Enhanced ${codeBlocks.length} code blocks, ${lists.length} lists`);
                 
             } catch (err) {
-                // Fail silently to prevent breaking the UI
-                console.debug('upgradeCodeBlocks: Non-critical error', err);
+                console.debug('enhanceServerHtml: Non-critical error', err);
             }
+        }
+        
+        // Keep the old function for compatibility but make it call the new one
+        function upgradeCodeBlocks(container) {
+            enhanceServerHtml(container);
         }
         
         // Mobile-specific optimizations
@@ -426,13 +570,7 @@
             // Handle orientation change
             window.addEventListener('orientationchange', function() {
                 // Small delay to let the browser finish the orientation change
-                setTimeout(() => {
-                    // Scroll to maintain position
-                    const chatEl = document.getElementById('chat');
-                    if (chatEl) {
-                        chatEl.scrollTop = chatEl.scrollHeight;
-                    }
-                }, 100);
+                // Don't auto-scroll on orientation change
             });
         }
 
@@ -647,8 +785,104 @@
         }
         
         
+        // New scroll management functions
+        function scrollToBottom() {
+            const chatEl = document.getElementById('chat');
+            chatEl.scrollTo({
+                top: chatEl.scrollHeight,
+                behavior: 'smooth'
+            });
+            hideNewMessageIndicator();
+        }
+        
+        function showNewMessageIndicator() {
+            const chatEl = document.getElementById('chat');
+            const indicator = document.querySelector('.scroll-indicator');
+            if (indicator && chatEl) {
+                // Show if there's content below the current viewport
+                const hasContentBelow = chatEl.scrollHeight > (chatEl.scrollTop + chatEl.clientHeight + 50);
+                indicator.style.display = hasContentBelow ? 'flex' : 'none';
+            }
+        }
+        
+        function hideNewMessageIndicator() {
+            const indicator = document.querySelector('.scroll-indicator');
+            if (indicator) {
+                indicator.style.display = 'none';
+            }
+        }
+        
+        // Monitor scroll position and check for content below
+        function checkScrollIndicator() {
+            const chatEl = document.getElementById('chat');
+            const indicator = document.querySelector('.scroll-indicator');
+            if (chatEl && indicator) {
+                const hasContentBelow = chatEl.scrollHeight > (chatEl.scrollTop + chatEl.clientHeight + 50);
+                indicator.style.display = hasContentBelow ? 'flex' : 'none';
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatEl = document.getElementById('chat');
+            if (chatEl) {
+                // Check on scroll
+                chatEl.addEventListener('scroll', checkScrollIndicator);
+                
+                // Check on resize
+                window.addEventListener('resize', checkScrollIndicator);
+                
+                // Check when content changes (mutations)
+                const observer = new MutationObserver(checkScrollIndicator);
+                observer.observe(chatEl, { childList: true, subtree: true });
+                
+                // Initial check
+                setTimeout(checkScrollIndicator, 100);
+            }
+            // Show dev diagnostics on localhost
+            showDevDiagnosticsIfLocal();
+        });
+        
         async function copyChat() {
-            try { const res = await fetch('/api/chat/export/session?sessionId=' + encodeURIComponent(sessionId)); const txt = await res.text(); await navigator.clipboard.writeText(txt); const btn = document.querySelector('.export-chat-btn'); if (btn) { btn.style.background = 'var(--accent-success)'; btn.style.color = 'white'; setTimeout(() => { btn.style.background = ''; btn.style.color = ''; }, 2000); } showToast('Chat session exported to clipboard!'); } catch (error) { showToast('Failed to export', 'error'); }
+            try {
+                // Collect all the clean markdown content from the chat
+                const chatEl = document.getElementById('chat');
+                const bubbles = chatEl.querySelectorAll('.bubble');
+                let markdownContent = '';
+                
+                bubbles.forEach((bubble, index) => {
+                    const isUser = bubble.classList.contains('user');
+                    const messageText = bubble.textContent.trim();
+                    
+                    if (isUser) {
+                        markdownContent += `**User:** ${messageText}\n\n`;
+                    } else {
+                        // Get the clean content, excluding copy buttons and other UI elements
+                        const contentWrapper = bubble.querySelector('.streaming-text, .formatted-content');
+                        const cleanContent = contentWrapper ? contentWrapper.textContent.trim() : messageText;
+                        markdownContent += `**Assistant:** ${cleanContent}\n\n`;
+                    }
+                });
+                
+                if (!markdownContent.trim()) {
+                    showToast('No messages to copy', 'error');
+                    return;
+                }
+                
+                await navigator.clipboard.writeText(markdownContent.trim());
+                const btn = document.querySelector('.export-chat-btn');
+                if (btn) { 
+                    btn.style.background = 'var(--accent-success)'; 
+                    btn.style.color = 'white'; 
+                    setTimeout(() => { 
+                        btn.style.background = ''; 
+                        btn.style.color = ''; 
+                    }, 2000); 
+                } 
+                showToast('All messages copied to clipboard!'); 
+            } catch (error) { 
+                console.error('Copy error:', error);
+                showToast('Failed to copy messages', 'error'); 
+            }
         }
         
         function cleanupEmptyElements(container) {
@@ -704,6 +938,8 @@
             
             // Initialize mobile optimizations
             initMobileOptimizations();
+            // Ensure dev diag visibility
+            showDevDiagnosticsIfLocal();
             
             const input = document.getElementById('q');
             input.focus();
@@ -712,6 +948,38 @@
                 if (e.key === 'Escape' && document.activeElement === input) { input.value = ''; }
             });
         });
+
+        async function renderRagDiagnostics(query) {
+            if (!isLocalhost) return;
+            try {
+                const res = await fetch('/api/chat/diagnostics/retrieval?q=' + encodeURIComponent(query));
+                const el = document.getElementById('ragContext');
+                if (!el) return;
+                if (!res.ok) { el.textContent = 'Diagnostics unavailable.'; return; }
+                const data = await res.json();
+                if (!data || !Array.isArray(data.docs) || data.docs.length === 0) { el.textContent = 'No documents retrieved yet.'; return; }
+                el.innerHTML = '';
+                data.docs.forEach((d, idx) => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'rag-doc';
+                    const head = document.createElement('div');
+                    head.className = 'rag-doc-head';
+                    const num = document.createElement('span'); num.className = 'rag-num'; num.textContent = String(idx + 1);
+                    const link = document.createElement(d.url ? 'a' : 'div');
+                    if (d.url) { link.href = d.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+                    link.className = 'citation-pill';
+                    const label = document.createElement('span'); label.className = 'citation-label'; label.textContent = (d.title || d.url || 'Source');
+                    link.appendChild(label);
+                    head.appendChild(num); head.appendChild(link);
+                    const pre = document.createElement('pre');
+                    const code = document.createElement('code'); code.textContent = d.snippet || '';
+                    pre.appendChild(code);
+                    wrap.appendChild(head); wrap.appendChild(pre);
+                    el.appendChild(wrap);
+                });
+                if (window.Prism) Prism.highlightAllUnder(el);
+            } catch (_) {}
+        }
     </script>
 </body>
 </html>

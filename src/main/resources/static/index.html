@@ -3,7 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Java Chat — Tabs</title>
+  <title>Java Chat — Solar Roast Edition</title>
+  <meta name="description" content="Beautiful AI-powered Java learning with cosmic coffee vibes and developer-first design">
+  <meta name="keywords" content="Java, AI, learning, programming, coffee, solar, developer">
+  <meta name="author" content="Java Chat Solar Roast">
+  <meta name="theme-color" content="#0a0a0a">
+  
+  <!-- Developer Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="apple-touch-icon" sizes="57x57" href="/apple-touch-icon-57x57.png" />
   <link rel="apple-touch-icon" sizes="114x114" href="/apple-touch-icon-114x114.png" />
   <link rel="apple-touch-icon" sizes="72x72" href="/apple-touch-icon-72x72.png" />
@@ -27,86 +36,172 @@
   <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
   <style>
      :root {
-       /* SOLAR ROAST THEME - Developer Nirvana */
-       /* Coffee Colors */
-       --espresso-black: #0a0a0a;
-       --coffee-foam: #d4a574;
-       --coffee-bean: #3e2723;
-       --coffee-steam: #f5f5dc;
-       --coffee-crema: #c5a78e;
+       /* SOLAR STARTUP 2025 - Premium Theme */
+       /* Solar Primary Palette */
+       --solar-orange: #ff6b35;
+       --solar-amber: #ff8c42;
+       --solar-gold: #ffa947;
+       --solar-sunset: #ff5722;
+       --solar-flame: #ff3d00;
+       --solar-coral: #ff6e40;
+       --solar-peach: #ffab91;
+       --solar-cream: #fff3e0;
        
-       /* Solar Colors */
-       --solar-flare: #ff8c42;
-       --solar-lime: #ccff00;
-       --solar-coral: #ff4757;
-       --solar-ice: #00d2d3;
-       --solar-gold: #ffb347;
+       /* Java Coffee Accents */
+       --java-espresso: #3e2723;
+       --java-mocha: #5d4037;
+       --java-latte: #8d6e63;
+       --java-cappuccino: #a1887f;
+       --java-cream: #d7ccc8;
        
-       /* Developer Colors */
-       --code-black: #0d1117;
-       --code-gray: #161b22;
-       --code-comment: #8b949e;
-       --code-green: #238636;
-       --code-blue: #58a6ff;
+       /* Dark Mode Premium */
+       --premium-black: #0a0908;
+       --premium-charcoal: #121110;
+       --premium-slate: #1a1816;
+       --premium-graphite: #242220;
+       --premium-ash: #2e2b28;
        
-       /* Theme Variables */
-       --accent-primary: var(--solar-flare);
-       --accent-secondary: var(--solar-lime);
-       --accent-tertiary: var(--solar-coral);
-       --accent-quaternary: var(--solar-ice);
-       --dark-bg: var(--espresso-black);
-       --dark-surface-1: var(--code-black);
-       --dark-surface-2: var(--code-gray);
-       --dark-surface-3: #21262d;
-       --dark-border: #30363d;
-       --dark-text-primary: #f0f6fc;
-       --dark-text-secondary: #c9d1d9;
-       --dark-text-tertiary: #8b949e;
+       /* ShadCN Base Colors */
+       --shadcn-background: var(--premium-black);
+       --shadcn-foreground: #fafaf9;
+       --shadcn-card: var(--premium-charcoal);
+       --shadcn-card-foreground: #fafaf9;
+       --shadcn-popover: var(--premium-slate);
+       --shadcn-popover-foreground: #fafaf9;
+       --shadcn-primary: var(--solar-orange);
+       --shadcn-primary-foreground: #ffffff;
+       --shadcn-secondary: var(--premium-graphite);
+       --shadcn-secondary-foreground: #fafaf9;
+       --shadcn-muted: var(--premium-ash);
+       --shadcn-muted-foreground: #a8a29e;
+       --shadcn-accent: var(--solar-amber);
+       --shadcn-accent-foreground: #ffffff;
+       --shadcn-destructive: #ef4444;
+       --shadcn-destructive-foreground: #fafafa;
+       --shadcn-border: rgba(255, 107, 53, 0.15);
+       --shadcn-input: rgba(255, 107, 53, 0.1);
+       --shadcn-ring: var(--solar-orange);
        
-       /* Developer Typography */
-       --font-mono-display: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, monospace;
-       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-       --font-mono-code: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+       /* Legacy Coffee Variables (for compatibility) */
+       --coffee-subtle: var(--java-mocha);
+       --coffee-warm: var(--solar-amber);
+       --coffee-cream: var(--solar-gold);
+       --coffee-dark: var(--java-espresso);
+       --coffee-light: var(--solar-cream);
        
-       /* Coffee Glow Effects */
-       --glow-primary: 0 0 25px rgba(255, 140, 66, 0.6);
-       --glow-secondary: 0 0 25px rgba(204, 255, 0, 0.5);
-       --glow-tertiary: 0 0 25px rgba(255, 71, 87, 0.5);
-       --glow-quaternary: 0 0 25px rgba(0, 210, 211, 0.5);
-       --glow-coffee: 0 0 20px rgba(212, 165, 116, 0.4);
+       /* Dark Mode Premium Surfaces */
+       --dark-bg: var(--premium-black);
+       --dark-surface-1: var(--premium-charcoal);
+       --dark-surface-2: var(--premium-slate);
+       --dark-surface-3: var(--premium-graphite);
+       --dark-border: rgba(255, 107, 53, 0.12);
+       --dark-text-primary: #fafaf9;
+       --dark-text-secondary: #d4d4d3;
+       --dark-text-tertiary: #a8a29e;
        
-       /* Coffee Gradients */
-       --gradient-primary: linear-gradient(135deg, var(--solar-flare) 0%, var(--coffee-foam) 50%, var(--solar-gold) 100%);
-       --gradient-secondary: linear-gradient(45deg, var(--solar-lime) 0%, var(--solar-ice) 100%);
-       --gradient-tertiary: linear-gradient(90deg, var(--solar-coral) 0%, var(--solar-flare) 100%);
-       --gradient-coffee: linear-gradient(180deg, var(--coffee-bean) 0%, var(--espresso-black) 100%);
-       --gradient-steam: linear-gradient(45deg, rgba(245, 245, 220, 0.1) 0%, rgba(212, 165, 116, 0.2) 100%);
+       /* Theme Accents */
+       --accent-primary: var(--solar-orange);
+       --accent-secondary: var(--solar-amber);
+       --accent-tertiary: var(--solar-gold);
+       --dark-bg: var(--dark-bg);
+       --dark-surface-1: var(--dark-surface-1);
+       --dark-surface-2: var(--dark-surface-2);
+       --dark-surface-3: var(--dark-surface-3);
+       --dark-border: var(--dark-border);
+       --dark-text-primary: var(--dark-text-primary);
+       --dark-text-secondary: var(--dark-text-secondary);
+       --dark-text-tertiary: var(--dark-text-tertiary);
        
-       /* Coffee Animations */
-       --coffee-brew-duration: 4s;
-       --steam-rise-duration: 3s;
-       --roast-flip-duration: 2s;
+       /* ShadCN Typography */
+       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+       --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
        
+       /* Premium Effects */
+       --glow-orange: 0 0 20px rgba(255, 107, 53, 0.3);
+       --glow-amber: 0 0 20px rgba(255, 140, 66, 0.25);
+       --glow-subtle: 0 1px 3px rgba(0,0,0,0.12);
+       --glow-soft: 0 4px 12px rgba(0,0,0,0.1);
+       --shadow-subtle: 0 1px 2px rgba(0,0,0,0.05);
+       --shadow-soft: 0 10px 25px rgba(0,0,0,0.15);
+       --shadow-premium: 0 20px 40px rgba(0,0,0,0.2);
+       
+       /* Premium Gradients */
+       --gradient-solar: linear-gradient(135deg, var(--solar-orange) 0%, var(--solar-amber) 100%);
+       --gradient-sunset: linear-gradient(135deg, var(--solar-sunset) 0%, var(--solar-gold) 100%);
+       --gradient-java: linear-gradient(135deg, var(--java-mocha) 0%, var(--java-latte) 100%);
+       --gradient-premium: linear-gradient(135deg, var(--premium-slate) 0%, var(--premium-graphite) 100%);
+       
+       --radius-xs: 4px;
+       --radius-sm: 6px;
+       --radius-md: 10px;
+       --radius-lg: 16px;
+       --radius-xl: 24px;
        --radius-full: 9999px;
-       --radius-lg: 12px;
+       --space-1: 0.25rem;
        --space-2: 0.5rem;
        --space-3: 0.75rem;
        --space-4: 1rem;
-       --shadow-md: 0 8px 16px rgba(0,0,0,0.6);
-       --transition-fast: 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
-       --transition-coffee: 400ms cubic-bezier(0.23, 1, 0.32, 1);
-       --transition-code: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+       --space-5: 1.25rem;
+       --space-6: 1.5rem;
+       --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+       --transition-smooth: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+       --transition-spring: 500ms cubic-bezier(0.68, -0.55, 0.265, 1.55);
      }
 
     html, body { height: 100%; }
     body { margin: 0; background: var(--dark-bg); color: var(--dark-text-primary); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
     .wrap { display: flex; flex-direction: column; height: 100vh; }
 
-    /* Tabs */
-    .tabs { display: flex; justify-content: space-between; align-items: center; padding: var(--space-3); background: var(--dark-surface-2); border-bottom: 1px solid var(--dark-border); position: sticky; top: 0; z-index: 10; }
-    .tabs-left { display: flex; align-items: center; gap: var(--space-4); }
-    .tab-buttons { display: flex; gap: 8px; }
-    .tabs-right { display: flex; gap: var(--space-2); align-items: center; }
+    /* Premium Navigation Bar */
+    .tabs { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding: var(--space-4) var(--space-6); 
+      background: linear-gradient(180deg, var(--premium-charcoal) 0%, var(--premium-slate) 100%);
+      border-bottom: 1px solid var(--dark-border);
+      position: sticky; 
+      top: 0; 
+      z-index: 100;
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      box-shadow: 0 1px 0 rgba(255, 107, 53, 0.05);
+    }
+    .tabs-left { 
+      display: flex; 
+      align-items: center; 
+      gap: var(--space-6);
+    }
+    .tab-buttons { 
+      display: flex; 
+      gap: var(--space-1);
+      padding: 3px;
+      background: rgba(255, 107, 53, 0.05);
+      border: 1px solid rgba(255, 107, 53, 0.1);
+      border-radius: var(--radius-lg);
+      position: relative;
+    }
+    .tab-buttons::before {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: var(--radius-lg);
+      padding: 1px;
+      background: linear-gradient(135deg, var(--solar-orange), var(--solar-amber));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity var(--transition-smooth);
+    }
+    .tab-buttons:hover::before {
+      opacity: 0.5;
+    }
+    .tabs-right { 
+      display: flex; 
+      gap: var(--space-3); 
+      align-items: center;
+    }
     
     /* Mobile Toolbar Styles */
     @media (max-width: 768px) {
@@ -149,123 +244,106 @@
        text-decoration: none; 
        display: inline-flex; 
        align-items: center;
-       gap: 12px;
-       transition: all var(--transition-coffee); 
-       position: relative; 
-       font-family: var(--font-mono-display);
+       gap: var(--space-3);
+       transition: all var(--transition-smooth); 
+       position: relative;
+       padding: var(--space-2) var(--space-3);
+       border-radius: var(--radius-md);
+       background: transparent;
+     }
+     .app-title-link:hover {
+       background: rgba(255, 107, 53, 0.05);
      }
      .coffee-cup {
        width: 28px;
        height: 28px;
        position: relative;
-       filter: drop-shadow(0 2px 8px rgba(255, 140, 66, 0.3));
-       transition: all var(--transition-coffee);
+       transition: all var(--transition-smooth);
+       display: flex;
+       align-items: center;
+       justify-content: center;
+       background: var(--gradient-solar);
+       border-radius: var(--radius-sm);
+       box-shadow: var(--shadow-subtle);
      }
      .coffee-cup::before {
        content: '☕';
-       font-size: 24px;
-       position: absolute;
-       top: 0;
-       left: 0;
-       background: var(--gradient-primary);
-       -webkit-background-clip: text;
-       -webkit-text-fill-color: transparent;
-       background-clip: text;
-       animation: coffee-steam 3s ease-in-out infinite;
-     }
-     .coffee-cup::after {
-       content: '';
-       position: absolute;
-       top: -8px;
-       left: 50%;
-       transform: translateX(-50%);
-       width: 2px;
-       height: 12px;
-       background: linear-gradient(to top, var(--coffee-steam), transparent);
-       border-radius: 1px;
-       animation: steam-rise 2s ease-out infinite;
-       opacity: 0.7;
-     }
-     @keyframes coffee-steam {
-       0%, 100% { transform: scale(1) rotate(0deg); }
-       50% { transform: scale(1.1) rotate(5deg); }
-     }
-     @keyframes steam-rise {
-       0% { opacity: 0; transform: translateX(-50%) translateY(0); }
-       50% { opacity: 0.8; }
-       100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+       font-size: 18px;
+       filter: grayscale(1) brightness(10);
+       transition: all var(--transition-smooth);
      }
      .app-title-link:hover .coffee-cup {
-       transform: scale(1.1);
-       filter: drop-shadow(0 4px 12px rgba(255, 140, 66, 0.5));
+       transform: rotate(-5deg) scale(1.05);
+       box-shadow: var(--glow-orange);
      }
      .app-title { 
        font-size: 1.25rem; 
-       font-weight: 600; 
-       background: var(--gradient-primary); 
-       -webkit-background-clip: text; 
-       -webkit-text-fill-color: transparent; 
-       background-clip: text; 
+       font-weight: 700; 
+       background: linear-gradient(135deg, var(--solar-orange) 0%, var(--solar-gold) 100%);
+       -webkit-background-clip: text;
+       -webkit-text-fill-color: transparent;
+       background-clip: text;
        margin: 0; 
-       transition: all var(--transition-coffee); 
-       letter-spacing: -0.01em;
-       text-shadow: 0 2px 4px rgba(255, 140, 66, 0.2);
-       font-family: var(--font-mono-display);
+       font-family: var(--font-sans);
+       letter-spacing: -0.025em;
+       transition: all var(--transition-smooth);
+     }
+     .app-title-link:hover .app-title {
+       filter: brightness(1.1);
      }
      .tab { 
        appearance: none; 
-       border: 1px solid var(--dark-border); 
-       background: var(--dark-surface-2); 
-       color: var(--dark-text-secondary); 
-       padding: 8px 14px; 
-       border-radius: var(--radius-full); 
+       border: none;
+       background: transparent;
+       color: rgba(250, 250, 249, 0.7); 
+       padding: var(--space-2) var(--space-4); 
+       border-radius: var(--radius-md); 
        cursor: pointer; 
-       transition: all var(--transition-solar); 
+       transition: all var(--transition-smooth); 
        font-weight: 500; 
+       font-size: 0.9rem;
        position: relative; 
        overflow: hidden;
        letter-spacing: 0.01em;
+       display: flex;
+       align-items: center;
+       gap: var(--space-2);
+       font-family: var(--font-sans);
      }
      .tab::before {
        content: '';
        position: absolute;
-       top: 0;
-       left: -100%;
-       width: 100%;
-       height: 100%;
-       background: linear-gradient(90deg, transparent, rgba(255, 107, 53, 0.1), transparent);
-       transition: left 0.6s ease;
-     }
-     .tab:hover::before {
-       left: 100%;
+       inset: 0;
+       background: rgba(255, 107, 53, 0.05);
+       border-radius: var(--radius-md);
+       opacity: 0;
+       transition: opacity var(--transition-fast);
      }
      .tab:hover { 
-       border-color: var(--accent-primary); 
-       color: #fff; 
-       box-shadow: var(--glow-primary); 
-       transform: translateY(-1px);
+       color: rgba(250, 250, 249, 0.95);
+     }
+     .tab:hover::before {
+       opacity: 1;
      }
      .tab[aria-selected="true"] { 
-       background: var(--gradient-primary); 
-       color: #fff; 
-       border-color: transparent; 
-       box-shadow: var(--glow-primary); 
-       transform: translateY(-1px); 
+       background: var(--gradient-solar);
+       color: white;
        font-weight: 600;
+       box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.2), var(--glow-orange);
+       transform: scale(1.02);
      }
      .tab[aria-selected="true"]::after { 
        content: ''; 
        position: absolute; 
-       top: 0; 
-       left: 0; 
-       right: 0; 
-       bottom: 0; 
-       background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%); 
-       animation: solar-flare 2s ease-in-out infinite; 
+       inset: 0;
+       border-radius: var(--radius-md);
+       background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.2) 50%, transparent 70%); 
+       animation: shimmer-premium 3s ease-in-out infinite; 
      }
-     @keyframes solar-flare {
-       0%, 100% { opacity: 0; }
+     @keyframes shimmer-premium {
+       0% { transform: translateX(-100%); opacity: 0; }
        50% { opacity: 1; }
+       100% { transform: translateX(100%); opacity: 0; }
      }
 
     /* Panel */
@@ -275,59 +353,107 @@
     /* Basic a11y focus */
     .tab:focus { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 
-     /* Pills */
-     .pill { 
+     .tab-icon {
+       font-size: 16px;
+       transition: all var(--transition-smooth);
+       filter: grayscale(0.5);
+     }
+     .tab:hover .tab-icon {
+       filter: grayscale(0);
+       transform: rotate(-5deg) scale(1.1);
+     }
+     .tab[aria-selected="true"] .tab-icon {
+       filter: grayscale(0) brightness(1.2);
+       animation: icon-glow 2s ease-in-out infinite;
+     }
+     @keyframes icon-glow {
+       0%, 100% { transform: scale(1); }
+       50% { transform: scale(1.1); }
+     }
+
+     /* Premium Info Badges - Distinct from Navigation */
+     .info-badge { 
        display: inline-flex; 
        align-items: center; 
        gap: var(--space-2); 
-       padding: var(--space-2) var(--space-3); 
-       background: var(--dark-surface-2); 
-       border: 1px solid var(--dark-border); 
+       padding: var(--space-1) var(--space-3); 
+       background: rgba(255, 107, 53, 0.08);
+       border: 1px solid rgba(255, 107, 53, 0.15);
        border-radius: var(--radius-full); 
-       font-size: 0.75rem; 
-       color: var(--dark-text-secondary); 
-       transition: all var(--transition-solar); 
-       position: relative; 
-       overflow: hidden; 
-       backdrop-filter: blur(4px);
+       font-size: 0.8rem; 
+       color: var(--solar-peach); 
+       cursor: default;
+       font-weight: 500;
+       font-family: var(--font-mono);
+       letter-spacing: 0.02em;
+       -webkit-backdrop-filter: blur(10px);
+       backdrop-filter: blur(10px);
+       transition: all var(--transition-smooth);
+       position: relative;
+       overflow: hidden;
      }
-     .pill:hover { 
-       background: var(--dark-surface-3); 
-       border-color: var(--accent-primary); 
-       transform: translateY(-1px); 
-       box-shadow: var(--glow-primary); 
+     .info-badge::before {
+       content: '';
+       position: absolute;
+       inset: 0;
+       background: linear-gradient(135deg, transparent, rgba(255, 107, 53, 0.1), transparent);
+       transform: translateX(-100%);
+       transition: transform 1s ease;
      }
-     .pill:nth-child(2) { 
-       background: var(--gradient-secondary); 
-       color: var(--solar-black); 
-       border-color: transparent; 
-       font-weight: 600;
-       text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+     .info-badge:hover::before { 
+       transform: translateX(100%);
      }
-    .pill-with-badge { position: relative; }
+     .info-badge:hover {
+       background: rgba(255, 107, 53, 0.12);
+       border-color: rgba(255, 107, 53, 0.25);
+       transform: translateY(-1px);
+     }
+     .status-indicator {
+       width: 6px;
+       height: 6px;
+       border-radius: 50%;
+       background: var(--solar-gold);
+       box-shadow: 0 0 8px var(--solar-gold);
+       animation: pulse-glow 2s ease-in-out infinite;
+     }
+     @keyframes pulse-glow {
+       0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--solar-gold); }
+       50% { opacity: 1; box-shadow: 0 0 12px var(--solar-gold); }
+     }
+    .pill-with-badge { 
+      position: relative; 
+      padding-right: 32px;
+      overflow: visible;
+    }
      .new-badge { 
        position: absolute; 
-       top: -6px; 
-       right: -8px; 
-       background: var(--gradient-secondary); 
-       color: var(--solar-black); 
-       font-size: 0.6rem; 
+       top: -5px; 
+       right: 2px; 
+       background: var(--gradient-sunset);
+       color: white; 
+       font-size: 0.55rem; 
        font-weight: 700; 
-       padding: 2px 6px; 
-       border-radius: 8px; 
+       padding: 2px 5px; 
+       border-radius: var(--radius-full); 
        line-height: 1; 
-       box-shadow: 0 2px 12px rgba(204, 255, 0, 0.6);
-       animation: solar-pulse 1.5s ease-in-out infinite;
-       text-shadow: 0 1px 1px rgba(0,0,0,0.2);
-       border: 1px solid rgba(204, 255, 0, 0.3);
+       box-shadow: 0 2px 6px rgba(255, 107, 53, 0.4);
+       animation: badge-pulse 2s ease-in-out infinite;
+       border: 1px solid rgba(255, 255, 255, 0.2);
+       text-transform: uppercase;
+       letter-spacing: 0.04em;
+       min-width: 18px;
+       text-align: center;
+       z-index: 10;
      }
-     @keyframes solar-pulse {
-       0%, 100% { transform: scale(1); box-shadow: 0 2px 12px rgba(204, 255, 0, 0.6); }
-       50% { transform: scale(1.1); box-shadow: 0 4px 20px rgba(204, 255, 0, 0.8); }
+     @keyframes badge-pulse {
+       0%, 100% { transform: scale(1) rotate(0deg); }
+       50% { transform: scale(1.05) rotate(2deg); }
+     }
+     @keyframes subtle-pulse {
+       0%, 100% { opacity: 0.9; }
+       50% { opacity: 1; }
      }
     @keyframes badge-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
-    .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: #10b981; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
     /* Loader overlay - FIXED to prevent overlapping */
     .loader-overlay { 
@@ -367,19 +493,25 @@
            <div class="coffee-cup" aria-hidden="true"></div>
            <h1 class="app-title">Java Chat</h1>
          </a>
-        <div class="tab-buttons" role="tablist" aria-label="Java Chat Sections">
-          <button id="tab-chat" class="tab" role="tab" aria-selected="true" aria-controls="tabpanel" tabindex="0">Chat</button>
-          <button id="tab-guided" class="tab" role="tab" aria-selected="false" aria-controls="tabpanel" tabindex="-1">Guided Learning</button>
-        </div>
+         <div class="tab-buttons" role="tablist" aria-label="Java Chat Sections">
+           <button type="button" id="tab-chat" class="tab" role="tab" aria-selected="true" aria-controls="tabpanel" tabindex="0">
+             <span class="tab-icon">💬</span>
+             Chat
+           </button>
+           <button type="button" id="tab-guided" class="tab" role="tab" aria-selected="false" aria-controls="tabpanel" tabindex="-1">
+             <span class="tab-icon">📚</span>
+             Guided Learning
+           </button>
+         </div>
       </div>
-      <div class="tabs-right">
-        <span class="pill pill-with-badge">
-          <span class="status-indicator"></span>
-          JDK 25 Docs
-          <span class="new-badge">New</span>
-        </span>
-        <span class="pill">AI-Powered Learning</span>
-      </div>
+       <div class="tabs-right">
+         <span class="info-badge pill-with-badge">
+           <span class="status-indicator"></span>
+           JDK 25 Docs
+           <span class="new-badge">New</span>
+         </span>
+         <span class="info-badge">AI-Powered Learning</span>
+       </div>
     </div>
 
     <div id="tabpanel" class="panel" role="tabpanel" tabindex="0" aria-labelledby="tab-chat">

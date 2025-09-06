@@ -242,9 +242,9 @@
             if (line.startsWith('data:')) {
               const data = line.slice(5);
               // Prevent word concatenation when deltas are alphanumeric
-              const prev = acc ? acc.charAt(acc.length - 1) : '';
+              const prev = fullText ? fullText.charAt(fullText.length - 1) : '';
               if (prev && /[A-Za-z0-9]/.test(prev) && /^[A-Za-z0-9]/.test(data)) {
-                acc += ' ';
+                fullText += ' ';
               }
               // STEP 1: Check for code block boundaries FIRST
               if (data.includes('```')) {
@@ -601,11 +601,9 @@
               }
             }
           }
-          // Only treat a code-fence boundary as complete when followed by a newline
-          // Safety: strip any leaked SSE tokens that made it into payload text
-          if (fullText.indexOf('data:') !== -1) {
-            fullText = fullText.replace(/(^|\n)\s*data:\s*/g, '$1');
-            fullText = fullText.replace(/([A-Za-z0-9])data:\s*/g, '$1');
+          // Drop terminal DONE frames if received (defense-in-depth)
+          if (fullText.trim() === '[DONE]') {
+            fullText = '';
           }
           const immediate = /[.!?][\"')]*\s$/.test(fullText.slice(-4)) || /\n\n/.test(fullText.slice(-2)) || fullText.endsWith('```\n');
           scheduleRender(immediate);
