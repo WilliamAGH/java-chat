@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +42,9 @@ class GuidedLearningControllerTest {
 
     @MockitoBean
     ExceptionResponseBuilder exceptionResponseBuilder;
+
+    @MockitoBean
+    OpenAIStreamingService openAIStreamingService;
 
     @Test
     void guided_enrich_filters_empty_strings_and_whitespace() throws Exception {

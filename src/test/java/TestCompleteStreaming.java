@@ -45,7 +45,7 @@ public class TestCompleteStreaming {
         
         stream
             .flatMap(chunk -> {
-                // Exact same logic as in the fixed ResilientApiClient
+                // Mirrors logic now handled by OpenAIStreamingService
                 if (chunk == null || chunk.trim().isEmpty() || chunk.equals("[DONE]")) {
                     return Flux.empty();
                 }
