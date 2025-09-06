@@ -74,12 +74,12 @@ public final class DocsSourceRegistry {
         LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/java/java25-complete/", JAVA25_EA_API_BASE);
         
         // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
-        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot/", "https://docs.spring.io/spring-boot/docs/current/");
-        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot-complete/", "https://docs.spring.io/spring-boot/docs/current/");
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot/", "https://docs.spring.io/spring-boot/docs/current/api/");
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-boot-complete/", "https://docs.spring.io/spring-boot/docs/current/api/");
         
-        // Spring Framework API documentation - map to base URL without /javadoc-api/ since local structure includes it
-        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework/", "https://docs.spring.io/spring-framework/docs/current/");
-        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework-complete/", "https://docs.spring.io/spring-framework/docs/current/");
+        // Spring Framework API documentation
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework/", "https://docs.spring.io/spring-framework/docs/current/javadoc-api/");
+        LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-framework-complete/", "https://docs.spring.io/spring-framework/docs/current/javadoc-api/");
         
         // Spring AI API documentation
         LOCAL_PREFIX_TO_REMOTE_BASE.put("/data/docs/spring-ai/", SPRING_AI_API_BASE);
