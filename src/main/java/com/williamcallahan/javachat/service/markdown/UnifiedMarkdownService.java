@@ -53,8 +53,7 @@ public class UnifiedMarkdownService {
     private final EnrichmentProcessor enrichmentProcessor;
     private final Cache<String, ProcessedMarkdown> processCache;
 
-    // Enrichment marker pattern: {{type:content}}
-    private static final Pattern ENRICHMENT_PATTERN = Pattern.compile("(?i)\\{\\{\\s*(hint|reminder|background|example|warning)\\s*:\\s*([\\s\\S]*?)\\s*\\}\\}");
+    // Enrichment marker parsing is handled by a streaming scanner (not regex)
     
     public UnifiedMarkdownService() {
         // Configure Flexmark with optimal settings
@@ -391,6 +390,32 @@ public class UnifiedMarkdownService {
             for (Element bq : doc.select("blockquote")) {
                 bq.addClass("markdown-quote");
             }
+            // Remove inline numeric citation markers like [1], [12] that the model emits in prose.
+            // Preserve anything inside anchors, code/pre, or our enrichment containers.
+            for (Element p : doc.select("p")) {
+                if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+                // Skip paragraphs that are actually part of links
+                if (!p.select("a").isEmpty()) continue;
+                // Replace bracketed numbers surrounded by boundaries
+                // We work on the element's text nodes only to avoid touching HTML structure
+                java.util.List<TextNode> textNodes = p.textNodes();
+                for (TextNode tn : textNodes) {
+                    String t = tn.getWholeText();
+                    if (t == null || t.isEmpty()) continue;
+                    String cleaned = t.replaceAll("(?<!\\w)\\[(?:[1-9]\\d{0,2})\\](?!\\w)", "").replace("  ", " ");
+                    if (!cleaned.equals(t)) tn.text(cleaned.trim());
+                }
+            }
+
+            // Remove orphan brace-only paragraphs '}' produced by partial enrichment/code normalization
+            for (Element p : new java.util.ArrayList<>(doc.select("p"))) {
+                if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+                String txt = p.text();
+                if (txt != null && txt.trim().equals("}")) {
+                    p.remove();
+                }
+            }
+
             // Spacing and readability fixes for punctuation and long paragraphs
             fixSentenceSpacing(doc);
             splitLongParagraphs(doc);
