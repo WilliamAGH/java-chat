@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import com.williamcallahan.javachat.service.MarkdownService;
 
 import java.util.*;
@@ -191,16 +192,17 @@ public class GuidedLearningController extends BaseController {
             // Build the complete prompt using GuidedLearningService logic
             String fullPrompt = guidedService.buildGuidedPromptWithContext(history, slug, latest);
             
-            // Create heartbeat stream for keeping connections alive through proxies
-            // Send as SSE comment frames so clients ignore them cleanly
-            Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .map(i -> ": keepalive\n\n");
-
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
                     .doOnNext(chunk -> fullResponse.append(chunk))
                     .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+
+            // Heartbeats should terminate when data stream completes; otherwise the
+            // merged Flux never completes and the client keeps a flashing cursor.
+            Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                    .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
+                    .map(i -> ": keepalive\n\n");
 
             return Flux.merge(dataStream, heartbeats)
                     .doOnComplete(() -> {

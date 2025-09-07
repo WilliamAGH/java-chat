@@ -19,6 +19,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import org.springframework.http.codec.ServerSentEvent;
 
 import java.time.Duration;
@@ -109,11 +110,6 @@ public class ChatController extends BaseController {
         if (openAIStreamingService.isAvailable()) {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestId);
             
-            // Create heartbeat stream for keeping connections alive through proxies
-            // Use proper SSE comment frames so clients can safely ignore them
-            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .map(i -> ServerSentEvent.<String>builder().comment("keepalive").build());
-
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
                     .doOnNext(chunk -> {
@@ -122,6 +118,12 @@ public class ChatController extends BaseController {
                     })
                     .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+
+            // Heartbeats should stop when the data stream completes to allow the SSE connection
+            // to close cleanly. Otherwise, an infinite heartbeat Flux would keep the stream open.
+            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                    .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
+                    .map(i -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
             Flux<ServerSentEvent<String>> dataEvents = dataStream
                     .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build());
