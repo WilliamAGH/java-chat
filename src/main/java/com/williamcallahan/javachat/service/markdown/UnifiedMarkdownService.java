@@ -185,66 +185,106 @@ public class UnifiedMarkdownService {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
-        
-        // First, identify code fence regions to skip
-        boolean[] inCodeFence = new boolean[markdown.length()];
+
+        StringBuilder result = new StringBuilder(markdown.length() + 64);
+        int i = 0;
         boolean inFence = false;
-        for (int i = 0; i < markdown.length(); i++) {
-            if (i + 2 < markdown.length() && 
-                markdown.charAt(i) == '`' && 
-                markdown.charAt(i+1) == '`' && 
-                markdown.charAt(i+2) == '`') {
+        int absolutePosition = 0; // running position for enrichment creation
+
+        while (i < markdown.length()) {
+            // Toggle code fence state and copy fence blocks verbatim
+            if (i + 2 < markdown.length() && markdown.charAt(i) == '`' && markdown.charAt(i + 1) == '`' && markdown.charAt(i + 2) == '`') {
                 inFence = !inFence;
-                i += 2; // Skip past the fence
-            }
-            inCodeFence[i] = inFence;
-        }
-        
-        Matcher matcher = ENRICHMENT_PATTERN.matcher(markdown);
-        StringBuilder result = new StringBuilder();
-        int lastEnd = 0;
-        int position = 0;
-        
-        while (matcher.find()) {
-            // Skip if this enrichment is inside a code fence
-            if (inCodeFence[matcher.start()]) {
+                result.append("```");
+                i += 3;
+                // Copy optional language token and the rest of the line
+                while (i < markdown.length()) {
+                    char c = markdown.charAt(i);
+                    result.append(c);
+                    i++;
+                    if (c == '\n') break;
+                }
                 continue;
             }
-            
-            // Add text before the enrichment
-            result.append(markdown, lastEnd, matcher.start());
-            
-            String type = matcher.group(1).toLowerCase();
-            String content = matcher.group(2).trim();
-            
-            // Create enrichment object
-            MarkdownEnrichment enrichment = switch (type) {
-                case "hint" -> Hint.create(content, position + matcher.start());
-                case "warning" -> Warning.create(content, position + matcher.start());
-                case "background" -> Background.create(content, position + matcher.start());
-                case "example" -> Example.create(content, position + matcher.start());
-                case "reminder" -> Reminder.create(content, position + matcher.start());
-                default -> null;
-            };
-            
-            if (enrichment != null) {
-                enrichments.add(enrichment);
-                // Create a unique placeholder
-                String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
-                placeholders.put(placeholderId, buildEnrichmentHtml(type, content));
-                result.append(placeholderId);
-            } else {
-                // Keep original if type unknown
-                result.append(matcher.group(0));
+
+            // Detect enrichment start only when not inside code fences
+            if (!inFence && i + 1 < markdown.length() && markdown.charAt(i) == '{' && markdown.charAt(i + 1) == '{') {
+                int tStart = i + 2;
+                // skip spaces
+                while (tStart < markdown.length() && Character.isWhitespace(markdown.charAt(tStart))) tStart++;
+                // read type token
+                int tEnd = tStart;
+                while (tEnd < markdown.length() && Character.isLetter(markdown.charAt(tEnd))) tEnd++;
+                String type = markdown.substring(tStart, Math.min(tEnd, markdown.length())).toLowerCase();
+                // skip spaces
+                int p = tEnd;
+                while (p < markdown.length() && Character.isWhitespace(markdown.charAt(p))) p++;
+                boolean hasColon = (p < markdown.length() && markdown.charAt(p) == ':');
+                if (hasColon && isKnownEnrichmentType(type)) {
+                    int contentStart = p + 1;
+                    if (contentStart < markdown.length() && markdown.charAt(contentStart) == ' ') contentStart++;
+                    // Scan forward to find matching "}}" not inside code fences
+                    int j = contentStart;
+                    boolean innerFence = false;
+                    boolean foundEnd = false;
+                    while (j < markdown.length()) {
+                        if (j + 2 < markdown.length() && markdown.charAt(j) == '`' && markdown.charAt(j + 1) == '`' && markdown.charAt(j + 2) == '`') {
+                            innerFence = !innerFence;
+                            j += 3;
+                            continue;
+                        }
+                        if (!innerFence && j + 1 < markdown.length() && markdown.charAt(j) == '}' && markdown.charAt(j + 1) == '}') {
+                            // Found the true end of this enrichment block
+                            String content = markdown.substring(contentStart, j).trim();
+                            MarkdownEnrichment enrichment = switch (type) {
+                                case "hint" -> Hint.create(content, absolutePosition + i);
+                                case "warning" -> Warning.create(content, absolutePosition + i);
+                                case "background" -> Background.create(content, absolutePosition + i);
+                                case "example" -> Example.create(content, absolutePosition + i);
+                                case "reminder" -> Reminder.create(content, absolutePosition + i);
+                                default -> null;
+                            };
+                            if (enrichment != null) {
+                                enrichments.add(enrichment);
+                                String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
+                                placeholders.put(placeholderId, buildEnrichmentHtml(type, content));
+                                result.append(placeholderId);
+                            } else {
+                                // Unknown type: copy through literally
+                                result.append(markdown, i, j + 2);
+                            }
+                            // Advance indices to after closing delimiter
+                            absolutePosition += (j + 2 - i);
+                            i = j + 2;
+                            foundEnd = true;
+                            break;
+                        }
+                        j++;
+                    }
+                    if (foundEnd) {
+                        continue; // handled block
+                    } else {
+                        // No closing found: treat as plain text
+                        result.append(markdown.charAt(i));
+                        i++;
+                        absolutePosition++;
+                        continue;
+                    }
+                }
             }
-            
-            lastEnd = matcher.end();
+
+            // Default copy behavior
+            result.append(markdown.charAt(i));
+            i++;
+            absolutePosition++;
         }
-        
-        // Add remaining text
-        result.append(markdown.substring(lastEnd));
-        
+
         return result.toString();
+    }
+
+    private boolean isKnownEnrichmentType(String type) {
+        return "hint".equals(type) || "reminder".equals(type) || "background".equals(type)
+                || "example".equals(type) || "warning".equals(type);
     }
     
     /**
