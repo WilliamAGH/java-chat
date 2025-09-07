@@ -19,7 +19,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Method;
-import java.util.Map;
+ 
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
@@ -267,15 +267,10 @@ public class OpenAIStreamingService {
                 }
             }
 
-            // 2) Standards-based escape hatch supported by the SDK:
-            //    pass additional body properties even if no typed field exists.
-            //    Set both shapes for maximum compatibility:
-            //    - Responses-style: { reasoning: { effort: "minimal" } }
-            //    - ChatCompletions-style: { reasoning_effort: "minimal" }
-            builder
-                .putAdditionalBodyProperty("reasoning", JsonValue.from(Map.of("effort", "minimal")))
-                .putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
-            log.info("[LLM] reasoning set via additional body properties (reasoning.effort=minimal; reasoning_effort=minimal)");
+            // 2) Fallback: Chat Completions supports only top-level "reasoning_effort"
+            //    Do NOT send a nested "reasoning" object on this endpoint.
+            builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
+            log.info("[LLM] reasoning_effort set via additional body property");
             return;
         } catch (Exception ex) {
             log.debug("Skipping reasoning_effort due to SDK compatibility: {}", ex.toString());
