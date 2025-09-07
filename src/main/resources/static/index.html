@@ -235,10 +235,22 @@
         font-size: 0.875rem;
         white-space: nowrap;
       }
+      .tab .tab-label { max-width: 22vw; }
+      .tab-label-long { display: inline; }
+      .tab-label-short { display: none; }
       
       .tabs-right {
         display: none;
       }
+    }
+    
+    /* Very narrow phones */
+    @media (max-width: 420px) {
+      .tab { padding: 6px 12px; font-size: 0.84rem; }
+      .tab-buttons { gap: 6px; }
+      .tab .tab-label { max-width: 26vw; }
+      .tab-label-long { display: none; }
+      .tab-label-short { display: inline; }
     }
      .app-title-link { 
        text-decoration: none; 
@@ -310,6 +322,8 @@
        gap: var(--space-2);
        font-family: var(--font-sans);
      }
+     .tab .tab-label { display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 18ch; }
+     .tab-label-short { display:none; }
      .tab::before {
        content: '';
        position: absolute;
@@ -496,11 +510,11 @@
          <div class="tab-buttons" role="tablist" aria-label="Java Chat Sections">
            <button type="button" id="tab-chat" class="tab" role="tab" aria-selected="true" aria-controls="tabpanel" tabindex="0">
              <span class="tab-icon">💬</span>
-             Chat
+             <span class="tab-label"><span class="tab-label-long">Chat</span><span class="tab-label-short">Chat</span></span>
            </button>
            <button type="button" id="tab-guided" class="tab" role="tab" aria-selected="false" aria-controls="tabpanel" tabindex="-1">
              <span class="tab-icon">📚</span>
-             Guided Learning
+             <span class="tab-label"><span class="tab-label-long">Guided Learning</span><span class="tab-label-short">Guided</span></span>
            </button>
          </div>
       </div>

@@ -84,7 +84,7 @@
         <div class="input-area">
             <div class="input-row">
                 <div class="input-wrapper">
-                    <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()"/>
+                    <input id="q" class="input" placeholder="Ask a question about this lesson" onkeypress="if(event.key==='Enter') ask()" data-placeholder-long="Ask a question about this lesson" data-placeholder-short="Ask about this lesson"/>
                     <button id="askBtn" class="btn" onclick="ask()" aria-label="Send question">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -854,6 +854,19 @@
 
     // Initialize mobile optimizations
     initMobileOptimizations();
+    // Responsive placeholder for guided input
+    (function(){
+        const input = document.getElementById('q');
+        function applyResponsivePlaceholder(){
+            if (!input) return;
+            const w = window.innerWidth || document.documentElement.clientWidth;
+            const longPh = input.getAttribute('data-placeholder-long') || input.placeholder;
+            const shortPh = input.getAttribute('data-placeholder-short') || longPh;
+            input.placeholder = (w <= 420) ? shortPh : longPh;
+        }
+        applyResponsivePlaceholder();
+        window.addEventListener('resize', applyResponsivePlaceholder);
+    })();
     
     // Load the table of contents and the first lesson
     loadTOC().catch(() => setLessonLoading(false));

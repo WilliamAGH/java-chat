@@ -114,8 +114,8 @@ public class UnifiedMarkdownService {
             markdown = markdown.substring(0, MAX_INPUT_LENGTH);
         }
         
-        // Pre-normalize code fences and critical spacing before parsing (no regex)
-        markdown = preNormalizeMarkdown(markdown);
+        // Pre-normalize code fences and heading markers before parsing (no regex)
+        markdown = preNormalizeForListsAndFences(markdown);
 
         // Replace enrichment markers with placeholders to prevent cross-node splits (e.g., example code fences)
         java.util.Map<String, String> placeholders = new java.util.HashMap<>();
@@ -133,6 +133,9 @@ public class UnifiedMarkdownService {
             // Parse markdown to AST - this is the foundation of AGENTS.md compliance
             Node document = parser.parse(placeholderMarkdown);
             
+            // AST-level cleanups prior to HTML rendering
+            transformAst(document);
+            
             // Extract structured data using AST visitors (not regex)
             List<MarkdownCitation> citations = citationProcessor.extractCitations(document);
             List<MarkdownEnrichment> enrichments = new java.util.ArrayList<>(placeholderEnrichments);
@@ -144,8 +147,6 @@ public class UnifiedMarkdownService {
             // Reinsert enrichment cards from placeholders (handles example blocks)
             html = renderEnrichmentBlocksFromPlaceholders(html, placeholders);
             
-            // Normalize inline list markers to semantic UL/OL using DOM-safe method
-            html = renderInlineLists(html);
             // Post-process HTML using DOM-safe methods
             html = postProcessHtml(html);
             
@@ -174,6 +175,399 @@ public class UnifiedMarkdownService {
             return new ProcessedMarkdown(safeHtml, List.of(), List.of(), List.of(), 
                                        System.currentTimeMillis() - startTime);
         }
+    }
+
+    // === AST-level transformations ===
+    private void transformAst(Node document) {
+        if (document == null) return;
+        // 1) Strip inline numeric citation markers in Text nodes outside code/links
+        stripInlineCitationMarkers(document);
+        // IMPORTANT: Do not alter author/model list structure. We intentionally disable
+        // paragraph-to-list conversions and numeric-heading promotions to preserve
+        // ordered lists exactly as authored by the model.
+    }
+
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
+    private void promoteOrderedHeadingParagraphs(Node document) {
+        java.util.List<com.vladsch.flexmark.ast.Paragraph> paragraphs = new java.util.ArrayList<>();
+        collectParagraphs(document, paragraphs);
+        for (com.vladsch.flexmark.ast.Paragraph p : paragraphs) {
+            if (isUnderCodeOrEnrichment(p)) continue;
+            if (isUnderList(p)) continue; // ignore list items
+            String text = p.getChars().toString();
+            if (text == null) continue;
+            String label = extractNumericHeadingLabel(text);
+            if (label.length() < 2) continue;
+            // Build strong paragraph: <p><strong>label</strong></p>
+            com.vladsch.flexmark.ast.Paragraph strongPara = new com.vladsch.flexmark.ast.Paragraph();
+            com.vladsch.flexmark.ast.StrongEmphasis strong = new com.vladsch.flexmark.ast.StrongEmphasis();
+            strong.appendChild(new com.vladsch.flexmark.ast.Text(label));
+            strongPara.appendChild(strong);
+            p.insertBefore(strongPara);
+            p.unlink();
+        }
+    }
+
+    private boolean isUnderList(Node n) {
+        for (Node cur = n.getParent(); cur != null; cur = cur.getParent()) {
+            if (cur instanceof com.vladsch.flexmark.ast.BulletList) return true;
+            if (cur instanceof com.vladsch.flexmark.ast.OrderedList) return true;
+        }
+        return false;
+    }
+
+    private String extractNumericHeadingLabel(String text) {
+        if (text == null) return "";
+        int i = 0; while (i < text.length() && Character.isWhitespace(text.charAt(i))) i++;
+        int nDigits = 0;
+        while (i < text.length() && Character.isDigit(text.charAt(i)) && nDigits < 3) { i++; nDigits++; }
+        if (nDigits == 0) return "";
+        if (i >= text.length()) return "";
+        char sep = text.charAt(i);
+        if (sep != '.' && sep != ')') return "";
+        i++;
+        while (i < text.length() && text.charAt(i) == ' ') i++;
+        if (i >= text.length()) return "";
+        return text.substring(i).trim();
+    }
+
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
+    private void promoteSingleItemOrderedListHeadings(Node document) {
+        for (Node n = document.getFirstChild(); n != null; n = n.getNext()) {
+            if (n instanceof com.vladsch.flexmark.ast.OrderedList ol) {
+                if (isUnderList(ol)) { if (n.hasChildren()) promoteSingleItemOrderedListHeadings(n); continue; }
+                // Count items
+                int itemCount = 0;
+                com.vladsch.flexmark.ast.ListItem only = null;
+                for (Node c = ol.getFirstChild(); c != null; c = c.getNext()) {
+                    if (c instanceof com.vladsch.flexmark.ast.ListItem li) { itemCount++; only = li; if (itemCount > 1) break; }
+                }
+                if (itemCount == 1 && only != null) {
+                    // Treat a single-item ordered list as a section label regardless of what follows
+                    String label = collectText(only).trim();
+                    if (!label.isEmpty()) {
+                        com.vladsch.flexmark.ast.Paragraph strongPara = new com.vladsch.flexmark.ast.Paragraph();
+                        com.vladsch.flexmark.ast.StrongEmphasis strong = new com.vladsch.flexmark.ast.StrongEmphasis();
+                        strong.appendChild(new com.vladsch.flexmark.ast.Text(label));
+                        strongPara.appendChild(strong);
+                        ol.insertBefore(strongPara);
+                        ol.unlink();
+                    }
+                }
+            }
+            if (n.hasChildren()) promoteSingleItemOrderedListHeadings(n);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    private Node nextMeaningfulSibling(Node node) {
+        Node s = node.getNext();
+        while (s != null) {
+            if (s instanceof com.vladsch.flexmark.ast.Paragraph p) {
+                String t = p.getChars() == null ? null : p.getChars().toString().trim();
+                if (t == null || t.isEmpty()) { s = s.getNext(); continue; }
+                return s; // non-empty paragraph is meaningful
+            }
+            // Lists and other blocks are meaningful
+            return s;
+        }
+        return null;
+    }
+
+    private String collectText(Node node) {
+        StringBuilder sb = new StringBuilder();
+        collectTextRecursive(node, sb);
+        return sb.toString();
+    }
+
+    private void collectTextRecursive(Node node, StringBuilder sb) {
+        if (node instanceof com.vladsch.flexmark.ast.Text t) {
+            sb.append(t.getChars());
+        }
+        for (Node c = node.getFirstChild(); c != null; c = c.getNext()) collectTextRecursive(c, sb);
+    }
+
+    private void stripInlineCitationMarkers(Node root) {
+        for (Node n = root.getFirstChild(); n != null; n = n.getNext()) {
+            // Skip code blocks/spans and links entirely
+            if (n instanceof com.vladsch.flexmark.ast.Code) continue;
+            if (n instanceof com.vladsch.flexmark.ast.FencedCodeBlock) continue;
+            if (n instanceof com.vladsch.flexmark.ast.Link) { stripInlineCitationMarkers(n); continue; }
+            if (n instanceof com.vladsch.flexmark.ast.Text t) {
+                CharSequence cs = t.getChars();
+                String s = cs.toString();
+                String cleaned = removeBracketNumbers(s);
+                if (!cleaned.equals(s)) {
+                    t.setChars(com.vladsch.flexmark.util.sequence.BasedSequence.of(cleaned));
+                }
+            }
+            if (n.hasChildren()) stripInlineCitationMarkers(n);
+        }
+    }
+
+    private String removeBracketNumbers(String s) {
+        if (s == null || s.isEmpty()) return s;
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            char c = s.charAt(i);
+            if (c == '[') {
+                int j = i + 1; int digits = 0; boolean valid = true;
+                while (j < s.length() && Character.isDigit(s.charAt(j)) && digits < 3) { j++; digits++; }
+                if (digits == 0 || digits > 3) valid = false;
+                if (valid && j < s.length() && s.charAt(j) == ']') {
+                    // Ensure boundaries are not alphanumeric on either side
+                    char prev = (i > 0) ? s.charAt(i - 1) : ' ';
+                    char next = (j + 1 < s.length()) ? s.charAt(j + 1) : ' ';
+                    if (!Character.isLetterOrDigit(prev) && !Character.isLetterOrDigit(next)) {
+                        // drop token
+                        i = j + 1;
+                        // compress spaces
+                        if (out.length() > 0 && out.charAt(out.length() - 1) == ' ') {
+                            while (i < s.length() && s.charAt(i) == ' ') i++;
+                        }
+                        continue;
+                    }
+                }
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
+
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
+    private void convertInlineLists(Node document) {
+        java.util.List<com.vladsch.flexmark.ast.Paragraph> paragraphs = new java.util.ArrayList<>();
+        for (Node n = document.getFirstChild(); n != null; n = n.getNext()) collectParagraphs(n, paragraphs);
+        for (com.vladsch.flexmark.ast.Paragraph p : paragraphs) {
+            if (isUnderCodeOrEnrichment(p)) continue;
+            String text = p.getChars().toString();
+            if (text == null || text.isBlank()) continue;
+            ListCandidate cand = detectListCandidate(text);
+            if (!cand.isList || cand.items.size() < 2) continue;
+
+            // Build a minimal markdown fragment for the list and parse it into AST nodes
+            StringBuilder md = new StringBuilder(cand.items.size() * 16);
+            if (cand.ordered) {
+                for (int i = 0; i < cand.items.size(); i++) {
+                    md.append(i + 1).append('.').append(' ').append(cand.items.get(i)).append('\n');
+                }
+            } else {
+                for (String it : cand.items) {
+                    md.append("- ").append(it).append('\n');
+                }
+            }
+            Node frag = parser.parse(md.toString());
+            // Insert all nodes from the fragment before the paragraph; capture next before reparenting
+            for (Node child = frag.getFirstChild(); child != null; ) {
+                Node next = child.getNext();
+                p.insertBefore(child);
+                child = next;
+            }
+            p.unlink();
+        }
+    }
+
+    private void collectParagraphs(Node n, java.util.List<com.vladsch.flexmark.ast.Paragraph> out) {
+        if (n instanceof com.vladsch.flexmark.ast.Paragraph p) out.add(p);
+        for (Node c = n.getFirstChild(); c != null; c = c.getNext()) collectParagraphs(c, out);
+    }
+
+    private boolean isUnderCodeOrEnrichment(Node n) {
+        for (Node cur = n.getParent(); cur != null; cur = cur.getParent()) {
+            if (cur instanceof com.vladsch.flexmark.ast.FencedCodeBlock) return true;
+            if (cur instanceof com.vladsch.flexmark.ast.Code) return true;
+        }
+        return false;
+    }
+
+    private static final class ListCandidate {
+        final boolean isList; final boolean ordered; final java.util.List<String> items;
+        ListCandidate(boolean isList, boolean ordered, java.util.List<String> items) { this.isList = isList; this.ordered = ordered; this.items = items; }
+    }
+
+    private ListCandidate detectListCandidate(String raw) {
+        // Strict paragraph-scoped detection: identify consistent marker type and split
+        java.util.List<String> items = new java.util.ArrayList<>();
+        // 'ordered' local no longer needed; the returned ListCandidate carries ordering
+        // Try digit ordered: 1. 2. ...
+        java.util.List<Integer> starts = new java.util.ArrayList<>();
+        java.util.List<Integer> bounds = new java.util.ArrayList<>();
+        for (int i = 0; i < raw.length() - 1; i++) {
+            if (Character.isDigit(raw.charAt(i))) {
+                int j = i; while (j < raw.length() && Character.isDigit(raw.charAt(j))) j++;
+                if (j < raw.length() && (raw.charAt(j) == '.' || raw.charAt(j) == ')')) {
+                    int s = j + 1; while (s < raw.length() && raw.charAt(s) == ' ') s++;
+                    if (s < raw.length()) { starts.add(s); bounds.add(i); }
+                }
+                i = j;
+            }
+        }
+        if (starts.size() >= 2) {
+            for (int idx = 0; idx < starts.size(); idx++) {
+                int s = starts.get(idx);
+                int e = (idx + 1 < starts.size()) ? bounds.get(idx + 1) : raw.length();
+                String seg = raw.substring(s, e).trim();
+                if (!seg.isEmpty()) items.add(seg);
+            }
+            return new ListCandidate(true, true, items);
+        }
+        // Try bullets: -, *, +, •
+        starts.clear(); bounds.clear();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '-' || c == '*' || c == '+' || c == '•' || c == '→' || c == '▸') {
+                char prev = (i > 0) ? raw.charAt(i - 1) : ' ';
+                if (Character.isWhitespace(prev) || prev == ':' || prev == ';' || prev == ',' || prev == '.' || prev == '!' || prev == '?') {
+                    int s = i + 1; while (s < raw.length() && raw.charAt(s) == ' ') s++;
+                    if (s < raw.length()) { starts.add(s); bounds.add(i); }
+                }
+            }
+        }
+        if (starts.size() >= 2) {
+            for (int idx = 0; idx < starts.size(); idx++) {
+                int s = starts.get(idx);
+                int e = (idx + 1 < starts.size()) ? bounds.get(idx + 1) : raw.length();
+                String seg = raw.substring(s, e).trim();
+                if (!seg.isEmpty()) items.add(seg);
+            }
+            return new ListCandidate(true, false, items);
+        }
+        return new ListCandidate(false, false, java.util.List.of());
+    }
+
+    // === Enrichment rendering helpers ===
+    private String buildEnrichmentHtmlUnified(String type, String content) {
+        StringBuilder html = new StringBuilder();
+        html.append("<div class=\"inline-enrichment ").append(type).append("\" data-enrichment-type=\"").append(type).append("\">\n");
+        html.append("<div class=\"inline-enrichment-header\">");
+        html.append(getIconFor(type));
+        html.append("<span>").append(escapeHtml(getTitleFor(type))).append("</span>");
+        html.append("</div>\n");
+        html.append("<div class=\"enrichment-text\">\n");
+
+        // Parse the enrichment content through the same AST pipeline for consistent lists/code
+        String processed = processFragmentForEnrichment(content);
+        html.append(processed);
+
+        html.append("</div>\n");
+        html.append("</div>");
+        return html.toString();
+    }
+
+    private String processFragmentForEnrichment(String content) {
+        if (content == null || content.isEmpty()) return "";
+        try {
+            String normalized = preNormalizeForListsAndFences(content);
+            Node doc = parser.parse(normalized);
+            transformAst(doc);
+            String inner = renderer.render(doc);
+            // strip surrounding <p> if it’s the only wrapper
+            Document d = Jsoup.parseBodyFragment(inner);
+            d.outputSettings().prettyPrint(false);
+            return d.body().html();
+        } catch (Exception e) {
+            return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
+        }
+    }
+
+    // Normalize: preserve fences; convert "1) " to "1. " outside fences so Flexmark sees OLs
+    private String preNormalizeForListsAndFences(String md) {
+        if (md == null || md.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(md.length() + 64);
+        boolean inFence = false;
+        for (int i = 0; i < md.length();) {
+            if (i + 2 < md.length() && md.charAt(i) == '`' && md.charAt(i + 1) == '`' && md.charAt(i + 2) == '`') {
+                boolean opening = !inFence;
+                if (opening && out.length() > 0) {
+                    char prev = out.charAt(out.length() - 1);
+                    if (prev != '\n') out.append('\n').append('\n');
+                }
+                out.append("```");
+                i += 3;
+                while (i < md.length()) {
+                    char ch = md.charAt(i);
+                    if (Character.isLetterOrDigit(ch) || ch == '-' || ch == '_') { out.append(ch); i++; }
+                    else break;
+                }
+                if (i < md.length() && md.charAt(i) != '\n') { out.append('\n'); }
+                inFence = true;
+                continue;
+            }
+            if (inFence && i + 2 < md.length() && md.charAt(i) == '`' && md.charAt(i + 1) == '`' && md.charAt(i + 2) == '`') {
+                if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') { out.append('\n'); }
+                out.append("```");
+                i += 3;
+                inFence = false;
+                if (i < md.length() && md.charAt(i) != '\n') out.append('\n').append('\n');
+                continue;
+            }
+            out.append(md.charAt(i));
+            i++;
+        }
+        if (inFence) { out.append('\n').append("```"); }
+        // Second pass: indent blocks under numeric headers so following content
+        // (bullets/enrichments/code) stays inside the same list item until next header.
+        return indentBlocksUnderNumericHeaders(out.toString());
+    }
+
+    private String indentBlocksUnderNumericHeaders(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder out = new StringBuilder(text.length() + 64);
+        boolean inFence = false;
+        boolean inNumericHeader = false;
+        int i = 0; int n = text.length();
+        while (i < n) {
+            int lineStart = i;
+            while (i < n && text.charAt(i) != '\n') i++;
+            int lineEnd = i; // exclusive
+            String line = text.substring(lineStart, lineEnd);
+            String trimmed = line.stripLeading();
+            // fence toggle
+            if (trimmed.startsWith("```") && !trimmed.startsWith("````")) {
+                inFence = !inFence;
+            }
+            boolean isHeader = false;
+            if (!inFence) {
+                int j = 0;
+                while (j < trimmed.length() && Character.isDigit(trimmed.charAt(j))) j++;
+                if (j > 0 && j <= 3 && j < trimmed.length()) {
+                    char c = trimmed.charAt(j);
+                    if ((c == '.' || c == ')') && (j + 1 < trimmed.length()) && trimmed.charAt(j + 1) == ' ') {
+                        isHeader = true;
+                    }
+                }
+            }
+            if (isHeader) {
+                inNumericHeader = true;
+                out.append(line);
+            } else if (inNumericHeader) {
+                // indent non-header lines under the current numbered header
+                if (line.isEmpty()) {
+                    out.append("    ");
+                    out.append(line);
+                } else {
+                    // keep existing leading spaces but ensure at least 4
+                    out.append("    ");
+                    out.append(line);
+                }
+            } else {
+                out.append(line);
+            }
+            if (i < n) { out.append('\n'); i++; }
+            // Stop header scope if we hit two consecutive blank lines (common section break)
+            if (inNumericHeader && line.isEmpty()) {
+                // peek next line
+                int k = i; int m = k;
+                while (m < n && text.charAt(m) != '\n') m++;
+                String nextLine = text.substring(k, m);
+                if (nextLine.isEmpty()) inNumericHeader = false;
+            }
+        }
+        return out.toString();
     }
     
     /**
@@ -235,6 +629,14 @@ public class UnifiedMarkdownService {
                         if (!innerFence && j + 1 < markdown.length() && markdown.charAt(j) == '}' && markdown.charAt(j + 1) == '}') {
                             // Found the true end of this enrichment block
                             String content = markdown.substring(contentStart, j).trim();
+                            // If content is empty, drop this enrichment silently to avoid crashes
+                            if (content.isEmpty()) {
+                                int delta = (j + 2) - i;
+                                absolutePosition += delta;
+                                i = j + 2;
+                                foundEnd = true;
+                                break;
+                            }
                             MarkdownEnrichment enrichment = switch (type) {
                                 case "hint" -> Hint.create(content, absolutePosition + i);
                                 case "warning" -> Warning.create(content, absolutePosition + i);
@@ -246,7 +648,7 @@ public class UnifiedMarkdownService {
                             if (enrichment != null) {
                                 enrichments.add(enrichment);
                                 String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
-                                placeholders.put(placeholderId, buildEnrichmentHtml(type, content));
+                                placeholders.put(placeholderId, buildEnrichmentHtmlUnified(type, content));
                                 result.append(placeholderId);
                             } else {
                                 // Unknown type: copy through literally
@@ -289,6 +691,9 @@ public class UnifiedMarkdownService {
     /**
      * Builds HTML for an enrichment card.
      */
+    // Legacy enrichment builder is no longer used; kept for backward compatibility
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
     private String buildEnrichmentHtml(String type, String content) {
         StringBuilder html = new StringBuilder();
         html.append("<div class=\"inline-enrichment ").append(type).append("\" data-enrichment-type=\"").append(type).append("\">\n");
@@ -390,31 +795,16 @@ public class UnifiedMarkdownService {
             for (Element bq : doc.select("blockquote")) {
                 bq.addClass("markdown-quote");
             }
-            // Remove inline numeric citation markers like [1], [12] that the model emits in prose.
-            // Preserve anything inside anchors, code/pre, or our enrichment containers.
-            for (Element p : doc.select("p")) {
-                if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-                // Skip paragraphs that are actually part of links
-                if (!p.select("a").isEmpty()) continue;
-                // Replace bracketed numbers surrounded by boundaries
-                // We work on the element's text nodes only to avoid touching HTML structure
-                java.util.List<TextNode> textNodes = p.textNodes();
-                for (TextNode tn : textNodes) {
-                    String t = tn.getWholeText();
-                    if (t == null || t.isEmpty()) continue;
-                    String cleaned = t.replaceAll("(?<!\\w)\\[(?:[1-9]\\d{0,2})\\](?!\\w)", "").replace("  ", " ");
-                    if (!cleaned.equals(t)) tn.text(cleaned.trim());
-                }
-            }
-
-            // Remove orphan brace-only paragraphs '}' produced by partial enrichment/code normalization
+            // Remove orphan brace-only paragraphs left by fragmented generations
             for (Element p : new java.util.ArrayList<>(doc.select("p"))) {
                 if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-                String txt = p.text();
-                if (txt != null && txt.trim().equals("}")) {
-                    p.remove();
+                String t = p.text();
+                if (t != null) {
+                    String tt = t.trim();
+                    if (tt.equals("{") || tt.equals("}")) p.remove();
                 }
             }
+            // HTML-side list/citation fixes removed in favor of AST-level transforms
 
             // Spacing and readability fixes for punctuation and long paragraphs
             fixSentenceSpacing(doc);
@@ -431,6 +821,8 @@ public class UnifiedMarkdownService {
      * Converts paragraphs containing inline list markers into proper UL/OL blocks.
      * Safe DOM approach; requires 2+ markers and never runs inside pre/code.
      */
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
     private String renderInlineLists(String html) {
         try {
             Document doc = Jsoup.parseBodyFragment(html);
@@ -737,6 +1129,8 @@ public class UnifiedMarkdownService {
     }
 
     // === Pre-normalization and paragraph utilities (no regex) ===
+    @Deprecated(since = "1.0")
+    @SuppressWarnings("unused")
     private String preNormalizeMarkdown(String md) {
         if (md == null || md.isEmpty()) return "";
         StringBuilder out = new StringBuilder(md.length() + 64);

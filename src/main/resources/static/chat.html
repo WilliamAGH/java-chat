@@ -82,6 +82,8 @@
                         id="q" 
                         class="input" 
                         placeholder="Ask about Java - try 'What are records?' or 'Explain pattern matching'"
+                        data-placeholder-long="Ask about Java - try 'What are records?' or 'Explain pattern matching'"
+                        data-placeholder-short="Ask about Java (e.g., records, pattern matching)"
                         aria-label="Enter your Java question"
                         autocomplete="off"
                         onkeypress="if(event.key==='Enter') ask()"
@@ -840,6 +842,23 @@
             }
             // Show dev diagnostics on localhost
             showDevDiagnosticsIfLocal();
+            
+            const input = document.getElementById('q');
+            // Responsive placeholder swap
+            function applyResponsivePlaceholder(){
+                if (!input) return;
+                const w = window.innerWidth || document.documentElement.clientWidth;
+                const longPh = input.getAttribute('data-placeholder-long') || input.placeholder;
+                const shortPh = input.getAttribute('data-placeholder-short') || longPh;
+                input.placeholder = (w <= 420) ? shortPh : longPh;
+            }
+            applyResponsivePlaceholder();
+            window.addEventListener('resize', applyResponsivePlaceholder);
+            input.focus();
+            document.addEventListener('keydown', (e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus(); input.select(); }
+                if (e.key === 'Escape' && document.activeElement === input) { input.value = ''; }
+            });
         });
         
         async function copyChat() {
@@ -942,6 +961,16 @@
             showDevDiagnosticsIfLocal();
             
             const input = document.getElementById('q');
+            // Responsive placeholder swap
+            function applyResponsivePlaceholder(){
+                if (!input) return;
+                const w = window.innerWidth || document.documentElement.clientWidth;
+                const longPh = input.getAttribute('data-placeholder-long') || input.placeholder;
+                const shortPh = input.getAttribute('data-placeholder-short') || longPh;
+                input.placeholder = (w <= 420) ? shortPh : longPh;
+            }
+            applyResponsivePlaceholder();
+            window.addEventListener('resize', applyResponsivePlaceholder);
             input.focus();
             document.addEventListener('keydown', (e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus(); input.select(); }
