@@ -111,18 +111,23 @@ public class ChatController extends BaseController {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestId);
             
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
+            // Use .share() to hot-share the stream and prevent double API subscription
             Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
+                    .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .doOnNext(chunk -> {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
                     })
-                    .filter(chunk -> chunk != null && !chunk.isEmpty())
-                    .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+                    .onBackpressureLatest()  // Handle backpressure to prevent memory buildup
+                    .share();  // Hot-share to prevent double subscription causing duplicate API calls
+
+            // Extract completion signal from the shared stream
+            Mono<String> completion = dataStream.ignoreElements().onErrorResume(e -> Mono.empty());
 
             // Heartbeats should stop when the data stream completes to allow the SSE connection
             // to close cleanly. Otherwise, an infinite heartbeat Flux would keep the stream open.
             Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
+                    .takeUntilOther(completion)
                     .map(i -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
             Flux<ServerSentEvent<String>> dataEvents = dataStream
