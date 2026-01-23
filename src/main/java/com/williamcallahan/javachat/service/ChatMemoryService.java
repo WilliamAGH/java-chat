@@ -27,20 +27,38 @@ public class ChatMemoryService {
     private final ConcurrentMap<String, List<ChatTurn>> sessionToTurns =
         new ConcurrentHashMap<>();
 
+    /**
+     * Returns a thread-safe snapshot of the history for the given session.
+     * Callers receive an independent copy that can be safely iterated without synchronization.
+     */
     public List<Message> getHistory(String sessionId) {
+        List<Message> history = sessionToMessages.computeIfAbsent(sessionId, k ->
+            Collections.synchronizedList(new ArrayList<>())
+        );
+        // Return a snapshot to avoid ConcurrentModificationException during iteration
+        synchronized (history) {
+            return new ArrayList<>(history);
+        }
+    }
+
+    /**
+     * Returns the internal synchronized list for direct modification.
+     * Use with care - prefer addUser/addAssistant for adding messages.
+     */
+    List<Message> getHistoryInternal(String sessionId) {
         return sessionToMessages.computeIfAbsent(sessionId, k ->
             Collections.synchronizedList(new ArrayList<>())
         );
     }
 
     public void addUser(String sessionId, String text) {
-        getHistory(sessionId).add(new UserMessage(text));
-        getTurns(sessionId).add(new ChatTurn("user", text));
+        getHistoryInternal(sessionId).add(new UserMessage(text));
+        getTurnsInternal(sessionId).add(new ChatTurn("user", text));
     }
 
     public void addAssistant(String sessionId, String text) {
-        getHistory(sessionId).add(new AssistantMessage(text));
-        getTurns(sessionId).add(new ChatTurn("assistant", text));
+        getHistoryInternal(sessionId).add(new AssistantMessage(text));
+        getTurnsInternal(sessionId).add(new ChatTurn("assistant", text));
     }
 
     public void clear(String sessionId) {
@@ -48,7 +66,22 @@ public class ChatMemoryService {
         sessionToTurns.remove(sessionId);
     }
 
+    /**
+     * Returns a thread-safe snapshot of the turns for the given session.
+     */
     public List<ChatTurn> getTurns(String sessionId) {
+        List<ChatTurn> turns = sessionToTurns.computeIfAbsent(sessionId, k ->
+            Collections.synchronizedList(new ArrayList<>())
+        );
+        synchronized (turns) {
+            return new ArrayList<>(turns);
+        }
+    }
+
+    /**
+     * Returns the internal synchronized list for direct modification.
+     */
+    List<ChatTurn> getTurnsInternal(String sessionId) {
         return sessionToTurns.computeIfAbsent(sessionId, k ->
             Collections.synchronizedList(new ArrayList<>())
         );
