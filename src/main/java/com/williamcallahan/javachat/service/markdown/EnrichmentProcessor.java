@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -45,7 +44,7 @@ public class EnrichmentProcessor {
         EnrichmentVisitor visitor = new EnrichmentVisitor();
         visitor.visit(document);
 
-        List<MarkdownEnrichment> enrichments = visitor.getEnrichments();
+        List<MarkdownEnrichment> enrichments = visitor.enrichments();
         logger.debug("Extracted {} enrichments using AST processing", enrichments.size());
 
         return enrichments;
@@ -57,7 +56,6 @@ public class EnrichmentProcessor {
      */
     private static class EnrichmentVisitor {
         private final List<MarkdownEnrichment> enrichments = new ArrayList<>();
-        private final List<ProcessingWarning> warnings = new ArrayList<>();
         private int position = 0;
         
         private final NodeVisitor visitor = new NodeVisitor(
@@ -65,17 +63,12 @@ public class EnrichmentProcessor {
             new VisitHandler<>(HtmlBlock.class, this::visitHtmlBlock)
         );
         
-        public void visit(Node node) {
+        void visit(Node node) {
             visitor.visit(node);
         }
         
-        public List<MarkdownEnrichment> getEnrichments() {
+        List<MarkdownEnrichment> enrichments() {
             return List.copyOf(enrichments);
-        }
-        
-        @SuppressWarnings("unused") // Will be used in future iterations for warning reporting
-        public List<ProcessingWarning> getWarnings() {
-            return List.copyOf(warnings);
         }
         
         /**
@@ -112,11 +105,6 @@ public class EnrichmentProcessor {
                 String enrichmentContent = matcher.group(2);
                 
                 if (enrichmentContent == null || enrichmentContent.trim().isEmpty()) {
-                    warnings.add(ProcessingWarning.create(
-                        "Empty enrichment content for type: " + type,
-                        ProcessingWarning.WarningType.MALFORMED_ENRICHMENT,
-                        position + matcher.start()
-                    ));
                     continue;
                 }
                 
@@ -124,12 +112,6 @@ public class EnrichmentProcessor {
                 if (enrichment != null) {
                     enrichments.add(enrichment);
                     logger.debug("Found {} enrichment at position {}", type, position + matcher.start());
-                } else {
-                    warnings.add(ProcessingWarning.create(
-                        "Unknown enrichment type: " + type,
-                        ProcessingWarning.WarningType.UNKNOWN_ENRICHMENT_TYPE,
-                        position + matcher.start()
-                    ));
                 }
             }
         }

@@ -35,7 +35,7 @@ public class CitationProcessor {
         CitationVisitor visitor = new CitationVisitor();
         visitor.visit(document);
         
-        List<MarkdownCitation> citations = visitor.getCitations();
+        List<MarkdownCitation> citations = visitor.citations();
         logger.debug("Extracted {} citations using AST processing", citations.size());
         
         return citations;
@@ -54,11 +54,11 @@ public class CitationProcessor {
             new VisitHandler<>(Text.class, this::visitText)
         );
         
-        public void visit(Node node) {
+        void visit(Node node) {
             visitor.visit(node);
         }
         
-        public List<MarkdownCitation> getCitations() {
+        List<MarkdownCitation> citations() {
             return List.copyOf(citations);
         }
         
