@@ -16,9 +16,15 @@
   // Render markdown when content changes
   $effect(() => {
     if (message.role === 'assistant' && message.content) {
-      renderMarkdown(message.content).then(html => {
-        renderedContent = html
-      })
+      renderMarkdown(message.content)
+        .then(html => {
+          renderedContent = html
+        })
+        .catch(error => {
+          console.error('Markdown rendering failed:', error)
+          // Fall back to empty content on render failure
+          renderedContent = ''
+        })
     }
   })
 
