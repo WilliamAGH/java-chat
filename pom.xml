@@ -219,11 +219,11 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Align all gRPC libs to 1.68.1 to include BackoffPolicyRetryScheduler -->
+            <!-- Align all gRPC libs to 1.75.0 to include BackoffPolicyRetryScheduler -->
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-bom</artifactId>
-                <version>1.68.1</version>
+                <version>1.75.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
