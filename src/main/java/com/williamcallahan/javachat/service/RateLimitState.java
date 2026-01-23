@@ -31,6 +31,7 @@ public class RateLimitState {
 
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final Object saveLock = new Object();
 
     private Map<String, ProviderState> providerStates = new ConcurrentHashMap<>();
 
@@ -214,16 +215,18 @@ public class RateLimitState {
     }
 
     private void saveState() throws IOException {
-        File file = new File(STATE_FILE);
-        if (file.getParentFile() != null) {
-            file.getParentFile().mkdirs();
+        synchronized (saveLock) {
+            File file = new File(STATE_FILE);
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
+            }
+
+            StateData data = new StateData();
+            data.providers = new ConcurrentHashMap<>(providerStates);
+            data.savedAt = Instant.now();
+
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
         }
-
-        StateData data = new StateData();
-        data.providers = new ConcurrentHashMap<>(providerStates);
-        data.savedAt = Instant.now();
-
-        objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
     }
 
     private String formatDuration(Duration duration) {
