@@ -160,13 +160,18 @@
     color: var(--color-error);
   }
 
+  /* Shared text wrapping for long unbroken strings (URLs, code identifiers) */
+  .user-text,
+  .assistant-content {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
   /* User text */
   .user-text {
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
     margin: 0;
-    overflow-wrap: break-word;
-    word-break: break-word;
   }
 
   /* Assistant content - prose styles */
@@ -174,8 +179,6 @@
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
     color: var(--color-text-primary);
-    overflow-wrap: break-word;
-    word-break: break-word;
   }
 
   .assistant-content :global(p) {
