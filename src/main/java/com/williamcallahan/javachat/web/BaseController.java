@@ -12,6 +12,9 @@ public abstract class BaseController {
 
     protected final ExceptionResponseBuilder exceptionBuilder;
 
+    /**
+     * Creates a base controller wired to the shared exception response builder.
+     */
     protected BaseController(ExceptionResponseBuilder exceptionBuilder) {
         this.exceptionBuilder = exceptionBuilder;
     }

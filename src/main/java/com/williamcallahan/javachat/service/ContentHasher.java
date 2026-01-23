@@ -6,6 +6,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+/**
+ * Computes stable hashes for content and chunk metadata.
+ */
 @Component
 public class ContentHasher {
 
@@ -17,11 +20,13 @@ public class ContentHasher {
      */
     public String sha256(String text) {
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) sb.append(String.format("%02x", b));
-            return sb.toString();
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = messageDigest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hashBuilder = new StringBuilder();
+            for (byte hashByte : hash) {
+                hashBuilder.append(String.format("%02x", hashByte));
+            }
+            return hashBuilder.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
@@ -41,5 +46,4 @@ public class ContentHasher {
         return sha256(hashInput);
     }
 }
-
 

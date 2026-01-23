@@ -30,24 +30,30 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     private final int dimensionsHint;       // used only as a hint; actual vector size comes from response
     private final RestTemplate restTemplate;
 
-    private record EmbeddingRequestPayload(String model, String input) {
-    }
+	private record EmbeddingRequestPayload(String model, String input) {
+	}
 
-    private static final class EmbeddingApiResponseException extends IllegalStateException {
-        private EmbeddingApiResponseException(String message, Exception cause) {
-            super(message, cause);
-        }
+	/**
+	 * Wraps remote embedding API failures as a runtime exception with concise context.
+	 */
+	private static final class EmbeddingApiResponseException extends IllegalStateException {
+		private EmbeddingApiResponseException(String message, Exception cause) {
+			super(message, cause);
+		}
 
         private EmbeddingApiResponseException(String message) {
-            super(message);
-        }
-    }
+			super(message);
+		}
+	}
 
-    public OpenAiCompatibleEmbeddingModel(String baseUrl,
-                                          String apiKey,
-                                          String modelName,
-                                          int dimensionsHint,
-                                          RestTemplateBuilder restTemplateBuilder) {
+	/**
+	 * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
+	 */
+	public OpenAiCompatibleEmbeddingModel(String baseUrl,
+	                                          String apiKey,
+	                                          String modelName,
+	                                          int dimensionsHint,
+	                                          RestTemplateBuilder restTemplateBuilder) {
         this.baseUrl = baseUrl != null && baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.modelName = modelName;

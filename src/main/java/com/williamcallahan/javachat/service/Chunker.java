@@ -10,15 +10,24 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Splits text into token-aware chunks using the shared encoding registry.
+ */
 @Component
 public class Chunker {
     private final Encoding encoding;
 
+    /**
+     * Initializes the tokenizer with the default CL100K encoding for consistent chunk sizes.
+     */
     public Chunker() {
         EncodingRegistry registry = Encodings.newDefaultEncodingRegistry();
         this.encoding = registry.getEncoding(EncodingType.CL100K_BASE);
     }
 
+    /**
+     * Splits text into fixed-size token windows with optional overlap.
+     */
     public List<String> chunkByTokens(String text, int maxTokens, int overlapTokens) {
         IntArrayList tokens = encoding.encode(text);
         List<String> chunks = new ArrayList<>();
@@ -26,8 +35,8 @@ public class Chunker {
         while (start < tokens.size()) {
             int end = Math.min(start + maxTokens, tokens.size());
             IntArrayList window = new IntArrayList();
-            for (int i = start; i < end; i++) {
-                window.add(tokens.get(i));
+            for (int tokenIndex = start; tokenIndex < end; tokenIndex++) {
+                window.add(tokens.get(tokenIndex));
             }
             String decoded = encoding.decode(window);
             chunks.add(decoded);
@@ -37,5 +46,4 @@ public class Chunker {
         return chunks;
     }
 }
-
 

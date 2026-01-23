@@ -28,14 +28,14 @@ public class GuidedTOCProvider {
     public synchronized List<GuidedLesson> getTOC() {
         if (!cache.isEmpty()) return cache;
         try {
-            ClassPathResource res = new ClassPathResource("guided/toc.json");
-            try (InputStream in = res.getInputStream()) {
+            ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
+            try (InputStream tocStream = tocResource.getInputStream()) {
                 List<GuidedLesson> loadedLessons =
-                    mapper.readValue(in, new TypeReference<List<GuidedLesson>>() {});
+                    mapper.readValue(tocStream, new TypeReference<List<GuidedLesson>>() {});
                 cache = List.copyOf(loadedLessons);
             }
-        } catch (Exception e) {
-            log.warn("Failed to load guided TOC (exceptionType={})", e.getClass().getName());
+        } catch (Exception exception) {
+            log.warn("Failed to load guided TOC (exceptionType={})", exception.getClass().getName());
             cache = Collections.emptyList();
         }
         return cache;
@@ -46,6 +46,6 @@ public class GuidedTOCProvider {
      */
     public Optional<GuidedLesson> findBySlug(String slug) {
         if (slug == null || slug.isBlank()) return Optional.empty();
-        return getTOC().stream().filter(l -> slug.equalsIgnoreCase(l.getSlug())).findFirst();
+        return getTOC().stream().filter(lesson -> slug.equalsIgnoreCase(lesson.getSlug())).findFirst();
     }
 }

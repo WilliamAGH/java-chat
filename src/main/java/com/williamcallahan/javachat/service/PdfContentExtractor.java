@@ -10,6 +10,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 
+/**
+ * Extracts text and basic metadata from PDF documents using Apache PDFBox.
+ */
 @Service
 public class PdfContentExtractor {
     private static final Logger log = LoggerFactory.getLogger(PdfContentExtractor.class);

@@ -33,6 +33,9 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
     private volatile long lastSecondaryCheck = 0;
     private static final long CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minute
 
+    /**
+     * Creates a model with primary, secondary, and hash-based fallback options.
+     */
     public GracefulEmbeddingModel(
         EmbeddingModel primaryModel,
         EmbeddingModel secondaryModel,
@@ -45,7 +48,9 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         this.enableHashFallback = enableHashFallback;
     }
 
-    // Constructor for single fallback (primary + hashing)
+    /**
+     * Creates a model with a primary model and hash-based fallback only.
+     */
     public GracefulEmbeddingModel(
         EmbeddingModel primaryModel,
         EmbeddingModel hashingModel,
@@ -54,6 +59,9 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         this(primaryModel, null, hashingModel, enableHashFallback);
     }
 
+    /**
+     * Executes an embedding request with fallback behavior and circuit breaking.
+     */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
         // Try primary model first
@@ -69,10 +77,10 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     }
                     return response;
                 }
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 log.warn(
                     "[EMBEDDING] Primary embedding service failed: {}",
-                    e.getMessage()
+                    exception.getMessage()
                 );
                 primaryAvailable = false;
                 lastPrimaryCheck = System.currentTimeMillis();
@@ -96,10 +104,10 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     }
                     return response;
                 }
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 log.warn(
                     "[EMBEDDING] Secondary embedding service failed: {}",
-                    e.getMessage()
+                    exception.getMessage()
                 );
                 secondaryAvailable = false;
                 lastSecondaryCheck = System.currentTimeMillis();
@@ -113,10 +121,10 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     "[EMBEDDING] Using hash-based fallback embeddings (limited semantic meaning)"
                 );
                 return hashingModel.call(request);
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 log.error(
                     "[EMBEDDING] Hash-based fallback failed: {}",
-                    e.getMessage()
+                    exception.getMessage()
                 );
             }
         }
@@ -144,15 +152,18 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         );
     }
 
+    /**
+     * Returns the embedding dimensions of the first available model.
+     */
     @Override
     public int dimensions() {
         if (primaryModel != null) {
             try {
                 return primaryModel.dimensions();
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 log.debug(
                     "[EMBEDDING] Could not get dimensions from primary model: {}",
-                    e.getMessage()
+                    exception.getMessage()
                 );
             }
         }
@@ -160,10 +171,10 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         if (secondaryModel != null) {
             try {
                 return secondaryModel.dimensions();
-            } catch (Exception e) {
+            } catch (Exception exception) {
                 log.debug(
                     "[EMBEDDING] Could not get dimensions from secondary model: {}",
-                    e.getMessage()
+                    exception.getMessage()
                 );
             }
         }
@@ -210,6 +221,9 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         extends RuntimeException
     {
 
+        /**
+         * Creates an exception that signals all embedding backends are unavailable.
+         */
         public EmbeddingServiceUnavailableException(String message) {
             super(message);
         }

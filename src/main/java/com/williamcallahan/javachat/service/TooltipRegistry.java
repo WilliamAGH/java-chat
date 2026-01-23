@@ -3,16 +3,29 @@ package com.williamcallahan.javachat.service;
 import org.springframework.stereotype.Component;
 import java.util.*;
 
+/**
+ * Provides a curated glossary of Java terms for UI tooltips.
+ */
 @Component
 public class TooltipRegistry {
+
+    /**
+     * Defines a tooltip entry with a term, short definition, and optional reference link.
+     */
     public static class TooltipDefinition {
         private final String term;
         private final String definition;
         private final String link;
 
+        /**
+         * Creates a tooltip definition suitable for JSON serialization.
+         */
         public TooltipDefinition(String term, String definition, String link) {
-            this.term = term; this.definition = definition; this.link = link;
+            this.term = term;
+            this.definition = definition;
+            this.link = link;
         }
+
         public String getTerm() { return term; }
         public String getDefinition() { return definition; }
         public String getLink() { return link; }
@@ -20,6 +33,9 @@ public class TooltipRegistry {
 
     private final Map<String, TooltipDefinition> glossary = new LinkedHashMap<>();
 
+    /**
+     * Seeds the glossary with common Java terms used across the learning UI.
+     */
     public TooltipRegistry() {
         // Seed with top Java terms (expand as needed)
         add("primitive", "A basic value type like int, double, boolean stored directly (not an object).", "https://docs.oracle.com/javase/tutorial/java/nutsandbolts/datatypes.html");
@@ -32,12 +48,14 @@ public class TooltipRegistry {
         add("optional", "A container object which may or may not contain a non-null value, used to avoid null checks.", "https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html");
     }
 
-    private void add(String term, String def, String link) {
-        glossary.put(term.toLowerCase(Locale.ROOT), new TooltipDefinition(term, def, link));
+    private void add(String term, String definition, String link) {
+        glossary.put(term.toLowerCase(Locale.ROOT), new TooltipDefinition(term, definition, link));
     }
 
+    /**
+     * Returns the current tooltip definitions in insertion order.
+     */
     public List<TooltipDefinition> list() {
         return new ArrayList<>(glossary.values());
     }
 }
-
