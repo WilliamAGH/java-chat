@@ -6,16 +6,53 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+/**
+ * Security configuration for API endpoints and static resources.
+ *
+ * <p>Configures CORS at the Spring Security filter chain level to ensure
+ * preflight OPTIONS requests are handled before authentication filters.
+ */
 @Configuration
 public class SecurityConfig {
 
-    // Permit all Actuator endpoints (health, info, metrics) — dev-friendly defaults
+    private final AppProperties appProperties;
+
+    public SecurityConfig(AppProperties appProperties) {
+        this.appProperties = appProperties;
+    }
+
+    /**
+     * CORS configuration source for Spring Security filter chain integration.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        var cors = appProperties.getCors();
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(cors.getAllowedOrigins());
+        config.setAllowedMethods(cors.getAllowedMethods());
+        config.setAllowedHeaders(cors.getAllowedHeaders());
+        config.setAllowCredentials(cors.isAllowCredentials());
+        config.setMaxAge(cors.getMaxAgeSeconds());
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
+    }
+
+    /**
+     * Permit all Actuator endpoints (health, info, metrics) with dev-friendly defaults.
+     */
     @Bean
     @Order(0)
-    public SecurityFilterChain managementSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain managementSecurityFilterChain(HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
             .securityMatcher(EndpointRequest.toAnyEndpoint())
+            .cors(c -> c.configurationSource(corsConfigurationSource))
             .authorizeHttpRequests(auth -> auth
                 .anyRequest().permitAll()
             )
@@ -27,20 +64,25 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // Permit all application endpoints; CSRF disabled for stateless APIs
+    /**
+     * Permit all application endpoints; CSRF disabled for stateless APIs.
+     */
     @Bean
     @Order(1)
-    public SecurityFilterChain appSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain appSecurityFilterChain(HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
+            .cors(c -> c.configurationSource(corsConfigurationSource))
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
-                    "/", 
-                    "/index.html", 
+                    "/",
+                    "/index.html",
                     "/chat.html",
                     "/guided.html",
-                    "/favicon.ico", 
-                    "/assets/**", 
+                    "/favicon.ico",
+                    "/app/**",
+                    "/assets/**",
                     "/static/**"
                 ).permitAll()
                 .requestMatchers("/api/**").permitAll()

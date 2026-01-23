@@ -1,18 +1,21 @@
 package com.williamcallahan.javachat.config;
 
+import java.util.List;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 @Component
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
-    
+
     private Rag rag = new Rag();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
     private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private Docs docs = new Docs();
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
+    private Cors cors = new Cors();
     
     public Rag getRag() {
         return rag;
@@ -44,6 +47,8 @@ public class AppProperties {
     public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
     public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
     public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = remoteEmbedding; }
+    public Cors getCors() { return cors; }
+    public void setCors(Cors cors) { this.cors = cors; }
     
     public static class Rag {
         private int searchTopK = 10;
@@ -182,5 +187,27 @@ public class AppProperties {
 
         public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
         public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
+    }
+
+    /**
+     * CORS configuration for cross-origin requests from frontend dev servers.
+     */
+    public static class Cors {
+        private List<String> allowedOrigins = List.of("http://localhost:8085", "http://127.0.0.1:8085");
+        private List<String> allowedMethods = List.of("GET", "POST", "PUT", "DELETE", "OPTIONS");
+        private List<String> allowedHeaders = List.of("*");
+        private boolean allowCredentials = true;
+        private long maxAgeSeconds = 3600;
+
+        public List<String> getAllowedOrigins() { return allowedOrigins; }
+        public void setAllowedOrigins(List<String> allowedOrigins) { this.allowedOrigins = allowedOrigins; }
+        public List<String> getAllowedMethods() { return allowedMethods; }
+        public void setAllowedMethods(List<String> allowedMethods) { this.allowedMethods = allowedMethods; }
+        public List<String> getAllowedHeaders() { return allowedHeaders; }
+        public void setAllowedHeaders(List<String> allowedHeaders) { this.allowedHeaders = allowedHeaders; }
+        public boolean isAllowCredentials() { return allowCredentials; }
+        public void setAllowCredentials(boolean allowCredentials) { this.allowCredentials = allowCredentials; }
+        public long getMaxAgeSeconds() { return maxAgeSeconds; }
+        public void setMaxAgeSeconds(long maxAgeSeconds) { this.maxAgeSeconds = maxAgeSeconds; }
     }
 }
