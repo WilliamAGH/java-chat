@@ -73,10 +73,16 @@ public class RateLimitManager {
             this.typicalRateLimitWindow = typicalRateLimitWindow;
         }
 
+        /**
+         * Returns the provider identifier used for persistence keys and logging.
+         */
         public String getName() {
             return name;
         }
 
+        /**
+         * Returns the typical rate-limit window description for the provider.
+         */
         public String getTypicalRateLimitWindow() {
             return typicalRateLimitWindow;
         }
@@ -175,8 +181,8 @@ public class RateLimitManager {
         };
     }
 
-    private boolean hasText(String s) {
-        return s != null && !s.trim().isEmpty();
+    private boolean hasText(String valueText) {
+        return valueText != null && !valueText.trim().isEmpty();
     }
 
     /**
@@ -203,7 +209,7 @@ public class RateLimitManager {
         // Then check in-memory circuit breaker state
         ApiEndpointState state = endpointStates.computeIfAbsent(
             provider.getName(),
-            k -> new ApiEndpointState()
+            providerKey -> new ApiEndpointState()
         );
 
         if (!state.isAvailable()) {
@@ -226,7 +232,7 @@ public class RateLimitManager {
         // Update both in-memory and persistent state
         ApiEndpointState state = endpointStates.computeIfAbsent(
             provider.getName(),
-            k -> new ApiEndpointState()
+            providerKey -> new ApiEndpointState()
         );
         state.recordSuccess();
         rateLimitState.recordSuccess(provider.getName());
@@ -256,7 +262,7 @@ public class RateLimitManager {
         // Update in-memory state
         ApiEndpointState state = endpointStates.computeIfAbsent(
             provider.getName(),
-            k -> new ApiEndpointState()
+            providerKey -> new ApiEndpointState()
         );
         state.recordRateLimit(retryAfterSeconds);
 
@@ -320,10 +326,10 @@ public class RateLimitManager {
         }
         try {
             return Instant.ofEpochSecond(Long.parseLong(resetHeader));
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException exception) {
             try {
                 return Instant.parse(resetHeader);
-            } catch (DateTimeParseException ex) {
+            } catch (DateTimeParseException parseException) {
                 log.debug("Could not parse rate limit reset header");
                 return null;
             }
@@ -339,7 +345,7 @@ public class RateLimitManager {
         }
         try {
             return Long.parseLong(retryAfter);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException exception) {
             log.debug("Could not parse Retry-After header");
             return 0;
         }
@@ -363,7 +369,7 @@ public class RateLimitManager {
         // Update in-memory circuit breaker state
         ApiEndpointState state = endpointStates.computeIfAbsent(
             provider.getName(),
-            k -> new ApiEndpointState()
+            providerKey -> new ApiEndpointState()
         );
         long secondsUntilReset = Math.max(
             0,

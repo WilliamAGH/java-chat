@@ -15,6 +15,9 @@ import jakarta.validation.constraints.Min;
 import java.io.IOException;
 import java.util.Map;
 
+/**
+ * Exposes ingestion endpoints for crawling remote docs and ingesting local directories.
+ */
 @RestController
 @RequestMapping("/api/ingest")
 public class IngestionController extends BaseController {
@@ -23,11 +26,17 @@ public class IngestionController extends BaseController {
 
     private final DocsIngestionService docsIngestionService;
 
+    /**
+     * Creates the ingestion controller backed by the ingestion service and shared error response builder.
+     */
     public IngestionController(DocsIngestionService docsIngestionService, ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.docsIngestionService = docsIngestionService;
     }
 
+    /**
+     * Starts an ingestion run that crawls and ingests up to the requested number of pages.
+     */
     @PostMapping
     public ResponseEntity<Map<String, Object>> ingest(
             @RequestParam(name = "maxPages", defaultValue = "100") 
@@ -50,16 +59,19 @@ public class IngestionController extends BaseController {
         }
     }
     
+    /**
+     * Ingests documents from a local directory, primarily for offline or development workflows.
+     */
     @PostMapping("/local")
     public ResponseEntity<Map<String, Object>> ingestLocal(
-            @RequestParam(name = "dir", defaultValue = "data/docs") String dir,
+            @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000")
             @Min(1) @Max(1000000) int maxFiles) {
         try {
-            int processed = docsIngestionService.ingestLocalDirectory(dir, maxFiles);
+            int processed = docsIngestionService.ingestLocalDirectory(directory, maxFiles);
             return createSuccessResponse(Map.of(
                     "processed", processed,
-                    "dir", dir
+                    "dir", directory
             ));
         } catch (IllegalArgumentException e) {
             return handleValidationException(e);
@@ -69,13 +81,14 @@ public class IngestionController extends BaseController {
         }
     }
     
+    /**
+     * Returns a standardized validation error response for invalid ingestion request parameters.
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleValidationException(IllegalArgumentException e) {
         return super.handleValidationException(e);
     }
 }
-
-
 
 
 

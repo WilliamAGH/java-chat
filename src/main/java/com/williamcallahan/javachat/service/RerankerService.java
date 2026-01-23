@@ -64,8 +64,8 @@ public class RerankerService {
 
             log.debug("Successfully reranked {} documents", reordered.size());
             return limitDocs(reordered, returnK);
-        } catch (Exception e) {
-            log.error("Reranking failed, using original document order", e);
+        } catch (Exception exception) {
+            log.error("Reranking failed, using original document order", exception);
             return limitDocs(docs, returnK);
         }
     }
@@ -89,10 +89,10 @@ public class RerankerService {
         return openAIStreamingService
             .complete(prompt, 0.0)
             .timeout(java.time.Duration.ofSeconds(4))
-            .onErrorResume(e -> {
+            .onErrorResume(error -> {
                 log.debug(
                     "Reranker LLM call short-circuited: {}",
-                    e.toString()
+                    error.toString()
                 );
                 return reactor.core.publisher.Mono.empty();
             })
@@ -119,17 +119,17 @@ public class RerankerService {
         );
         prompt.append("Query: ").append(query).append("\n\n");
 
-        for (int i = 0; i < docs.size(); i++) {
-            Document d = docs.get(i);
+        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
+            Document document = docs.get(docIndex);
             prompt
                 .append("[")
-                .append(i)
+                .append(docIndex)
                 .append("] ")
-                .append(d.getMetadata().get("title"))
+                .append(document.getMetadata().get("title"))
                 .append(" | ")
-                .append(d.getMetadata().get("url"))
+                .append(document.getMetadata().get("url"))
                 .append("\n")
-                .append(trim(d.getText(), 500))
+                .append(trim(document.getText(), 500))
                 .append("\n\n");
         }
 
@@ -148,10 +148,10 @@ public class RerankerService {
 
         List<Document> reordered = new ArrayList<>();
         if (root.has("order") && root.get("order").isArray()) {
-            for (JsonNode n : root.get("order")) {
-                int idx = n.asInt();
-                if (idx >= 0 && idx < docs.size()) {
-                    reordered.add(docs.get(idx));
+            for (JsonNode orderNode : root.get("order")) {
+                int documentIndex = orderNode.asInt();
+                if (documentIndex >= 0 && documentIndex < docs.size()) {
+                    reordered.add(docs.get(documentIndex));
                 }
             }
         }
@@ -192,8 +192,8 @@ public class RerankerService {
         return docs.subList(0, Math.min(returnK, docs.size()));
     }
 
-    private String trim(String s, int len) {
-        return s.length() <= len ? s : s.substring(0, len) + "…";
+    private String trim(String text, int maxLength) {
+        return text.length() <= maxLength ? text : text.substring(0, maxLength) + "…";
     }
 
     /**

@@ -28,16 +28,19 @@ public class SeoController {
     private final SiteUrlResolver siteUrlResolver;
     private final Map<String, PageMetadata> metadataMap = new ConcurrentHashMap<>();
 
-    // Cache the parsed document to avoid re-reading files, but clone it per request to modify
-    private Document cachedIndexDocument;
+	    // Cache the parsed document to avoid re-reading files, but clone it per request to modify
+	    private Document cachedIndexDocument;
 
-    public SeoController(
-            @Value("classpath:/static/index.html") Resource indexHtml,
-            SiteUrlResolver siteUrlResolver) {
-        this.indexHtml = indexHtml;
-        this.siteUrlResolver = siteUrlResolver;
-        initMetadata();
-    }
+	    /**
+	     * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
+	     */
+	    public SeoController(
+	            @Value("classpath:/static/index.html") Resource indexHtml,
+	            SiteUrlResolver siteUrlResolver) {
+	        this.indexHtml = indexHtml;
+	        this.siteUrlResolver = siteUrlResolver;
+	        initMetadata();
+	    }
 
     private void initMetadata() {
         String defaultImage = "/mstile-310x310.png";
@@ -60,14 +63,17 @@ public class SeoController {
                 "Structured, step-by-step Java learning paths with examples and explanations.",
                 defaultImage
         );
-        metadataMap.put("/guided", guided);
-        metadataMap.put("/learn", guided);
-    }
+	        metadataMap.put("/guided", guided);
+	        metadataMap.put("/learn", guided);
+	    }
 
-    @GetMapping(value = {"/", "/chat", "/guided", "/learn"}, produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> serveIndexWithSeo(HttpServletRequest request) {
-        try {
-            Document doc = getIndexDocument();
+	    /**
+	     * Serves the SPA index.html with path-specific SEO metadata for crawlers and social previews.
+	     */
+	    @GetMapping(value = {"/", "/chat", "/guided", "/learn"}, produces = MediaType.TEXT_HTML_VALUE)
+	    public ResponseEntity<String> serveIndexWithSeo(HttpServletRequest request) {
+	        try {
+	            Document doc = getIndexDocument();
             
             String path = resolvePath(request);
             PageMetadata metadata = metadataMap.getOrDefault(path, metadataMap.get("/"));

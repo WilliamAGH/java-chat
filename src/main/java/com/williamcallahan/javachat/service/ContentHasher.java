@@ -27,8 +27,8 @@ public class ContentHasher {
                 hashBuilder.append(String.format("%02x", hashByte));
             }
             return hashBuilder.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
         }
     }
 

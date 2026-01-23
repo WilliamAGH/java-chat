@@ -42,15 +42,15 @@ public class ProgressTracker {
             long parsed = 0;
             if (parsedDir != null && Files.isDirectory(parsedDir)) {
                 try (var pathStream = Files.walk(parsedDir)) {
-                    parsed = pathStream.filter(p -> !Files.isDirectory(p))
-                              .filter(p -> p.getFileName().toString().endsWith(".txt"))
+                    parsed = pathStream.filter(pathCandidate -> !Files.isDirectory(pathCandidate))
+                              .filter(pathCandidate -> pathCandidate.getFileName().toString().endsWith(".txt"))
                               .count();
                 }
             }
             parsedCount.set(parsed);
-        } catch (IOException e) {
+        } catch (IOException exception) {
             log.debug("Progress init: unable to count parsed chunks (exception type: {})",
-                e.getClass().getSimpleName());
+                exception.getClass().getSimpleName());
         }
         try {
             long indexed = 0;
@@ -60,9 +60,9 @@ public class ProgressTracker {
                 }
             }
             indexedCount.set(indexed);
-        } catch (IOException e) {
+        } catch (IOException exception) {
             log.debug("Progress init: unable to count indexed chunks (exception type: {})",
-                e.getClass().getSimpleName());
+                exception.getClass().getSimpleName());
         }
         log.info("[INDEXING] Progress initialized: parsed={}, indexed={}", parsedCount.get(), indexedCount.get());
     }
@@ -81,8 +81,19 @@ public class ProgressTracker {
         indexedCount.incrementAndGet();
     }
 
-    public long getParsedCount() { return parsedCount.get(); }
-    public long getIndexedCount() { return indexedCount.get(); }
+    /**
+     * Returns the current count of parsed chunks.
+     */
+    public long getParsedCount() {
+        return parsedCount.get();
+    }
+
+    /**
+     * Returns the current count of indexed chunks.
+     */
+    public long getIndexedCount() {
+        return indexedCount.get();
+    }
 
     /**
      * Computes a best-effort completion percentage based on parsed versus indexed chunk counts.

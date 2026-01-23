@@ -27,6 +27,9 @@ public class CustomErrorController implements ErrorController {
     
     private final ExceptionResponseBuilder exceptionBuilder;
     
+    /**
+     * Creates the error controller backed by the shared exception response builder.
+     */
     public CustomErrorController(ExceptionResponseBuilder exceptionBuilder) {
         this.exceptionBuilder = exceptionBuilder;
     }

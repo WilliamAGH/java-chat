@@ -44,7 +44,7 @@ public class ChatService {
      * Streaming via {@link OpenAIStreamingService}. This builds the prompt and streams with the SDK.
      */
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
-        logger.debug("ChatService.streamAnswer called for query: {}", latestUserMessage);
+        logger.debug("ChatService.streamAnswer called");
         
         // Retrieve context and provide user feedback about search quality
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
@@ -66,11 +66,11 @@ public class ChatService {
         logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
 
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document d = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            Document contextDoc = contextDocs.get(docIndex);
+            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
             String normUrl = normalizeUrlForPrompt(rawUrl);
             systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
-                .append("\n").append(d.getText());
+                .append("\n").append(contextDoc.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -160,11 +160,11 @@ public class ChatService {
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document d = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            Document contextDoc = contextDocs.get(docIndex);
+            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
             systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(d.getText());
+                .append("\n").append(contextDoc.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -175,9 +175,9 @@ public class ChatService {
         String fullPrompt = buildPromptFromMessages(messages);
 
         return openAIStreamingService.streamResponse(fullPrompt, 0.7)
-                .onErrorResume(ex -> {
-                    logger.error("Streaming failed", ex);
-                    return Flux.error(ex);
+                .onErrorResume(exception -> {
+                    logger.error("Streaming failed", exception);
+                    return Flux.error(exception);
                 });
     }
 
@@ -237,11 +237,11 @@ public class ChatService {
         }
 
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document d = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            Document contextDoc = contextDocs.get(docIndex);
+            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
             systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(d.getText());
+                .append("\n").append(contextDoc.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -267,21 +267,21 @@ public class ChatService {
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document d = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            Document contextDoc = contextDocs.get(docIndex);
+            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
             systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(d.getText());
+                .append("\n").append(contextDoc.getText());
         }
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        
+
         return buildPromptFromMessages(messages);
     }
-    
+
     /**
      * Legacy markdown rendering path. Prefer {@link UnifiedMarkdownService}
      * integration where possible and avoid rendering on the hot path.
@@ -291,14 +291,14 @@ public class ChatService {
         if (text == null || text.isEmpty()) {
             return "";
         }
-        
+
         try {
             // Use new AST-based processing for better compliance
             var processed = markdownService.processStructured(text);
             logger.debug("Processed response with AST-based markdown rendering");
             return processed.html();
-        } catch (Exception e) {
-            logger.error("Error processing response with markdown", e);
+        } catch (Exception exception) {
+            logger.error("Error processing response with markdown", exception);
             // Fallback to plain text with basic escaping
             return text.replace("&", "&amp;")
                       .replace("<", "&lt;")
