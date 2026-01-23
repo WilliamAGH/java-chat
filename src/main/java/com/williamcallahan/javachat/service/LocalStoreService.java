@@ -43,14 +43,17 @@ public class LocalStoreService {
         this.progressTracker = progressTracker;
     }
 
+    /**
+     * Ensures the backing directories exist before any ingestion work begins.
+     */
     @PostConstruct
     void createStoreDirectories() {
         try {
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to create local store directories", e);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create local store directories", exception);
         }
     }
 
@@ -116,22 +119,27 @@ public class LocalStoreService {
         return safeName(url);
     }
 
+    /**
+     * Returns the root directory for parsed chunk files.
+     */
     public Path getParsedDir() {
         return parsedDir;
     }
 
+    /**
+     * Returns the root directory for ingest marker files.
+     */
     public Path getIndexDir() {
         return indexDir;
     }
 
     private String shortSha256(String input) {
         try {
-            MessageDigest md = MessageDigest.getInstance(SHA_256_ALGORITHM);
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            MessageDigest messageDigest = MessageDigest.getInstance(SHA_256_ALGORITHM);
+            byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 MessageDigest is not available", e);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
         }
     }
 }
-

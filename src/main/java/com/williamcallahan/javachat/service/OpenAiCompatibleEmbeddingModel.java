@@ -64,6 +64,9 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
             .build();
     }
 
+    /**
+     * Calls the remote OpenAI-compatible embeddings endpoint for all inputs in the request.
+     */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
         if (apiKey == null || apiKey.isBlank()) {
@@ -137,11 +140,17 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
         return new EmbeddingResponse(embeddings);
     }
 
+    /**
+     * Returns the configured dimension hint for downstream vector store setup.
+     */
     @Override
     public int dimensions() {
         return dimensionsHint;
     }
 
+    /**
+     * Embeds a single document by delegating to the remote embeddings endpoint.
+     */
     @Override
     public float[] embed(org.springframework.ai.document.Document document) {
         EmbeddingRequest embeddingRequest = new EmbeddingRequest(List.of(document.getText()), null);

@@ -41,9 +41,9 @@ public class PdfContentExtractor {
                 text.length(), document.getNumberOfPages());
             
             return text;
-        } catch (IOException e) {
+        } catch (IOException exception) {
             // Let caller decide how to log/handle this; avoid duplicate stack traces
-            throw e;
+            throw exception;
         }
     }
     
@@ -73,9 +73,9 @@ public class PdfContentExtractor {
                 text.length(), startPage, endPage);
             
             return text;
-        } catch (IOException e) {
+        } catch (IOException exception) {
             // Let caller decide how to log/handle this; avoid duplicate stack traces
-            throw e;
+            throw exception;
         }
     }
     
@@ -118,9 +118,9 @@ public class PdfContentExtractor {
             java.util.List<String> pages = new java.util.ArrayList<>(document.getNumberOfPages());
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
-            for (int p = 1; p <= document.getNumberOfPages(); p++) {
-                stripper.setStartPage(p);
-                stripper.setEndPage(p);
+            for (int pageNumber = 1; pageNumber <= document.getNumberOfPages(); pageNumber++) {
+                stripper.setStartPage(pageNumber);
+                stripper.setEndPage(pageNumber);
                 String text = stripper.getText(document);
                 pages.add(text == null ? "" : text);
             }

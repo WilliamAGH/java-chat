@@ -52,6 +52,9 @@ public class OpenAIStreamingService {
     // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
     private volatile long primaryBackoffUntilEpochMs = 0L;
     
+    /**
+     * Creates a streaming service that can consult rate limit state when selecting an active provider.
+     */
     public OpenAIStreamingService(RateLimitManager rateLimitManager) {
         this.rateLimitManager = rateLimitManager;
     }
@@ -72,6 +75,9 @@ public class OpenAIStreamingService {
     private long primaryBackoffSeconds;
     
 
+    /**
+     * Initializes OpenAI-compatible clients for configured providers after Spring injects credentials.
+     */
     @jakarta.annotation.PostConstruct
     public void initializeClient() {
         try {
