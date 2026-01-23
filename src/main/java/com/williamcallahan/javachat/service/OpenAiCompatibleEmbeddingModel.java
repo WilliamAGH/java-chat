@@ -58,7 +58,6 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
         // Build endpoint robustly. Support users passing either a base (e.g., https://api.openai.com)
         // or a full path including /v1/embeddings. Avoid double-appending.
         String endpoint = baseUrl;
-        if (endpoint == null) endpoint = "";
         // Strip trailing slash for normalization
         if (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
         if (!endpoint.endsWith("/v1/embeddings")) {
