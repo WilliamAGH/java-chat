@@ -38,8 +38,9 @@ test: ## Run tests (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
 	  $(MVNW) test
 
-lint: ## Run static analysis (SpotBugs + PMD)
+lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
 	$(MVNW) compile spotbugs:check pmd:check
+	cd frontend && npm run check
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
