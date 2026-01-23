@@ -63,8 +63,8 @@ WORKDIR /app
 # Copy the JAR from builder stage
 COPY --from=builder /app/target/*.jar app.jar
 
-# Change ownership
-RUN chown appuser:appuser app.jar
+# Create logs directory and set permissions
+RUN mkdir -p logs && chown -R appuser:appuser logs app.jar
 
 USER appuser
 
