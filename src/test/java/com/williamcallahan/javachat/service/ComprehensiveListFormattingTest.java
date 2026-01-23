@@ -1,7 +1,8 @@
 package com.williamcallahan.javachat.service;
 
-import org.junit.jupiter.api.Test;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ComprehensiveListFormattingTest {
@@ -10,7 +11,7 @@ class ComprehensiveListFormattingTest {
     
     @BeforeEach
     void setUp() {
-        markdownService = new MarkdownService();
+        markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
     
     @Test

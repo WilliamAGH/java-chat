@@ -1,8 +1,9 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -12,7 +13,7 @@ class MarkdownServiceTest {
     
     @BeforeEach
     void setUp() {
-        markdownService = new MarkdownService();
+        markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
 
     @Test

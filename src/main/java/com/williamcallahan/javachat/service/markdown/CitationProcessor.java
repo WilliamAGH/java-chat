@@ -128,13 +128,9 @@ public class CitationProcessor {
             
             // Skip common non-citation links
             String lowerUrl = url.toLowerCase();
-            if (lowerUrl.startsWith("mailto:") || 
+            return !(lowerUrl.startsWith("mailto:") || 
                 lowerUrl.startsWith("tel:") || 
-                lowerUrl.startsWith("javascript:")) {
-                return false;
-            }
-            
-            return true;
+                lowerUrl.startsWith("javascript:"));
         }
     }
 }
