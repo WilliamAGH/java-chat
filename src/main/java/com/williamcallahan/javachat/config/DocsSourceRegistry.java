@@ -8,6 +8,8 @@ import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 
 /**
@@ -24,249 +26,191 @@ public final class DocsSourceRegistry {
     private static final Logger LOGGER = LoggerFactory.getLogger(DocsSourceRegistry.class);
 
     private static final String DOCS_SOURCES_RESOURCE = "/docs-sources.properties";
+    private static final String LOG_DOCS_SOURCES_LOADED =
+        "Loaded docs-sources.properties with {} entries";
+    private static final String LOG_DOCS_SOURCES_MISSING =
+        "docs-sources.properties not found on classpath; using default URL mappings";
+    private static final String LOG_DOCS_SOURCES_LOAD_FAILED =
+        "Failed to load docs-sources.properties (exceptionType={}) - using default URL mappings";
 
-    private static final String JAVA24_BASE_DEFAULT = "https://docs.oracle.com/en/java/javase/24/docs/api/";
-    private static final String JAVA25_EA_BASE_DEFAULT = "https://download.java.net/java/early_access/jdk25/docs/api/";
-    private static final String SPRING_BOOT_BASE_DEFAULT = "https://docs.spring.io/spring-boot/docs/current/api/";
-    private static final String SPRING_FRAMEWORK_BASE_DEFAULT = "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
-    private static final String SPRING_AI_BASE_DEFAULT = "https://docs.spring.io/spring-ai/reference/1.0/api/";
+    private static final String JAVA24_API_BASE_KEY = "JAVA24_API_BASE";
+    private static final String JAVA25_EA_API_BASE_KEY = "JAVA25_EA_API_BASE";
+    private static final String SPRING_BOOT_API_BASE_KEY = "SPRING_BOOT_API_BASE";
+    private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
+    private static final String SPRING_AI_API_BASE_KEY = "SPRING_AI_API_BASE";
 
-    private static final String SPRING_DOCS_HOST = "https://docs.spring.io/";
+    private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
+    private static final String DEFAULT_JAVA25_EA = "https://download.java.net/java/early_access/jdk25/docs/api/";
+    private static final String DEFAULT_SPRING_BOOT_API_BASE =
+        "https://docs.spring.io/spring-boot/docs/current/api/";
+    private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
+        "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
+    private static final String DEFAULT_SPRING_AI_API_BASE =
+        "https://docs.spring.io/spring-ai/reference/1.0/api/";
+
+    private static final String LOCAL_DOCS_ROOT = "/data/docs/";
+    private static final String LOCAL_DOCS_JAVA24 = LOCAL_DOCS_ROOT + "java24/";
+    private static final String LOCAL_DOCS_JAVA24_NESTED = LOCAL_DOCS_ROOT + "java/java24/";
+    private static final String LOCAL_DOCS_JAVA24_COMPLETE = LOCAL_DOCS_ROOT + "java/java24-complete/";
+    private static final String LOCAL_DOCS_JAVA25 = LOCAL_DOCS_ROOT + "java25/";
+    private static final String LOCAL_DOCS_JAVA25_NESTED = LOCAL_DOCS_ROOT + "java/java25/";
+    private static final String LOCAL_DOCS_JAVA25_EA_COMPLETE = LOCAL_DOCS_ROOT + "java/java25-ea-complete/";
+    private static final String LOCAL_DOCS_JAVA25_COMPLETE = LOCAL_DOCS_ROOT + "java/java25-complete/";
+    private static final String LOCAL_DOCS_SPRING_BOOT = LOCAL_DOCS_ROOT + "spring-boot/";
+    private static final String LOCAL_DOCS_SPRING_BOOT_COMPLETE = LOCAL_DOCS_ROOT + "spring-boot-complete/";
+    private static final String LOCAL_DOCS_SPRING_FRAMEWORK = LOCAL_DOCS_ROOT + "spring-framework/";
+    private static final String LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE = LOCAL_DOCS_ROOT + "spring-framework-complete/";
+    private static final String LOCAL_DOCS_SPRING_AI = LOCAL_DOCS_ROOT + "spring-ai/";
+    private static final String LOCAL_DOCS_SPRING_AI_COMPLETE = LOCAL_DOCS_ROOT + "spring-ai-complete/";
+    private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
+
+    private static final String PUBLIC_PDFS_BASE = "/pdfs/";
+    private static final String PDF_EXTENSION = ".pdf";
+
     private static final String HTTPS_PREFIX = "https://";
-    private static final String DOCS_API_SUFFIX = "/docs/api";
-    private static final String API_SUFFIX = "/api";
-    private static final String DOCS_API_SEGMENT = "docs/api/";
-    private static final String API_SEGMENT = "api/";
-    private static final String PDF_SUFFIX = ".pdf";
+    private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
+    private static final String JAVA_EA_HOST_MARKER = "download.java.net/";
+    private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
+    private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
 
-    private static final char WINDOWS_SEPARATOR = '\\';
-    private static final char UNIX_SEPARATOR = '/';
-    private static final int INDEX_NOT_FOUND = -1;
+    private static final Properties PROPS = loadDocsSourceProperties();
 
-    private static final String JAVA24_PREFIX = "/data/docs/java24/";
-    private static final String JAVA24_ALT_PREFIX = "/data/docs/java/java24/";
-    private static final String JAVA24_COMPLETE_PREFIX = "/data/docs/java/java24-complete/";
-    private static final String JAVA25_PREFIX = "/data/docs/java25/";
-    private static final String JAVA25_ALT_PREFIX = "/data/docs/java/java25/";
-    private static final String JAVA25_EA_COMPLETE_PREFIX = "/data/docs/java/java25-ea-complete/";
-    private static final String JAVA25_COMPLETE_PREFIX = "/data/docs/java/java25-complete/";
-    private static final String SPRING_BOOT_PREFIX = "/data/docs/spring-boot/";
-    private static final String SPRING_BOOT_COMPLETE_PREFIX = "/data/docs/spring-boot-complete/";
-    private static final String SPRING_FRAMEWORK_PREFIX = "/data/docs/spring-framework/";
-    private static final String SPRING_FRAMEWORK_COMPLETE_PREFIX = "/data/docs/spring-framework-complete/";
-    private static final String SPRING_AI_PREFIX = "/data/docs/spring-ai/";
-    private static final String SPRING_AI_COMPLETE_PREFIX = "/data/docs/spring-ai-complete/";
-    private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
-    private static final String SPRING_BOOT_MARKER = "spring-boot";
+    public static final String JAVA24_API_BASE = resolveSetting(JAVA24_API_BASE_KEY, DEFAULT_JAVA24);
+    public static final String JAVA25_EA_API_BASE = resolveSetting(JAVA25_EA_API_BASE_KEY, DEFAULT_JAVA25_EA);
+    public static final String SPRING_BOOT_API_BASE =
+        resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
+    public static final String SPRING_FRAMEWORK_API_BASE =
+        resolveSetting(SPRING_FRAMEWORK_API_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_API_BASE);
+    public static final String SPRING_AI_API_BASE = resolveSetting(SPRING_AI_API_BASE_KEY, DEFAULT_SPRING_AI_API_BASE);
 
-    public static final String JAVA24_API;
-    public static final String JAVA25_EA_API;
-    public static final String SPRING_BOOT_API;
-    public static final String SPRING_FRAMEWORK_API;
-    public static final String SPRING_AI_API;
-
-    public static final String BOOKS_PREFIX = "/data/docs/books/";
-    public static final String PUBLIC_PDF_BASE = "/pdfs/";
-
-    private static final String[] EMBEDDED_HOSTS = {
-        "docs.oracle.com/",
-        "download.java.net/",
-        "docs.spring.io/"
+    private static final String[] EMBEDDED_HOST_MARKERS = {
+        DOCS_ORACLE_HOST_MARKER,
+        JAVA_EA_HOST_MARKER,
+        SPRING_DOCS_HOST_MARKER
     };
 
-    private static final Properties SOURCE_PROPERTIES = new Properties();
-    private static final Map<String, String> LOCAL_PREFIX_MAP = new LinkedHashMap<>();
-
-    static {
-        loadProperties();
-        JAVA24_API = resolveProperty("JAVA24_API_BASE", JAVA24_BASE_DEFAULT);
-        JAVA25_EA_API = resolveProperty("JAVA25_EA_API_BASE", JAVA25_EA_BASE_DEFAULT);
-        SPRING_BOOT_API = resolveProperty("SPRING_BOOT_API_BASE", SPRING_BOOT_BASE_DEFAULT);
-        SPRING_FRAMEWORK_API = resolveProperty("SPRING_FRAMEWORK_API_BASE", SPRING_FRAMEWORK_BASE_DEFAULT);
-        SPRING_AI_API = resolveProperty("SPRING_AI_API_BASE", SPRING_AI_BASE_DEFAULT);
-        registerPrefixMappings();
-    }
+    private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
 
     private DocsSourceRegistry() {
     }
 
-    private static void loadProperties() {
-        try (InputStream docsSourceStream = DocsSourceRegistry.class.getResourceAsStream(DOCS_SOURCES_RESOURCE)) {
-            if (docsSourceStream != null) {
-                SOURCE_PROPERTIES.load(docsSourceStream);
+    private static Properties loadDocsSourceProperties() {
+        final Properties docsSourceProperties = new Properties();
+        try (InputStream inputStream = DocsSourceRegistry.class.getResourceAsStream(DOCS_SOURCES_RESOURCE)) {
+            if (inputStream != null) {
+                docsSourceProperties.load(inputStream);
                 if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("Loaded docs-sources.properties with {} entries", SOURCE_PROPERTIES.size());
+                    LOGGER.debug(LOG_DOCS_SOURCES_LOADED, docsSourceProperties.size());
                 }
             } else if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("docs-sources.properties not found on classpath; using default URL mappings");
+                LOGGER.info(LOG_DOCS_SOURCES_MISSING);
             }
         } catch (IOException configLoadError) {
             if (LOGGER.isWarnEnabled()) {
-                LOGGER.warn(
-                    "Failed to load docs-sources.properties: {} - using default URL mappings",
-                    configLoadError.getMessage()
-                );
+                LOGGER.warn(LOG_DOCS_SOURCES_LOAD_FAILED, configLoadError.getClass().getName());
             }
         }
+        return docsSourceProperties;
     }
 
-    private static String resolveProperty(final String propertyKey, final String fallbackSetting) {
-        String resolvedSetting = System.getProperty(propertyKey);
-        if (resolvedSetting == null) {
-            resolvedSetting = System.getenv(propertyKey);
-        }
-        if (resolvedSetting == null) {
-            resolvedSetting = SOURCE_PROPERTIES.getProperty(propertyKey);
-        }
-        if (resolvedSetting == null) {
-            resolvedSetting = fallbackSetting;
-        }
-        return resolvedSetting;
+    private static String resolveSetting(final String settingKey, final String fallbackText) {
+        final String systemProperty = System.getProperty(settingKey);
+        final String envSetting = systemProperty != null ? systemProperty : System.getenv(settingKey);
+        final String propertySetting = envSetting != null ? envSetting : PROPS.getProperty(settingKey);
+        return Objects.requireNonNullElse(propertySetting, fallbackText);
     }
 
-    private static void registerPrefixMappings() {
-        LOCAL_PREFIX_MAP.put(JAVA24_PREFIX, JAVA24_API);
-        LOCAL_PREFIX_MAP.put(JAVA24_ALT_PREFIX, JAVA24_API);
-        LOCAL_PREFIX_MAP.put(JAVA24_COMPLETE_PREFIX, JAVA24_API);
+    private static Map<String, String> buildLocalPrefixLookup() {
+        final Map<String, String> prefixLookup = new LinkedHashMap<>();
 
-        LOCAL_PREFIX_MAP.put(JAVA25_PREFIX, JAVA25_EA_API);
-        LOCAL_PREFIX_MAP.put(JAVA25_ALT_PREFIX, JAVA25_EA_API);
-        LOCAL_PREFIX_MAP.put(JAVA25_EA_COMPLETE_PREFIX, JAVA25_EA_API);
-        LOCAL_PREFIX_MAP.put(JAVA25_COMPLETE_PREFIX, JAVA25_EA_API);
+        // Java SE 24 API (Oracle)
+        prefixLookup.put(LOCAL_DOCS_JAVA24, JAVA24_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA24_NESTED, JAVA24_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA24_COMPLETE, JAVA24_API_BASE);
 
-        LOCAL_PREFIX_MAP.put(SPRING_BOOT_PREFIX, SPRING_BOOT_API);
-        LOCAL_PREFIX_MAP.put(SPRING_BOOT_COMPLETE_PREFIX, SPRING_BOOT_API);
+        // Java 25 Early Access API (download.java.net)
+        prefixLookup.put(LOCAL_DOCS_JAVA25, JAVA25_EA_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_EA_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA25_EA_COMPLETE, JAVA25_EA_API_BASE);
+        // In case a GA mirror is stored under this name locally before GA, still point to EA docs
+        prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_EA_API_BASE);
 
-        LOCAL_PREFIX_MAP.put(SPRING_FRAMEWORK_PREFIX, SPRING_FRAMEWORK_API);
-        LOCAL_PREFIX_MAP.put(SPRING_FRAMEWORK_COMPLETE_PREFIX, SPRING_FRAMEWORK_API);
+        // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
+        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT_COMPLETE, SPRING_BOOT_API_BASE);
 
-        LOCAL_PREFIX_MAP.put(SPRING_AI_PREFIX, SPRING_AI_API);
-        LOCAL_PREFIX_MAP.put(SPRING_AI_COMPLETE_PREFIX, SPRING_AI_API);
+        // Spring Framework API documentation
+        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK, SPRING_FRAMEWORK_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE, SPRING_FRAMEWORK_API_BASE);
+
+        // Spring AI API documentation
+        prefixLookup.put(LOCAL_DOCS_SPRING_AI, SPRING_AI_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_AI_COMPLETE, SPRING_AI_API_BASE);
+
+        return prefixLookup;
     }
 
     /**
      * If the given local filesystem-like path contains an embedded known host,
      * reconstruct an HTTPS URL to that embedded path.
-     *
-     * @param localPath local filesystem-like path
-     * @return reconstructed URL or null if no embedded host is found
      */
-    public static String reconstructFromEmbeddedHost(final String localPath) {
-        String reconstructedUrl = null;
-        String normalizedPath = normalizePathSeparators(localPath);
-        for (String hostMarker : EMBEDDED_HOSTS) {
-            int markerIndex = normalizedPath.indexOf(hostMarker);
-            if (markerIndex > INDEX_NOT_FOUND) {
-                reconstructedUrl = HTTPS_PREFIX + normalizedPath.substring(markerIndex);
-                if (reconstructedUrl.startsWith(SPRING_DOCS_HOST)) {
-                    reconstructedUrl = SpringDocsUtils.normalizeUrl(reconstructedUrl);
+    public static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
+        Optional<String> reconstructedUrl = Optional.empty();
+        if (localPath != null) {
+            final String normalizedPath = localPath.replace('\\', '/');
+            for (final String hostMarker : EMBEDDED_HOST_MARKERS) {
+                final int markerIndex = normalizedPath.indexOf(hostMarker);
+                if (markerIndex >= 0) {
+                    final String candidateUrl = HTTPS_PREFIX + normalizedPath.substring(markerIndex);
+                    // Fix Spring URLs using proper string parsing
+                    final String normalizedUrl = candidateUrl.startsWith(SPRING_DOCS_HTTPS_PREFIX)
+                        ? SpringDocsUrlNormalizer.normalize(candidateUrl)
+                        : candidateUrl;
+                    reconstructedUrl = Optional.of(normalizedUrl);
+                    break;
                 }
-                break;
             }
         }
         return reconstructedUrl;
     }
 
     /**
-     * Map a local mirrored path to its authoritative remote base URL. Returns null if not matched.
+     * Map a local mirrored path to its authoritative remote base URL.
      *
      * @param localPath local filesystem-like path
-     * @return authoritative remote URL or null if not matched
+     * @return authoritative remote URL when a mapping is found
      */
-    public static String mapLocalPrefixToRemote(final String localPath) {
-        String resolvedUrl = null;
-        String normalizedPath = normalizePathSeparators(localPath);
-        for (Map.Entry<String, String> mappingEntry : LOCAL_PREFIX_MAP.entrySet()) {
-            String prefix = mappingEntry.getKey();
-            int prefixIndex = normalizedPath.indexOf(prefix);
-            if (prefixIndex > INDEX_NOT_FOUND) {
-                String relativePath = normalizedPath.substring(prefixIndex + prefix.length());
-                boolean springFrameworkPath = prefix.contains(SPRING_FRAMEWORK_MARKER);
-                boolean springBootPath = prefix.contains(SPRING_BOOT_MARKER);
-                if (springFrameworkPath || springBootPath) {
-                    relativePath = SpringDocsUtils.cleanRelativePath(relativePath, springFrameworkPath, springBootPath);
-                }
-                resolvedUrl = joinBaseAndRel(mappingEntry.getValue(), relativePath);
-                break;
-            }
+    public static Optional<String> mapLocalPrefixToRemote(final String localPath) {
+        Optional<String> mappedUrl = Optional.empty();
+        if (localPath != null && !localPath.isBlank()) {
+            mappedUrl = DocsLocalPathMapper.mapLocalPrefixToRemote(localPath, LOCAL_PREFIX_TO_REMOTE_BASE);
         }
-        return resolvedUrl;
-    }
-
-    private static String joinBaseAndRel(final String baseUrl, final String relRaw) {
-        String joinedUrl = null;
-        if (baseUrl != null) {
-            String trimmedBase = trimTrailingSlashes(baseUrl);
-            String normalizedRelative = normalizeRelativePath(relRaw);
-            normalizedRelative = removeDuplicateApiSegments(trimmedBase, normalizedRelative);
-            joinedUrl = trimmedBase + UNIX_SEPARATOR + normalizedRelative;
-        }
-        return joinedUrl;
-    }
-
-    private static String removeDuplicateApiSegments(final String baseUrl, final String relativePath) {
-        String adjustedRelative = relativePath;
-        if (baseUrl.endsWith(DOCS_API_SUFFIX)) {
-            if (adjustedRelative.startsWith(DOCS_API_SEGMENT)) {
-                adjustedRelative = adjustedRelative.substring(DOCS_API_SEGMENT.length());
-            } else if (adjustedRelative.startsWith(API_SEGMENT)) {
-                adjustedRelative = adjustedRelative.substring(API_SEGMENT.length());
-            }
-        } else if (baseUrl.endsWith(API_SUFFIX) && adjustedRelative.startsWith(API_SEGMENT)) {
-            adjustedRelative = adjustedRelative.substring(API_SEGMENT.length());
-        }
-        return adjustedRelative;
-    }
-
-    private static String trimTrailingSlashes(final String baseUrl) {
-        int endIndex = baseUrl.length();
-        while (endIndex > 0 && baseUrl.charAt(endIndex - 1) == UNIX_SEPARATOR) {
-            endIndex -= 1;
-        }
-        return baseUrl.substring(0, endIndex);
-    }
-
-    private static String normalizeRelativePath(final String relRaw) {
-        String relativePath = relRaw == null ? "" : relRaw;
-        relativePath = normalizePathSeparators(relativePath);
-        while (relativePath.startsWith(String.valueOf(UNIX_SEPARATOR))) {
-            relativePath = relativePath.substring(1);
-        }
-        return relativePath;
-    }
-
-    private static String normalizePathSeparators(final String rawPath) {
-        return rawPath.replace(WINDOWS_SEPARATOR, UNIX_SEPARATOR);
+        return mappedUrl;
     }
 
     /**
      * Map a local book PDF under data/docs/books to a server-hosted public PDF path (/pdfs/...).
-     * Returns null if the local path is not a recognized book PDF.
      *
      * @param localPath local filesystem-like path
-     * @return public PDF URL or null if not matched
+     * @return public PDF URL when the local path maps to a book PDF
      */
-    public static String mapBookLocalToPublic(final String localPath) {
-        String publicPdfUrl = null;
-        String normalizedPath = normalizePathSeparators(localPath);
-        String lowerPath = normalizedPath.toLowerCase(Locale.ROOT);
-        if (lowerPath.endsWith(PDF_SUFFIX)) {
-            int prefixIndex = normalizedPath.indexOf(BOOKS_PREFIX);
-            if (prefixIndex > INDEX_NOT_FOUND) {
-                String fileSegment = normalizedPath.substring(prefixIndex + BOOKS_PREFIX.length());
-                String fileName = stripDirectories(fileSegment);
-                publicPdfUrl = PUBLIC_PDF_BASE + fileName;
+    public static Optional<String> mapBookLocalToPublic(final String localPath) {
+        Optional<String> publicPdfUrl = Optional.empty();
+        if (localPath != null) {
+            final String normalizedPath = localPath.replace('\\', '/');
+            if (normalizedPath.toLowerCase(Locale.ROOT).endsWith(PDF_EXTENSION)) {
+                final int markerIndex = normalizedPath.indexOf(LOCAL_DOCS_BOOKS);
+                if (markerIndex >= 0) {
+                    final String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
+                    // Only map the basename to avoid subfolder leakage
+                    final int lastSlash = fileName.lastIndexOf('/');
+                    final String baseName = lastSlash >= 0
+                        ? fileName.substring(lastSlash + 1)
+                        : fileName;
+                    publicPdfUrl = Optional.of(PUBLIC_PDFS_BASE + baseName);
+                }
             }
         }
         return publicPdfUrl;
-    }
-
-    private static String stripDirectories(final String fileSegment) {
-        int lastSeparatorIndex = fileSegment.lastIndexOf(UNIX_SEPARATOR);
-        String fileName = fileSegment;
-        if (lastSeparatorIndex > INDEX_NOT_FOUND) {
-            fileName = fileSegment.substring(lastSeparatorIndex + 1);
-        }
-        return fileName;
     }
 }
