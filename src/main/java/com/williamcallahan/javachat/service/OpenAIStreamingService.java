@@ -112,6 +112,13 @@ public class OpenAIStreamingService {
             try {
                 ChatCompletionCreateParams params = buildChatParams(prompt, temperature);
                 OpenAIClient first = selectClientForStreaming();
+                if (first == null) {
+                    log.error("No OpenAI-compatible client is configured or available for streaming. "
+                            + "Check API credentials and configuration.");
+                    sink.error(new IllegalStateException(
+                            "No OpenAI-compatible client is configured or available for streaming."));
+                    return;
+                }
                 ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
                 AtomicReference<ChatCompletion> finalCompletion = new AtomicReference<>();
                 
