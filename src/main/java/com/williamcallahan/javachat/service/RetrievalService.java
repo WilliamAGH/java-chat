@@ -369,8 +369,8 @@ public class RetrievalService {
                     url,
                     title,
                     "",
-                    snippet.length() > 500
-                        ? snippet.substring(0, 500) + "…"
+                    snippet.length() > CITATION_SNIPPET_MAX_LENGTH
+                        ? snippet.substring(0, CITATION_SNIPPET_MAX_LENGTH) + "…"
                         : snippet
                 )
             );

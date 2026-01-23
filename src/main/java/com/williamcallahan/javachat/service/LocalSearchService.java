@@ -14,6 +14,13 @@ import java.util.stream.Collectors;
 @Service
 public class LocalSearchService {
     private static final Logger log = LoggerFactory.getLogger(LocalSearchService.class);
+
+    /** Maximum number of files to scan to prevent unbounded directory traversal */
+    private static final int MAX_FILES_TO_SCAN = 5000;
+
+    /** Minimum content length divisor to prevent score inflation on tiny documents */
+    private static final int MIN_CONTENT_LENGTH_FOR_SCORING = 50;
+
     private final Path parsedDir;
 
     public LocalSearchService(@Value("${app.docs.parsed-dir}") String parsedDir) {
@@ -38,7 +45,7 @@ public class LocalSearchService {
 
         try (var files = Files.walk(parsedDir)) {
             List<Path> txts = files.filter(p -> p.toString().endsWith(".txt"))
-                .limit(5000)
+                .limit(MAX_FILES_TO_SCAN)
                 .collect(Collectors.toList());
 
             log.debug("Local search scanning {} files for query: {}", txts.size(), query);
@@ -52,7 +59,7 @@ public class LocalSearchService {
                         if (t.isBlank()) continue;
                         score += count(norm, t);
                     }
-                    if (score > 0) scores.put(p, score / Math.max(50, norm.length()));
+                    if (score > 0) scores.put(p, score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, norm.length()));
                 } catch (IOException fileReadError) {
                     log.debug("Skipping unreadable file {}: {}", p, fileReadError.getMessage());
                 }
