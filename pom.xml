@@ -269,6 +269,8 @@
                     <threshold>Low</threshold>
                     <includeFilterFile>spotbugs-include.xml</includeFilterFile>
                     <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+                    <!-- Disable buggy FindSecBugs CORS detector that crashes on Spring config -->
+                    <omitVisitors>CorsRegistryCORSDetector</omitVisitors>
                     <plugins>
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+        Exclude WebMvcConfig from SpotBugs analysis due to bug in FindSecBugs
+        CorsRegistryCORSDetector causing NPE on Spring CORS configuration.
+        See: https://github.com/find-sec-bugs/find-sec-bugs/issues
+    -->
+    <Match>
+        <Class name="com.williamcallahan.javachat.config.WebMvcConfig"/>
+    </Match>
+</FindBugsFilter>
