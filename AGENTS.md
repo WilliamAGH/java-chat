@@ -19,6 +19,7 @@ alwaysApply: true
 - FS8 No generic utilities: reject `*Utils/*Helper/*Common`; banned: `BaseMapper<T>`, `GenericRepository<T,ID>`, `SharedUtils`.
 - FS9 Large files (>500 LOC): extract only pieces you touch into clean-architecture roots; avoid broad refactors.
 - FS10 Domain value types: identifiers, amounts, slugs wrap in records with constructor validation; never raw primitives across API boundaries.
+- FS11 Never use `@SuppressWarnings` to resolve lint issues; fix the code or refactor structure to comply with rules.
 - MO1 Monolith = >500 LOC or multi-concern catch-all (`*Utils/*Helper/*Common`).
 - MO2 New functionality starts in new files in canonical roots; never add code to monoliths.
 - MO3 Shrink on touch: when editing monoliths, extract at least one seam and net-decrease file size; if unsafe, stop and ask.
@@ -90,4 +91,5 @@ alwaysApply: true
 - DP3 Deprecated code must be a thin shim extending its successor; no aliases, fallbacks, or alternate implementations.
 - SRC1 Never make assumptions; if unsure, stop and verify.
 - SRC2 For dependency code questions, inspect `~/.m2` JARs first; fallback to upstream GitHub; never answer without referencing code.
+- SRC3 Inspect `~/.gradle/caches/` for dependency code in Gradle projects; verify actual implementation rather than assuming.
 - DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.

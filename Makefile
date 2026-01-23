@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 APP_NAME := java-chat
-MVNW := ./mvnw
+GRADLEW := ./gradlew
 
 # Terminal colors for output prefixing
 RED    := \033[0;31m
@@ -11,7 +11,8 @@ CYAN   := \033[0;36m
 NC     := \033[0m
 # Compute JAR lazily so it's resolved after the build runs
 # Use a function instead of variable to evaluate at runtime
-get_jar = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
+# Exclude -plain.jar which is the non-bootable archive
+get_jar = $(shell ls -t build/libs/*.jar 2>/dev/null | grep -v '\-plain\.jar' | head -n 1)
 
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)
@@ -29,17 +30,17 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 clean: ## Clean build outputs
-	$(MVNW) clean
+	$(GRADLEW) clean
 
 build: ## Build the project (skip tests)
-	$(MVNW) -DskipTests package
+	$(GRADLEW) build -x test
 
 test: ## Run tests (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  $(MVNW) test
+	  $(GRADLEW) test
 
 lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
-	$(MVNW) compile spotbugs:check pmd:check
+	$(GRADLEW) spotbugsMain pmdMain
 	cd frontend && npm run check
 
 run: build ## Run the packaged jar (loads .env if present)
@@ -65,9 +66,9 @@ dev: ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
 	  trap 'kill 0' INT TERM; \
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
 	  (if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	   SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run \
-	   -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" \
-	   -Dspring-boot.run.arguments="--server.port=8085 $(RUN_ARGS)" 2>&1 \
+	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
+	   --args="--server.port=8085 $(RUN_ARGS)" \
+	   -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" 2>&1 \
 	   | awk '{print "\033[33m[java]\033[0m " $$0; fflush()}') & \
 	  wait
 
@@ -83,7 +84,9 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 	    if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$port: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 1; fi; \
 	  done; \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
-	  SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" -Dspring-boot.run.arguments="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)"
+	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
+	    --args="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)" \
+	    -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
 
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install

@@ -1,14 +1,14 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.5"
+    id("org.springframework.boot") version "3.5.9"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.github.spotbugs") version "6.4.8"
     id("pmd")
 }
 
 val javaVersion = 21
-val springAiVersion = "1.0.1"
-val openaiVersion = "4.16.1"
+val springAiVersion = "1.0.3"
+val openaiVersion = "4.16.0"
 val springDotenvVersion = "5.1.0"
 val jsoupVersion = "1.22.1"
 val fastutilVersion = "8.5.18"
