@@ -1,0 +1,21 @@
+{
+  "name": "Java Chat",
+  "short_name": "Java Chat",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1a1a18",
+  "theme_color": "#1a1a18",
+  "icons": [
+    {
+      "src": "/favicon-196x196.png",
+      "sizes": "196x196",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
+}
