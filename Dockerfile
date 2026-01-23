@@ -10,13 +10,18 @@
 # ================================
 FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
+
 # Copy dependency definitions
 COPY frontend/package*.json ./
 RUN npm ci
+
 # Copy source files
 COPY frontend/ .
-# Create output directory for Vite (it writes to ../src/main/resources/static)
-RUN mkdir -p ../src/main/resources/static
+
+# Copy existing static assets (favicons) so they're preserved in the build output
+COPY src/main/resources/static/ ../src/main/resources/static/
+
+# Build frontend (outputs to ../src/main/resources/static/)
 RUN npm run build
 
 # ================================
@@ -29,12 +34,14 @@ WORKDIR /app
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 RUN chmod +x mvnw
+
 # Download dependencies
 RUN ./mvnw dependency:go-offline -B
 
-# Copy source code
+# Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
-# Copy built frontend assets from frontend-builder
+
+# Copy built frontend assets (includes favicons + Svelte build) from frontend-builder
 COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
 
 # Build the application
