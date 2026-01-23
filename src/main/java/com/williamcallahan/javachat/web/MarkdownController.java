@@ -63,7 +63,7 @@ public class MarkdownController {
             return ResponseEntity.ok(Map.of(
                 "html", processed.html(),
                 "source", "server",
-                "cached", true,  // Will be true if it was cached
+                "cached", false,  // Cache status not tracked at this layer
                 "citations", processed.citations().size(),
                 "enrichments", processed.enrichments().size()
             ));
