@@ -105,15 +105,25 @@ public class UnifiedMarkdownService {
         if (markdown == null || markdown.isEmpty()) {
             return new ProcessedMarkdown("", List.of(), List.of(), List.of(), 0L);
         }
-        
+
+        // Capture original input for consistent cache key before any mutations
+        final String cacheKey = markdown;
+
+        // Check cache first, before any transformations
+        ProcessedMarkdown cached = processCache.getIfPresent(cacheKey);
+        if (cached != null) {
+            logger.debug("Cache hit for markdown processing");
+            return cached;
+        }
+
         long startTime = System.currentTimeMillis();
-        
+
         if (markdown.length() > MAX_INPUT_LENGTH) {
-            logger.warn("Markdown input exceeds maximum length: {} > {}", 
+            logger.warn("Markdown input exceeds maximum length: {} > {}",
                        markdown.length(), MAX_INPUT_LENGTH);
             markdown = markdown.substring(0, MAX_INPUT_LENGTH);
         }
-        
+
         // Pre-normalize code fences and heading markers before parsing (no regex)
         markdown = preNormalizeForListsAndFences(markdown);
 
@@ -121,13 +131,6 @@ public class UnifiedMarkdownService {
         java.util.Map<String, String> placeholders = new java.util.HashMap<>();
         java.util.List<MarkdownEnrichment> placeholderEnrichments = new java.util.ArrayList<>();
         String placeholderMarkdown = extractAndPlaceholderizeEnrichments(markdown, placeholderEnrichments, placeholders);
-        
-        // Check cache first
-        ProcessedMarkdown cached = processCache.getIfPresent(markdown);
-        if (cached != null) {
-            logger.debug("Cache hit for markdown processing");
-            return cached;
-        }
         
         try {
             // Parse markdown to AST - this is the foundation of AGENTS.md compliance
