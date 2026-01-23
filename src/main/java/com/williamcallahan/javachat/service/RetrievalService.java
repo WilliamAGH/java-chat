@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.support.RetrievalErrorClassifier;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
@@ -63,68 +64,9 @@ public class RetrievalService {
         // Initial vector search
         List<Document> docs;
         try {
-            // Fetch more candidates when version filtering is active
             int baseTopK = Math.max(1, props.getRag().getSearchTopK());
-            int topK = versionFilter.isPresent() ? baseTopK * 2 : baseTopK;
-
-            log.info("=== RETRIEVAL DEBUG ===");
-            log.info("Query: '{}'", query);
-            if (versionFilter.isPresent()) {
-                log.info("Version detected: Java {}, using boosted query and expanded topK",
-                    versionFilter.get().versionNumber());
-            }
-            log.info("Boosted query: '{}'", boostedQuery);
-            log.info("TopK requested: {}", topK);
-            log.info("VectorStore class: {}", vectorStore.getClass().getName());
-
-            SearchRequest searchRequest = SearchRequest.builder()
-                .query(boostedQuery)
-                .topK(topK)
-                .build();
-
-            log.info(
-                "SearchRequest created - Query: '{}', TopK: {}",
-                searchRequest.getQuery(),
-                searchRequest.getTopK()
-            );
-
-            docs = vectorStore.similaritySearch(searchRequest);
-
-            log.info("VectorStore returned {} documents", docs.size());
-
-            // Apply version-based post-filtering if version was detected
-            if (versionFilter.isPresent()) {
-                VersionFilterPatterns filter = versionFilter.get();
-                List<Document> versionMatchedDocs = docs.stream()
-                    .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
-                    .collect(Collectors.toList());
-
-                log.info("Version filter matched {} of {} documents for Java {}",
-                    versionMatchedDocs.size(), docs.size(), filter.versionNumber());
-
-                // Use version-matched docs if we have enough, otherwise fall back to all docs
-                if (versionMatchedDocs.size() >= 2) {
-                    docs = versionMatchedDocs;
-                } else {
-                    log.info("Insufficient version-specific docs ({}), using all {} candidates",
-                        versionMatchedDocs.size(), docs.size());
-                }
-            }
-
-            if (!docs.isEmpty()) {
-                log.info("First doc metadata: {}", docs.get(0).getMetadata());
-                log.info(
-                    "First doc content preview: {}",
-                    docs
-                        .get(0)
-                        .getText()
-                        .substring(
-                            0,
-                            Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docs.get(0).getText().length())
-                        )
-                );
-            }
-        } catch (Exception e) {
+            docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
+        } catch (RuntimeException e) {
             return handleVectorSearchFailure(e, query);
         }
 
@@ -149,9 +91,9 @@ public class RetrievalService {
         );
         // DIAGNOSTIC: Log top reranked doc preview (truncated)
         if (!reranked.isEmpty()) {
-            String txt = reranked.get(0).getText();
-            String preview = txt.substring(0, Math.min(DIAGNOSTIC_PREVIEW_LENGTH, txt.length()));
-            log.info("[DIAG] RAG top doc (post-rerank) preview=\n{}", preview);
+            String topText = reranked.get(0).getText();
+            int previewLength = Math.min(DIAGNOSTIC_PREVIEW_LENGTH, topText.length());
+            log.info("[DIAG] RAG top doc (post-rerank) previewLength={}", previewLength);
         }
         return reranked;
     }
@@ -178,75 +120,26 @@ public class RetrievalService {
                 1,
                 Math.max(maxDocs, props.getRag().getSearchTopK())
             );
-            // Fetch more candidates when version filtering is active
-            int topK = versionFilter.isPresent() ? baseTopK * 2 : baseTopK;
+            docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
+        } catch (RuntimeException e) {
+            String errorType = RetrievalErrorClassifier.determineErrorType(e);
+            log.warn("Vector search unavailable; falling back to local keyword search with limits");
 
-            log.info("=== LIMITED RETRIEVAL DEBUG ===");
-            log.info(
-                "Query: '{}', MaxDocs: {}, MaxTokensPerDoc: {}",
-                query,
-                maxDocs,
-                maxTokensPerDoc
-            );
-            if (versionFilter.isPresent()) {
-                log.info("Version detected: Java {}, using boosted query and expanded topK",
-                    versionFilter.get().versionNumber());
-            }
-            log.info("Boosted query: '{}'", boostedQuery);
-            log.info("TopK requested: {}", topK);
-
-            SearchRequest searchRequest = SearchRequest.builder()
-                .query(boostedQuery)
-                .topK(topK)
-                .build();
-
-            docs = vectorStore.similaritySearch(searchRequest);
-            log.info(
-                "VectorStore returned {} documents for limited retrieval",
-                docs.size()
-            );
-
-            // Apply version-based post-filtering if version was detected
-            if (versionFilter.isPresent()) {
-                VersionFilterPatterns filter = versionFilter.get();
-                List<Document> versionMatchedDocs = docs.stream()
-                    .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
-                    .collect(Collectors.toList());
-
-                log.info("Version filter matched {} of {} documents for Java {}",
-                    versionMatchedDocs.size(), docs.size(), filter.versionNumber());
-
-                // Use version-matched docs if we have enough, otherwise fall back to all docs
-                if (versionMatchedDocs.size() >= 2) {
-                    docs = versionMatchedDocs;
-                } else {
-                    log.info("Insufficient version-specific docs ({}), using all {} candidates",
-                        versionMatchedDocs.size(), docs.size());
-                }
-            }
-        } catch (Exception e) {
-            String errorType = determineErrorType(e);
-            log.warn(
-                "Vector search unavailable ({}); falling back to local keyword search with limits",
-                errorType
-            );
-
-            logUserFriendlyErrorContext(e, errorType);
+            RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, e);
 
             // Fallback to local search with limits
             LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
 
             if (outcome.isFailed()) {
-                log.error("Local keyword search also failed: {} - returning empty results", outcome.errorMessage());
+                log.error("Local keyword search also failed - returning empty results");
                 docs = List.of();
             } else {
-                log.info("Local keyword search returned {} results (fallback from: {})",
-                    outcome.results().size(), errorType);
+                log.info("Local keyword search returned {} results", outcome.results().size());
 
                 docs = outcome.results()
                     .stream()
                     .map(r -> {
-                        Document doc = documentFactory.createLocalDocument(r.text, r.url);
+                        Document doc = documentFactory.createLocalDocument(r.text(), r.url());
                         doc.getMetadata().put("retrievalSource", "keyword_fallback");
                         doc.getMetadata().put("fallbackReason", errorType);
                         return doc;
@@ -283,6 +176,58 @@ public class RetrievalService {
             .collect(Collectors.toList());
 
         return rerankerService.rerank(query, uniqueByUrl, maxDocs);
+    }
+
+    private List<Document> executeVersionAwareSearch(
+        String query,
+        String boostedQuery,
+        Optional<VersionFilterPatterns> versionFilter,
+        int baseTopK
+    ) {
+        // Fetch more candidates when version filtering is active
+        int topK = versionFilter.isPresent() ? baseTopK * 2 : baseTopK;
+
+        if (versionFilter.isPresent()) {
+            log.info("Version filter detected; using boosted query and expanded topK");
+        }
+        log.info("TopK requested: {}", topK);
+
+        SearchRequest searchRequest = SearchRequest.builder()
+            .query(boostedQuery)
+            .topK(topK)
+            .build();
+
+        List<Document> docs = vectorStore.similaritySearch(searchRequest);
+        log.info("VectorStore returned {} documents", docs.size());
+
+        // Apply version-based post-filtering if version was detected
+        if (versionFilter.isPresent()) {
+            VersionFilterPatterns filter = versionFilter.get();
+            List<Document> versionMatchedDocs = docs.stream()
+                .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
+                .collect(Collectors.toList());
+
+            log.info("Version filter matched {} of {} documents",
+                versionMatchedDocs.size(), docs.size());
+
+            // Use version-matched docs if we have enough, otherwise fall back to all docs
+            if (versionMatchedDocs.size() >= 2) {
+                docs = versionMatchedDocs;
+            } else {
+                log.info("Insufficient version-specific docs ({}), using all {} candidates",
+                    versionMatchedDocs.size(), docs.size());
+            }
+        }
+
+        if (!docs.isEmpty()) {
+            Map<String, Object> metadata = docs.get(0).getMetadata();
+            int metadataSize = metadata == null ? 0 : metadata.size();
+            String docText = docs.get(0).getText();
+            int previewLength = docText == null ? 0 : Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
+            log.info("First doc metadata size: {}", metadataSize);
+            log.info("First doc content preview length: {}", previewLength);
+        }
+        return docs;
     }
 
     /**
@@ -385,33 +330,28 @@ public class RetrievalService {
      * Documents returned include metadata indicating they came from fallback search.
      */
     private List<Document> handleVectorSearchFailure(
-        Exception e,
+        RuntimeException e,
         String query
     ) {
-        String errorType = determineErrorType(e);
-        log.warn(
-            "Vector search unavailable ({}); falling back to local keyword search",
-            errorType,
-            e
-        );
+        String errorType = RetrievalErrorClassifier.determineErrorType(e);
+        log.warn("Vector search unavailable; falling back to local keyword search");
 
-        logUserFriendlyErrorContext(e, errorType);
+        RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, e);
 
         // Use searchTopK (not searchReturnK) to match the primary path's candidate pool size
         LocalSearchService.SearchOutcome outcome = localSearch.search(query, props.getRag().getSearchTopK());
 
         if (outcome.isFailed()) {
-            log.error("Local keyword search also failed: {} - returning empty results", outcome.errorMessage());
+            log.error("Local keyword search also failed - returning empty results");
             return List.of();
         }
 
-        log.info("Local keyword search returned {} results (fallback from: {})",
-            outcome.results().size(), errorType);
+        log.info("Local keyword search returned {} results", outcome.results().size());
 
         return outcome.results()
             .stream()
             .map(r -> {
-                Document doc = documentFactory.createLocalDocument(r.text, r.url);
+                Document doc = documentFactory.createLocalDocument(r.text(), r.url());
                 // Mark document as coming from fallback search
                 doc.getMetadata().put("retrievalSource", "keyword_fallback");
                 doc.getMetadata().put("fallbackReason", errorType);
@@ -421,31 +361,6 @@ public class RetrievalService {
             .collect(Collectors.toList());
     }
 
-    /**
-     * Log user-friendly context about why vector search failed.
-     */
-    private void logUserFriendlyErrorContext(Exception e, String errorType) {
-        if (
-            e.getCause() instanceof
-                GracefulEmbeddingModel.EmbeddingServiceUnavailableException
-        ) {
-            log.info(
-                "Embedding services are unavailable. Using keyword-based search with limited semantic understanding."
-            );
-        } else if (errorType.contains("404")) {
-            log.info(
-                "Embedding API endpoint not found. Check configuration for spring.ai.openai.embedding.base-url"
-            );
-        } else if (errorType.contains("401") || errorType.contains("403")) {
-            log.info(
-                "Embedding API authentication failed. Check OPENAI_API_KEY or GITHUB_TOKEN configuration"
-            );
-        } else if (errorType.contains("429")) {
-            log.info(
-                "Embedding API rate limit exceeded. Consider using local embeddings or upgrading API tier"
-            );
-        }
-    }
 
     /**
      * Normalize URLs from locally mirrored files to their authoritative online sources.
@@ -459,28 +374,24 @@ public class RetrievalService {
         }
 
         // Map book PDFs to public PDFs even if not file:// (defensive)
-        String publicPdf =
-            com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(
-                u.startsWith("file://") ? u.substring("file://".length()) : u
-            );
-        if (publicPdf != null) return publicPdf;
+        String pathForBookMapping = u.startsWith("file://") ? u.substring("file://".length()) : u;
+        Optional<String> publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(pathForBookMapping);
+        if (publicPdf.isPresent()) {
+            return publicPdf.get();
+        }
 
         // Only handle file:// mirrors beyond this point
         if (!u.startsWith("file://")) return u;
 
-        String p = u.substring("file://".length());
+        String localPath = u.substring("file://".length());
         // Try embedded host reconstruction first
-        String embedded =
-            com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(
-                p
-            );
-        if (embedded != null) return embedded;
+        Optional<String> embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(localPath);
+        if (embedded.isPresent()) {
+            return embedded.get();
+        }
         // Try local prefix mapping
-        String mapped =
-            com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(
-                p
-            );
-        return mapped != null ? mapped : url;
+        Optional<String> mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(localPath);
+        return mapped.orElse(url);
     }
 
     /**
@@ -512,49 +423,4 @@ public class RetrievalService {
         return prefix + rest;
     }
 
-    /**
-     * Determine the type of error for better user feedback
-     */
-    private String determineErrorType(Exception e) {
-        String message = e.getMessage();
-        if (message == null) {
-            message = "";
-        }
-
-        // Check the entire exception chain
-        Throwable current = e;
-        while (current != null) {
-            String currentMessage = current.getMessage();
-            if (currentMessage != null) {
-                message += " " + currentMessage;
-            }
-            current = current.getCause();
-        }
-
-        message = message.toLowerCase();
-
-        if (message.contains("404") || message.contains("not found")) {
-            return "404 Not Found";
-        } else if (
-            message.contains("401") || message.contains("unauthorized")
-        ) {
-            return "401 Unauthorized";
-        } else if (message.contains("403") || message.contains("forbidden")) {
-            return "403 Forbidden";
-        } else if (
-            message.contains("429") || message.contains("too many requests")
-        ) {
-            return "429 Rate Limited";
-        } else if (
-            message.contains("connection") || message.contains("timeout")
-        ) {
-            return "Connection Error";
-        } else if (
-            message.contains("embedding") && message.contains("unavailable")
-        ) {
-            return "Embedding Service Unavailable";
-        } else {
-            return "Unknown Error";
-        }
-    }
 }
