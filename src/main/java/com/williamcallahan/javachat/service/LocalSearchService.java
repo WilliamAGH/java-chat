@@ -86,7 +86,12 @@ public class LocalSearchService {
             String text = Files.readString(p, StandardCharsets.UTF_8);
             String file = p.getFileName().toString();
             // Filename pattern: safeUrl_index_hash.txt
-            String url = fromSafeName(file.substring(0, file.indexOf("_"))); // best-effort
+            // Defensive: handle files without underscore delimiter
+            int underscoreIdx = file.indexOf("_");
+            String safeName = underscoreIdx > 0
+                ? file.substring(0, underscoreIdx)
+                : file.replace(".txt", "");
+            String url = fromSafeName(safeName);
             return Optional.of(new Result(url, text, score));
         } catch (IOException readError) {
             log.warn("Failed to read result file {}: {}", p, readError.getMessage());
