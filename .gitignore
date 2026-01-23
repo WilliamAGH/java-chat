@@ -43,6 +43,10 @@ build/
 ### VS Code ###
 .vscode/
 
+### Frontend (Svelte/Vite) ###
+frontend/node_modules/
+frontend/.svelte-kit/
+
 ### Logs ###
 logs/
 *.log
