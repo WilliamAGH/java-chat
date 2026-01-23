@@ -10,18 +10,35 @@ import org.springframework.context.annotation.Import;
  */
 @Configuration
 public class ConditionalAiConfig {
-    
+
+    private static final String OPENAI_API_KEY = "spring.ai.openai.api-key";
+    private static final String OPENAI_CHAT_KEY = "spring.ai.openai.chat.api-key";
+    private static final String NON_EMPTY_FLAG = "!empty";
+
+    /**
+     * Creates conditional AI configuration.
+     */
+    public ConditionalAiConfig() {
+    }
+
+    /**
+     * Enables Spring AI configuration when API keys are available.
+     */
     @Configuration
     @ConditionalOnProperty(
-        value = {"spring.ai.openai.api-key", "spring.ai.openai.chat.api-key"},
+        value = {OPENAI_API_KEY, OPENAI_CHAT_KEY},
         matchIfMissing = false,
-        havingValue = "!empty"
+        havingValue = NON_EMPTY_FLAG
     )
     @Import({
         org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration.class,
         org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration.class
     })
     public static class EnabledAiConfig {
-        // This configuration is only activated when API keys are present
+        /**
+         * Creates enabled AI configuration.
+         */
+        public EnabledAiConfig() {
+        }
     }
 }

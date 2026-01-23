@@ -108,7 +108,7 @@ public final class DocsSourceRegistry {
                 
                 // Fix Spring URLs using proper string parsing
                 if (url.startsWith("https://docs.spring.io/")) {
-                    url = normalizeSpringUrl(url);
+                    url = SpringDocsUtils.normalizeUrl(url);
                 }
                 
                 return url;
@@ -117,132 +117,6 @@ public final class DocsSourceRegistry {
         return null;
     }
     
-    /**
-     * Normalize Spring documentation URLs to their correct canonical form.
-     * Handles various malformed scraped URL patterns.
-     */
-    private static String normalizeSpringUrl(String url) {
-        // Parse the URL path after docs.spring.io/
-        String prefix = "https://docs.spring.io/";
-        if (!url.startsWith(prefix)) {
-            return url;
-        }
-        
-        String path = url.substring(prefix.length());
-        String[] parts = path.split("/");
-        
-        if (parts.length < 2) {
-            return url;
-        }
-        
-        String project = parts[0]; // e.g., "spring-framework" or "spring-boot"
-        
-        // Handle Spring Framework URLs
-        if (project.equals("spring-framework")) {
-            // Case 1: /spring-framework/docs/current/reference/6.1-SNAPSHOT/...
-            // Should be: /spring-framework/reference/current/...
-            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
-                // Check if parts[4] is a version string, if so skip it
-                int startIndex = 4;
-                if (isVersionString(parts[4])) {
-                    startIndex = 5; // Skip the version
-                }
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-framework/reference/current");
-                for (int i = startIndex; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-            
-            // Case 2: /spring-framework/reference/7.0-SNAPSHOT/...
-            // Should be: /spring-framework/reference/current/...
-            if (parts.length > 2 && parts[1].equals("reference") && isVersionString(parts[2])) {
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-framework/reference/current");
-                for (int i = 3; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-            
-            // Case 3a: /spring-framework/docs/current/api/current/javadoc-api/...
-            // Should be: /spring-framework/docs/current/javadoc-api/...
-            if (parts.length > 5 && parts[1].equals("docs") && parts[2].equals("current") 
-                && parts[3].equals("api") && parts[4].equals("current") && parts[5].equals("javadoc-api")) {
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-framework/docs/current/javadoc-api");
-                for (int i = 6; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-            // Case 3b: /spring-framework/docs/current/javadoc-api/java/... -> remove spurious 'java/'
-            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current")
-                && parts[3].equals("javadoc-api") && parts[4].equals("java")) {
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-framework/docs/current/javadoc-api");
-                for (int i = 5; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-        }
-        
-        // Handle Spring Boot URLs
-        if (project.equals("spring-boot")) {
-            // Case 1: /spring-boot/docs/current/reference/VERSION/...
-            // Should be: /spring-boot/reference/current/...
-            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current") && parts[3].equals("reference")) {
-                // Check if parts[4] is a version string, if so skip it
-                int startIndex = 4;
-                if (isVersionString(parts[4])) {
-                    startIndex = 5; // Skip the version
-                }
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-boot/reference/current");
-                for (int i = startIndex; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-            
-            // Case 2a: /spring-boot/reference/VERSION/...
-            // Should be: /spring-boot/reference/current/...
-            if (parts.length > 2 && parts[1].equals("reference") && isVersionString(parts[2])) {
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-boot/reference/current");
-                for (int i = 3; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-            // Case 2b: /spring-boot/docs/current/api/java/... -> remove spurious 'java/'
-            if (parts.length > 4 && parts[1].equals("docs") && parts[2].equals("current")
-                && parts[3].equals("api") && parts[4].equals("java")) {
-                StringBuilder newPath = new StringBuilder(prefix);
-                newPath.append("spring-boot/docs/current/api");
-                for (int i = 5; i < parts.length; i++) {
-                    newPath.append("/").append(parts[i]);
-                }
-                return newPath.toString();
-            }
-        }
-        
-        return url;
-    }
-    
-    /**
-     * Check if a string looks like a version (e.g., "6.1-SNAPSHOT", "7.0", "3.2.1")
-     */
-    private static boolean isVersionString(String s) {
-        if (s == null || s.isEmpty()) {
-            return false;
-        }
-        // Check for patterns like X.Y, X.Y.Z, X.Y-SNAPSHOT
-        return s.contains(".") && (Character.isDigit(s.charAt(0)) || s.charAt(0) == 'v');
-    }
-
     /**
      * Map a local mirrored path to its authoritative remote base URL. Returns null if not matched.
      */
@@ -254,35 +128,11 @@ public final class DocsSourceRegistry {
                 String rel = p.substring(p.indexOf(prefix) + prefix.length());
                 
                 // Special handling for Spring Framework paths
-                if (prefix.contains("spring-framework")) {
-                    // Handle various scraped path structures
-                    if (rel.startsWith("docs/current/api/current/javadoc-api/")) {
-                        // Fix double "current" in path: docs/current/api/current/javadoc-api/ -> javadoc-api/
-                        rel = rel.substring("docs/current/api/current/".length());
-                    } else if (rel.startsWith("api/current/javadoc-api/")) {
-                        // Remove api/current/ prefix: api/current/javadoc-api/ -> javadoc-api/
-                        rel = rel.substring("api/current/".length());
-                    } else if (rel.startsWith("docs/current/javadoc-api/")) {
-                        // Remove docs/current/ prefix: docs/current/javadoc-api/ -> javadoc-api/
-                        rel = rel.substring("docs/current/".length());
-                    }
-                    // Remove spurious leading 'java/' in mirrors
-                    if (rel.startsWith("javadoc-api/java/")) {
-                        rel = "javadoc-api/" + rel.substring("javadoc-api/java/".length());
-                    }
-                }
+                boolean isFramework = prefix.contains("spring-framework");
+                boolean isBoot = prefix.contains("spring-boot");
                 
-                // Special handling for Spring Boot paths
-                if (prefix.contains("spring-boot")) {
-                    // Handle various scraped path structures
-                    if (rel.startsWith("docs/current/api/")) {
-                        // Remove docs/current/ prefix: docs/current/api/ -> api/
-                        rel = rel.substring("docs/current/".length());
-                    }
-                    // Remove spurious leading 'java/' in mirrors
-                    if (rel.startsWith("api/java/")) {
-                        rel = "api/" + rel.substring("api/java/".length());
-                    }
+                if (isFramework || isBoot) {
+                    rel = SpringDocsUtils.cleanRelativePath(rel, isFramework, isBoot);
                 }
                 
                 return joinBaseAndRel(e.getValue(), rel);

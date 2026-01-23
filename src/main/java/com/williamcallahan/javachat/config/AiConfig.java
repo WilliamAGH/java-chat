@@ -11,35 +11,52 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import reactor.netty.http.client.HttpClient;
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
-import org.springframework.beans.factory.annotation.Autowired;
-
+/**
+ * Spring configuration for AI clients and HTTP settings.
+ */
 @Configuration
 @ConfigurationPropertiesScan(basePackageClasses = AppProperties.class)
 public class AiConfig {
+    private static final long RESPONSE_TIMEOUT_SECONDS = 120;
+    private static final int CONNECT_TIMEOUT_MILLIS = 30_000;
+
     // ChatModel and EmbeddingModel are auto-configured by Spring AI starter
     // using spring.ai.openai.* properties (OpenAI-compatible)
     // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
     // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
-    
+
+    /**
+     * Creates the AI configuration.
+     */
+    public AiConfig() {
+    }
+
+    /**
+     * Builds the chat client for Spring AI.
+     *
+     * @param chatModel configured chat model bean
+     * @return chat client instance
+     */
     @Bean
     @ConditionalOnBean(ChatModel.class)
-    public ChatClient chatClient(@Autowired(required = false) ChatModel chatModel) {
-        if (chatModel == null) {
-            return null;
-        }
+    public ChatClient chatClient(final ChatModel chatModel) {
         return ChatClient.builder(chatModel).build();
     }
-    
+
+    /**
+     * Configures the shared WebClient builder for AI calls.
+     *
+     * @return configured WebClient builder
+     */
     @Bean
     public WebClient.Builder webClientBuilder() {
         // Configure HTTP client with increased timeouts for GitHub Models API
         // GitHub Models can be slower than OpenAI, especially for complex requests
-        HttpClient httpClient = HttpClient.create()
-            .responseTimeout(Duration.ofSeconds(120)) // 2 minutes for response
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 30000); // 30 seconds for connection
-            
+        final HttpClient httpClient = HttpClient.create()
+            .responseTimeout(Duration.ofSeconds(RESPONSE_TIMEOUT_SECONDS)) // 2 minutes for response
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS); // 30 seconds for connection
+
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(httpClient));
     }
 }
-

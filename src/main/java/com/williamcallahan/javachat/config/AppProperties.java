@@ -1,213 +1,216 @@
 package com.williamcallahan.javachat.config;
 
-import java.util.List;
+import jakarta.annotation.PostConstruct;
+import java.util.Locale;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+/**
+ * Binds application configuration under the "app" prefix.
+ */
 @Component
-@ConfigurationProperties(prefix = "app")
+@ConfigurationProperties(prefix = AppProperties.CONFIG_PREFIX)
 public class AppProperties {
 
-    private Rag rag = new Rag();
+    public static final String CONFIG_PREFIX = "app";
+
+    private static final String NULL_SECT_FMT = "Configuration section %s must not be null.";
+    private static final String RAG_KEY = "app.rag";
+    private static final String LOCAL_EMBED_KEY = "app.local-embedding";
+    private static final String REMOTE_EMB_KEY = "app.remote-embedding";
+    private static final String DOCS_KEY = "app.docs";
+    private static final String DIAG_KEY = "app.diagnostics";
+    private static final String QDRANT_KEY = "app.qdrant";
+    private static final String CORS_KEY = "app.cors";
+
+    private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
     private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
-    private Docs docs = new Docs();
+    private DocumentationConfig docs = new DocumentationConfig();
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
-    private Cors cors = new Cors();
-    
-    public Rag getRag() {
-        return rag;
-    }
-    
-    public void setRag(Rag rag) {
-        this.rag = rag;
+    private CorsConfig cors = new CorsConfig();
+
+    /**
+     * Creates configuration sections with default values.
+     */
+    public AppProperties() {
     }
 
+    @PostConstruct
+    void validateConfiguration() {
+        requireConfiguredSection(rag, RAG_KEY).validateConfiguration();
+        requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY).validateConfiguration();
+        requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
+        requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
+        requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
+        requireConfiguredSection(qdrant, QDRANT_KEY);
+        requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+    }
+
+    /**
+     * Returns retrieval augmentation configuration.
+     *
+     * @return retrieval augmentation configuration
+     */
+    public RetrievalAugmentationConfig getRag() {
+        return rag;
+    }
+
+    /**
+     * Sets retrieval augmentation configuration.
+     *
+     * @param rag retrieval augmentation configuration
+     */
+    public void setRag(final RetrievalAugmentationConfig rag) {
+        this.rag = requireConfiguredSection(rag, RAG_KEY);
+    }
+
+    /**
+     * Returns local embedding configuration.
+     *
+     * @return local embedding configuration
+     */
     public LocalEmbedding getLocalEmbedding() {
         return localEmbedding;
     }
 
-    public void setLocalEmbedding(LocalEmbedding localEmbedding) {
-        this.localEmbedding = localEmbedding;
-    }
-
-    public Docs getDocs() {
-        return docs;
-    }
-
-    public void setDocs(Docs docs) {
-        this.docs = docs;
-    }
-    
-    public Diagnostics getDiagnostics() { return diagnostics; }
-    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = diagnostics; }
-    public Qdrant getQdrant() { return qdrant; }
-    public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
-    public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
-    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = remoteEmbedding; }
-    public Cors getCors() { return cors; }
-    public void setCors(Cors cors) { this.cors = cors; }
-    
-    public static class Rag {
-        private int searchTopK = 10;
-        private int searchReturnK = 5;
-        private int chunkMaxTokens = 900;
-        private int chunkOverlapTokens = 150;
-        private int searchCitations = 3;
-        private double searchMmrLambda = 0.5;
-        
-        public int getSearchTopK() {
-            return searchTopK;
-        }
-        
-        public void setSearchTopK(int searchTopK) {
-            this.searchTopK = searchTopK;
-        }
-        
-        public int getSearchReturnK() {
-            return searchReturnK;
-        }
-        
-        public void setSearchReturnK(int searchReturnK) {
-            this.searchReturnK = searchReturnK;
-        }
-
-        public int getChunkMaxTokens() {
-            return chunkMaxTokens;
-        }
-
-        public void setChunkMaxTokens(int chunkMaxTokens) {
-            this.chunkMaxTokens = chunkMaxTokens;
-        }
-
-        public int getChunkOverlapTokens() {
-            return chunkOverlapTokens;
-        }
-
-        public void setChunkOverlapTokens(int chunkOverlapTokens) {
-            this.chunkOverlapTokens = chunkOverlapTokens;
-        }
-
-        public int getSearchCitations() {
-            return searchCitations;
-        }
-
-        public void setSearchCitations(int searchCitations) {
-            this.searchCitations = searchCitations;
-        }
-
-        public double getSearchMmrLambda() {
-            return searchMmrLambda;
-        }
-
-        public void setSearchMmrLambda(double searchMmrLambda) {
-            this.searchMmrLambda = searchMmrLambda;
-        }
-    }
-
-    public static class LocalEmbedding {
-        private boolean enabled = false;
-        private String serverUrl = "http://127.0.0.1:1234";
-        private String model = "text-embedding-qwen3-embedding-8b";
-        private int dimensions = 4096;
-        private boolean useHashWhenDisabled = false;
-
-        public boolean isEnabled() { return enabled; }
-        public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-        public String getServerUrl() { return serverUrl; }
-        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
-
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
-
-        public int getDimensions() { return dimensions; }
-        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
-
-        public boolean isUseHashWhenDisabled() { return useHashWhenDisabled; }
-        public void setUseHashWhenDisabled(boolean useHashWhenDisabled) { this.useHashWhenDisabled = useHashWhenDisabled; }
-    }
-
-    public static class RemoteEmbedding {
-        private String serverUrl = ""; // e.g., https://api.novita.ai/openai
-        private String model = "text-embedding-3-small";
-        private String apiKey = "";
-        private int dimensions = 4096;
-
-        public String getServerUrl() { return serverUrl; }
-        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
-        public String getApiKey() { return apiKey; }
-        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
-        public int getDimensions() { return dimensions; }
-        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
-    }
-
-    public static class Docs {
-        private String rootUrl = "https://docs.oracle.com/en/java/javase/24/";
-        private int jdkVersion = 24;
-        private String snapshotDir = "data/snapshots";
-        private String parsedDir = "data/parsed";
-        private String indexDir = "data/index";
-
-        public String getRootUrl() { return rootUrl; }
-        public void setRootUrl(String rootUrl) { this.rootUrl = rootUrl; }
-
-        public int getJdkVersion() { return jdkVersion; }
-        public void setJdkVersion(int jdkVersion) { this.jdkVersion = jdkVersion; }
-
-        public String getSnapshotDir() { return snapshotDir; }
-        public void setSnapshotDir(String snapshotDir) { this.snapshotDir = snapshotDir; }
-
-        public String getParsedDir() { return parsedDir; }
-        public void setParsedDir(String parsedDir) { this.parsedDir = parsedDir; }
-
-        public String getIndexDir() { return indexDir; }
-        public void setIndexDir(String indexDir) { this.indexDir = indexDir; }
-    }
-    
-    public static class Diagnostics {
-        // Whether to log each raw streaming chunk (DEBUG). Default false to avoid flooding logs.
-        private boolean streamChunkLogging = false;
-        // Sample every Nth chunk when logging is enabled. 0 => log every chunk.
-        private int streamChunkSample = 0;
-        
-        public boolean isStreamChunkLogging() { return streamChunkLogging; }
-        public void setStreamChunkLogging(boolean streamChunkLogging) { this.streamChunkLogging = streamChunkLogging; }
-        public int getStreamChunkSample() { return streamChunkSample; }
-        public void setStreamChunkSample(int streamChunkSample) { this.streamChunkSample = streamChunkSample; }
-    }
-
-    public static class Qdrant {
-        // Mirror app.qdrant.ensure-payload-indexes
-        private boolean ensurePayloadIndexes = true;
-
-        public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
-        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
+    /**
+     * Sets local embedding configuration.
+     *
+     * @param localEmbedding local embedding configuration
+     */
+    public void setLocalEmbedding(final LocalEmbedding localEmbedding) {
+        this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY);
     }
 
     /**
-     * CORS configuration for cross-origin requests from frontend dev servers.
+     * Returns remote embedding configuration.
+     *
+     * @return remote embedding configuration
      */
-    public static class Cors {
-        private List<String> allowedOrigins = List.of("http://localhost:8085", "http://127.0.0.1:8085");
-        private List<String> allowedMethods = List.of("GET", "POST", "PUT", "DELETE", "OPTIONS");
-        private List<String> allowedHeaders = List.of("*");
-        private boolean allowCredentials = true;
-        private long maxAgeSeconds = 3600;
+    public RemoteEmbedding getRemoteEmbedding() {
+        return remoteEmbedding;
+    }
 
-        public List<String> getAllowedOrigins() { return allowedOrigins; }
-        public void setAllowedOrigins(List<String> allowedOrigins) { this.allowedOrigins = allowedOrigins; }
-        public List<String> getAllowedMethods() { return allowedMethods; }
-        public void setAllowedMethods(List<String> allowedMethods) { this.allowedMethods = allowedMethods; }
-        public List<String> getAllowedHeaders() { return allowedHeaders; }
-        public void setAllowedHeaders(List<String> allowedHeaders) { this.allowedHeaders = allowedHeaders; }
-        public boolean isAllowCredentials() { return allowCredentials; }
-        public void setAllowCredentials(boolean allowCredentials) { this.allowCredentials = allowCredentials; }
-        public long getMaxAgeSeconds() { return maxAgeSeconds; }
-        public void setMaxAgeSeconds(long maxAgeSeconds) { this.maxAgeSeconds = maxAgeSeconds; }
+    /**
+     * Sets remote embedding configuration.
+     *
+     * @param remoteEmbedding remote embedding configuration
+     */
+    public void setRemoteEmbedding(final RemoteEmbedding remoteEmbedding) {
+        this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY);
+    }
+
+    /**
+     * Returns documentation configuration.
+     *
+     * @return documentation configuration
+     */
+    public DocumentationConfig getDocs() {
+        return docs;
+    }
+
+    /**
+     * Sets documentation configuration.
+     *
+     * @param docs documentation configuration
+     */
+    public void setDocs(final DocumentationConfig docs) {
+        this.docs = requireConfiguredSection(docs, DOCS_KEY);
+    }
+
+    /**
+     * Returns diagnostics configuration.
+     *
+     * @return diagnostics configuration
+     */
+    public Diagnostics getDiagnostics() {
+        return diagnostics;
+    }
+
+    /**
+     * Sets diagnostics configuration.
+     *
+     * @param diagnostics diagnostics configuration
+     */
+    public void setDiagnostics(final Diagnostics diagnostics) {
+        this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY);
+    }
+
+    /**
+     * Returns Qdrant configuration.
+     *
+     * @return Qdrant configuration
+     */
+    public Qdrant getQdrant() {
+        return qdrant;
+    }
+
+    /**
+     * Sets Qdrant configuration.
+     *
+     * @param qdrant Qdrant configuration
+     */
+    public void setQdrant(final Qdrant qdrant) {
+        this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY);
+    }
+
+    /**
+     * Returns CORS configuration.
+     *
+     * @return CORS configuration
+     */
+    public CorsConfig getCors() {
+        return cors;
+    }
+
+    /**
+     * Sets CORS configuration.
+     *
+     * @param cors CORS configuration
+     */
+    public void setCors(final CorsConfig cors) {
+        this.cors = requireConfiguredSection(cors, CORS_KEY);
+    }
+
+    private static <T> T requireConfiguredSection(final T section, final String sectionKey) {
+        if (section == null) {
+            throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
+        }
+        return section;
+    }
+
+    /**
+     * Qdrant configuration.
+     */
+    public static class Qdrant {
+
+        private boolean payloadIndexing = true;
+
+        /**
+         * Creates Qdrant configuration.
+         */
+        public Qdrant() {
+        }
+
+        /**
+         * Returns whether payload indexes are ensured.
+         *
+         * @return whether payload indexes are ensured
+         */
+        public boolean isEnsurePayloadIndexes() {
+            return payloadIndexing;
+        }
+
+        /**
+         * Sets whether payload indexes are ensured.
+         *
+         * @param payloadIndexing whether payload indexes are ensured
+         */
+        public void setEnsurePayloadIndexes(final boolean payloadIndexing) {
+            this.payloadIndexing = payloadIndexing;
+        }
     }
 }
