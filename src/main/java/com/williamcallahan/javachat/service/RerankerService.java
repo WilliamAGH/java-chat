@@ -10,18 +10,24 @@ import org.springframework.ai.document.Document;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+/**
+ * Reorders retrieved documents by relevance using an LLM-based reranking prompt with caching and fast timeouts.
+ */
 @Service
 public class RerankerService {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        RerankerService.class
-    );
-    private final OpenAIStreamingService openAIStreamingService;
-    private final ObjectMapper mapper = new ObjectMapper();
+	    private static final Logger log = LoggerFactory.getLogger(
+	        RerankerService.class
+	    );
+	    private final OpenAIStreamingService openAIStreamingService;
+	    private final ObjectMapper mapper = new ObjectMapper();
 
-    public RerankerService(OpenAIStreamingService openAIStreamingService) {
-        this.openAIStreamingService = openAIStreamingService;
-    }
+	    /**
+	     * Creates a reranker backed by the streaming service for low-latency LLM completion calls.
+	     */
+	    public RerankerService(OpenAIStreamingService openAIStreamingService) {
+	        this.openAIStreamingService = openAIStreamingService;
+	    }
 
     /**
      * Rerank documents by relevance to query using LLM.

@@ -106,17 +106,20 @@ public class MarkdownService {
     /**
      * Cache statistics record.
      */
-    public record CacheStats(
-        long hitCount,
-        long missCount,
-        long evictionCount,
-        long size
-    ) {
-        public double hitRate() {
-            long total = hitCount + missCount;
-            return total == 0 ? 0.0 : (double) hitCount / total;
-        }
-    }
+	    public record CacheStats(
+	        long hitCount,
+	        long missCount,
+	        long evictionCount,
+	        long size
+	    ) {
+	        /**
+	         * Computes the cache hit rate as a fraction between 0.0 and 1.0.
+	         */
+	        public double hitRate() {
+	            long total = hitCount + missCount;
+	            return total == 0 ? 0.0 : (double) hitCount / total;
+	        }
+	    }
 
     private String escapeHtml(String text) {
         if (text == null) {

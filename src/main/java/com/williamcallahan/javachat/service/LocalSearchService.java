@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+
 /**
  * Searches locally parsed documents using simple keyword scoring as a fallback when vector retrieval is unavailable.
  */
@@ -36,8 +37,8 @@ public class LocalSearchService {
      * Search local parsed documents using keyword matching.
      *
      * @param query the search query
-     * @param topK maximum number of results to return
-     * @return SearchOutcome containing results and status information
+     * @param topK maximum number of hits to return
+     * @return SearchOutcome containing hits and status information
      */
     public SearchOutcome search(String query, int topK) {
         Objects.requireNonNull(query, "query must not be null");
@@ -50,37 +51,42 @@ public class LocalSearchService {
         Map<Path, Double> scores = new HashMap<>();
 
         try (var files = Files.walk(parsedDir)) {
-            List<Path> txts = files.filter(p -> p.toString().endsWith(".txt"))
+            List<Path> textFiles = files.filter(pathCandidate -> pathCandidate.toString().endsWith(".txt"))
                 .limit(MAX_FILES_TO_SCAN)
                 .collect(Collectors.toList());
 
-            log.debug("Local search scanning {} files", txts.size());
+            log.debug("Local search scanning {} files", textFiles.size());
 
-            for (Path p : txts) {
+            for (Path textFile : textFiles) {
                 try {
-                    String content = Files.readString(p, StandardCharsets.UTF_8);
-                    String norm = normalize(content);
+                    String content = Files.readString(textFile, StandardCharsets.UTF_8);
+                    String normalizedContent = normalize(content);
                     double score = 0;
-                    for (String t : terms) {
-                        if (t.isBlank()) continue;
-                        score += count(norm, t);
+                    for (String term : terms) {
+                        if (term.isBlank()) continue;
+                        score += count(normalizedContent, term);
                     }
-                    if (score > 0) scores.put(p, score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, norm.length()));
+                    if (score > 0) {
+                        scores.put(
+                            textFile,
+                            score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, normalizedContent.length())
+                        );
+                    }
                 } catch (IOException fileReadError) {
                     log.debug("Skipping unreadable file (exception type: {})",
                         fileReadError.getClass().getSimpleName());
                 }
             }
 
-            List<Result> results = scores.entrySet().stream()
+            List<SearchHit> searchHits = scores.entrySet().stream()
                 .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(topK)
-                .map(e -> toResult(e.getKey(), e.getValue()))
+                .map(scoreEntry -> toSearchHit(scoreEntry.getKey(), scoreEntry.getValue()))
                 .flatMap(Optional::stream)
                 .collect(Collectors.toList());
 
-            log.info("Local search found {} results", results.size());
-            return SearchOutcome.success(results);
+            log.info("Local search found {} hits", searchHits.size());
+            return SearchOutcome.success(searchHits);
 
         } catch (IOException walkError) {
             log.error("Local search failed to walk directory (exception type: {})",
@@ -89,18 +95,18 @@ public class LocalSearchService {
         }
     }
 
-    private Optional<Result> toResult(Path p, double score) {
+    private Optional<SearchHit> toSearchHit(Path textPath, double score) {
         try {
-            String text = Files.readString(p, StandardCharsets.UTF_8);
-            String file = p.getFileName().toString();
+            String text = Files.readString(textPath, StandardCharsets.UTF_8);
+            String fileName = textPath.getFileName().toString();
             // Filename pattern: safeUrl_index_hash.txt
             // Defensive: handle files without underscore delimiter
-            int underscoreIdx = file.indexOf("_");
+            int underscoreIdx = fileName.indexOf("_");
             String safeName = underscoreIdx > 0
-                ? file.substring(0, underscoreIdx)
-                : file.replace(".txt", "");
+                ? fileName.substring(0, underscoreIdx)
+                : fileName.replace(".txt", "");
             String url = fromSafeName(safeName);
-            return Optional.of(new Result(url, text, score));
+            return Optional.of(new SearchHit(url, text, score));
         } catch (IOException readError) {
             log.warn("Failed to read result file (exception type: {})",
                 readError.getClass().getSimpleName());
@@ -108,64 +114,73 @@ public class LocalSearchService {
         }
     }
 
-    private String normalize(String s) {
-        return s.toLowerCase(Locale.ROOT);
+    private String normalize(String inputText) {
+        return inputText.toLowerCase(Locale.ROOT);
     }
 
-    private int count(String hay, String needle) {
-        int c = 0;
-        int idx = 0;
-        while ((idx = hay.indexOf(needle, idx)) >= 0) {
-            c++;
-            idx += needle.length();
+    private int count(String haystack, String needleText) {
+        int matchCount = 0;
+        int searchIndex = 0;
+        while ((searchIndex = haystack.indexOf(needleText, searchIndex)) >= 0) {
+            matchCount++;
+            searchIndex += needleText.length();
         }
-        return c;
+        return matchCount;
     }
 
-    private String fromSafeName(String s) {
-        return s.replace('_', '/');
+    private String fromSafeName(String safeName) {
+        return safeName.replace('_', '/');
     }
 
     /**
-     * Represents a single search result with URL, text content, and relevance score.
+     * Represents a single search hit with URL, text content, and relevance score.
      */
-    public static final class Result {
+    public static final class SearchHit {
         private final String url;
         private final String text;
         private final double score;
 
         /**
-         * Creates a local search result with its source URL, raw text, and relevance score.
+         * Creates a local search hit with its source URL, raw text, and relevance score.
          */
-        public Result(String url, String text, double score) {
+        public SearchHit(String url, String text, double score) {
             this.url = url;
             this.text = text;
             this.score = score;
         }
 
+        /**
+         * Returns the source URL for the hit.
+         */
         public String url() {
             return url;
         }
 
+        /**
+         * Returns the raw text content for the hit.
+         */
         public String text() {
             return text;
         }
 
+        /**
+         * Returns the relevance score for the hit.
+         */
         public double score() {
             return score;
         }
     }
 
     /**
-     * Outcome of a local search operation, distinguishing between success, empty results, and failures.
+     * Outcome of a local search operation, distinguishing between success, empty hits, and failures.
      */
     public static class SearchOutcome {
-        private final List<Result> results;
+        private final List<SearchHit> searchHits;
         private final Status status;
         private final Optional<String> errorMessage;
 
         /**
-         * Signals the outcome state of a local search, separate from result payload.
+         * Signals the outcome state of a local search, separate from hit payload.
          */
         public enum Status {
             SUCCESS,
@@ -173,17 +188,17 @@ public class LocalSearchService {
             IO_ERROR
         }
 
-        private SearchOutcome(List<Result> results, Status status, Optional<String> errorMessage) {
-            this.results = List.copyOf(Objects.requireNonNull(results, "results must not be null"));
+        private SearchOutcome(List<SearchHit> searchHits, Status status, Optional<String> errorMessage) {
+            this.searchHits = List.copyOf(Objects.requireNonNull(searchHits, "searchHits must not be null"));
             this.status = Objects.requireNonNull(status, "status must not be null");
             this.errorMessage = Objects.requireNonNull(errorMessage, "errorMessage must not be null");
         }
 
         /**
-         * Builds a successful search outcome with the provided results.
+         * Builds a successful search outcome with the provided hits.
          */
-        public static SearchOutcome success(List<Result> results) {
-            return new SearchOutcome(results, Status.SUCCESS, Optional.empty());
+        public static SearchOutcome success(List<SearchHit> hits) {
+            return new SearchOutcome(hits, Status.SUCCESS, Optional.empty());
         }
 
         /**
@@ -201,10 +216,16 @@ public class LocalSearchService {
             return new SearchOutcome(List.of(), Status.IO_ERROR, Optional.of(message));
         }
 
-        public List<Result> results() {
-            return List.copyOf(results);
+        /**
+         * Returns the search hits, empty when no matches were found.
+         */
+        public List<SearchHit> hits() {
+            return List.copyOf(searchHits);
         }
 
+        /**
+         * Returns the outcome status for the search operation.
+         */
         public Status status() {
             return status;
         }
@@ -219,7 +240,7 @@ public class LocalSearchService {
         }
 
         /**
-         * Returns true when the search finished successfully (results may still be empty).
+         * Returns true when the search finished successfully (hits may still be empty).
          */
         public boolean isSuccess() {
             return status == Status.SUCCESS;
@@ -233,4 +254,3 @@ public class LocalSearchService {
         }
     }
 }
-

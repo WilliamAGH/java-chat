@@ -45,6 +45,9 @@ public class AuditService {
     @Value("${spring.ai.vectorstore.qdrant.collection-name}")
     private String collection;
 
+    /**
+     * Creates an audit service that compares locally parsed chunks against the vector store state.
+     */
     public AuditService(LocalStoreService localStore, ContentHasher hasher) {
         this.localStore = localStore;
         this.hasher = hasher;

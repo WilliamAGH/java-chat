@@ -18,6 +18,9 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
+/**
+ * Retrieves and reranks context documents for RAG queries and converts them into citation-ready metadata.
+ */
 @Service
 public class RetrievalService {
 
@@ -40,6 +43,9 @@ public class RetrievalService {
     private final LocalSearchService localSearch;
     private final DocumentFactory documentFactory;
 
+    /**
+     * Creates a retrieval service backed by a vector store, reranker, and local fallback search.
+     */
     public RetrievalService(
         VectorStore vectorStore,
         AppProperties props,
@@ -54,6 +60,9 @@ public class RetrievalService {
         this.documentFactory = documentFactory;
     }
 
+    /**
+     * Retrieves documents for a query using vector search and reranking, falling back to local search on failure.
+     */
     public List<Document> retrieve(String query) {
         // Extract version filter patterns if query mentions a specific Java version
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
@@ -121,25 +130,25 @@ public class RetrievalService {
                 Math.max(maxDocs, props.getRag().getSearchTopK())
             );
             docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
-        } catch (RuntimeException e) {
-            String errorType = RetrievalErrorClassifier.determineErrorType(e);
+        } catch (RuntimeException exception) {
+            String errorType = RetrievalErrorClassifier.determineErrorType(exception);
             log.warn("Vector search unavailable; falling back to local keyword search with limits");
 
-            RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, e);
+            RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
 
             // Fallback to local search with limits
             LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
 
             if (outcome.isFailed()) {
-                log.error("Local keyword search also failed - returning empty results");
+                log.error("Local keyword search also failed - returning empty hits");
                 docs = List.of();
             } else {
-                log.info("Local keyword search returned {} results", outcome.results().size());
+                log.info("Local keyword search returned {} hits", outcome.hits().size());
 
-                docs = outcome.results()
+                docs = outcome.hits()
                     .stream()
-                    .map(r -> {
-                        Document doc = documentFactory.createLocalDocument(r.text(), r.url());
+                    .map(hit -> {
+                        Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
                         doc.getMetadata().put("retrievalSource", "keyword_fallback");
                         doc.getMetadata().put("fallbackReason", errorType);
                         return doc;
@@ -275,6 +284,9 @@ public class RetrievalService {
         );
     }
 
+    /**
+     * Builds citations from retrieved documents by normalizing source URLs and trimming snippets for UI display.
+     */
     public List<Citation> toCitations(List<Document> docs) {
         List<Citation> citations = new ArrayList<>();
         for (Document d : docs) {
@@ -330,28 +342,28 @@ public class RetrievalService {
      * Documents returned include metadata indicating they came from fallback search.
      */
     private List<Document> handleVectorSearchFailure(
-        RuntimeException e,
+        RuntimeException exception,
         String query
     ) {
-        String errorType = RetrievalErrorClassifier.determineErrorType(e);
+        String errorType = RetrievalErrorClassifier.determineErrorType(exception);
         log.warn("Vector search unavailable; falling back to local keyword search");
 
-        RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, e);
+        RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
 
         // Use searchTopK (not searchReturnK) to match the primary path's candidate pool size
         LocalSearchService.SearchOutcome outcome = localSearch.search(query, props.getRag().getSearchTopK());
 
         if (outcome.isFailed()) {
-            log.error("Local keyword search also failed - returning empty results");
+            log.error("Local keyword search also failed - returning empty hits");
             return List.of();
         }
 
-        log.info("Local keyword search returned {} results", outcome.results().size());
+        log.info("Local keyword search returned {} hits", outcome.hits().size());
 
-        return outcome.results()
+        return outcome.hits()
             .stream()
-            .map(r -> {
-                Document doc = documentFactory.createLocalDocument(r.text(), r.url());
+            .map(hit -> {
+                Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
                 // Mark document as coming from fallback search
                 doc.getMetadata().put("retrievalSource", "keyword_fallback");
                 doc.getMetadata().put("fallbackReason", errorType);

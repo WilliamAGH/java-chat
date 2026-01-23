@@ -43,24 +43,30 @@ public class MarkdownStreamProcessor {
     private static final Pattern SENTENCE_END = Pattern.compile(".*[.!?][\"'\\)]?\\s*$");
     private static final Pattern PARAGRAPH_BREAK = Pattern.compile(".*\\n\\n\\s*$");
     private static final Pattern CODE_BLOCK_END = Pattern.compile(".*```\\s*$");
-    private static final Pattern LIST_ITEM_END = Pattern.compile(".*\\n\\s*(?:\\d+[.)]|[-*+•→▸◆□▪])\\s+.*$");
-    
-    // Processing state
-    public enum StreamState {
-        PLAIN_TEXT,
-        IN_CODE_BLOCK,
-        IN_LIST
-    }
+	    private static final Pattern LIST_ITEM_END = Pattern.compile(".*\\n\\s*(?:\\d+[.)]|[-*+•→▸◆□▪])\\s+.*$");
+	    
+	    // Processing state
+	    /**
+	     * Tracks the current structure context inferred from the buffered markdown stream.
+	     */
+	    public enum StreamState {
+	        PLAIN_TEXT,
+	        IN_CODE_BLOCK,
+	        IN_LIST
+	    }
     
     private final UnifiedMarkdownService markdownService;
     private final StringBuilder buffer = new StringBuilder();
-    private final StringBuilder commitBuffer = new StringBuilder();
-    private StreamState currentState = StreamState.PLAIN_TEXT;
-    private Instant bufferStartTime = Instant.now();
-    
-    public MarkdownStreamProcessor(UnifiedMarkdownService markdownService) {
-        this.markdownService = markdownService;
-    }
+	    private final StringBuilder commitBuffer = new StringBuilder();
+	    private StreamState currentState = StreamState.PLAIN_TEXT;
+	    private Instant bufferStartTime = Instant.now();
+	    
+	    /**
+	     * Creates a processor that delegates final markdown rendering to the unified markdown service.
+	     */
+	    public MarkdownStreamProcessor(UnifiedMarkdownService markdownService) {
+	        this.markdownService = markdownService;
+	    }
     
     /**
      * Processes a streaming chunk and returns formatted HTML when appropriate.
