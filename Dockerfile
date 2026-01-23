@@ -7,7 +7,8 @@
 # ================================
 # BUILD STAGE - Maven + JDK
 # ================================
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk-alpine AS builder
 
 # Install Maven (Alpine package is lightweight)
 RUN apk add --no-cache maven
@@ -31,7 +32,8 @@ RUN ./mvnw clean package -DskipTests -B
 # ================================
 # RUNTIME STAGE - JRE Only
 # ================================
-FROM eclipse-temurin:21-jre-alpine AS runtime
+# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre-alpine AS runtime
 
 # Add labels for better container management
 LABEL maintainer="Java Chat Team" \
