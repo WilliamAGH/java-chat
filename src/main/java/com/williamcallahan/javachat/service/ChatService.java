@@ -73,9 +73,13 @@ public class ChatService {
         
         String fullPrompt = buildPromptFromMessages(messages);
 
-        // DIAGNOSTIC: Log prompt and context (truncated)
-        String promptPreview = fullPrompt.substring(0, Math.min(500, fullPrompt.length()));
-        logger.info("[DIAG] LLM prompt length={} preview=\n{}", fullPrompt.length(), promptPreview);
+        // DIAGNOSTIC: Log prompt size only (no content) at DEBUG to avoid leaking sensitive data
+        logger.debug("[DIAG] LLM prompt length={}", fullPrompt.length());
+
+        if (!openAIStreamingService.isAvailable()) {
+            logger.error("OpenAI streaming service is not available - check API credentials");
+            return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
+        }
 
         return openAIStreamingService.streamResponse(fullPrompt, 0.7)
                 .onErrorResume(ex -> {
@@ -147,14 +151,16 @@ public class ChatService {
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            String safeUrl = normalizeUrlForPrompt(rawUrl);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        
+
         String fullPrompt = buildPromptFromMessages(messages);
 
         return openAIStreamingService.streamResponse(fullPrompt, 0.7)
@@ -216,34 +222,38 @@ public class ChatService {
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            String safeUrl = normalizeUrlForPrompt(rawUrl);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        
+
         return buildPromptFromMessages(messages);
     }
-    
+
     /**
      * Build a complete prompt with context and guidance for OpenAI streaming service.
      * Used by GuidedLearningService for lesson-specific prompts.
      */
-    public String buildPromptWithContextAndGuidance(List<Message> history, String latestUserMessage, 
+    public String buildPromptWithContextAndGuidance(List<Message> history, String latestUserMessage,
                                                    List<Document> contextDocs, String guidance) {
         // Build system prompt with guidance
         String basePrompt = systemPromptConfig.getCoreSystemPrompt();
-        String completePrompt = guidance != null && !guidance.isBlank() 
+        String completePrompt = guidance != null && !guidance.isBlank()
             ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
             : basePrompt;
-        
+
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
         for (int i = 0; i < contextDocs.size(); i++) {
             Document d = contextDocs.get(i);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(d.getMetadata().get("url")).append("\n").append(d.getText());
+            String rawUrl = String.valueOf(d.getMetadata().get("url"));
+            String safeUrl = normalizeUrlForPrompt(rawUrl);
+            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
