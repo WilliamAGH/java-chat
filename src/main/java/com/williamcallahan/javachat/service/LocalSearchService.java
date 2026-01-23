@@ -62,6 +62,7 @@ public class LocalSearchService {
                 .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(topK)
                 .map(e -> toResult(e.getKey(), e.getValue()))
+                .flatMap(Optional::stream)
                 .collect(Collectors.toList());
 
             log.info("Local search found {} results for query: {}", results.size(), query);
@@ -73,16 +74,16 @@ public class LocalSearchService {
         }
     }
 
-    private Result toResult(Path p, double score) {
+    private Optional<Result> toResult(Path p, double score) {
         try {
             String text = Files.readString(p, StandardCharsets.UTF_8);
             String file = p.getFileName().toString();
             // Filename pattern: safeUrl_index_hash.txt
             String url = fromSafeName(file.substring(0, file.indexOf("_"))); // best-effort
-            return new Result(url, text, score);
+            return Optional.of(new Result(url, text, score));
         } catch (IOException readError) {
             log.warn("Failed to read result file {}: {}", p, readError.getMessage());
-            return new Result("", "", 0);
+            return Optional.empty();
         }
     }
 

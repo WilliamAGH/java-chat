@@ -5,9 +5,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -246,6 +244,12 @@ public class RetrievalService {
             }
         }
 
+        // Early return if no documents to process (fallback also failed or no matches)
+        if (docs.isEmpty()) {
+            log.info("No documents to process after retrieval/fallback - returning empty list");
+            return List.of();
+        }
+
         // Truncate documents to token limits and return limited count
         List<Document> truncatedDocs = docs
             .stream()
@@ -301,14 +305,17 @@ public class RetrievalService {
 
         truncated += "\n[...content truncated for token limits...]";
 
-        // Create new document with truncated content
-        Map<String, Object> metadata = new HashMap<>(doc.getMetadata());
-        metadata.put("truncated", true);
-        metadata.put("originalLength", content.length());
+        // Create new document with truncated content, preserving all original metadata
+        // and adding truncation-specific metadata
+        Map<String, Object> truncationMetadata = Map.of(
+            "truncated", true,
+            "originalLength", content.length()
+        );
 
-        return documentFactory.createLocalDocument(
+        return documentFactory.createWithPreservedMetadata(
             truncated,
-            String.valueOf(metadata.get("url"))
+            doc.getMetadata(),
+            truncationMetadata
         );
     }
 
