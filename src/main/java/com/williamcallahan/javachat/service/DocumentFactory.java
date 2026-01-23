@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Factory service for creating standardized Spring AI Document objects
@@ -65,6 +66,32 @@ public class DocumentFactory {
 
         var document = new org.springframework.ai.document.Document(text);
         document.getMetadata().putAll(metadata);
+
+        return document;
+    }
+
+    /**
+     * Creates a Spring AI Document with new text content while preserving existing metadata.
+     * Used for operations like truncation where the text changes but metadata should be retained.
+     *
+     * @param newText The new text content (required)
+     * @param existingMetadata The metadata to preserve, copied not mutated (required, use Map.of() if empty)
+     * @param additionalMetadata Entries to merge, can override existing (required, use Map.of() if empty)
+     * @return A properly configured Spring AI Document with preserved metadata
+     * @throws NullPointerException if any parameter is null
+     */
+    public org.springframework.ai.document.Document createWithPreservedMetadata(
+            String newText,
+            Map<String, Object> existingMetadata,
+            Map<String, Object> additionalMetadata) {
+
+        Objects.requireNonNull(newText, "newText must not be null");
+        Objects.requireNonNull(existingMetadata, "existingMetadata must not be null; use Map.of() for empty");
+        Objects.requireNonNull(additionalMetadata, "additionalMetadata must not be null; use Map.of() for empty");
+
+        var document = new org.springframework.ai.document.Document(newText);
+        document.getMetadata().putAll(existingMetadata);
+        document.getMetadata().putAll(additionalMetadata);
 
         return document;
     }

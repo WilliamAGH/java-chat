@@ -6,6 +6,7 @@ import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -22,6 +23,16 @@ public class RetrievalService {
     private static final Logger log = LoggerFactory.getLogger(
         RetrievalService.class
     );
+
+    /** Max chars for first document preview in debug logs */
+    private static final int DEBUG_FIRST_DOC_PREVIEW_LENGTH = 200;
+
+    /** Max chars for diagnostic log previews of top reranked documents */
+    private static final int DIAGNOSTIC_PREVIEW_LENGTH = 500;
+
+    /** Max chars for citation snippets shown to users */
+    private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
+
     private final VectorStore vectorStore;
     private final AppProperties props;
     private final RerankerService rerankerService;
@@ -109,7 +120,7 @@ public class RetrievalService {
                         .getText()
                         .substring(
                             0,
-                            Math.min(200, docs.get(0).getText().length())
+                            Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docs.get(0).getText().length())
                         )
                 );
             }
@@ -139,7 +150,7 @@ public class RetrievalService {
         // DIAGNOSTIC: Log top reranked doc preview (truncated)
         if (!reranked.isEmpty()) {
             String txt = reranked.get(0).getText();
-            String preview = txt.substring(0, Math.min(500, txt.length()));
+            String preview = txt.substring(0, Math.min(DIAGNOSTIC_PREVIEW_LENGTH, txt.length()));
             log.info("[DIAG] RAG top doc (post-rerank) preview=\n{}", preview);
         }
         return reranked;
