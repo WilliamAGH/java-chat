@@ -176,8 +176,11 @@ public class DocumentProcessor {
     private void logProcessingStats(final int processed, final long elapsedMillis) {
         final double elapsedSeconds = Math.max(elapsedMillis, 1) / 1000.0;
         final double rate = processed / elapsedSeconds;
-        LOGGER.info("Processed {} files in {:.2f}s ({:.1f} files/sec) ({})",
-            processed, elapsedSeconds, rate, progressTracker.formatPercent());
+        LOGGER.info("Processed {} files in {}s ({} files/sec) ({})",
+            processed,
+            String.format(Locale.ROOT, "%.2f", elapsedSeconds),
+            String.format(Locale.ROOT, "%.1f", rate),
+            progressTracker.formatPercent());
     }
 
     private void logSummary(final EnvironmentConfig config, final IngestionTotals totals) {

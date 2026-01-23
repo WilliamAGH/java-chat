@@ -35,6 +35,7 @@ public class LocalSearchService {
      * @return SearchOutcome containing results and status information
      */
     public SearchOutcome search(String query, int topK) {
+        Objects.requireNonNull(query, "query must not be null");
         if (!Files.isDirectory(parsedDir)) {
             log.warn("Local search directory does not exist: {}", parsedDir);
             return SearchOutcome.directoryNotFound(parsedDir.toString());
