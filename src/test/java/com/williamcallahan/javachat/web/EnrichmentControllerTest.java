@@ -19,7 +19,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.springframework.context.annotation.Import;
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.WebMvcConfig;
+
 @WebMvcTest(controllers = EnrichmentController.class)
+@Import({AppProperties.class, WebMvcConfig.class})
 @org.springframework.test.context.TestPropertySource(properties = "app.docs.jdk-version=24")
 @org.springframework.security.test.context.support.WithMockUser
 class EnrichmentControllerTest {

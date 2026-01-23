@@ -29,8 +29,18 @@
     <properties>
         <java.version>21</java.version>
         <spring-ai.version>1.0.1</spring-ai.version>
-        <jsoup.version>1.18.1</jsoup.version>
+        <jsoup.version>1.22.1</jsoup.version>
         <jtokkit.version>1.1.0</jtokkit.version>
+        <openai.version>4.16.1</openai.version>
+        <spring-dotenv.version>5.1.0</spring-dotenv.version>
+        <fastutil.version>8.5.18</fastutil.version>
+        <flexmark.version>0.64.8</flexmark.version>
+        <caffeine.version>3.2.3</caffeine.version>
+        <grpc.version>1.78.0</grpc.version>
+        <pdfbox.version>3.0.6</pdfbox.version>
+        <spotbugs.version>4.9.8.2</spotbugs.version>
+        <findsecbugs.version>1.14.0</findsecbugs.version>
+        <pmd.version>3.28.0</pmd.version>
     </properties>
     <dependencies>
         <!-- Ensure a single, consistent logging stack (Logback + SLF4J). -->
@@ -64,7 +74,7 @@
         <dependency>
             <groupId>com.openai</groupId>
             <artifactId>openai-java</artifactId>
-            <version>3.0.1</version>
+            <version>${openai.version}</version>
         </dependency>
         
         <!-- Keep Spring AI OpenAI for gradual migration -->
@@ -88,7 +98,7 @@
         <dependency>
             <groupId>me.paulschwarz</groupId>
             <artifactId>spring-dotenv</artifactId>
-            <version>4.0.0</version>
+            <version>${spring-dotenv.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -117,7 +127,7 @@
         <dependency>
             <groupId>it.unimi.dsi</groupId>
             <artifactId>fastutil</artifactId>
-            <version>8.5.13</version>
+            <version>${fastutil.version}</version>
         </dependency>
         <dependency>
             <groupId>com.knuddels</groupId>
@@ -131,7 +141,7 @@
         <dependency>
             <groupId>com.vladsch.flexmark</groupId>
             <artifactId>flexmark-all</artifactId>
-            <version>0.64.8</version>
+            <version>${flexmark.version}</version>
             <exclusions>
                 <!-- Avoid conflicts with Spring's spring-jcl (Commons Logging bridge) -->
                 <exclusion>
@@ -143,7 +153,7 @@
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
-            <version>3.1.8</version>
+            <version>${caffeine.version}</version>
         </dependency>
 
         <!-- grpc-core version managed by grpc-bom in dependencyManagement -->
@@ -156,7 +166,7 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.3</version>
+            <version>${pdfbox.version}</version>
             <exclusions>
                 <!-- Avoid conflicts with Spring's spring-jcl (Commons Logging bridge) -->
                 <exclusion>
@@ -222,7 +232,7 @@
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-bom</artifactId>
-                <version>1.68.2</version>
+                <version>${grpc.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -262,7 +272,7 @@
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.9.8.2</version>
+                <version>${spotbugs.version}</version>
                 <configuration>
                     <effort>Max</effort>
                     <threshold>Low</threshold>
@@ -274,7 +284,7 @@
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>
                             <artifactId>findsecbugs-plugin</artifactId>
-                            <version>1.14.0</version>
+                            <version>${findsecbugs.version}</version>
                         </plugin>
                     </plugins>
                 </configuration>
@@ -291,7 +301,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
-                <version>3.28.0</version>
+                <version>${pmd.version}</version>
                 <configuration>
                     <rulesets>
                         <ruleset>pmd-ruleset.xml</ruleset>
