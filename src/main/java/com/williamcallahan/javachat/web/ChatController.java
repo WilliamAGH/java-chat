@@ -27,6 +27,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Exposes chat endpoints for streaming responses, session history management, and diagnostics.
+ */
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController extends BaseController {
@@ -44,14 +47,17 @@ public class ChatController extends BaseController {
     @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
     private String localEmbeddingServerUrl;
 
-    @Value("${app.local-embedding.enabled:false}")
-    private boolean localEmbeddingEnabled;
+	    @Value("${app.local-embedding.enabled:false}")
+	    private boolean localEmbeddingEnabled;
 
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
-                         UnifiedMarkdownService unifiedMarkdownService,
-                         OpenAIStreamingService openAIStreamingService,
-                         RetrievalService retrievalService,
-                         ExceptionResponseBuilder exceptionBuilder) {
+	    /**
+	     * Creates the chat controller wired to chat, retrieval, and markdown services.
+	     */
+	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
+	                         UnifiedMarkdownService unifiedMarkdownService,
+	                         OpenAIStreamingService openAIStreamingService,
+	                         RetrievalService retrievalService,
+	                         ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
@@ -233,14 +239,17 @@ public class ChatController extends BaseController {
         }
         chatMemory.clear(sessionId);
         PIPELINE_LOG.info("Cleared chat session");
-        return ResponseEntity.ok("Session cleared");
-    }
-    
-    @GetMapping("/health/embeddings")
-    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-        if (!localEmbeddingEnabled) {
-            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
-        }
+	        return ResponseEntity.ok("Session cleared");
+	    }
+	    
+	    /**
+	     * Reports whether the configured local embedding server is reachable when the feature is enabled.
+	     */
+	    @GetMapping("/health/embeddings")
+	    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
+	        if (!localEmbeddingEnabled) {
+	            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
+	        }
 
         try {
             // Simple health check - try to get models list

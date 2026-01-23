@@ -20,6 +20,9 @@ import com.williamcallahan.javachat.service.MarkdownService;
 import java.util.*;
 import java.time.Duration;
 
+/**
+ * Exposes guided learning endpoints for lesson metadata, citations, enrichment, and streaming lesson content.
+ */
 @RestController
 @RequestMapping("/api/guided")
 public class GuidedLearningController extends BaseController {
@@ -34,6 +37,9 @@ public class GuidedLearningController extends BaseController {
 
     private final MarkdownService markdownService;
 
+    /**
+     * Creates the guided learning controller wired to the guided learning orchestration services.
+     */
     public GuidedLearningController(GuidedLearningService guidedService,
                                     ChatMemoryService chatMemory,
                                     OpenAIStreamingService openAIStreamingService,

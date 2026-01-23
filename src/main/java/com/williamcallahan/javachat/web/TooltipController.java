@@ -7,15 +7,26 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * Exposes tooltip glossary entries for the frontend.
+ */
 @RestController
 @RequestMapping("/api/tooltips")
 public class TooltipController {
     private final TooltipRegistry registry;
-    public TooltipController(TooltipRegistry registry) { this.registry = registry; }
 
+    /**
+     * Creates the tooltip controller backed by the glossary registry.
+     */
+    public TooltipController(TooltipRegistry registry) {
+        this.registry = registry;
+    }
+
+    /**
+     * Returns the current tooltip definitions in insertion order.
+     */
     @GetMapping("/list")
     public List<TooltipRegistry.TooltipDefinition> list() {
         return registry.list();
     }
 }
-

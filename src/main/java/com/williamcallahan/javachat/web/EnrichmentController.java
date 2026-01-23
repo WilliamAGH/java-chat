@@ -11,12 +11,18 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Exposes enrichment marker generation backed by retrieval and enrichment services.
+ */
 @RestController
 public class EnrichmentController {
     private final RetrievalService retrievalService;
     private final EnrichmentService enrichmentService;
     private final String jdkVersion;
 
+    /**
+     * Creates the enrichment controller using retrieval for context and a service to synthesize enrichment markers.
+     */
     public EnrichmentController(RetrievalService retrievalService,
                                 EnrichmentService enrichmentService,
                                 @Value("${app.docs.jdk-version}") String jdkVersion) {
@@ -25,36 +31,46 @@ public class EnrichmentController {
         this.jdkVersion = jdkVersion;
     }
 
+    /**
+     * Returns enrichment markers for a query using retrieved context snippets.
+     */
     @GetMapping("/api/enrich")
-    public Enrichment enrich(@RequestParam("q") String q) {
-        var docs = retrievalService.retrieve(q);
+    public Enrichment enrich(@RequestParam("q") String query) {
+        var docs = retrievalService.retrieve(query);
         List<String> snippets = docs.stream().map(d -> d.getText()).limit(6).collect(Collectors.toList());
-        return sanitize(enrichmentService.enrich(q, jdkVersion, snippets));
+        return sanitize(enrichmentService.enrich(query, jdkVersion, snippets));
     }
 
     // New alias for consistent naming with chat routes
+    /**
+     * Provides the chat-aligned alias for enrichment generation.
+     */
     @GetMapping("/api/chat/enrich")
-    public Enrichment chatEnrich(@RequestParam("q") String q) {
-        return enrich(q);
+    public Enrichment chatEnrich(@RequestParam("q") String query) {
+        return enrich(query);
     }
 
-    private Enrichment sanitize(Enrichment e) {
-        if (e == null) return null;
-        e.setHints(trimFilter(e.getHints()));
-        e.setReminders(trimFilter(e.getReminders()));
-        e.setBackground(trimFilter(e.getBackground()));
-        return e;
+    private Enrichment sanitize(Enrichment enrichment) {
+        if (enrichment == null) {
+            Enrichment emptyEnrichment = new Enrichment();
+            emptyEnrichment.setHints(List.of());
+            emptyEnrichment.setReminders(List.of());
+            emptyEnrichment.setBackground(List.of());
+            return emptyEnrichment;
+        }
+        enrichment.setHints(trimFilter(enrichment.getHints()));
+        enrichment.setReminders(trimFilter(enrichment.getReminders()));
+        enrichment.setBackground(trimFilter(enrichment.getBackground()));
+        return enrichment;
     }
 
-    private List<String> trimFilter(List<String> in) {
-        if (in == null) return List.of();
-        return in.stream()
-                .map(s -> s == null ? "" : s.trim())
-                .filter(s -> !s.isEmpty())
+    private List<String> trimFilter(List<String> rawEntries) {
+        if (rawEntries == null) return List.of();
+        return rawEntries.stream()
+                .map(entry -> entry == null ? "" : entry.trim())
+                .filter(entry -> !entry.isEmpty())
                 .collect(Collectors.toList());
     }
 }
-
-
 
 
