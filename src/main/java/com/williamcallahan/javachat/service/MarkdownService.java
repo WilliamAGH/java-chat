@@ -416,9 +416,7 @@ public class MarkdownService {
 
                 // If this is a closing fence and there's more content, ensure separation
                 if (!inCodeBlock && i < lines.length - 1) {
-                    String nextLine = (i + 1 < lines.length)
-                        ? lines[i + 1].trim()
-                        : "";
+                    String nextLine = lines[i + 1].trim();
                     if (!nextLine.isEmpty() && !nextLine.startsWith("```")) {
                         out.append("\n\n");
                         continue; // Skip normal newline addition
