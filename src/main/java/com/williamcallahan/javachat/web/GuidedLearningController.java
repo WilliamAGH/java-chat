@@ -200,11 +200,13 @@ public class GuidedLearningController extends BaseController {
 
             // Heartbeats should terminate when data stream completes; otherwise the
             // merged Flux never completes and the client keeps a flashing cursor.
+            // Use empty string for heartbeat - will be filtered out and doesn't pollute response
             Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
                     .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
-                    .map(i -> ": keepalive\n\n");
+                    .map(i -> "");
 
             return Flux.merge(dataStream, heartbeats)
+                    .filter(s -> s != null && !s.isEmpty())  // Filter out empty heartbeat strings
                     .doOnComplete(() -> {
                         // Store processed HTML for consistency with Chat
                         var processed = markdownService.processStructured(fullResponse.toString());
