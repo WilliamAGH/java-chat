@@ -215,6 +215,7 @@ public class DocumentProcessor {
         String appPort
     ) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
+        private static final String QDRANT_COLLECTION_DEFAULT = "(not set)";
         private static final String QDRANT_HOST_DEFAULT = "localhost";
         private static final String QDRANT_PORT_DEFAULT = "8086";
         private static final String APP_PORT_DEFAULT = "8085";
@@ -222,7 +223,7 @@ public class DocumentProcessor {
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
                 envOrDefault("DOCS_DIR", DOCS_DIR_DEFAULT),
-                System.getenv("QDRANT_COLLECTION"),
+                envOrDefault("QDRANT_COLLECTION", QDRANT_COLLECTION_DEFAULT),
                 envOrDefault("QDRANT_HOST", QDRANT_HOST_DEFAULT),
                 envOrDefault("QDRANT_PORT", QDRANT_PORT_DEFAULT),
                 envOrDefault("PORT", APP_PORT_DEFAULT)
