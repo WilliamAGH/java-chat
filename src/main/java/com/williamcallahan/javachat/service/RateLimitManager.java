@@ -158,7 +158,13 @@ public class RateLimitManager {
     }
 
     public boolean isProviderAvailable(ApiProvider provider) {
-        // First check persistent rate limit state
+        // First check if provider is actually configured
+        if (!isProviderConfigured(provider)) {
+            log.debug("Provider {} not configured; treating as unavailable", provider.getName());
+            return false;
+        }
+
+        // Then check persistent rate limit state
         if (!rateLimitState.isAvailable(provider.getName())) {
             Duration remaining = rateLimitState.getRemainingWaitTime(
                 provider.getName()
