@@ -23,6 +23,7 @@ import java.lang.reflect.Method;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
+import java.util.Objects;
 
 /**
  * OpenAI Java SDK-based streaming service that provides clean, reliable streaming
@@ -63,6 +64,7 @@ public class OpenAIStreamingService {
     @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}")
     private long primaryBackoffSeconds;
     
+
     @jakarta.annotation.PostConstruct
     public void initializeClient() {
         try {
@@ -122,7 +124,7 @@ public class OpenAIStreamingService {
                 ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
                 AtomicReference<ChatCompletion> finalCompletion = new AtomicReference<>();
                 
-                RateLimitManager.ApiProvider firstProvider = (first == clientPrimary)
+                RateLimitManager.ApiProvider firstProvider = (Objects.equals(first, clientPrimary))
                         ? RateLimitManager.ApiProvider.GITHUB_MODELS
                         : RateLimitManager.ApiProvider.OPENAI;
                 log.info("[LLM] Streaming via {}", describeProvider(first));
@@ -152,7 +154,7 @@ public class OpenAIStreamingService {
                     
                 } catch (Exception e) {
                     log.error("[LLM] Primary streaming failed ({}): {}", describeProvider(first), summarize(e));
-                    if (first == clientPrimary && isRetryablePrimaryFailure(e)) {
+                    if (Objects.equals(first, clientPrimary) && isRetryablePrimaryFailure(e)) {
                         markPrimaryBackoff("stream failure: " + summarize(e));
                         if (rateLimitManager != null) {
                             rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, e.getMessage());
@@ -204,7 +206,7 @@ public class OpenAIStreamingService {
                 log.info("[LLM] Complete via {}", describeProvider(first));
                 ChatCompletion completion = first.chat().completions().create(params);
                 if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(first == clientPrimary
+                    rateLimitManager.recordSuccess(Objects.equals(first, clientPrimary)
                             ? RateLimitManager.ApiProvider.GITHUB_MODELS
                             : RateLimitManager.ApiProvider.OPENAI);
                 }
@@ -213,7 +215,7 @@ public class OpenAIStreamingService {
                         .flatMap(choice -> choice.message().content())
                         .orElse("");
             } catch (Exception primaryError) {
-                if (first == clientPrimary && isRetryablePrimaryFailure(primaryError)) {
+                if (Objects.equals(first, clientPrimary) && isRetryablePrimaryFailure(primaryError)) {
                     markPrimaryBackoff("complete failure: " + summarize(primaryError));
                     if (rateLimitManager != null) {
                         rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryError.getMessage());
@@ -278,7 +280,6 @@ public class OpenAIStreamingService {
             //    Do NOT send a nested "reasoning" object on this endpoint.
             builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
             log.info("[LLM] reasoning_effort set via additional body property");
-            return;
         } catch (Exception ex) {
             log.debug("Skipping reasoning_effort due to SDK compatibility: {}", ex.toString());
         }
@@ -358,8 +359,8 @@ public class OpenAIStreamingService {
 
     private String describeProvider(OpenAIClient client) {
         if (client == null) return "none";
-        if (client == clientPrimary && primaryDescription != null) return primaryDescription;
-        if (client == clientSecondary && secondaryDescription != null) return secondaryDescription;
+        if (Objects.equals(client, clientPrimary) && primaryDescription != null) return primaryDescription;
+        if (Objects.equals(client, clientSecondary) && secondaryDescription != null) return secondaryDescription;
         return "unknown";
     }
 

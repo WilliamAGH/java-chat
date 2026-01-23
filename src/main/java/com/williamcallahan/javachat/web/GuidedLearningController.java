@@ -7,6 +7,8 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import jakarta.servlet.http.HttpServletResponse;
@@ -21,7 +23,7 @@ import java.time.Duration;
 @RestController
 @RequestMapping("/api/guided")
 public class GuidedLearningController extends BaseController {
-
+    private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 
     private final GuidedLearningService guidedService;
     private final ChatMemoryService chatMemory;
@@ -137,7 +139,12 @@ public class GuidedLearningController extends BaseController {
             return Map.of("markdown", cached.get(), "cached", true);
         }
         // Generate synchronously (best-effort) and cache
-        String md = String.join("", guidedService.streamLessonContent(slug).collectList().block(Duration.ofSeconds(25)));
+        List<String> chunks = guidedService.streamLessonContent(slug).collectList().block(Duration.ofSeconds(25));
+        if (chunks == null || chunks.isEmpty()) {
+            log.error("Content generation timed out or returned empty for lesson: {}", slug);
+            throw new IllegalStateException("Content generation failed for lesson: " + slug);
+        }
+        String md = String.join("", chunks);
         guidedService.putLessonCache(slug, md);
         return Map.of("markdown", md, "cached", false);
     }
@@ -153,7 +160,12 @@ public class GuidedLearningController extends BaseController {
     public String contentHtml(@RequestParam("slug") String slug) {
         var cached = guidedService.getCachedLessonMarkdown(slug);
         String md = cached.orElseGet(() -> {
-            String text = String.join("", guidedService.streamLessonContent(slug).collectList().block(Duration.ofSeconds(25)));
+            List<String> chunks = guidedService.streamLessonContent(slug).collectList().block(Duration.ofSeconds(25));
+            if (chunks == null || chunks.isEmpty()) {
+                log.error("Content generation timed out or returned empty for lesson HTML: {}", slug);
+                throw new IllegalStateException("Content generation failed for lesson: " + slug);
+            }
+            String text = String.join("", chunks);
             guidedService.putLessonCache(slug, text);
             return text;
         });
@@ -201,8 +213,10 @@ public class GuidedLearningController extends BaseController {
             // Heartbeats should terminate when data stream completes; otherwise the
             // merged Flux never completes and the client keeps a flashing cursor.
             // Use empty string for heartbeat - will be filtered out and doesn't pollute response
+            // Use doOnError for logging - errors propagate naturally without catch-and-rethrow
             Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
+                    .takeUntilOther(dataStream.ignoreElements()
+                        .doOnError(e -> log.error("Stream error during heartbeat coordination for session {}: {}", sessionId, e.getMessage())))
                     .map(i -> "");
 
             return Flux.merge(dataStream, heartbeats)
@@ -211,10 +225,18 @@ public class GuidedLearningController extends BaseController {
                         // Store processed HTML for consistency with Chat
                         var processed = markdownService.processStructured(fullResponse.toString());
                         chatMemory.addAssistant(sessionId, processed.html());
+                    })
+                    .onErrorResume(error -> {
+                        // Log and send error marker to client - errors must be communicated, not silently dropped
+                        log.error("Guided streaming error for session {}, lesson {}: {}",
+                            sessionId, slug, error.getMessage(), error);
+                        return Flux.just("[ERROR] Streaming error: " + error.getMessage());
                     });
-                    
+
         } else {
-            return Flux.just("Service temporarily unavailable. Try again shortly.");
+            // Service unavailable - send structured error so client can handle appropriately
+            log.warn("OpenAI streaming service unavailable for guided session {}", sessionId);
+            return Flux.just("[ERROR] Service temporarily unavailable. The streaming service is not ready.");
         }
     }
 }

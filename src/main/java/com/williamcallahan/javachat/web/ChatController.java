@@ -122,7 +122,9 @@ public class ChatController extends BaseController {
                     .share();  // Hot-share to prevent double subscription causing duplicate API calls
 
             // Extract completion signal from the shared stream
-            Mono<String> completion = dataStream.ignoreElements().onErrorResume(e -> Mono.empty());
+            // Use doOnError for logging - errors propagate naturally without catch-and-rethrow
+            Mono<String> completion = dataStream.ignoreElements()
+                .doOnError(e -> PIPELINE_LOG.error("[{}] Stream error during heartbeat coordination: {}", requestId, e.getMessage()));
 
             // Heartbeats should stop when the data stream completes to allow the SSE connection
             // to close cleanly. Otherwise, an infinite heartbeat Flux would keep the stream open.
@@ -139,17 +141,26 @@ public class ChatController extends BaseController {
                         ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
                         String processed = processedResult.html();
                         chatMemory.addAssistant(sessionId, processed);
-                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments", 
-                            requestId, chunkCount.get(), processed.length(), 
+                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments",
+                            requestId, chunkCount.get(), processed.length(),
                             processedResult.citations().size(), processedResult.enrichments().size());
                     })
-                    .doOnError(error -> {
-                        PIPELINE_LOG.error("[{}] FINAL STREAMING ERROR: {}", requestId, error.getMessage());
+                    .onErrorResume(error -> {
+                        // Log and send error event to client - errors must be communicated, not silently dropped
+                        PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage(), error);
+                        return Flux.just(ServerSentEvent.<String>builder()
+                            .event("error")
+                            .data("Streaming error: " + error.getMessage())
+                            .build());
                     });
-                    
+
         } else {
-            // If SDK unavailable, return minimal message
-            return Flux.just(ServerSentEvent.<String>builder().data("Service temporarily unavailable. Try again shortly.").build());
+            // Service unavailable - send structured error event so client can handle appropriately
+            PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestId);
+            return Flux.just(ServerSentEvent.<String>builder()
+                .event("error")
+                .data("Service temporarily unavailable. The streaming service is not ready.")
+                .build());
         }
     }
 

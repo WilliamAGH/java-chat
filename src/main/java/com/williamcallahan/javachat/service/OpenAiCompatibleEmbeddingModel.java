@@ -63,9 +63,7 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
         if (!endpoint.endsWith("/v1/embeddings")) {
             if (endpoint.endsWith("/v1")) {
                 endpoint = endpoint + "/embeddings";
-            } else if (endpoint.contains("/v1/embeddings")) {
-                // If user passed something like https://.../openai/v1/embeddings (with suffix already), keep as-is
-            } else {
+            } else if (!endpoint.contains("/v1/embeddings")) {
                 endpoint = endpoint + "/v1/embeddings";
             }
         }

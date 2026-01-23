@@ -209,7 +209,7 @@ public class EmbeddingCacheService {
      * Imports embeddings from compressed file
      * @param filename Name of file to import
      */
-    public void importCache(String filename) throws IOException, ClassNotFoundException {
+    public final void importCache(String filename) throws IOException, ClassNotFoundException {
         Path importPath = cacheDir.resolve(filename);
         CACHE_LOG.info("Importing cached embeddings from: {}", importPath);
         

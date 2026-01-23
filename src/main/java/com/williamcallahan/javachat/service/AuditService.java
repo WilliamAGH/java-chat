@@ -126,13 +126,7 @@ public class AuditService {
                 Object points = m.get("points");
                 if (points instanceof List<?> list) {
                     for (Object o : list) {
-                        if (o instanceof Map<?, ?> pm) {
-                            Object payload = pm.get("payload");
-                            if (payload instanceof Map<?, ?> pmap) {
-                                Object h = pmap.get("hash");
-                                if (h instanceof String s) hashes.add(s);
-                            }
-                        }
+                        extractHash(o).ifPresent(hashes::add);
                     }
                 }
             }
@@ -140,5 +134,18 @@ public class AuditService {
             log.warn("Qdrant scroll failed: {}", e.getMessage());
         }
         return hashes;
+    }
+
+    private Optional<String> extractHash(Object point) {
+        if (point instanceof Map<?, ?> pm) {
+            Object payload = pm.get("payload");
+            if (payload instanceof Map<?, ?> pmap) {
+                Object h = pmap.get("hash");
+                if (h instanceof String s) {
+                    return Optional.of(s);
+                }
+            }
+        }
+        return Optional.empty();
     }
 }

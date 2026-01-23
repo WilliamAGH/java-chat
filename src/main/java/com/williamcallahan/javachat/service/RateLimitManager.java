@@ -368,10 +368,8 @@ public class RateLimitManager {
 
     private Instant parseResetTimeFromError(String errorMessage) {
         // Try to parse reset time from error message
-        if (errorMessage != null && errorMessage.contains("reset")) {
-            // Implementation would parse various formats
-            // For now, return null and rely on window-based calculation
-        }
+        // Implementation would parse various formats
+        // For now, return null and rely on window-based calculation
         return null;
     }
 
