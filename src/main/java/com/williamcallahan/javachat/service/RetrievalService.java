@@ -222,12 +222,28 @@ public class RetrievalService {
                 errorType
             );
 
+            logUserFriendlyErrorContext(e, errorType);
+
             // Fallback to local search with limits
-            var results = localSearch.search(query, maxDocs);
-            docs = results
-                .stream()
-                .map(r -> documentFactory.createLocalDocument(r.text, r.url))
-                .collect(Collectors.toList());
+            LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
+
+            if (outcome.isFailed()) {
+                log.error("Local keyword search also failed: {} - returning empty results", outcome.errorMessage());
+                docs = List.of();
+            } else {
+                log.info("Local keyword search returned {} results (fallback from: {})",
+                    outcome.results().size(), errorType);
+
+                docs = outcome.results()
+                    .stream()
+                    .map(r -> {
+                        Document doc = documentFactory.createLocalDocument(r.text, r.url);
+                        doc.getMetadata().put("retrievalSource", "keyword_fallback");
+                        doc.getMetadata().put("fallbackReason", errorType);
+                        return doc;
+                    })
+                    .collect(Collectors.toList());
+            }
         }
 
         // Truncate documents to token limits and return limited count
