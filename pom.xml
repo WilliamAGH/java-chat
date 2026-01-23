@@ -126,7 +126,6 @@
         </dependency>
         
         <!-- gRPC managed transitively by io.qdrant:client; avoid pinning to prevent mismatches -->
-        <!-- Ensure grpc-core present (BackoffPolicyRetryScheduler is in grpc-core) -->
         
         <!-- Flexmark for Markdown processing -->
         <dependency>
@@ -147,7 +146,7 @@
             <version>3.1.8</version>
         </dependency>
 
-        <!-- Ensure grpc-core is present and aligned via grpc-bom (1.68.1) to match Qdrant client -->
+        <!-- grpc-core version managed by grpc-bom in dependencyManagement -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-core</artifactId>
@@ -219,11 +218,11 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Align all gRPC libs to 1.75.0 to include BackoffPolicyRetryScheduler -->
+            <!-- Align gRPC libs to match qdrant-client expected version -->
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-bom</artifactId>
-                <version>1.75.0</version>
+                <version>1.68.2</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
