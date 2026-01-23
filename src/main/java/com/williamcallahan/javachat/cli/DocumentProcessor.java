@@ -85,25 +85,39 @@ public class DocumentProcessor {
         final EnvironmentConfig config = EnvironmentConfig.fromEnvironment();
         logStartBanner(config);
 
-        final IngestionResult totals = DOCUMENTATION_SETS.stream()
+        final IngestionTotals totals = DOCUMENTATION_SETS.stream()
             .map(docSet -> processDocumentationSet(config.docsDirectory(), docSet))
-            .reduce(IngestionResult.EMPTY, IngestionResult::combine);
+            .reduce(IngestionTotals.ZERO, this::accumulateOutcome, IngestionTotals::combine);
 
         logSummary(config, totals);
+
+        if (totals.failedSets() > 0) {
+            throw new DocumentProcessingException(
+                "Document processing completed with " + totals.failedSets() + " failed documentation set(s)"
+            );
+        }
     }
 
-    private IngestionResult processDocumentationSet(final String docsDirectory, final DocumentationSet docSet) {
+    private IngestionTotals accumulateOutcome(final IngestionTotals totals, final ProcessingOutcome outcome) {
+        return switch (outcome) {
+            case ProcessingOutcome.Success success -> totals.addSuccess(success.processed(), success.duplicates());
+            case ProcessingOutcome.Skipped ignored -> totals.addSkipped();
+            case ProcessingOutcome.Failed ignored -> totals.addFailed();
+        };
+    }
+
+    private ProcessingOutcome processDocumentationSet(final String docsDirectory, final DocumentationSet docSet) {
         final Path docsPath = Paths.get(docsDirectory).resolve(docSet.relativePath());
 
         if (!Files.exists(docsPath) || !Files.isDirectory(docsPath)) {
-            LOGGER.debug("Skipping {} (directory not found)", docSet.displayName());
-            return IngestionResult.EMPTY;
+            LOGGER.debug("Skipping {} (directory not found: {})", docSet.displayName(), docsPath);
+            return new ProcessingOutcome.Skipped(docSet.displayName(), "directory not found");
         }
 
         final long fileCount = countEligibleFiles(docsPath);
         if (fileCount <= 0) {
-            LOGGER.debug("Skipping {} (no HTML files found)", docSet.displayName());
-            return IngestionResult.EMPTY;
+            LOGGER.debug("Skipping {} (no eligible files in {})", docSet.displayName(), docsPath);
+            return new ProcessingOutcome.Skipped(docSet.displayName(), "no eligible files");
         }
 
         LOGGER.info("-----------------------------------------------");
@@ -114,18 +128,19 @@ public class DocumentProcessor {
         final long startMillis = System.currentTimeMillis();
         try {
             final int processed = ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
-            logProcessingStats(processed, System.currentTimeMillis() - startMillis);
+            final long elapsedMillis = System.currentTimeMillis() - startMillis;
+            logProcessingStats(processed, elapsedMillis);
 
             final long duplicates = fileCount - processed;
             if (duplicates > 0) {
                 LOGGER.info("  Skipped {} duplicate files (already in Qdrant)", duplicates);
             }
-            return new IngestionResult(processed, duplicates);
+            return new ProcessingOutcome.Success(processed, duplicates);
 
         } catch (IOException ioException) {
-            LOGGER.error("Error processing {}: {}", docSet.displayName(), ioException.getMessage());
+            LOGGER.error("Failed to process {}: {}", docSet.displayName(), ioException.getMessage());
             LOGGER.debug("Stack trace:", ioException);
-            return IngestionResult.EMPTY;
+            return new ProcessingOutcome.Failed(docSet.displayName(), ioException);
         }
     }
 
@@ -136,7 +151,10 @@ public class DocumentProcessor {
                 .filter(DocumentProcessor::isEligibleFile)
                 .count();
         } catch (IOException ioException) {
-            throw new UncheckedIOException("Failed to enumerate files in " + docsPath, ioException);
+            throw new UncheckedIOException(
+                "Failed to enumerate files in " + docsPath + " - check directory permissions",
+                ioException
+            );
         }
     }
 
@@ -156,19 +174,23 @@ public class DocumentProcessor {
     }
 
     private void logProcessingStats(final int processed, final long elapsedMillis) {
-        final double elapsedSeconds = elapsedMillis / 1000.0;
-        final double rate = processed > 0 && elapsedMillis > 0 ? processed / elapsedSeconds : 0;
+        final double elapsedSeconds = Math.max(elapsedMillis, 1) / 1000.0;
+        final double rate = processed / elapsedSeconds;
         LOGGER.info("Processed {} files in {:.2f}s ({:.1f} files/sec) ({})",
             processed, elapsedSeconds, rate, progressTracker.formatPercent());
     }
 
-    private void logSummary(final EnvironmentConfig config, final IngestionResult totals) {
+    private void logSummary(final EnvironmentConfig config, final IngestionTotals totals) {
         LOGGER.info("");
         LOGGER.info("===============================================");
         LOGGER.info("DOCUMENT PROCESSING COMPLETE");
         LOGGER.info("===============================================");
         LOGGER.info("Total new documents processed: {}", totals.processed());
         LOGGER.info("Total duplicates skipped: {}", totals.duplicates());
+        LOGGER.info("Documentation sets skipped: {}", totals.skippedSets());
+        if (totals.failedSets() > 0) {
+            LOGGER.warn("Documentation sets FAILED: {}", totals.failedSets());
+        }
         LOGGER.info("");
         LOGGER.info("Documents have been indexed in Qdrant with automatic deduplication.");
         LOGGER.info("Each document chunk is identified by a SHA-256 hash of its content.");
@@ -214,22 +236,54 @@ public class DocumentProcessor {
     }
 
     /**
-     * Result of processing a documentation set, enabling functional accumulation.
+     * Accumulated totals across all documentation sets, tracking successes and failures separately.
      */
-    private record IngestionResult(long processed, long duplicates) {
-        static final IngestionResult EMPTY = new IngestionResult(0, 0);
+    private record IngestionTotals(long processed, long duplicates, int skippedSets, int failedSets) {
+        static final IngestionTotals ZERO = new IngestionTotals(0, 0, 0, 0);
 
-        IngestionResult combine(final IngestionResult other) {
-            return new IngestionResult(
-                this.processed + other.processed,
-                this.duplicates + other.duplicates
+        IngestionTotals addSuccess(final long newProcessed, final long newDuplicates) {
+            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, skippedSets, failedSets);
+        }
+
+        IngestionTotals addSkipped() {
+            return new IngestionTotals(processed, duplicates, skippedSets + 1, failedSets);
+        }
+
+        IngestionTotals addFailed() {
+            return new IngestionTotals(processed, duplicates, skippedSets, failedSets + 1);
+        }
+
+        static IngestionTotals combine(final IngestionTotals left, final IngestionTotals right) {
+            return new IngestionTotals(
+                left.processed + right.processed,
+                left.duplicates + right.duplicates,
+                left.skippedSets + right.skippedSets,
+                left.failedSets + right.failedSets
             );
         }
+    }
+
+    /**
+     * Outcome of processing a single documentation set - distinguishes success, skip, and failure.
+     */
+    private sealed interface ProcessingOutcome {
+        record Success(long processed, long duplicates) implements ProcessingOutcome {}
+        record Skipped(String setName, String reason) implements ProcessingOutcome {}
+        record Failed(String setName, IOException cause) implements ProcessingOutcome {}
     }
 
     /**
      * A documentation set to process, defined by display name and relative path.
      */
     private record DocumentationSet(String displayName, String relativePath) {
+    }
+
+    /**
+     * Thrown when document processing completes but one or more documentation sets failed.
+     */
+    public static class DocumentProcessingException extends RuntimeException {
+        public DocumentProcessingException(final String message) {
+            super(message);
+        }
     }
 }
