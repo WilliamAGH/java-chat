@@ -237,7 +237,10 @@ public class UnifiedMarkdownService {
     private void promoteSingleItemOrderedListHeadings(Node document) {
         for (Node n = document.getFirstChild(); n != null; n = n.getNext()) {
             if (n instanceof com.vladsch.flexmark.ast.OrderedList ol) {
-                if (isUnderList(ol)) { if (n.hasChildren()) promoteSingleItemOrderedListHeadings(n); continue; }
+                if (isUnderList(ol)) {
+                    if (n.hasChildren()) promoteSingleItemOrderedListHeadings(n);
+                    continue;
+                }
                 // Count items
                 int itemCount = 0;
                 com.vladsch.flexmark.ast.ListItem only = null;
@@ -315,7 +318,7 @@ public class UnifiedMarkdownService {
             if (c == '[') {
                 int j = i + 1; int digits = 0; boolean valid = true;
                 while (j < s.length() && Character.isDigit(s.charAt(j)) && digits < 3) { j++; digits++; }
-                if (digits == 0 || digits > 3) valid = false;
+                if (digits == 0) valid = false;
                 if (valid && j < s.length() && s.charAt(j) == ']') {
                     // Ensure boundaries are not alphanumeric on either side
                     char prev = (i > 0) ? s.charAt(i - 1) : ' ';
