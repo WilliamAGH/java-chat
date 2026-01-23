@@ -90,3 +90,4 @@ alwaysApply: true
 - DP3 Deprecated code must be a thin shim extending its successor; no aliases, fallbacks, or alternate implementations.
 - SRC1 Never make assumptions; if unsure, stop and verify.
 - SRC2 For dependency code questions, inspect `~/.m2` JARs first; fallback to upstream GitHub; never answer without referencing code.
+- DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.

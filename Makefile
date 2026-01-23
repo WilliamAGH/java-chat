@@ -2,6 +2,13 @@ SHELL := /bin/bash
 
 APP_NAME := java-chat
 MVNW := ./mvnw
+
+# Terminal colors for output prefixing
+RED    := \033[0;31m
+GREEN  := \033[0;32m
+YELLOW := \033[0;33m
+CYAN   := \033[0;36m
+NC     := \033[0m
 # Compute JAR lazily so it's resolved after the build runs
 # Use a function instead of variable to evaluate at runtime
 get_jar = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
@@ -16,7 +23,7 @@ RUN_ARGS := \
   --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
 
-.PHONY: help clean build test run dev compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline
+.PHONY: help clean build test run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -44,7 +51,23 @@ run: build ## Run the packaged jar (loads .env if present)
 	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS) & disown
 
-dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
+dev: ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
+	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
+	@echo "$(CYAN)Frontend: http://localhost:5173/$(NC)"
+	@echo "$(YELLOW)Backend API: http://localhost:8085/api/$(NC)"
+	@echo ""
+	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
+	  trap 'kill 0' INT TERM; \
+	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
+	  (if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	   SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run \
+	   -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" \
+	   -Dspring-boot.run.arguments="--server.port=8085 $(RUN_ARGS)" 2>&1 \
+	   | awk '{print "\033[33m[java]\033[0m " $$0; fflush()}') & \
+	  wait
+
+dev-backend: ## Run only Spring Boot backend (dev profile)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
 	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
@@ -57,6 +80,12 @@ dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
 	  done; \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
 	  SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" -Dspring-boot.run.arguments="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)"
+
+frontend-install: ## Install frontend dependencies
+	cd frontend && npm install
+
+frontend-build: ## Build frontend for production
+	cd frontend && npm run build
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
 	@for p in 8086 8087; do \

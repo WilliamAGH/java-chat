@@ -1,105 +1,79 @@
 # ================================
-# LIGHTWEIGHT JAVA CHAT DOCKERFILE
+# JAVA CHAT DOCKERFILE
 # ================================
-# Memory-optimized for <512MB RAM usage
-# Uses modern Alpine Linux + Eclipse Temurin JRE
+# Multi-stage build for Frontend and Backend
+# Switched to Debian/Ubuntu-based images to resolve Alpine network issues
+# All images sourced from public.ecr.aws to avoid Docker Hub rate limits
 
 # ================================
-# BUILD STAGE - Maven + JDK
+# FRONTEND BUILD STAGE
 # ================================
-# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk-alpine AS builder
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS frontend-builder
+WORKDIR /app/frontend
+# Copy dependency definitions
+COPY frontend/package*.json ./
+RUN npm ci
+# Copy source files
+COPY frontend/ .
+# Create output directory for Vite (it writes to ../src/main/resources/static)
+RUN mkdir -p ../src/main/resources/static
+RUN npm run build
 
-# Install Maven (Alpine package is lightweight)
-RUN apk add --no-cache maven
-
-# Set working directory
+# ================================
+# BACKEND BUILD STAGE
+# ================================
+FROM public.ecr.aws/docker/library/maven:3.9.9-eclipse-temurin-21 AS builder
 WORKDIR /app
 
-# Copy Maven wrapper and pom.xml first (for better layer caching)
+# Copy Maven wrapper and pom.xml
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-
-# Download dependencies (cached if pom.xml unchanged)
+RUN chmod +x mvnw
+# Download dependencies
 RUN ./mvnw dependency:go-offline -B
 
 # Copy source code
 COPY src ./src/
+# Copy built frontend assets from frontend-builder
+COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
 
 # Build the application
 RUN ./mvnw clean package -DskipTests -B
 
 # ================================
-# RUNTIME STAGE - JRE Only
+# RUNTIME STAGE
 # ================================
-# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre-alpine AS runtime
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre AS runtime
 
-# Add labels for better container management
-LABEL maintainer="Java Chat Team" \
-      description="Lightweight Java Chat AI Application" \
-      version="1.0"
+# Install curl for health check
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install curl for health checks (minimal Alpine package)
-RUN apk add --no-cache curl
+# Create non-root user
+RUN useradd -u 1001 -m -s /bin/bash appuser
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
-
-# Set working directory
 WORKDIR /app
 
 # Copy the JAR from builder stage
 COPY --from=builder /app/target/*.jar app.jar
 
-# Change ownership to non-root user
-RUN chown -R appuser:appgroup /app
+# Change ownership
+RUN chown appuser:appuser app.jar
 
-# Switch to non-root user
 USER appuser
 
-# Expose port (Railway will assign via PORT env var)
 EXPOSE 8085
 
-# Health check using PORT environment variable
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/actuator/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
 
-# ================================
-# JVM OPTIMIZATION FOR <512MB RAM
-# ================================
-# Memory settings optimized for container constraints (512MB limit):
-# -Xmx192m: Max heap 192MB (shift budget to metaspace)
-# -Xms64m:  Small initial heap for faster start and lower RSS
-# -XX:MaxMetaspaceSize=192m: Allow more classes to prevent metaspace OOM
-# -XX:ReservedCodeCacheSize=32m: Cap JIT code cache
-# -XX:MaxDirectMemorySize=32m: Cap Netty/gRPC direct buffers
-# -Xss256k: Smaller thread stacks
-# -XX:+UseStringDeduplication: Reduce duplicate string overhead
-# -Dreactor.schedulers.defaultBoundedElasticSize=32: Limit elastic threads
-# -Dreactor.schedulers.defaultBoundedElasticQueueSize=256: Limit task queue
-# -Dreactor.netty.ioWorkerCount=2: Fewer IO threads
-# -Dio.netty.allocator.maxOrder=7: Smaller pooled chunks
-# -XX:+ExitOnOutOfMemoryError: Fail fast
-# ================================
-# Use PORT environment variable (Railway assigns this)
-# Default to 8085 if not set
+# Environment variables
 ENV PORT=8085
-
-# Disable Qdrant initialization for Railway (no vector DB needed for basic functionality)
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
-
-# Enable hash-based fallback for graceful degradation when embeddings fail
 ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
-
-# Disable aggressive port management in container environment
 ENV APP_KILL_ON_CONFLICT=false
 
-# JSON array format for ENTRYPOINT (recommended by Docker)
-# Use shell form to allow PORT variable expansion
-# Disable Netty native OpenSSL (tcnative) to avoid segfaults on Alpine/musl
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
   -Xms64m -Xmx192m \
@@ -114,16 +88,4 @@ ENTRYPOINT ["/bin/sh", "-c", "java \
   -Dreactor.netty.ioWorkerCount=2 \
   -Dio.netty.allocator.maxOrder=7 \
   -Djava.security.egd=file:/dev/./urandom \
-  -Dio.netty.handler.ssl.noOpenSsl=true \
-  -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true \
   -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
-
-# ================================
-# IMAGE SIZE OPTIMIZATION
-# ================================
-# Base image: eclipse-temurin:21-jre-alpine (~80MB)
-# Alpine Linux: Minimal package manager, no bloat
-# JRE only: ~100MB smaller than JDK
-# Multi-stage: Build dependencies not in final image
-# Total expected size: ~150-200MB
-# ================================
