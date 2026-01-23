@@ -5,10 +5,14 @@ import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import com.williamcallahan.javachat.service.MarkdownService;
 
 import java.util.*;
@@ -21,16 +25,19 @@ public class GuidedLearningController extends BaseController {
 
     private final GuidedLearningService guidedService;
     private final ChatMemoryService chatMemory;
+    private final OpenAIStreamingService openAIStreamingService;
 
     private final MarkdownService markdownService;
 
     public GuidedLearningController(GuidedLearningService guidedService,
                                     ChatMemoryService chatMemory,
+                                    OpenAIStreamingService openAIStreamingService,
                                     ExceptionResponseBuilder exceptionBuilder,
                                     MarkdownService markdownService) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
+        this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
     }
 
@@ -103,11 +110,15 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamLesson(@RequestParam("slug") String slug) {
-        // If cached, emit immediately as a single-frame stream
+        // If cached, emit immediately as a single-frame stream with proper SSE formatting
         var cached = guidedService.getCachedLessonMarkdown(slug);
         if (cached.isPresent()) {
-            return Flux.just(cached.get());
+            String payload = cached.get().replace("\r", "");
+            // Return raw content and let Spring handle SSE formatting automatically
+            return Flux.just(payload);
         }
+        
+        // Stream raw content and let Spring handle SSE formatting automatically
         return guidedService.streamLessonContent(slug);
     }
 
@@ -146,7 +157,7 @@ public class GuidedLearningController extends BaseController {
             guidedService.putLessonCache(slug, text);
             return text;
         });
-        return markdownService.render(md);
+        return markdownService.processStructured(md).html();
     }
 
     /**
@@ -162,18 +173,48 @@ public class GuidedLearningController extends BaseController {
      *             }</pre>
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
-    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody Map<String, Object> body) {
+@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
+        // Critical proxy headers for streaming
+        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
+        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        
         String sessionId = String.valueOf(body.getOrDefault("sessionId", "guided:default"));
         String latest = String.valueOf(body.getOrDefault("latest", ""));
         String slug = String.valueOf(body.getOrDefault("slug", ""));
 
         chatMemory.addUser(sessionId, latest);
         List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
-        StringBuilder sb = new StringBuilder();
+        StringBuilder fullResponse = new StringBuilder();
 
-        return guidedService.streamGuidedAnswer(history, slug, latest)
-                .doOnNext(sb::append)
-                .doOnComplete(() -> chatMemory.addAssistant(sessionId, sb.toString()));
+        // Use OpenAI streaming only (legacy fallback removed)
+        if (openAIStreamingService.isAvailable()) {
+            // Build the complete prompt using GuidedLearningService logic
+            String fullPrompt = guidedService.buildGuidedPromptWithContext(history, slug, latest);
+            
+            // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
+            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
+                    .doOnNext(chunk -> fullResponse.append(chunk))
+                    .filter(chunk -> chunk != null && !chunk.isEmpty())
+                    .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
+
+            // Heartbeats should terminate when data stream completes; otherwise the
+            // merged Flux never completes and the client keeps a flashing cursor.
+            // Use empty string for heartbeat - will be filtered out and doesn't pollute response
+            Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
+                    .takeUntilOther(dataStream.ignoreElements().onErrorResume(e -> Mono.empty()))
+                    .map(i -> "");
+
+            return Flux.merge(dataStream, heartbeats)
+                    .filter(s -> s != null && !s.isEmpty())  // Filter out empty heartbeat strings
+                    .doOnComplete(() -> {
+                        // Store processed HTML for consistency with Chat
+                        var processed = markdownService.processStructured(fullResponse.toString());
+                        chatMemory.addAssistant(sessionId, processed.html());
+                    });
+                    
+        } else {
+            return Flux.just("Service temporarily unavailable. Try again shortly.");
+        }
     }
 }

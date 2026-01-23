@@ -8,8 +8,14 @@
       .replace(/```[ \t]*([^\n])/g, '```\n$1');
   }
 
-  // Conservative promotion of likely Java snippets into fenced blocks (fallback only).
-  // Idempotent: skips when backticks already exist near the target.
+  /**
+   * Conservative promotion of likely Java snippets into fenced blocks (fallback only).
+   * Idempotent: skips when backticks already exist near the target.
+   *
+   * @deprecated Client-side mutation of model output can introduce rendering bugs.
+   *             Prefer server-side AST parsing (UnifiedMarkdownService). This is
+   *             retained only for the minimal clientMarkdownFallback path.
+   */
   function promoteLikelyJavaBlocks(text){
     if (!text || text.indexOf('```') !== -1) return text;
     const cues = /(example\s*(code)?|here(?:'| i)s\s*a\s*(?:simple\s*)?example|for\s+example)/i;
@@ -72,8 +78,10 @@
     const positions = [];
     while (i < chars.length) {
       let j = i;
-      // bullets: - * +
-      if (chars[j] === '-' || chars[j] === '*' || chars[j] === '+') {
+      // bullets: - * + • → ▸ ◆ □ ▪
+      if (chars[j] === '-' || chars[j] === '*' || chars[j] === '+' || 
+          chars[j] === '•' || chars[j] === '→' || chars[j] === '▸' || 
+          chars[j] === '◆' || chars[j] === '□' || chars[j] === '▪') {
         const prev = j > 0 ? chars[j-1] : '\n';
         const next = (j+1) < chars.length ? chars[j+1] : '\n';
         const atStart = j === 0 || prev === '\n';
@@ -131,7 +139,7 @@
     for (let i=0;i<lines.length;i++){
       const ln = lines[i];
       const t = ln.trim();
-      if (/^(?:\d+[.)]|[A-Za-z][.)]|[-*+])\s*$/.test(t) && i+1 < lines.length && lines[i+1].trim() !== ''){
+      if (/^(?:\d+[.)]|[A-Za-z][.)]|[-*+•→▸◆□▪])\s*$/.test(t) && i+1 < lines.length && lines[i+1].trim() !== ''){
         out.push(t + ' ' + lines[i+1].trim()); i++;
       } else { out.push(ln); }
     }
@@ -145,6 +153,10 @@
     return /[.!?]["')]*\s$/.test(tail4) || /\n\n/.test(tail2) || fullText.endsWith('```\n');
   }
 
+  /**
+   * @deprecated Do not restructure DOM code blocks on the client. Leave block
+   * detection to the server; this utility remains for legacy views only.
+   */
   function upgradeCodeBlocks(container){
     if (!container || typeof container.querySelectorAll !== 'function') return;
     // Multi-line inline <code> -> <pre><code>
@@ -190,7 +202,7 @@
         btn.className = 'code-copy-btn';
         btn.setAttribute('aria-label','Copy code');
         btn.title = 'Copy code';
-        btn.innerHTML = '<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const codeEl = pre.querySelector('code');
@@ -198,7 +210,7 @@
           navigator.clipboard.writeText(text).then(() => {
             btn.classList.add('copied');
             const orig = btn.innerHTML;
-            btn.innerHTML = '<svg width="16" height="16" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
             setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = orig; }, 1500);
           });
         });
@@ -213,11 +225,11 @@
 
   // Shared enrichment rendering
   const ENRICH_ICONS = {
-    hint: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z"/></svg>',
-    background: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z"/></svg>',
-    reminder: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
-    warning: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>',
-    example: '<svg viewbox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>'
+    hint: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z"/></svg>',
+    background: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z"/></svg>',
+    reminder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>',
+    example: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>'
   };
 
   function createEnrichmentBlock(type, title, items){
@@ -230,7 +242,17 @@
     header.innerHTML = `${ENRICH_ICONS[type] || ''}<span>${title}</span>`;
     const body = document.createElement('div');
     body.className = 'enrichment-text';
-    const appendParagraph = (txt) => { const p = document.createElement('p'); p.textContent = txt || ''; body.appendChild(p); };
+    const appendParagraph = (txt) => {
+      const p = document.createElement('p');
+      const s = String(txt || '').replace(/\r/g, '');
+      // Interpret literal <br> tokens and single newlines as line breaks inside the paragraph
+      const parts = s.split(/(?:<br\s*\/?>(?:\s*)|\n)/i);
+      for (let i = 0; i < parts.length; i++) {
+        p.appendChild(document.createTextNode(parts[i]));
+        if (i < parts.length - 1) p.appendChild(document.createElement('br'));
+      }
+      body.appendChild(p);
+    };
     if (Array.isArray(items)) { items.filter(Boolean).forEach((txt) => appendParagraph(txt)); }
     else if (typeof items === 'string') { appendParagraph(items); }
     card.appendChild(header);
@@ -262,6 +284,35 @@
       const el = createEnrichmentBlock('warning', 'Warning', [c.trim()]);
       return `\n${el.outerHTML}\n`;
     });
+    // Example blocks – render fenced code when present, else as plain text
+    t = t.replace(/\{\{example:([\s\S]*?)\}\}/g, (m, c) => {
+      const content = (c || '').trim();
+      const card = document.createElement('div');
+      card.className = 'inline-enrichment example';
+      card.setAttribute('data-enrichment-type', 'example');
+      const header = document.createElement('div');
+      header.className = 'inline-enrichment-header';
+      header.innerHTML = `${ENRICH_ICONS.example || ''}<span>Example</span>`;
+      const body = document.createElement('div');
+      body.className = 'enrichment-text';
+      const fence = content.match(/```([\w-]+)?\n([\s\S]*?)\n```/);
+      if (fence) {
+        const lang = (fence[1] || 'java').toLowerCase();
+        const code = (fence[2] || '').trim();
+        const pre = document.createElement('pre');
+        const codeEl = document.createElement('code');
+        codeEl.className = 'language-' + lang;
+        codeEl.textContent = code;
+        pre.appendChild(codeEl);
+        body.appendChild(pre);
+      } else {
+        const p = document.createElement('p');
+        p.textContent = content;
+        body.appendChild(p);
+      }
+      card.appendChild(header); card.appendChild(body);
+      return `\n${card.outerHTML}\n`;
+    });
     return t;
   }
 
@@ -271,29 +322,21 @@
    */
   function processInlineLinks(text) {
     if (!text) return '';
-    
-    // Only process if we actually have malformed link patterns to avoid breaking normal content
-    const hasMalformedLinks = text.includes('&lt;a href=') && text.includes('&lt;/a&gt;');
-    if (!hasMalformedLinks) {
-      return text; // No malformed links, return unchanged
-    }
-    
-    // Very specific pattern for the exact malformed structure we see:
-    // &lt;a href="https://start.spring.io/"&gt;<a href="https://start.spring.io/">https://start.spring.io/</a>&lt;/a&gt;
-    text = text.replace(/&lt;a href="(https?:\/\/[^"]*)"&gt;<a href="[^"]*">([^<]*)<\/a>&lt;\/a&gt;/g, (match, url, linkText) => {
-      const citation = { url: url, title: linkText || url };
-      const pill = createInlineLinkPill(citation);
-      return pill.outerHTML;
+    // Parse into a DOM and replace anchors with pills, skipping pre/code
+    const container = document.createElement('div');
+    container.innerHTML = text;
+    const anchors = container.querySelectorAll('a');
+    anchors.forEach(a => {
+      if (!a || !a.getAttribute) return;
+      const parentPre = a.closest('pre, code');
+      if (parentPre) return;
+      if (a.classList && (a.classList.contains('citation-pill') || a.classList.contains('inline-link'))) return;
+      const href = a.getAttribute('href') || '';
+      const title = a.textContent || '';
+      const pill = createInlineLinkPill({ url: href, title });
+      a.replaceWith(pill);
     });
-    
-    // Handle simple escaped HTML links (only if they're URLs)
-    text = text.replace(/&lt;a href="(https?:\/\/[^"]*)"&gt;([^&<]*?)&lt;\/a&gt;/g, (match, url, linkText) => {
-      const citation = { url: url, title: linkText || url };
-      const pill = createInlineLinkPill(citation);
-      return pill.outerHTML;
-    });
-    
-    return text;
+    return container.innerHTML;
   }
 
   /**
@@ -322,10 +365,9 @@
     }
     
     // Label logic for inline links
-    let label = citation.title || 'Source';
+    let label = (citation.title || '').trim() || 'Source';
     if (!citation.title && isHttpLink) {
       try {
-        // Extract hostname for external links when no title is provided
         label = new URL(href).hostname;
       } catch {
         // Keep default label on URL parse error
@@ -333,6 +375,7 @@
     }
     // Replace :: separator with | for cleaner appearance
     label = label.replace(/::/g, '|');
+    label = label.replace(/\s+/g, ' ').trim();
     
     // SVG icons
     const iconExternal = `<svg class="citation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;

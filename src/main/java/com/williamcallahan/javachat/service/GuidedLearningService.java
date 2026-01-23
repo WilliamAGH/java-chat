@@ -98,6 +98,25 @@ public class GuidedLearningService {
 
         return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
     }
+    
+    /**
+     * Build a complete prompt for OpenAI streaming service for guided learning.
+     * This reuses the same logic as streamGuidedAnswer but returns the prompt instead of streaming.
+     */
+    public String buildGuidedPromptWithContext(List<Message> history, String slug, String userMessage) {
+        var lesson = tocProvider.findBySlug(slug).orElse(null);
+        String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
+        List<Document> docs = retrievalService.retrieve(query);
+        List<Document> filtered = filterToBook(docs);
+
+        String guidance = "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
+                "Use ONLY content grounded in this book for factual claims. " +
+                "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
+                "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
+
+        // Build the complete prompt using ChatService's prompt building logic
+        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
+    }
 
     /**
      * Stream well-structured lesson content for the given slug.

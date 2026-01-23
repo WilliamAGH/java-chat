@@ -56,7 +56,6 @@ public class AuditService {
         }
 
         Set<String> expectedHashes = new LinkedHashSet<>();
-        Set<Integer> chunkIndexes = new LinkedHashSet<>();
         for (Path f : files) {
             String name = f.getFileName().toString();
             Matcher m = p.matcher(name);
@@ -65,7 +64,6 @@ public class AuditService {
             String text = Files.readString(f, StandardCharsets.UTF_8);
             String fullHash = hasher.generateChunkHash(url, idx, text);
             expectedHashes.add(fullHash);
-            chunkIndexes.add(idx);
         }
 
         // 2) Query Qdrant for all points with payload.url == url
@@ -144,4 +142,3 @@ public class AuditService {
         return hashes;
     }
 }
-

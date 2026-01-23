@@ -55,6 +55,9 @@ public final class JavadocLinkResolver {
     public static String refineMemberAnchorUrl(String url, String text, String packageName) {
         if (url == null || text == null) return url;
         if (!url.endsWith(".html")) return url;
+        // Do not attempt anchor heuristics on Spring docs; their anchors include FQCNs and
+        // annotation patterns that differ from JDK javadoc. Avoid risky guesses.
+        if (url.contains("https://docs.spring.io/")) return url;
         // If URL already has a fragment, respect it
         if (url.contains("#")) return url;
 
@@ -83,6 +86,8 @@ public final class JavadocLinkResolver {
         Matcher m = p.matcher(text);
         if (m.find()) {
             String paramsRaw = m.group(1);
+            // Ignore annotation-style or class literal params (e.g., SomeType.class)
+            if (paramsRaw.contains(".class")) return null;
             String paramsCanon = canonicalizeParams(paramsRaw, packageName, fullClassName);
             if (paramsCanon != null) {
                 return "%3Cinit%3E(" + paramsCanon + ")"; // <init>(...)
@@ -98,6 +103,7 @@ public final class JavadocLinkResolver {
         while (m.find()) {
             String name = m.group(1);
             String paramsRaw = m.group(2);
+            if (paramsRaw.contains(".class")) continue; // avoid class literal cases
             String paramsCanon = canonicalizeParams(paramsRaw, packageName, fullClassName);
             if (paramsCanon != null) {
                 return name + "(" + paramsCanon + ")";

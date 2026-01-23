@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.config;
 import com.williamcallahan.javachat.service.GracefulEmbeddingModel;
 import com.williamcallahan.javachat.service.LocalEmbeddingModel;
 import com.williamcallahan.javachat.service.LocalHashingEmbeddingModel;
+import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -33,6 +34,12 @@ public class EmbeddingFallbackConfig {
             @Value("${app.local-embedding.model:text-embedding-qwen3-embedding-8b}") String localModel,
             @Value("${app.local-embedding.dimensions:4096}") int dimensions,
             @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback,
+            // Remote OpenAI-compatible provider (e.g., Novita)
+            @Value("${app.remote-embedding.server-url:}") String remoteUrl,
+            @Value("${app.remote-embedding.api-key:}") String remoteApiKey,
+            @Value("${app.remote-embedding.model:text-embedding-3-small}") String remoteModel,
+            @Value("${app.remote-embedding.dimensions:4096}") int remoteDims,
+            // OpenAI direct fallback (optional)
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
             @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com/v1}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
@@ -43,19 +50,18 @@ public class EmbeddingFallbackConfig {
         // Primary: Local embedding server
         LocalEmbeddingModel primaryModel = new LocalEmbeddingModel(localUrl, localModel, dimensions, restTemplateBuilder);
         
-        // Secondary: OpenAI API (if available)
+        // Secondary: Prefer remote OpenAI-compatible provider; else OpenAI direct if key present
         EmbeddingModel secondaryModel = null;
-        if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
-            try {
-                // Create OpenAI embedding model with proper configuration
-                // For now, skip OpenAI embedding fallback due to constructor complexity
-                // The GracefulEmbeddingModel will handle this gracefully
-                log.info("[EMBEDDING] OpenAI embedding fallback temporarily disabled - using hash fallback instead");
-            } catch (Exception e) {
-                log.warn("[EMBEDDING] Failed to configure OpenAI embedding fallback: {}", e.getMessage());
-            }
+        if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
+            log.info("[EMBEDDING] Configured remote OpenAI-compatible embedding fallback at {}", redactUrl(remoteUrl));
+            secondaryModel = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
+                    remoteDims > 0 ? remoteDims : dimensions, restTemplateBuilder);
+        } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
+            log.info("[EMBEDDING] Configured OpenAI embedding fallback");
+            secondaryModel = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
+                    dimensions, restTemplateBuilder);
         } else {
-            log.info("[EMBEDDING] No OpenAI API key provided - skipping OpenAI embedding fallback");
+            log.info("[EMBEDDING] No remote/OpenAI embedding fallback configured");
         }
         
         // Tertiary: Hash-based fallback
@@ -68,32 +74,42 @@ public class EmbeddingFallbackConfig {
     @Primary
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "false", matchIfMissing = true)
     public EmbeddingModel openaiEmbeddingWithFallback(
+            // Remote OpenAI-compatible provider (e.g., Novita)
+            @Value("${app.remote-embedding.server-url:}") String remoteUrl,
+            @Value("${app.remote-embedding.api-key:}") String remoteApiKey,
+            @Value("${app.remote-embedding.model:text-embedding-3-small}") String remoteModel,
+            @Value("${app.remote-embedding.dimensions:4096}") int remoteDims,
+            // OpenAI direct
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
             @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com/v1}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
-            @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback) {
+            @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback,
+            RestTemplateBuilder restTemplateBuilder) {
         
         log.info("[EMBEDDING] Configuring OpenAI embedding with fallback strategies");
         
-        // Primary: OpenAI API (currently disabled due to constructor complexity)
-        if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
-            // TODO: Implement proper OpenAI embedding model construction
-            log.info("[EMBEDDING] OpenAI API key available but embedding temporarily disabled");
+        log.info("[EMBEDDING] Configuring remote/OpenAI embeddings with fallback strategies");
+
+        // Primary: Prefer remote provider; else OpenAI direct
+        EmbeddingModel primary = null;
+        if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
+            log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider at {}", redactUrl(remoteUrl));
+            primary = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
+                    remoteDims > 0 ? remoteDims : 4096, restTemplateBuilder);
+        } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
+            log.info("[EMBEDDING] Using OpenAI embeddings as primary provider");
+            primary = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
+                    4096, restTemplateBuilder);
         }
-        
-        // Create hash-based fallback model with 4096 dimensions to match Qdrant collection
+
         LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(4096);
-        
-        // Since primaryModel is currently always null (OpenAI embedding disabled),
-        // we always use fallback strategies
-        log.warn("[EMBEDDING] No primary embedding service configured. Using hash-based fallback only.");
-        if (useHashFallback) {
-            log.info("[EMBEDDING] Using hash-based embeddings (limited semantic meaning)");
-            return hashingModel; // Return hash model directly
-        } else {
-            log.warn("[EMBEDDING] Hash fallback disabled. Vector search will fail gracefully.");
-            return new NoOpEmbeddingModel();
+
+        if (primary != null) {
+            return new GracefulEmbeddingModel(primary, hashingModel, useHashFallback);
         }
+
+        log.warn("[EMBEDDING] No remote/OpenAI embedding configured. Falling back to hash-only mode.");
+        return useHashFallback ? hashingModel : new NoOpEmbeddingModel();
     }
     
     /**
@@ -113,6 +129,18 @@ public class EmbeddingFallbackConfig {
         @Override
         public float[] embed(org.springframework.ai.document.Document document) {
             throw new GracefulEmbeddingModel.EmbeddingServiceUnavailableException("No embedding service configured");
+        }
+    }
+
+    private String redactUrl(String url) {
+        if (url == null) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            String host = uri.getScheme() + "://" + uri.getHost();
+            if (uri.getPort() > 0) host += ":" + uri.getPort();
+            return host;
+        } catch (Exception e) {
+            return url;
         }
     }
 }

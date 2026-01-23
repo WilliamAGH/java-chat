@@ -133,7 +133,7 @@ All config is env-driven. See `src/main/resources/application.properties` for de
 ### API Configuration
 - `GITHUB_TOKEN`: GitHub personal access token for GitHub Models
 - `OPENAI_API_KEY`: OpenAI API key (separate, independent service)
-- `OPENAI_MODEL`: Model name, default `gpt-4o-mini` (used by all endpoints)
+- `OPENAI_MODEL`: Model name, default `gpt-5` (used by all endpoints)
 - `OPENAI_TEMPERATURE`: default `0.7`
 - `OPENAI_BASE_URL`: Spring AI base URL (default: `https://models.github.ai/inference`)
   - **CRITICAL**: Must be `https://models.github.ai/inference` for GitHub Models
@@ -343,9 +343,19 @@ Modes & objectives:
 ## Models & Architecture
 
 ### Chat Model
-- **OpenAI GPT-4o-mini**: Fast, cost-effective, high-quality responses
-- Direct OpenAI API integration (GitHub Models API deprecated due to authentication issues)
-- Streaming via Server-Sent Events (SSE) for real-time interaction
+- **OpenAI Java SDK (standardized)**: All streaming and non-streaming chat uses `OpenAIStreamingService`
+  - ✅ Official SDK streaming, no manual SSE parsing
+  - ✅ Prompt truncation for GPT‑5 context window (~400K tokens, 128K max output) handled centrally
+  - ✅ Clean, reliable streaming and consolidated error handling
+
+### Legacy Deletions
+- Removed `ResilientApiClient` and all manual SSE parsing
+- Controllers (`ChatController`, `GuidedLearningController`) stream via SDK only
+
+### Service Responsibilities
+- `OpenAIStreamingService`: streaming + complete() helper
+- `ChatService`: builds prompts (RAG-aware); may stream via SDK for internal flows
+- `EnrichmentService` / `RerankerService`: use SDK `complete()` for JSON/ordering
 - Session memory management for context preservation
 
 ### Embeddings
@@ -404,12 +414,59 @@ Modes & objectives:
  - [ ] Per-session rate limiting.
  - [ ] DigitalOcean Spaces S3 offload for snapshots & parsed text.
  - [ ] Docker Compose app service + optional local embedding model.
+## 📱 Mobile Responsive Design
+
+The Java Chat application is fully optimized for mobile devices with comprehensive responsive design and mobile-specific safety measures.
+
+### Mobile Features
+- **Full-width chat containers** on mobile with comfortable margins
+- **16px minimum font size** on all inputs to prevent iOS Safari zoom
+- **Enhanced touch targets** (44px minimum) for all interactive elements
+- **Touch-optimized scrolling** with momentum scrolling support
+- **Safe area insets** for devices with notches (iPhone X+)
+- **Zoom prevention** on double-tap for chat areas
+- **Horizontal scroll prevention** with proper text wrapping
+- **Improved focus visibility** for keyboard navigation
+- **Reduced motion support** for accessibility preferences
+
+### Mobile Breakpoints
+- **Mobile**: ≤768px - Full mobile optimization
+- **Tablet**: 769px-1024px - Intermediate responsive layout
+- **Desktop**: >1024px - Full desktop experience
+
+### Mobile Safety Measures
+- **Viewport Configuration**: Prevents unwanted zooming and ensures proper scaling
+- **Text Size Adjustment**: Prevents browser text inflation on mobile
+- **Touch Action Optimization**: Improves touch responsiveness and prevents conflicts
+- **Performance Optimizations**: CSS containment and will-change for smooth animations
+- **Accessibility**: Respects `prefers-reduced-motion` for users with motion sensitivity
+
+### Mobile Testing Checklist
+- ✅ iOS Safari (iPhone/iPad)
+- ✅ Chrome Mobile (Android)
+- ✅ Samsung Internet
+- ✅ Firefox Mobile
+- ✅ Edge Mobile
+
+### Things to Avoid (Mobile Anti-Patterns)
+1. **Font sizes < 16px on inputs** - Causes iOS Safari to zoom
+2. **Touch targets < 44px** - Poor accessibility and usability
+3. **Fixed positioning without safe-area-insets** - Content hidden by notches
+4. **Horizontal overflow** - Breaks mobile UX
+5. **user-scalable=yes without maximum-scale** - Allows accidental zoom
+6. **Missing touch-action: manipulation** - Slower tap response (300ms delay)
+7. **Viewport units (vh/vw) without fallbacks** - Inconsistent on mobile browsers
+8. **Hover-only interactions** - Inaccessible on touch devices
+9. **Small click areas** - Difficult to tap accurately
+10. **Ignoring prefers-reduced-motion** - Accessibility violation
+
 ## Stack details
 
 - Spring Boot 3.5.5 (WebFlux, Actuator)
 - Spring AI 1.0.1 (OpenAI client, VectorStore Qdrant)
 - Qdrant (HNSW vector DB); `docker-compose.yml` includes a local dev service
 - JSoup (HTML parsing), JTokkit (tokenization), Fastutil (utils)
+- **Mobile-First CSS**: Responsive design with mobile-specific optimizations
 
 Docker Compose (Qdrant only, optional fallback when you outgrow the free Qdrant Cloud plan or for offline dev):
 ```bash

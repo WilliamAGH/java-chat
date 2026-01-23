@@ -15,12 +15,13 @@ import java.util.List;
 public class EnrichmentService {
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentService.class);
 
-    private final ResilientApiClient apiClient;
+    private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper objectMapper;
 
-    public EnrichmentService(ResilientApiClient apiClient, ObjectMapper objectMapper) {
-        this.apiClient = apiClient;
+    public EnrichmentService(ObjectMapper objectMapper,
+                             OpenAIStreamingService openAIStreamingService) {
         this.objectMapper = objectMapper;
+        this.openAIStreamingService = openAIStreamingService;
     }
 
     @Cacheable(value = "enrichment-cache", key = "#userQuery + ':' + #jdkVersion")
@@ -48,7 +49,12 @@ public class EnrichmentService {
 
         String json;
         try {
-            json = apiClient.callLLM(prompt.toString(), 0.7).block();
+            if (openAIStreamingService != null && openAIStreamingService.isAvailable()) {
+                json = openAIStreamingService.complete(prompt.toString(), 0.7).block();
+            } else {
+                logger.warn("OpenAIStreamingService unavailable; returning empty enrichment JSON");
+                json = "{}";
+            }
             if (json == null || json.isEmpty()) {
                 logger.warn("Empty response from API, using fallback");
                 json = "{}";

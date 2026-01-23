@@ -7,7 +7,8 @@
 # ================================
 # BUILD STAGE - Maven + JDK
 # ================================
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk-alpine AS builder
 
 # Install Maven (Alpine package is lightweight)
 RUN apk add --no-cache maven
@@ -31,7 +32,8 @@ RUN ./mvnw clean package -DskipTests -B
 # ================================
 # RUNTIME STAGE - JRE Only
 # ================================
-FROM eclipse-temurin:21-jre-alpine AS runtime
+# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre-alpine AS runtime
 
 # Add labels for better container management
 LABEL maintainer="Java Chat Team" \
@@ -67,13 +69,19 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # ================================
 # JVM OPTIMIZATION FOR <512MB RAM
 # ================================
-# Memory settings optimized for container constraints:
-# - Xmx256m: Max heap 256MB (leaves room for JVM overhead)
-# - Xms128m: Initial heap 128MB (faster startup)
-# - UseSerialGC: Single-threaded GC for minimal memory usage
-# - MaxRAM=256m: Total JVM memory limit
-# - UseCompressedOops: Enable compressed object pointers
-# - UseCompressedClassPointers: Enable compressed class pointers
+# Memory settings optimized for container constraints (512MB limit):
+# -Xmx192m: Max heap 192MB (shift budget to metaspace)
+# -Xms64m:  Small initial heap for faster start and lower RSS
+# -XX:MaxMetaspaceSize=192m: Allow more classes to prevent metaspace OOM
+# -XX:ReservedCodeCacheSize=32m: Cap JIT code cache
+# -XX:MaxDirectMemorySize=32m: Cap Netty/gRPC direct buffers
+# -Xss256k: Smaller thread stacks
+# -XX:+UseStringDeduplication: Reduce duplicate string overhead
+# -Dreactor.schedulers.defaultBoundedElasticSize=32: Limit elastic threads
+# -Dreactor.schedulers.defaultBoundedElasticQueueSize=256: Limit task queue
+# -Dreactor.netty.ioWorkerCount=2: Fewer IO threads
+# -Dio.netty.allocator.maxOrder=7: Smaller pooled chunks
+# -XX:+ExitOnOutOfMemoryError: Fail fast
 # ================================
 # Use PORT environment variable (Railway assigns this)
 # Default to 8085 if not set
@@ -91,7 +99,24 @@ ENV APP_KILL_ON_CONFLICT=false
 
 # JSON array format for ENTRYPOINT (recommended by Docker)
 # Use shell form to allow PORT variable expansion
-ENTRYPOINT ["/bin/sh", "-c", "java -XX:+IgnoreUnrecognizedVMOptions -Xmx256m -Xms128m -XX:+UseSerialGC -XX:MaxRAM=256m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.security.egd=file:/dev/./urandom -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
+# Disable Netty native OpenSSL (tcnative) to avoid segfaults on Alpine/musl
+ENTRYPOINT ["/bin/sh", "-c", "java \
+  -XX:+IgnoreUnrecognizedVMOptions \
+  -Xms64m -Xmx192m \
+  -XX:MaxMetaspaceSize=192m \
+  -XX:ReservedCodeCacheSize=32m \
+  -XX:MaxDirectMemorySize=32m \
+  -Xss256k \
+  -XX:+UseStringDeduplication \
+  -XX:+ExitOnOutOfMemoryError \
+  -Dreactor.schedulers.defaultBoundedElasticSize=32 \
+  -Dreactor.schedulers.defaultBoundedElasticQueueSize=256 \
+  -Dreactor.netty.ioWorkerCount=2 \
+  -Dio.netty.allocator.maxOrder=7 \
+  -Djava.security.egd=file:/dev/./urandom \
+  -Dio.netty.handler.ssl.noOpenSsl=true \
+  -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true \
+  -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
 
 # ================================
 # IMAGE SIZE OPTIMIZATION

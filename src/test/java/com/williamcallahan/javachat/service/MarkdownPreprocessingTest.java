@@ -16,122 +16,128 @@ class MarkdownPreprocessingTest {
     @Test
     void testColonDashListPattern() {
         String input = "The remainder operator has several uses, such as:- Checking divisibility- Extracting digits";
-        String result = markdownService.preprocessMarkdown(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("Test: Colon-dash list pattern");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
-        
-        assertTrue(result.contains("\n\n- Checking"), "Should have paragraph break before first list item");
-        assertTrue(result.contains("\n- Extracting"), "Should have line break before second list item");
+        System.out.println("HTML: " + html);
+
+        assertTrue(html.contains("<ul>"), "Should render as unordered list");
+        assertTrue(html.contains("<li>Checking divisibility</li>"), "Should contain first list item");
+        assertTrue(html.contains("<li>Extracting digits</li>"), "Should contain second list item");
     }
     
     @Test
     void testInlineNumberedList() {
         String input = "The primitive types are:1. boolean: true or false. 2. byte: 8-bit signed.";
-        String result = markdownService.preprocessMarkdown(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("\nTest: Inline numbered list");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
-        System.out.println("Result bytes: " + java.util.Arrays.toString(result.getBytes()));
-        
-        // The list should be separated from the text - check for any newline separation
-        boolean hasSeparation = result.contains(":\n1.") || result.contains(":\n\n1.");
-        assertTrue(hasSeparation, "Should have newline separation before list");
-        assertTrue(result.contains("\n2. byte"), "Should have line break before item 2");
+        System.out.println("HTML: " + html);
+
+        // Should render as ordered list
+        assertTrue(html.contains("<ol>"), "Should render as ordered list");
+        assertTrue(html.contains("<li>boolean"), "Should contain first list item");
+        assertTrue(html.contains("<li>byte"), "Should contain second list item");
     }
     
     @Test
     void testMissingSpacesAfterPunctuation() {
         String input = "This is a sentence.Here is another!And a third?Yet another.";
-        String result = markdownService.preprocessMarkdown(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("\nTest: Missing spaces after punctuation");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
-        
-        // Spaces are added, and paragraph breaks may be added too for readability
-        assertTrue(result.contains(". Here"), "Should add space after period");
-        // After 2 sentences, paragraph break is expected, so check for either space or paragraph break
-        assertTrue(result.contains("! And") || result.contains("!\n\nAnd") || result.contains("! \n\nAnd"), 
-                  "Should add space or paragraph break after exclamation");
-        assertTrue(result.contains("? Yet"), "Should add space after question mark");
+        System.out.println("HTML: " + html);
+
+        // Should render as paragraphs with proper spacing
+        assertTrue(html.contains("<p>"), "Should render as paragraphs");
+        assertTrue(html.contains("sentence. Here"), "Should add space after period");
+        assertTrue(html.contains("another! And") || html.contains("another!</p>"), "Should handle exclamation");
+        assertTrue(html.contains("third? Yet"), "Should add space after question mark");
     }
     
     @Test
     void testParagraphBreaksInLongText() {
         String input = "The % operator in Java is the remainder operator. It returns the remainder after division. For example, 10 % 3 equals 1. This is useful for checking divisibility. When a % b equals 0, a is divisible by b.";
-        String result = markdownService.preprocessMarkdown(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("\nTest: Paragraph breaks in long text");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
-        
-        assertTrue(result.contains("\n\n"), "Should contain paragraph breaks");
-        int paragraphs = result.split("\n\n").length;
-        assertTrue(paragraphs > 1, "Should have multiple paragraphs, got: " + paragraphs);
+        System.out.println("HTML: " + html);
+
+        assertTrue(html.contains("<p>"), "Should render as paragraphs");
+        // Count paragraph tags
+        int paraCount = html.split("<p>").length - 1;
+        assertTrue(paraCount > 1, "Should have multiple paragraphs, got: " + paraCount);
     }
     
     @Test
     void testCodeBlockSpacing() {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
-        String result = markdownService.preprocessMarkdown(input);
-        String html = markdownService.render(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("\nTest: Code block spacing");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
-        
-        // Either preprocessor adds paragraph break OR final HTML renders code as its own block
-        boolean preSeparated = result.contains("example:\n\n```");
-        boolean htmlHasPre = html.contains("<pre>");
-        boolean htmlHasLang = html.contains("<code class=\"language-");
-        boolean htmlSeparated = htmlHasPre || html.contains("</p>\n\n<pre>") || html.contains("<pre><code class=\"language-java\">");
-        assertTrue(preSeparated || htmlSeparated, "Code block should be separated as a block (pre or final HTML)");
-        assertTrue(htmlHasPre || htmlHasLang, "Final HTML must render fenced code as a block or with language class");
+        System.out.println("HTML: " + html);
+
+        // Should render code block properly
+        assertTrue(html.contains("<pre>"), "Should contain pre tag");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Should contain code with language class");
+        assertTrue(html.contains("int x = 10 % 3"), "Should contain code content");
+    }
+    
+    @Test
+    void testClosingFenceSeparatesProse() {
+        String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
+        String html = markdownService.processStructured(input).html();
+
+        // The prose after the closing fence must be outside the code block
+        assertTrue(html.contains("<pre>"), "Should contain code block");
+        assertTrue(html.contains("</code></pre>"), "Should close code block");
+        assertFalse(html.contains("```The"), "Closing fence must be on its own line, not inside code");
+        int codeClose = html.indexOf("</code></pre>");
+        int theIdx = html.indexOf("The", codeClose + 1);
+        int restIdx = html.indexOf("result is 1.", codeClose + 1);
+        assertTrue(theIdx > codeClose && restIdx > codeClose, "Prose must appear after the closed code block");
     }
     
     @Test
     void testColonDirectlyBeforeCodeFence() {
         // This is the exact issue from the screenshot
         String input = "with a flexible constructor approach:```java\nimport java.util.Scanner;";
-        String result = markdownService.preprocessMarkdown(input);
-        String html = markdownService.render(input);
-        
+        String html = markdownService.processStructured(input).html();
+
         System.out.println("\nTest: Colon directly before code fence");
         System.out.println("Input: " + input);
-        System.out.println("Preprocessed: " + result);
         System.out.println("HTML contains <pre>: " + html.contains("<pre>"));
-        
-        // The preprocessor should add paragraph break after colon
-        assertTrue(result.contains("approach:\n\n```"), "Should have paragraph break between colon and fence");
-        
+
         // The HTML should properly render as a code block
         assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
         assertTrue(html.contains("<code"), "HTML should contain <code> tag");
-        assertFalse(html.contains("approach:```"), "HTML should not have colon directly attached to fence");
+        assertTrue(html.contains("import java.util.Scanner"), "Should contain code content");
     }
     
     @Test
     void testPeriodDirectlyBeforeCodeFence() {
         String input = "Here is the code.```python\nprint('hello')";
-        String result = markdownService.preprocessMarkdown(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Period directly before code fence");
         System.out.println("Input: " + input);
-        System.out.println("Output: " + result);
+        System.out.println("HTML: " + html);
 
-        assertTrue(result.contains("code.\n\n```"), "Should have paragraph break between period and fence");
+        assertTrue(html.contains("<pre>"), "Should render code block");
+        assertTrue(html.contains("<code class=\"language-python\">"), "Should contain Python language class");
+        assertTrue(html.contains("print('hello')"), "Should contain code content");
     }
 
     @Test
     void testJavaCodeBlockWithComplexLanguageTag() {
         String input = "Here's a Java example:```java\npublic class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n```";
-        String result = markdownService.preprocessMarkdown(input);
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
-        assertTrue(result.contains("example:\n\n```java"), "Should have paragraph break before Java code fence");
         assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
         assertTrue(html.contains("<code class=\"language-java\">"), "Should contain code with Java language class");
         assertTrue(html.contains("public class Hello"), "Should contain Java code content");
@@ -140,7 +146,7 @@ class MarkdownPreprocessingTest {
     @Test
     void testMultipleJavaCodeBlocks() {
         String input = "First example:```java\nSystem.out.println(\"First\");\n```\n\nSecond example:```java\nSystem.out.println(\"Second\");\n```";
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Multiple Java code blocks");
         System.out.println("Input: " + input);
@@ -156,14 +162,12 @@ class MarkdownPreprocessingTest {
     @Test
     void testJavaCodeBlockAfterColon() {
         String input = "The solution is:```java\npublic static void main(String[] args) {\n    // Java code here\n}\n```";
-        String result = markdownService.preprocessMarkdown(input);
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block after colon");
         System.out.println("Input: " + input);
-        System.out.println("Preprocessed: " + result);
+        System.out.println("HTML: " + html);
 
-        assertTrue(result.contains("is:\n\n```java"), "Should have paragraph break after colon");
         assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
         assertTrue(html.contains("<code class=\"language-java\">"), "Should contain Java language class");
         assertTrue(html.contains("public static void main"), "Should contain Java method");
@@ -172,7 +176,7 @@ class MarkdownPreprocessingTest {
     @Test
     void testJavaCodeBlockWithSpecialCharacters() {
         String input = "Advanced Java features:```java\n// Using generics and lambdas\nList<String> names = Arrays.asList(\"Alice\", \"Bob\");\nnames.stream().filter(name -> name.length() > 3).forEach(System.out::println);\n```";
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block with special characters");
         System.out.println("Input: " + input);
@@ -186,7 +190,7 @@ class MarkdownPreprocessingTest {
     @Test
     void testEmptyJavaCodeBlock() {
         String input = "Empty code block:```java\n```";
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Empty Java code block");
         System.out.println("Input: " + input);
@@ -199,7 +203,7 @@ class MarkdownPreprocessingTest {
     @Test
     void testJavaCodeBlockWithAnnotations() {
         String input = "Spring Boot example:```java\n@RestController\npublic class UserController {\n    @GetMapping(\"/users\")\n    public List<User> getUsers() {\n        return userService.findAll();\n    }\n}\n```";
-        String html = markdownService.render(input);
+        String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block with annotations");
         System.out.println("Input: " + input);

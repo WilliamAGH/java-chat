@@ -9,7 +9,10 @@ public class AppProperties {
     
     private Rag rag = new Rag();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
+    private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private Docs docs = new Docs();
+    private Diagnostics diagnostics = new Diagnostics();
+    private Qdrant qdrant = new Qdrant();
     
     public Rag getRag() {
         return rag;
@@ -34,6 +37,13 @@ public class AppProperties {
     public void setDocs(Docs docs) {
         this.docs = docs;
     }
+    
+    public Diagnostics getDiagnostics() { return diagnostics; }
+    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = diagnostics; }
+    public Qdrant getQdrant() { return qdrant; }
+    public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
+    public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
+    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = remoteEmbedding; }
     
     public static class Rag {
         private int searchTopK = 10;
@@ -96,7 +106,7 @@ public class AppProperties {
         private boolean enabled = false;
         private String serverUrl = "http://127.0.0.1:1234";
         private String model = "text-embedding-qwen3-embedding-8b";
-private int dimensions = 4096;
+        private int dimensions = 4096;
         private boolean useHashWhenDisabled = false;
 
         public boolean isEnabled() { return enabled; }
@@ -113,6 +123,22 @@ private int dimensions = 4096;
 
         public boolean isUseHashWhenDisabled() { return useHashWhenDisabled; }
         public void setUseHashWhenDisabled(boolean useHashWhenDisabled) { this.useHashWhenDisabled = useHashWhenDisabled; }
+    }
+
+    public static class RemoteEmbedding {
+        private String serverUrl = ""; // e.g., https://api.novita.ai/openai
+        private String model = "text-embedding-3-small";
+        private String apiKey = "";
+        private int dimensions = 4096;
+
+        public String getServerUrl() { return serverUrl; }
+        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+        public String getApiKey() { return apiKey; }
+        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+        public int getDimensions() { return dimensions; }
+        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
     }
 
     public static class Docs {
@@ -136,5 +162,25 @@ private int dimensions = 4096;
 
         public String getIndexDir() { return indexDir; }
         public void setIndexDir(String indexDir) { this.indexDir = indexDir; }
+    }
+    
+    public static class Diagnostics {
+        // Whether to log each raw streaming chunk (DEBUG). Default false to avoid flooding logs.
+        private boolean streamChunkLogging = false;
+        // Sample every Nth chunk when logging is enabled. 0 => log every chunk.
+        private int streamChunkSample = 0;
+        
+        public boolean isStreamChunkLogging() { return streamChunkLogging; }
+        public void setStreamChunkLogging(boolean streamChunkLogging) { this.streamChunkLogging = streamChunkLogging; }
+        public int getStreamChunkSample() { return streamChunkSample; }
+        public void setStreamChunkSample(int streamChunkSample) { this.streamChunkSample = streamChunkSample; }
+    }
+
+    public static class Qdrant {
+        // Mirror app.qdrant.ensure-payload-indexes
+        private boolean ensurePayloadIndexes = true;
+
+        public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
+        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
     }
 }
