@@ -23,9 +23,6 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
@@ -56,6 +53,9 @@ public class UnifiedMarkdownService {
 
     // Enrichment marker parsing is handled by a streaming scanner (not regex)
     
+    /**
+     * Creates the unified markdown processor with AST parsing and caching.
+     */
     public UnifiedMarkdownService() {
         // Configure Flexmark with optimal settings
         MutableDataSet options = new MutableDataSet()
@@ -157,7 +157,7 @@ public class UnifiedMarkdownService {
             
             long processingTime = System.currentTimeMillis() - startTime;
             
-            ProcessedMarkdown result = new ProcessedMarkdown(
+            ProcessedMarkdown processedMarkdown = new ProcessedMarkdown(
                 html, 
                 citations, 
                 enrichments, 
@@ -166,19 +166,16 @@ public class UnifiedMarkdownService {
             );
             
             // Cache the result using the original input key for consistency
-            processCache.put(cacheKey, result);
+            processCache.put(cacheKey, processedMarkdown);
             
             logger.debug("Processed markdown in {}ms: {} citations, {} enrichments", 
                         processingTime, citations.size(), enrichments.size());
             
-            return result;
+            return processedMarkdown;
             
-        } catch (Exception e) {
-            logger.error("Error processing markdown with AST approach", e);
-            // Fallback to safe HTML escaping
-            String safeHtml = escapeHtml(markdown).replace("\n", "<br />\n");
-            return new ProcessedMarkdown(safeHtml, List.of(), List.of(), List.of(), 
-                                       System.currentTimeMillis() - startTime);
+        } catch (Exception processingFailure) {
+            logger.error("Error processing markdown with AST approach", processingFailure);
+            throw new MarkdownProcessingException("Markdown processing failed", processingFailure);
         }
     }
 
@@ -201,72 +198,442 @@ public class UnifiedMarkdownService {
      */
     private String postProcessHtml(String html) {
         if (html == null) return "";
-        try {
-            Document doc = Jsoup.parseBodyFragment(html);
-            doc.outputSettings().prettyPrint(false);
-            // Avoid mutating intra-word spacing; rely on renderer paragraphing
-            // Add styling hooks structurally
-            for (Element table : doc.select("table")) {
-                table.addClass("markdown-table");
-            }
-            for (Element bq : doc.select("blockquote")) {
-                bq.addClass("markdown-quote");
-            }
-            // Remove orphan brace-only paragraphs left by fragmented generations
-            for (Element p : new java.util.ArrayList<>(doc.select("p"))) {
-                if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-                String t = p.text();
-                if (t != null) {
-                    String tt = t.trim();
-                    if (tt.equals("{") || tt.equals("}")) p.remove();
+        Document document = Jsoup.parseBodyFragment(html);
+        document.outputSettings().prettyPrint(false);
+        // Avoid mutating intra-word spacing; rely on renderer paragraphing
+        // Add styling hooks structurally
+        for (Element tableElement : document.select("table")) {
+            tableElement.addClass("markdown-table");
+        }
+        for (Element blockquoteElement : document.select("blockquote")) {
+            blockquoteElement.addClass("markdown-quote");
+        }
+        // Remove orphan brace-only paragraphs left by fragmented generations
+        for (Element paragraphElement : new java.util.ArrayList<>(document.select("p"))) {
+            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            String paragraphText = paragraphElement.text();
+            if (paragraphText != null) {
+                String trimmedParagraphText = paragraphText.trim();
+                if (trimmedParagraphText.equals("{") || trimmedParagraphText.equals("}")) {
+                    paragraphElement.remove();
                 }
             }
-            // HTML-side list/citation fixes removed in favor of AST-level transforms
-
-            // Spacing and readability fixes for punctuation and long paragraphs
-            fixSentenceSpacing(doc);
-            splitLongParagraphs(doc);
-            String out = doc.body().html();
-            return out.trim();
-        } catch (Exception e) {
-            logger.warn("postProcessHtml failed; returning original HTML: {}", e.getMessage());
-            return html.trim();
         }
+        // Inline list normalization happens on the DOM (not regex) so malformed inline list markers
+        // like "Key points: 1. First 2. Second" still render as proper <ol>/<ul>.
+        renderInlineLists(document);
+
+        // Spacing and readability fixes for punctuation and long paragraphs
+        fixSentenceSpacing(document);
+        splitLongParagraphs(document);
+        String processedHtml = document.body().html();
+        return processedHtml.trim();
     }
 
     /**
      * Converts paragraphs containing inline list markers into proper UL/OL blocks.
      * Safe DOM approach; requires 2+ markers and never runs inside pre/code.
      */
-    // removed renderInlineLists
+    private void renderInlineLists(Document document) {
+        if (document == null) {
+            return;
+        }
+        java.util.List<Element> paragraphElements = new java.util.ArrayList<>(document.select("p"));
+        for (Element paragraphElement : paragraphElements) {
+            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            // Only transform plain-text paragraphs to avoid breaking links/code spans.
+            if (!paragraphElement.children().isEmpty()) continue;
 
-    /**
-     * Escapes HTML for security using safe character replacement.
-     * @param text the text to escape
-     * @return escaped HTML
-     */
-    private String escapeHtml(String text) {
-        if (text == null) return "";
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;");
+            String rawText = paragraphElement.text();
+            if (rawText == null || rawText.isBlank()) continue;
+
+            InlineListConversion conversion = InlineListConversion.tryConvert(rawText);
+            if (conversion == null) continue;
+
+            if (!conversion.leadingText().isBlank()) {
+                paragraphElement.before(new Element("p").text(conversion.leadingText()));
+            }
+            paragraphElement.before(conversion.primaryListElement());
+            for (Element additionalListElement : conversion.additionalListElements()) {
+                paragraphElement.before(additionalListElement);
+            }
+            if (!conversion.trailingText().isBlank()) {
+                paragraphElement.before(new Element("p").text(conversion.trailingText()));
+            }
+            paragraphElement.remove();
+        }
+    }
+
+    private record InlineListConversion(
+        String leadingText,
+        Element primaryListElement,
+        java.util.List<Element> additionalListElements,
+        String trailingText
+    ) {
+        static InlineListConversion tryConvert(String text) {
+            InlineListParse parse = InlineListParse.tryParse(text);
+            if (parse == null) {
+                return null;
+            }
+
+            Element listElement = new Element(parse.primaryBlock().tagName());
+            for (String itemLabel : parse.primaryBlock().itemLabels()) {
+                listElement.appendChild(new Element("li").text(itemLabel));
+            }
+
+            java.util.List<Element> additionalLists = new java.util.ArrayList<>();
+            for (String nestedSegment : parse.nestedSegments()) {
+                InlineListParse nestedParse = InlineListParse.tryParse(nestedSegment);
+                if (nestedParse == null) continue;
+                Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
+                for (String itemLabel : nestedParse.primaryBlock().itemLabels()) {
+                    nestedListElement.appendChild(new Element("li").text(itemLabel));
+                }
+                additionalLists.add(nestedListElement);
+                additionalLists.addAll(renderNestedListsRecursively(nestedParse, 1));
+            }
+
+            return new InlineListConversion(parse.leadingText(), listElement, additionalLists, parse.trailingText());
+        }
+
+        private static java.util.List<Element> renderNestedListsRecursively(InlineListParse parse, int depth) {
+            if (depth >= 3) {
+                return java.util.List.of();
+            }
+            java.util.List<Element> listElements = new java.util.ArrayList<>();
+            for (String nestedSegment : parse.nestedSegments()) {
+                InlineListParse nestedParse = InlineListParse.tryParse(nestedSegment);
+                if (nestedParse == null) continue;
+                Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
+                for (String itemLabel : nestedParse.primaryBlock().itemLabels()) {
+                    nestedListElement.appendChild(new Element("li").text(itemLabel));
+                }
+                listElements.add(nestedListElement);
+                listElements.addAll(renderNestedListsRecursively(nestedParse, depth + 1));
+            }
+            return listElements;
+        }
+    }
+
+    private record InlineListBlock(String tagName, java.util.List<String> itemLabels) {}
+
+    private record InlineListParse(
+        String leadingText,
+        InlineListBlock primaryBlock,
+        java.util.List<String> nestedSegments,
+        String trailingText
+    ) {
+        static InlineListParse tryParse(String input) {
+            if (input == null) return null;
+            String text = input.strip();
+            if (text.isEmpty()) return null;
+
+            InlineListParse ordered = tryParseOrdered(text);
+            if (ordered != null) return ordered;
+            return tryParseBulleted(text);
+        }
+
+	        /**
+	         * Defines ordered list marker styles recognized by the inline list parser.
+	         */
+	        private enum OrderedKind {
+	            NUMERIC,
+	            ROMAN_LOWER,
+	            LETTER_LOWER
+	        }
+
+        private record Marker(int markerStartIndex, int contentStartIndex) {}
+
+        private static InlineListParse tryParseOrdered(String text) {
+            InlineListParse numeric = parseOrderedKind(text, OrderedKind.NUMERIC);
+            if (numeric != null) return numeric;
+
+            InlineListParse roman = parseOrderedKind(text, OrderedKind.ROMAN_LOWER);
+            if (roman != null) return roman;
+
+            return parseOrderedKind(text, OrderedKind.LETTER_LOWER);
+        }
+
+        private static InlineListParse parseOrderedKind(String text, OrderedKind kind) {
+            java.util.List<Marker> markers = findOrderedMarkers(text, kind);
+            if (markers.size() < 2) return null;
+
+            int firstMarkerIndex = markers.get(0).markerStartIndex();
+            String leading = text.substring(0, firstMarkerIndex).trim();
+
+            java.util.List<String> itemLabels = new java.util.ArrayList<>();
+            java.util.List<String> nestedSegments = new java.util.ArrayList<>();
+            for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
+                int contentStart = markers.get(markerIndex).contentStartIndex();
+                int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
+                String rawItem = text.substring(contentStart, nextMarkerStart).trim();
+                if (rawItem.isEmpty()) continue;
+
+                ParsedItem parsedItem = splitNestedList(rawItem);
+                itemLabels.add(parsedItem.label());
+                if (parsedItem.nestedSegment() != null && !parsedItem.nestedSegment().isBlank()) {
+                    nestedSegments.add(parsedItem.nestedSegment());
+                }
+            }
+
+            if (itemLabels.size() < 2) return null;
+
+            InlineListBlock primaryBlock = new InlineListBlock("ol", itemLabels);
+            return new InlineListParse(leading, primaryBlock, nestedSegments, "");
+        }
+
+        private static InlineListParse tryParseBulleted(String text) {
+            BulletKind bulletKind = findFirstBulletKind(text);
+            if (bulletKind == null) return null;
+
+            java.util.List<Marker> markers = findBulletMarkers(text, bulletKind);
+            if (markers.size() < 2) return null;
+
+            int firstMarkerIndex = markers.get(0).markerStartIndex();
+            String leading = text.substring(0, firstMarkerIndex).trim();
+
+            java.util.List<String> itemLabels = new java.util.ArrayList<>();
+            java.util.List<String> nestedSegments = new java.util.ArrayList<>();
+            for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
+                int contentStart = markers.get(markerIndex).contentStartIndex();
+                int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
+                String rawItem = text.substring(contentStart, nextMarkerStart).trim();
+                if (rawItem.isEmpty()) continue;
+                ParsedItem parsedItem = splitNestedList(rawItem);
+                itemLabels.add(parsedItem.label());
+                if (parsedItem.nestedSegment() != null && !parsedItem.nestedSegment().isBlank()) {
+                    nestedSegments.add(parsedItem.nestedSegment());
+                }
+            }
+
+            if (itemLabels.size() < 2) return null;
+
+            InlineListBlock primaryBlock = new InlineListBlock("ul", itemLabels);
+            return new InlineListParse(leading, primaryBlock, nestedSegments, "");
+        }
+
+	        /**
+	         * Defines supported bullet marker characters recognized by the inline list parser.
+	         */
+	        private enum BulletKind {
+	            DASH('-'),
+	            ASTERISK('*'),
+	            PLUS('+'),
+	            BULLET('•');
+
+            private final char markerChar;
+
+            BulletKind(char markerChar) {
+                this.markerChar = markerChar;
+            }
+
+            char markerChar() {
+                return markerChar;
+            }
+        }
+
+        private static BulletKind findFirstBulletKind(String text) {
+            for (int index = 0; index < text.length(); index++) {
+                char character = text.charAt(index);
+                BulletKind kind = bulletKind(character);
+                if (kind == null) continue;
+                if (isBulletListIntro(text, index) && hasSecondBulletMarker(text, kind, index + 1)) {
+                    return kind;
+                }
+            }
+            return null;
+        }
+
+        private static boolean hasSecondBulletMarker(String text, BulletKind kind, int startIndex) {
+            for (int index = startIndex; index < text.length(); index++) {
+                if (text.charAt(index) == kind.markerChar() && isBulletMarker(text, index, kind)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static BulletKind bulletKind(char character) {
+            return switch (character) {
+                case '-' -> BulletKind.DASH;
+                case '*' -> BulletKind.ASTERISK;
+                case '+' -> BulletKind.PLUS;
+                case '•' -> BulletKind.BULLET;
+                default -> null;
+            };
+        }
+
+	        private static boolean isBulletListIntro(String text, int markerIndex) {
+	            if (markerIndex == 0) return true;
+	            char previousChar = text.charAt(markerIndex - 1);
+	            return previousChar == ':'
+	                || previousChar == '\n'
+	                || (previousChar == ' ' && markerIndex >= 2 && text.charAt(markerIndex - 2) == ':');
+	        }
+
+	        private static boolean isBulletMarker(String text, int markerIndex, BulletKind kind) {
+	            // Require a space after the marker to avoid catching punctuation/minus uses.
+	            return text.charAt(markerIndex) == kind.markerChar()
+	                && markerIndex + 1 < text.length()
+	                && text.charAt(markerIndex + 1) == ' ';
+	        }
+
+        private static java.util.List<Marker> findBulletMarkers(String text, BulletKind kind) {
+            java.util.List<Marker> markers = new java.util.ArrayList<>();
+            boolean hasIntro = false;
+            for (int index = 0; index < text.length(); index++) {
+                if (text.charAt(index) != kind.markerChar()) continue;
+                if (!hasIntro) {
+                    if (!isBulletListIntro(text, index)) continue;
+                    if (!isBulletMarker(text, index, kind)) continue;
+                    hasIntro = true;
+                    markers.add(new Marker(index, index + 2));
+                    continue;
+                }
+                if (isBulletMarker(text, index, kind)) {
+                    markers.add(new Marker(index, index + 2));
+                }
+            }
+            return markers;
+        }
+
+        private static java.util.List<Marker> findOrderedMarkers(String text, OrderedKind kind) {
+            java.util.List<Marker> markers = new java.util.ArrayList<>();
+            int index = 0;
+            while (index < text.length()) {
+                Marker marker = tryReadOrderedMarkerAt(text, index, kind);
+                if (marker != null) {
+                    markers.add(marker);
+                    index = marker.contentStartIndex();
+                    continue;
+                }
+                index++;
+            }
+            return markers;
+        }
+
+        private static Marker tryReadOrderedMarkerAt(String text, int index, OrderedKind kind) {
+            if (index < 0 || index >= text.length()) return null;
+            if (!isMarkerBoundary(text, index)) return null;
+
+            return switch (kind) {
+                case NUMERIC -> tryReadNumericMarker(text, index);
+                case ROMAN_LOWER -> tryReadRomanMarker(text, index);
+                case LETTER_LOWER -> tryReadLetterMarker(text, index);
+            };
+        }
+
+        private static boolean isMarkerBoundary(String text, int index) {
+            if (index == 0) return true;
+            char previousChar = text.charAt(index - 1);
+            return !Character.isLetterOrDigit(previousChar);
+        }
+
+        private static Marker tryReadNumericMarker(String text, int index) {
+            int cursor = index;
+            int digitCount = 0;
+            while (cursor < text.length() && Character.isDigit(text.charAt(cursor)) && digitCount < 3) {
+                digitCount++;
+                cursor++;
+            }
+            if (digitCount == 0) return null;
+            if (cursor >= text.length()) return null;
+            char markerChar = text.charAt(cursor);
+            if (markerChar != '.' && markerChar != ')') return null;
+            if (cursor + 1 >= text.length()) return null;
+            char nextChar = text.charAt(cursor + 1);
+            if (Character.isDigit(nextChar)) return null; // version number like 1.8
+            int contentStart = cursor + 1;
+            if (nextChar == ' ') {
+                contentStart = cursor + 2;
+            }
+            if (contentStart >= text.length()) return null;
+            if (!Character.isLetter(text.charAt(contentStart))) return null;
+            return new Marker(index, contentStart);
+        }
+
+        private static Marker tryReadLetterMarker(String text, int index) {
+            char letter = text.charAt(index);
+            if (letter < 'a' || letter > 'z') return null;
+            if (index + 1 >= text.length()) return null;
+            char markerChar = text.charAt(index + 1);
+            if (markerChar != '.' && markerChar != ')') return null;
+            int contentStart = index + 2;
+            if (contentStart < text.length() && text.charAt(contentStart) == ' ') {
+                contentStart++;
+            }
+            if (contentStart >= text.length()) return null;
+            if (!Character.isLetter(text.charAt(contentStart))) return null;
+            return new Marker(index, contentStart);
+        }
+
+        private static Marker tryReadRomanMarker(String text, int index) {
+            int cursor = index;
+            int length = 0;
+            while (cursor < text.length() && length < 6) {
+                char c = text.charAt(cursor);
+                if (c != 'i' && c != 'v' && c != 'x') break;
+                length++;
+                cursor++;
+            }
+            if (length == 0) return null;
+            if (cursor >= text.length()) return null;
+            char markerChar = text.charAt(cursor);
+            if (markerChar != '.' && markerChar != ')') return null;
+            int contentStart = cursor + 1;
+            if (contentStart < text.length() && text.charAt(contentStart) == ' ') {
+                contentStart++;
+            }
+            if (contentStart >= text.length()) return null;
+            if (!Character.isLetter(text.charAt(contentStart))) return null;
+            return new Marker(index, contentStart);
+        }
+
+        private record ParsedItem(String label, String nestedSegment) {}
+
+        private static ParsedItem splitNestedList(String rawItemText) {
+            String trimmed = rawItemText.trim();
+            int colonIndex = trimmed.indexOf(':');
+            if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
+                String labelPart = trimmed.substring(0, colonIndex).trim();
+                String tail = trimmed.substring(colonIndex + 1).trim();
+                if (InlineListParse.tryParse(tail) != null) {
+                    return new ParsedItem(normalizeItemLabel(labelPart), tail);
+                }
+            }
+            return new ParsedItem(normalizeItemLabel(trimmed), null);
+        }
+
+        private static String normalizeItemLabel(String raw) {
+            String label = raw == null ? "" : raw.trim();
+            int colonIndex = label.indexOf(':');
+            if (colonIndex > 0) {
+                label = label.substring(0, colonIndex).trim();
+            }
+            while (!label.isEmpty()) {
+                char last = label.charAt(label.length() - 1);
+                if (last == '.' || last == '!' || last == '?') {
+                    label = label.substring(0, label.length() - 1).trim();
+                } else {
+                    break;
+                }
+            }
+            return label;
+        }
     }
 
     // === Pre-normalization and paragraph utilities (no regex) ===
     
     private void fixSentenceSpacing(Document doc) {
-        for (Element p : doc.select("p")) {
-            if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-            for (int i = 0; i < p.childNodeSize(); i++) {
-                org.jsoup.nodes.Node n = p.childNode(i);
-                if (n instanceof TextNode tn) {
-                    String text = tn.getWholeText();
-                    String fixed = fixTextSpacing(text);
-                    if (fixed != null && !fixed.equals(text)) {
-                        tn.text(fixed);
+        for (Element paragraphElement : doc.select("p")) {
+            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            for (int nodeIndex = 0; nodeIndex < paragraphElement.childNodeSize(); nodeIndex++) {
+                org.jsoup.nodes.Node childNode = paragraphElement.childNode(nodeIndex);
+                if (childNode instanceof TextNode textNode) {
+                    String nodeText = textNode.getWholeText();
+                    String fixedSpacingText = fixTextSpacing(nodeText);
+                    if (fixedSpacingText != null && !fixedSpacingText.equals(nodeText)) {
+                        textNode.text(fixedSpacingText);
                     }
                 }
             }
@@ -275,63 +642,75 @@ public class UnifiedMarkdownService {
 
     private String fixTextSpacing(String text) {
         if (text == null || text.isEmpty()) return text;
-        StringBuilder sb = new StringBuilder(text.length() + 8);
-        for (int idx = 0; idx < text.length(); idx++) {
-            char c = text.charAt(idx);
-            sb.append(c);
-            if ((c == '.' || c == '!' || c == '?')) {
-                // If next char is a letter and not a space, insert a space
-                if (idx + 1 < text.length()) {
-                    char next = text.charAt(idx + 1);
-                    if (next != ' ' && next != '\n' && Character.isLetterOrDigit(next)) {
-                        sb.append(' ');
+        StringBuilder spacingBuilder = new StringBuilder(text.length() + 8);
+        for (int charIndex = 0; charIndex < text.length(); charIndex++) {
+            char character = text.charAt(charIndex);
+            spacingBuilder.append(character);
+            if ((character == '.' || character == '!' || character == '?')) {
+                // Only insert space if this looks like end of sentence, not a number/version
+                if (charIndex + 1 < text.length()) {
+                    char nextCharacter = text.charAt(charIndex + 1);
+                    // Skip spacing fix for numbers (3.14) and versions (v2.1)
+                    boolean prevIsDigit = charIndex > 0 && Character.isDigit(text.charAt(charIndex - 1));
+                    boolean nextIsDigit = Character.isDigit(nextCharacter);
+                    if (prevIsDigit && nextIsDigit) {
+                        // Part of a number like 3.14 - don't add space
+                        continue;
+                    }
+                    // Insert space before letters (not digits) that follow sentence-ending punctuation
+                    if (nextCharacter != ' ' && nextCharacter != '\n' && Character.isLetter(nextCharacter)) {
+                        spacingBuilder.append(' ');
                     }
                 }
             }
         }
-        return sb.toString();
+        return spacingBuilder.toString();
     }
 
     private void splitLongParagraphs(Document doc) {
-        java.util.List<Element> toProcess = new java.util.ArrayList<>(doc.select("p"));
-        for (Element p : toProcess) {
-            if (!p.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-            String text = p.text();
-            if (text == null) continue;
+        java.util.List<Element> paragraphElements = new java.util.ArrayList<>(doc.select("p"));
+        for (Element paragraphElement : paragraphElements) {
+            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            String paragraphText = paragraphElement.text();
+            if (paragraphText == null) continue;
             // Simple sentence boundary detection
-            java.util.List<String> sentences = new java.util.ArrayList<>();
-            StringBuilder current = new StringBuilder();
-            for (int i = 0; i < text.length(); i++) {
-                char c = text.charAt(i);
-                current.append(c);
-                if ((c == '.' || c == '!' || c == '?')) {
-                    int nextStart = getNextSentenceStart(text, i);
-                    if (nextStart != -1) {
-                        sentences.add(current.toString().trim());
-                        current.setLength(0);
-                        i = nextStart - 1;
+            java.util.List<String> sentenceSegments = new java.util.ArrayList<>();
+            StringBuilder sentenceBuffer = new StringBuilder();
+            for (int textIndex = 0; textIndex < paragraphText.length(); textIndex++) {
+                char character = paragraphText.charAt(textIndex);
+                sentenceBuffer.append(character);
+                if ((character == '.' || character == '!' || character == '?')) {
+                    int nextSentenceStartIndex = getNextSentenceStart(paragraphText, textIndex);
+                    if (nextSentenceStartIndex != -1) {
+                        sentenceSegments.add(sentenceBuffer.toString().trim());
+                        sentenceBuffer.setLength(0);
+                        textIndex = nextSentenceStartIndex - 1;
                     }
                 }
             }
-            if (current.length() > 0) sentences.add(current.toString().trim());
+            if (sentenceBuffer.length() > 0) sentenceSegments.add(sentenceBuffer.toString().trim());
             // Only split if we have >= 5 sentences; keep first two together to satisfy spacing test expectations
-            if (sentences.size() >= 5) {
-                String firstPara = sentences.get(0) + " " + sentences.get(1);
-                p.before(new Element("p").text(firstPara.trim()));
-                for (int si = 2; si < sentences.size(); si++) {
-                    String seg = sentences.get(si);
-                    if (!seg.isEmpty()) p.before(new Element("p").text(seg));
+            if (sentenceSegments.size() >= 5) {
+                String firstParagraph = sentenceSegments.get(0) + " " + sentenceSegments.get(1);
+                paragraphElement.before(new Element("p").text(firstParagraph.trim()));
+                for (int sentenceIndex = 2; sentenceIndex < sentenceSegments.size(); sentenceIndex++) {
+                    String sentenceSegment = sentenceSegments.get(sentenceIndex);
+                    if (!sentenceSegment.isEmpty()) {
+                        paragraphElement.before(new Element("p").text(sentenceSegment));
+                    }
                 }
-                p.remove();
+                paragraphElement.remove();
             }
         }
     }
 
-    private int getNextSentenceStart(String text, int i) {
-        int j = i + 1;
-        while (j < text.length() && text.charAt(j) == ' ') j++;
-        if (j < text.length() && Character.isUpperCase(text.charAt(j))) {
-            return j;
+    private int getNextSentenceStart(String text, int sentenceEndIndex) {
+        int scanIndex = sentenceEndIndex + 1;
+        while (scanIndex < text.length() && text.charAt(scanIndex) == ' ') {
+            scanIndex++;
+        }
+        if (scanIndex < text.length() && Character.isUpperCase(text.charAt(scanIndex))) {
+            return scanIndex;
         }
         return -1;
     }
@@ -372,4 +751,5 @@ public class UnifiedMarkdownService {
             return total == 0 ? 0.0 : (double) hitCount / total;
         }
     }
+
 }

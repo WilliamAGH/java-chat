@@ -2,64 +2,88 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.vladsch.flexmark.util.ast.Node;
 
+/**
+ * AST utilities for markdown cleanup and normalization.
+ */
 final class MarkdownAstUtils {
     private MarkdownAstUtils() {}
 
     static void stripInlineCitationMarkers(Node root) {
-        for (Node n = root.getFirstChild(); n != null; n = n.getNext()) {
+        for (Node childNode = root.getFirstChild(); childNode != null; childNode = childNode.getNext()) {
             // Skip code blocks/spans and links entirely
-            if (n instanceof com.vladsch.flexmark.ast.Code) continue;
-            if (n instanceof com.vladsch.flexmark.ast.FencedCodeBlock) continue;
-            if (n instanceof com.vladsch.flexmark.ast.Link) { stripInlineCitationMarkers(n); continue; }
-            if (n instanceof com.vladsch.flexmark.ast.Text t) {
-                CharSequence cs = t.getChars();
-                String s = cs.toString();
-                String cleaned = removeBracketNumbers(s);
-                if (!cleaned.equals(s)) {
-                    t.setChars(com.vladsch.flexmark.util.sequence.BasedSequence.of(cleaned));
+            if (childNode instanceof com.vladsch.flexmark.ast.Code) continue;
+            if (childNode instanceof com.vladsch.flexmark.ast.FencedCodeBlock) continue;
+            if (childNode instanceof com.vladsch.flexmark.ast.Link) {
+                stripInlineCitationMarkers(childNode);
+                continue;
+            }
+            if (childNode instanceof com.vladsch.flexmark.ast.Text textNode) {
+                CharSequence nodeChars = textNode.getChars();
+                String rawText = nodeChars.toString();
+                String cleanedText = removeBracketNumbers(rawText);
+                if (!cleanedText.equals(rawText)) {
+                    textNode.setChars(com.vladsch.flexmark.util.sequence.BasedSequence.of(cleanedText));
                 }
             }
-            if (n.hasChildren()) stripInlineCitationMarkers(n);
+            if (childNode.hasChildren()) {
+                stripInlineCitationMarkers(childNode);
+            }
         }
     }
 
-    private static String removeBracketNumbers(String s) {
-        if (s == null || s.isEmpty()) return s;
-        StringBuilder out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); ) {
-            char c = s.charAt(i);
-            if (c == '[') {
-                int j = i + 1; int digits = 0; boolean valid = true;
-                while (j < s.length() && Character.isDigit(s.charAt(j)) && digits < 3) { j++; digits++; }
-                if (digits == 0) valid = false;
-                if (valid && j < s.length() && s.charAt(j) == ']') {
-                    if (isBracketNumber(s, i, j)) {
-                        i = skipSpacesAfterBracket(s, j + 1, out);
+    private static String removeBracketNumbers(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        StringBuilder cleanedBuilder = new StringBuilder(text.length());
+        int cursor = 0;
+        while (cursor < text.length()) {
+            char currentChar = text.charAt(cursor);
+            if (currentChar == '[') {
+                int scanIndex = cursor + 1;
+                int digitCount = 0;
+                boolean validToken = true;
+                while (scanIndex < text.length() && Character.isDigit(text.charAt(scanIndex)) && digitCount < 3) {
+                    scanIndex++;
+                    digitCount++;
+                }
+                if (digitCount == 0) {
+                    validToken = false;
+                }
+                if (validToken && scanIndex < text.length() && text.charAt(scanIndex) == ']') {
+                    if (isBracketNumber(text, cursor, scanIndex)) {
+                        cursor = skipSpacesAfterBracket(text, scanIndex + 1, cleanedBuilder);
                         continue;
                     }
                 }
             }
-            out.append(c);
-            i++;
+            cleanedBuilder.append(currentChar);
+            cursor++;
         }
-        return out.toString();
+        return cleanedBuilder.toString();
     }
 
-    private static int skipSpacesAfterBracket(String s, int nextI, StringBuilder out) {
-        if (out.length() > 0 && out.charAt(out.length() - 1) == ' ') {
-            while (nextI < s.length() && s.charAt(nextI) == ' ') nextI++;
+    private static int skipSpacesAfterBracket(String text, int nextIndex, StringBuilder cleanedBuilder) {
+        if (cleanedBuilder.length() > 0 && cleanedBuilder.charAt(cleanedBuilder.length() - 1) == ' ') {
+            while (nextIndex < text.length() && text.charAt(nextIndex) == ' ') {
+                nextIndex++;
+            }
         }
-        return nextI;
+        return nextIndex;
     }
 
-    private static boolean isBracketNumber(String s, int i, int j) {
-        if (i > 0) {
-            char prev = s.charAt(i - 1);
-            if (Character.isLetterOrDigit(prev)) return false;
+    private static boolean isBracketNumber(String text, int openIndex, int closeIndex) {
+        if (openIndex > 0) {
+            char previousChar = text.charAt(openIndex - 1);
+            if (Character.isLetterOrDigit(previousChar)) {
+                return false;
+            }
         }
-        if (j + 1 < s.length()) {
-            char next = s.charAt(j + 1);
-            if (Character.isLetterOrDigit(next)) return false;
+        if (closeIndex + 1 < text.length()) {
+            char nextChar = text.charAt(closeIndex + 1);
+            if (Character.isLetterOrDigit(nextChar)) {
+                return false;
+            }
         }
         return true;
     }

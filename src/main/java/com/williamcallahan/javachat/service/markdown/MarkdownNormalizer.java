@@ -1,59 +1,91 @@
 package com.williamcallahan.javachat.service.markdown;
 
+/**
+ * Normalizes markdown text prior to AST parsing to improve list and fence handling.
+ */
 final class MarkdownNormalizer {
     private MarkdownNormalizer() {}
 
     // Normalize: preserve fences; convert "1) " to "1. " outside fences so Flexmark sees OLs
-    static String preNormalizeForListsAndFences(String md) {
-        if (md == null || md.isEmpty()) return "";
-        StringBuilder out = new StringBuilder(md.length() + 64);
+    static String preNormalizeForListsAndFences(String markdownText) {
+        if (markdownText == null || markdownText.isEmpty()) {
+            return "";
+        }
+        StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         boolean inFence = false;
-        for (int i = 0; i < md.length();) {
-            if (i + 2 < md.length() && md.charAt(i) == '`' && md.charAt(i + 1) == '`' && md.charAt(i + 2) == '`') {
-                boolean opening = !inFence;
-                if (opening && out.length() > 0) {
-                    char prev = out.charAt(out.length() - 1);
-                    if (prev != '\n') out.append('\n').append('\n');
+        for (int cursor = 0; cursor < markdownText.length();) {
+            // Opening fence detection - only when NOT already inside a fence
+            if (!inFence && cursor + 2 < markdownText.length()
+                && markdownText.charAt(cursor) == '`'
+                && markdownText.charAt(cursor + 1) == '`'
+                && markdownText.charAt(cursor + 2) == '`') {
+                boolean openingFence = !inFence;
+                if (openingFence && normalizedBuilder.length() > 0) {
+                    char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
+                    if (previousChar != '\n') {
+                        normalizedBuilder.append('\n').append('\n');
+                    }
                 }
-                out.append("```");
-                i += 3;
-                while (i < md.length()) {
-                    char ch = md.charAt(i);
-                    if (Character.isLetterOrDigit(ch) || ch == '-' || ch == '_') { out.append(ch); i++; }
-                    else break;
+                normalizedBuilder.append("```");
+                cursor += 3;
+                while (cursor < markdownText.length()) {
+                    char languageChar = markdownText.charAt(cursor);
+                    if (Character.isLetterOrDigit(languageChar) || languageChar == '-' || languageChar == '_') {
+                        normalizedBuilder.append(languageChar);
+                        cursor++;
+                    } else {
+                        break;
+                    }
                 }
-                if (i < md.length() && md.charAt(i) != '\n') { out.append('\n'); }
+                if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                    normalizedBuilder.append('\n');
+                }
                 inFence = true;
                 continue;
             }
-            if (inFence && i + 2 < md.length() && md.charAt(i) == '`' && md.charAt(i + 1) == '`' && md.charAt(i + 2) == '`') {
-                if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') { out.append('\n'); }
-                out.append("```");
-                i += 3;
+            if (inFence
+                && cursor + 2 < markdownText.length()
+                && markdownText.charAt(cursor) == '`'
+                && markdownText.charAt(cursor + 1) == '`'
+                && markdownText.charAt(cursor + 2) == '`') {
+                if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
+                    normalizedBuilder.append('\n');
+                }
+                normalizedBuilder.append("```");
+                cursor += 3;
                 inFence = false;
-                if (i < md.length() && md.charAt(i) != '\n') out.append('\n').append('\n');
+                if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                    normalizedBuilder.append('\n').append('\n');
+                }
                 continue;
             }
-            out.append(md.charAt(i));
-            i++;
+            normalizedBuilder.append(markdownText.charAt(cursor));
+            cursor++;
         }
-        if (inFence) { out.append('\n').append("```"); }
+        if (inFence) {
+            normalizedBuilder.append('\n').append("```");
+        }
         // Second pass: indent blocks under numeric headers so following content
         // (bullets/enrichments/code) stays inside the same list item until next header.
-        return indentBlocksUnderNumericHeaders(out.toString());
+        return indentBlocksUnderNumericHeaders(normalizedBuilder.toString());
     }
 
-    private static String indentBlocksUnderNumericHeaders(String text) {
-        if (text == null || text.isEmpty()) return text;
-        StringBuilder out = new StringBuilder(text.length() + 64);
+    private static String indentBlocksUnderNumericHeaders(String markdownText) {
+        if (markdownText == null || markdownText.isEmpty()) {
+            return markdownText;
+        }
+        StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         boolean inFence = false;
         boolean inNumericHeader = false;
-        int i = 0; int n = text.length();
-        while (i < n) {
-            int lineStart = i;
-            while (i < n && text.charAt(i) != '\n') i++;
-            int lineEnd = i; // exclusive
-            String line = text.substring(lineStart, lineEnd);
+        int cursor = 0;
+        int textLength = markdownText.length();
+        while (cursor < textLength) {
+            int lineStartIndex = cursor;
+            while (cursor < textLength && markdownText.charAt(cursor) != '\n') {
+                cursor++;
+            }
+            int lineEndIndex = cursor; // exclusive
+            String line = markdownText.substring(lineStartIndex, lineEndIndex);
             String trimmed = line.stripLeading();
             // fence toggle
             if (trimmed.startsWith("```") && !trimmed.startsWith("````")) {
@@ -61,41 +93,97 @@ final class MarkdownNormalizer {
             }
             boolean isHeader = false;
             if (!inFence) {
-                int j = 0;
-                while (j < trimmed.length() && Character.isDigit(trimmed.charAt(j))) j++;
-                if (j > 0 && j <= 3 && j < trimmed.length()) {
-                    char c = trimmed.charAt(j);
-                    if ((c == '.' || c == ')') && (j + 1 < trimmed.length()) && trimmed.charAt(j + 1) == ' ') {
+                int digitIndex = 0;
+                while (digitIndex < trimmed.length() && Character.isDigit(trimmed.charAt(digitIndex))) {
+                    digitIndex++;
+                }
+                if (digitIndex > 0 && digitIndex <= 3 && digitIndex < trimmed.length()) {
+                    char markerChar = trimmed.charAt(digitIndex);
+                    if ((markerChar == '.' || markerChar == ')')
+                        && (digitIndex + 1 < trimmed.length())
+                        && trimmed.charAt(digitIndex + 1) == ' ') {
                         isHeader = true;
                     }
                 }
             }
             if (isHeader) {
                 inNumericHeader = true;
-                out.append(line);
-            } else if (inNumericHeader) {
-                // indent non-header lines under the current numbered header
-                if (line.isEmpty()) {
-                    out.append("    ");
-                    out.append(line);
-                } else {
-                    // keep existing leading spaces but ensure at least 4
-                    out.append("    ");
-                    out.append(line);
-                }
+                normalizedBuilder.append(line);
+            } else if (inNumericHeader && shouldIndentContinuationLine(trimmed)) {
+                // Indent only true continuation prose under a numbered header.
+                // Avoid indenting list markers (would turn nested lists into code blocks).
+                normalizedBuilder.append("    ").append(line);
             } else {
-                out.append(line);
+                normalizedBuilder.append(line);
             }
-            if (i < n) { out.append('\n'); i++; }
+            if (cursor < textLength) {
+                normalizedBuilder.append('\n');
+                cursor++;
+            }
             // Stop header scope if we hit two consecutive blank lines (common section break)
             if (inNumericHeader && line.isEmpty()) {
-                // peek next line
-                int k = i; int m = k;
-                while (m < n && text.charAt(m) != '\n') m++;
-                String nextLine = text.substring(k, m);
-                if (nextLine.isEmpty()) inNumericHeader = false;
+                int peekStartIndex = cursor;
+                int peekEndIndex = peekStartIndex;
+                while (peekEndIndex < textLength && markdownText.charAt(peekEndIndex) != '\n') {
+                    peekEndIndex++;
+                }
+                String nextLine = markdownText.substring(peekStartIndex, peekEndIndex);
+                if (nextLine.isEmpty()) {
+                    inNumericHeader = false;
+                }
             }
         }
-        return out.toString();
+        return normalizedBuilder.toString();
+    }
+
+    private static boolean shouldIndentContinuationLine(String trimmedLine) {
+        if (trimmedLine == null || trimmedLine.isEmpty()) {
+            return false;
+        }
+        // Keep nested lists and fences as-is; they already carry their own structure.
+        if (trimmedLine.startsWith("```")) {
+            return false;
+        }
+        char firstChar = trimmedLine.charAt(0);
+	        if (firstChar == '-' || firstChar == '*' || firstChar == '+' || firstChar == '•') {
+	            return false;
+	        }
+	        // Skip indentation for ordered list markers (1. / 1) / a. / i.)
+	        return !startsWithOrderedMarker(trimmedLine);
+	    }
+
+    private static boolean startsWithOrderedMarker(String trimmedLine) {
+        int cursor = 0;
+        while (cursor < trimmedLine.length() && Character.isDigit(trimmedLine.charAt(cursor))) {
+            cursor++;
+        }
+        if (cursor > 0 && cursor < trimmedLine.length()) {
+            char marker = trimmedLine.charAt(cursor);
+            if ((marker == '.' || marker == ')') && cursor + 1 < trimmedLine.length()) {
+                return true;
+            }
+        }
+        // Lowercase letter marker: a. / a)
+        if (trimmedLine.length() > 1) {
+            char firstChar = trimmedLine.charAt(0);
+            char secondChar = trimmedLine.charAt(1);
+            if (firstChar >= 'a' && firstChar <= 'z' && (secondChar == '.' || secondChar == ')')) {
+                return true;
+            }
+        }
+        // Basic lowercase roman markers (i., ii., iii., iv., v.)
+        int romanCursor = 0;
+        while (romanCursor < trimmedLine.length() && romanCursor < 6) {
+            char romanChar = trimmedLine.charAt(romanCursor);
+            if (romanChar != 'i' && romanChar != 'v' && romanChar != 'x') {
+                break;
+            }
+            romanCursor++;
+        }
+        if (romanCursor > 0 && romanCursor < trimmedLine.length()) {
+            char marker = trimmedLine.charAt(romanCursor);
+            return marker == '.' || marker == ')';
+        }
+        return false;
     }
 }

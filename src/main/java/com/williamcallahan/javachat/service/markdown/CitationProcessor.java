@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * AST-based citation processor that replaces regex-based citation extraction.
@@ -67,10 +68,10 @@ public class CitationProcessor {
          */
         private void visitLink(Link link) {
             String url = link.getUrl().toString();
-            String title = extractLinkTitle(link);
             CitationType type = CitationType.fromUrl(url);
             
-            if (isValidCitation(url, title)) {
+            String title = extractLinkTitle(link);
+            if (isValidCitation(url)) {
                 MarkdownCitation citation = MarkdownCitation.create(url, title, "", type, position++);
                 citations.add(citation);
                 logger.debug("Found citation: {} -> {}", title, url);
@@ -121,16 +122,16 @@ public class CitationProcessor {
          * @param title the title to validate
          * @return true if valid citation
          */
-        private boolean isValidCitation(String url, String title) {
+        private boolean isValidCitation(String url) {
             if (url == null || url.trim().isEmpty()) {
                 return false;
             }
             
             // Skip common non-citation links
-            String lowerUrl = url.toLowerCase();
-            return !(lowerUrl.startsWith("mailto:") || 
-                lowerUrl.startsWith("tel:") || 
-                lowerUrl.startsWith("javascript:"));
+            String lowerUrl = url.toLowerCase(Locale.ROOT);
+            return !lowerUrl.startsWith("mailto:")
+                && !lowerUrl.startsWith("tel:")
+                && !lowerUrl.startsWith("javascript:");
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import java.util.Locale;
+
 /**
  * Enumeration of citation types for structured processing.
  * This replaces string-based type identification with type-safe enums.
@@ -59,7 +61,7 @@ public enum CitationType {
             return UNKNOWN;
         }
         
-        String lowerUrl = url.toLowerCase();
+        String lowerUrl = url.toLowerCase(Locale.ROOT);
         
         if (lowerUrl.endsWith(".pdf")) {
             return PDF_DOCUMENT;

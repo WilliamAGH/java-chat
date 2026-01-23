@@ -26,6 +26,24 @@ public record ProcessedMarkdown(
         Objects.requireNonNull(citations, "Citations list cannot be null");
         Objects.requireNonNull(enrichments, "Enrichments list cannot be null");
         Objects.requireNonNull(warnings, "Warnings list cannot be null");
+        citations = List.copyOf(citations);
+        enrichments = List.copyOf(enrichments);
+        warnings = List.copyOf(warnings);
+    }
+
+    @Override
+    public List<MarkdownCitation> citations() {
+        return List.copyOf(citations);
+    }
+
+    @Override
+    public List<MarkdownEnrichment> enrichments() {
+        return List.copyOf(enrichments);
+    }
+
+    @Override
+    public List<ProcessingWarning> warnings() {
+        return List.copyOf(warnings);
     }
     
     /**

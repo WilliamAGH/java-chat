@@ -5,11 +5,17 @@ import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Extracts inline enrichment markers and replaces them with HTML placeholders.
+ */
 class EnrichmentPlaceholderizer {
     private final Parser parser;
     private final HtmlRenderer renderer;
@@ -19,93 +25,129 @@ class EnrichmentPlaceholderizer {
         this.renderer = renderer;
     }
 
-    String extractAndPlaceholderizeEnrichments(String markdown, List<MarkdownEnrichment> enrichments, Map<String, String> placeholders) {
+    String extractAndPlaceholderizeEnrichments(
+        String markdown,
+        List<MarkdownEnrichment> enrichments,
+        Map<String, String> placeholders
+    ) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
 
-        StringBuilder result = new StringBuilder(markdown.length() + 64);
-        int i = 0;
+        StringBuilder outputBuilder = new StringBuilder(markdown.length() + 64);
+        int cursor = 0;
         boolean inFence = false;
         int absolutePosition = 0; // running position for enrichment creation
 
-        while (i < markdown.length()) {
+        while (cursor < markdown.length()) {
             // Toggle code fence state and copy fence blocks verbatim
-            if (i + 2 < markdown.length() && markdown.charAt(i) == '`' && markdown.charAt(i + 1) == '`' && markdown.charAt(i + 2) == '`') {
+            if (cursor + 2 < markdown.length()
+                && markdown.charAt(cursor) == '`'
+                && markdown.charAt(cursor + 1) == '`'
+                && markdown.charAt(cursor + 2) == '`') {
                 inFence = !inFence;
-                result.append("```");
-                i += 3;
+                outputBuilder.append("```");
+                cursor += 3;
+                absolutePosition += 3;
                 // Copy optional language token and the rest of the line
-                while (i < markdown.length()) {
-                    char c = markdown.charAt(i);
-                    result.append(c);
-                    i++;
-                    if (c == '\n') break;
+                while (cursor < markdown.length()) {
+                    char currentChar = markdown.charAt(cursor);
+                    outputBuilder.append(currentChar);
+                    cursor++;
+                    absolutePosition++;
+                    if (currentChar == '\n') break;
                 }
                 continue;
             }
 
             // Detect enrichment start only when not inside code fences
-            if (!inFence && i + 1 < markdown.length() && markdown.charAt(i) == '{' && markdown.charAt(i + 1) == '{') {
-                int tStart = i + 2;
+            if (!inFence
+                && cursor + 1 < markdown.length()
+                && markdown.charAt(cursor) == '{'
+                && markdown.charAt(cursor + 1) == '{') {
+                int typeStartIndex = cursor + 2;
                 // skip spaces
-                while (tStart < markdown.length() && Character.isWhitespace(markdown.charAt(tStart))) tStart++;
+                while (typeStartIndex < markdown.length()
+                    && Character.isWhitespace(markdown.charAt(typeStartIndex))) {
+                    typeStartIndex++;
+                }
                 // read type token
-                int tEnd = tStart;
-                while (tEnd < markdown.length() && Character.isLetter(markdown.charAt(tEnd))) tEnd++;
-                String type = markdown.substring(tStart, Math.min(tEnd, markdown.length())).toLowerCase();
+                int typeEndIndex = typeStartIndex;
+                while (typeEndIndex < markdown.length()
+                    && Character.isLetter(markdown.charAt(typeEndIndex))) {
+                    typeEndIndex++;
+                }
+                String type = markdown.substring(typeStartIndex, Math.min(typeEndIndex, markdown.length()))
+                    .toLowerCase(Locale.ROOT);
                 // skip spaces
-                int p = tEnd;
-                while (p < markdown.length() && Character.isWhitespace(markdown.charAt(p))) p++;
-                boolean hasColon = (p < markdown.length() && markdown.charAt(p) == ':');
+                int cursorAfterType = typeEndIndex;
+                while (cursorAfterType < markdown.length()
+                    && Character.isWhitespace(markdown.charAt(cursorAfterType))) {
+                    cursorAfterType++;
+                }
+                boolean hasColon = (cursorAfterType < markdown.length() && markdown.charAt(cursorAfterType) == ':');
                 if (hasColon && isKnownEnrichmentType(type)) {
-                    int contentStart = p + 1;
-                    if (contentStart < markdown.length() && markdown.charAt(contentStart) == ' ') contentStart++;
-                    EnrichmentProcessingResult res = processEnrichment(markdown, i, contentStart, type, absolutePosition, enrichments, placeholders, result);
-                    if (res != null) {
-                        i = res.newI();
-                        absolutePosition = res.newAbsolutePosition();
+                    int contentStartIndex = cursorAfterType + 1;
+                    if (contentStartIndex < markdown.length() && markdown.charAt(contentStartIndex) == ' ') {
+                        contentStartIndex++;
+                    }
+                    EnrichmentProcessingResult processingResult = processEnrichment(
+                        markdown,
+                        cursor,
+                        contentStartIndex,
+                        type,
+                        absolutePosition,
+                        enrichments,
+                        placeholders,
+                        outputBuilder
+                    );
+                    if (processingResult != null) {
+                        cursor = processingResult.nextIndex();
+                        absolutePosition = processingResult.nextAbsolutePosition();
                         continue;
                     }
 
                     // No closing found: treat as plain text
-                    result.append(markdown.charAt(i));
-                    i++;
+                    outputBuilder.append(markdown.charAt(cursor));
+                    cursor++;
                     absolutePosition++;
                     continue;
                 }
             }
 
             // Default copy behavior
-            result.append(markdown.charAt(i));
-            i++;
+            outputBuilder.append(markdown.charAt(cursor));
+            cursor++;
             absolutePosition++;
         }
 
-        return result.toString();
+        return outputBuilder.toString();
     }
 
     private boolean isKnownEnrichmentType(String type) {
-        return "hint".equals(type) || "reminder".equals(type) || "background".equals(type)
-                || "example".equals(type) || "warning".equals(type);
+        return "hint".equals(type)
+            || "reminder".equals(type)
+            || "background".equals(type)
+            || "example".equals(type)
+            || "warning".equals(type);
     }
 
     private String buildEnrichmentHtmlUnified(String type, String content) {
-        StringBuilder html = new StringBuilder();
-        html.append("<div class=\"inline-enrichment ").append(type).append("\" data-enrichment-type=\"").append(type).append("\">\n");
-        html.append("<div class=\"inline-enrichment-header\">");
-        html.append(getIconFor(type));
-        html.append("<span>").append(escapeHtml(getTitleFor(type))).append("</span>");
-        html.append("</div>\n");
-        html.append("<div class=\"enrichment-text\">\n");
+        StringBuilder htmlBuilder = new StringBuilder();
+        htmlBuilder.append("<div class=\"inline-enrichment ").append(type).append("\" data-enrichment-type=\"").append(type).append("\">\n");
+        htmlBuilder.append("<div class=\"inline-enrichment-header\">");
+        htmlBuilder.append(getIconFor(type));
+        htmlBuilder.append("<span>").append(escapeHtml(getTitleFor(type))).append("</span>");
+        htmlBuilder.append("</div>\n");
+        htmlBuilder.append("<div class=\"enrichment-text\">\n");
 
         // Parse the enrichment content through the same AST pipeline for consistent lists/code
-        String processed = processFragmentForEnrichment(content);
-        html.append(processed);
+        String processedContent = processFragmentForEnrichment(content);
+        htmlBuilder.append(processedContent);
 
-        html.append("</div>\n");
-        html.append("</div>");
-        return html.toString();
+        htmlBuilder.append("</div>\n");
+        htmlBuilder.append("</div>");
+        return htmlBuilder.toString();
     }
 
     private static String escapeHtml(String text) {
@@ -124,14 +166,69 @@ class EnrichmentPlaceholderizer {
             String normalized = MarkdownNormalizer.preNormalizeForListsAndFences(content);
             Node doc = parser.parse(normalized);
             MarkdownAstUtils.stripInlineCitationMarkers(doc);
-            String inner = renderer.render(doc);
-            // strip surrounding <p> if it’s the only wrapper
-            Document d = Jsoup.parseBodyFragment(inner);
-            d.outputSettings().prettyPrint(false);
-            return d.body().html();
-        } catch (Exception e) {
+            String innerHtml = renderer.render(doc);
+            // strip surrounding <p> if it's the only wrapper
+            Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
+            parsedDocument.outputSettings().prettyPrint(false);
+            // Enrichment content often uses newlines as intentional line breaks; render those as <br>.
+            convertNewlinesToBreaks(parsedDocument.body(), false);
+            return parsedDocument.body().html();
+        } catch (Exception processingFailure) {
             return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
         }
+    }
+
+    private static void convertNewlinesToBreaks(org.jsoup.nodes.Node rootNode, boolean inCodeOrPre) {
+        if (rootNode == null) {
+            return;
+        }
+
+        boolean nextInCodeOrPre = inCodeOrPre;
+        if (rootNode instanceof Element elementNode) {
+            String tagName = elementNode.tagName();
+            if ("pre".equals(tagName) || "code".equals(tagName)) {
+                nextInCodeOrPre = true;
+            }
+        }
+
+        if (rootNode instanceof TextNode textNode && !nextInCodeOrPre) {
+            String originalText = textNode.getWholeText();
+            if (originalText.indexOf('\n') >= 0) {
+                java.util.List<String> segments = splitOnNewlines(originalText);
+                for (int segmentIndex = 0; segmentIndex < segments.size(); segmentIndex++) {
+                    String segmentText = segments.get(segmentIndex);
+                    if (!segmentText.isEmpty()) {
+                        textNode.before(new TextNode(segmentText));
+                    }
+                    if (segmentIndex + 1 < segments.size()) {
+                        textNode.before(new Element("br"));
+                    }
+                }
+                textNode.remove();
+                return;
+            }
+        }
+
+        for (int childIndex = 0; childIndex < rootNode.childNodeSize(); childIndex++) {
+            org.jsoup.nodes.Node childNode = rootNode.childNode(childIndex);
+            convertNewlinesToBreaks(childNode, nextInCodeOrPre);
+        }
+    }
+
+    private static java.util.List<String> splitOnNewlines(String text) {
+        java.util.List<String> segments = new java.util.ArrayList<>();
+        StringBuilder segmentBuilder = new StringBuilder();
+        for (int textIndex = 0; textIndex < text.length(); textIndex++) {
+            char character = text.charAt(textIndex);
+            if (character == '\n') {
+                segments.add(segmentBuilder.toString());
+                segmentBuilder.setLength(0);
+                continue;
+            }
+            segmentBuilder.append(character);
+        }
+        segments.add(segmentBuilder.toString());
+        return segments;
     }
 
     private String getTitleFor(String type) {
@@ -160,27 +257,33 @@ class EnrichmentPlaceholderizer {
      * Replaces enrichment placeholders with their HTML content.
      */
     String renderEnrichmentBlocksFromPlaceholders(String html, Map<String, String> placeholders) {
-        String result = html;
+        String renderedHtml = html;
         for (Map.Entry<String, String> entry : placeholders.entrySet()) {
-            result = result.replace("<p>" + entry.getKey() + "</p>", entry.getValue());
-            result = result.replace(entry.getKey(), entry.getValue());
+            renderedHtml = renderedHtml.replace("<p>" + entry.getKey() + "</p>", entry.getValue());
+            renderedHtml = renderedHtml.replace(entry.getKey(), entry.getValue());
         }
-        return result;
+        return renderedHtml;
     }
 
-    private int findEnrichmentEndIndex(String markdown, int start) {
-        int j = start;
+    private int findEnrichmentEndIndex(String markdown, int startIndex) {
+        int scanIndex = startIndex;
         boolean innerFence = false;
-        while (j < markdown.length()) {
-            if (j + 2 < markdown.length() && markdown.charAt(j) == '`' && markdown.charAt(j + 1) == '`' && markdown.charAt(j + 2) == '`') {
+        while (scanIndex < markdown.length()) {
+            if (scanIndex + 2 < markdown.length()
+                && markdown.charAt(scanIndex) == '`'
+                && markdown.charAt(scanIndex + 1) == '`'
+                && markdown.charAt(scanIndex + 2) == '`') {
                 innerFence = !innerFence;
-                j += 3;
+                scanIndex += 3;
                 continue;
             }
-            if (!innerFence && j + 1 < markdown.length() && markdown.charAt(j) == '}' && markdown.charAt(j + 1) == '}') {
-                return j;
+            if (!innerFence
+                && scanIndex + 1 < markdown.length()
+                && markdown.charAt(scanIndex) == '}'
+                && markdown.charAt(scanIndex + 1) == '}') {
+                return scanIndex;
             }
-            j++;
+            scanIndex++;
         }
         return -1;
     }
@@ -196,28 +299,40 @@ class EnrichmentPlaceholderizer {
         };
     }
 
-    private EnrichmentProcessingResult processEnrichment(String markdown, int i, int contentStart, String type, int absolutePosition, List<MarkdownEnrichment> enrichments, Map<String, String> placeholders, StringBuilder result) {
-         int j = findEnrichmentEndIndex(markdown, contentStart);
-         if (j == -1) return null;
-         
-         String content = markdown.substring(contentStart, j).trim();
-         if (content.isEmpty()) {
-             int delta = (j + 2) - i;
-             return new EnrichmentProcessingResult(j + 2, absolutePosition + delta);
-         }
-         
-         MarkdownEnrichment enrichment = createEnrichment(type, content, absolutePosition);
-         if (enrichment != null) {
-              enrichments.add(enrichment);
-              String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
-              placeholders.put(placeholderId, buildEnrichmentHtmlUnified(type, content));
-              result.append(placeholderId);
-         } else {
-              result.append(markdown, i, j + 2);
-         }
-         
-         return new EnrichmentProcessingResult(j + 2, absolutePosition + (j + 2 - i));
+    private EnrichmentProcessingResult processEnrichment(
+        String markdown,
+        int openingIndex,
+        int contentStartIndex,
+        String type,
+        int absolutePosition,
+        List<MarkdownEnrichment> enrichments,
+        Map<String, String> placeholders,
+        StringBuilder outputBuilder
+    ) {
+        int closingIndex = findEnrichmentEndIndex(markdown, contentStartIndex);
+        if (closingIndex == -1) {
+            return null;
+        }
+
+        String content = markdown.substring(contentStartIndex, closingIndex).trim();
+        if (content.isEmpty()) {
+            int consumedLength = (closingIndex + 2) - openingIndex;
+            return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
+        }
+
+        MarkdownEnrichment enrichment = createEnrichment(type, content, absolutePosition);
+        if (enrichment != null) {
+            enrichments.add(enrichment);
+            String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
+            placeholders.put(placeholderId, buildEnrichmentHtmlUnified(type, content));
+            outputBuilder.append(placeholderId);
+        } else {
+            outputBuilder.append(markdown, openingIndex, closingIndex + 2);
+        }
+
+        int consumedLength = (closingIndex + 2 - openingIndex);
+        return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
     }
 
-    private record EnrichmentProcessingResult(int newI, int newAbsolutePosition) {}
+    private record EnrichmentProcessingResult(int nextIndex, int nextAbsolutePosition) {}
 }
