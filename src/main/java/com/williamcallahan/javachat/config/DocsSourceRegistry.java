@@ -1,5 +1,8 @@
 package com.williamcallahan.javachat.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,6 +20,8 @@ import java.util.Properties;
  */
 public final class DocsSourceRegistry {
 
+    private static final Logger log = LoggerFactory.getLogger(DocsSourceRegistry.class);
+
     private DocsSourceRegistry() {}
 
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
@@ -27,9 +32,13 @@ public final class DocsSourceRegistry {
         try (InputStream in = DocsSourceRegistry.class.getResourceAsStream("/docs-sources.properties")) {
             if (in != null) {
                 PROPS.load(in);
+                log.debug("Loaded docs-sources.properties with {} entries", PROPS.size());
+            } else {
+                log.info("docs-sources.properties not found on classpath; using default URL mappings");
             }
-        } catch (Exception ignored) {
-            // Fallbacks below will be used
+        } catch (Exception configLoadError) {
+            log.warn("Failed to load docs-sources.properties: {} - using default URL mappings",
+                configLoadError.getMessage());
         }
     }
 
