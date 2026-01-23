@@ -8,8 +8,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * MVC configuration for CORS and SPA routing.
  *
- * <p>Configures CORS for API endpoints to allow Vite dev server (port 5173)
- * during development, and forwards SPA routes to index.html.
+ * <p>Configures CORS for API endpoints to allow frontend dev servers
+ * during development (Vite on 5173, backend on 8085), and forwards
+ * SPA routes to index.html for client-side routing support.
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -35,6 +36,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addViewControllers(ViewControllerRegistry registry) {
         // SPA fallback: forward non-file routes to index.html
         // This allows client-side routing to work with direct URL access
+        // Pattern [^\\.]*  matches path segments without dots (excludes static assets)
         registry.addViewController("/").setViewName("forward:/index.html");
+        registry.addViewController("/{path:[^\\.]*}").setViewName("forward:/index.html");
+        registry.addViewController("/**/{path:[^\\.]*}").setViewName("forward:/index.html");
     }
 }
