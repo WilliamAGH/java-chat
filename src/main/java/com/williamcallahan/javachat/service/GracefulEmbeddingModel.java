@@ -26,11 +26,11 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
     private final EmbeddingModel hashingModel;
     private final boolean enableHashFallback;
 
-    // Circuit breaker state
-    private boolean primaryAvailable = true;
-    private boolean secondaryAvailable = true;
-    private long lastPrimaryCheck = 0;
-    private long lastSecondaryCheck = 0;
+    // Circuit breaker state - volatile for thread visibility across concurrent requests
+    private volatile boolean primaryAvailable = true;
+    private volatile boolean secondaryAvailable = true;
+    private volatile long lastPrimaryCheck = 0;
+    private volatile long lastSecondaryCheck = 0;
     private static final long CIRCUIT_BREAKER_TIMEOUT = 60000; // 1 minute
 
     public GracefulEmbeddingModel(
