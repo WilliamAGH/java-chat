@@ -201,7 +201,8 @@ public class RerankerService {
         StringBuilder sb = new StringBuilder();
         for (Document doc : docs) {
             Object url = doc.getMetadata().get("url");
-            sb.append(url != null ? url.toString() : doc.getText().hashCode());
+            String text = doc.getText();
+            sb.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
             sb.append("|");
         }
         return Integer.toHexString(sb.toString().hashCode());
