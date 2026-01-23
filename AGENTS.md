@@ -80,9 +80,14 @@ alwaysApply: true
 - ST2 Event types: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
 - ST3 Error handling: `onErrorContinue` for partial failures; never drop entire response on single failure.
 - ST4 Heartbeats: maintain connection with periodic events during long operations.
-- JD1 Javadocs required on public classes and methods; keep them concise and standards-compliant.
-- JD2 Explain why as much as what; avoid academic tags except required `@deprecated`/`@since`.
-- JD3 Deprecations require both `@Deprecated` and Javadoc `@deprecated` tag with reason and successor pointer.
+- JD1 Javadocs mandatory on public/protected classes, methods, and enums; one sentence for simple elements, 2-3 for complex ones.
+- JD2 Focus on "why" (purpose, rationale, constraints) over "what" (which code already shows); never restate method name as description.
+- JD3 First sentence is the summary: complete sentence, present tense, third person ("Calculates...", "Returns...", "Stores...").
+- JD4 Use `@param` only when name isn't self-documenting or constraints exist; use `@return` only for non-obvious return values.
+- JD5 Include `@throws` for checked exceptions and runtime exceptions callers should handle; state the condition triggering each.
+- JD6 Reference evidence: when logic derives from specs/docs, cite source inline (e.g., "Per RFC 7231 section 6.5.1" or "See Spring Framework docs: [topic]").
+- JD7 Deprecations require both `@Deprecated` annotation and `@deprecated` Javadoc tag with migration path: `@deprecated Use {@link NewClass#newMethod} instead`.
+- JD8 No filler phrases: ban "This method...", "This class...", "Gets the...", "Sets the...", "Returns the..."; start with verb or noun directly.
 - ER1 Use exceptions for exceptional cases; avoid defensive checks on trusted inputs.
 - ER2 Never catch and ignore; either handle meaningfully or propagate.
 - ER3 Prefer specific exception types over generic `Exception` or `RuntimeException`.
