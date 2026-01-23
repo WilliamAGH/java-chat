@@ -25,7 +25,6 @@ import org.springframework.http.codec.ServerSentEvent;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
@@ -77,34 +76,29 @@ public class ChatController extends BaseController {
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> stream(@RequestBody Map<String, Object> body, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> stream(@RequestBody ChatStreamRequest request, HttpServletResponse response) {
         // Critical proxy headers for streaming
         response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
         response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
         String requestId = "REQ-" + System.currentTimeMillis() + "-" + Thread.currentThread().threadId();
-        
-        // Generate session ID if not provided using same logic as frontend
-        String sessionId = body.get("sessionId") != null 
-            ? String.valueOf(body.get("sessionId"))
-            : "chat-" + System.currentTimeMillis() + "-" + Math.random();
-        // Support both "message" (from curl/API) and "latest" (from web UI) field names
-        String latest = String.valueOf(body.getOrDefault("message", body.getOrDefault("latest", "")));
-        
+
+        String sessionId = request.resolvedSessionId();
+        String userQuery = request.userQuery();
+
         PIPELINE_LOG.info("[{}] ============================================", requestId);
-        PIPELINE_LOG.info("[{}] NEW CHAT REQUEST - Session: {}", requestId, sessionId);
-        PIPELINE_LOG.info("[{}] User query: {}", requestId, latest);
+        PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestId);
         PIPELINE_LOG.info("[{}] ============================================", requestId);
         
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
-        PIPELINE_LOG.info("[{}] Chat history: {} previous messages", requestId, history.size());
+        PIPELINE_LOG.info("[{}] Chat history loaded", requestId);
         
-        chatMemory.addUser(sessionId, latest);
+        chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
-        
+
         // Build the complete prompt using existing ChatService logic
         // Pass model hint to optimize RAG for GPT-5's 8K token input limit
-        String fullPrompt = chatService.buildPromptWithContext(history, latest, "gpt-5");
+        String fullPrompt = chatService.buildPromptWithContext(history, userQuery, "gpt-5");
         
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
@@ -121,16 +115,11 @@ public class ChatController extends BaseController {
                     .onBackpressureLatest()  // Handle backpressure to prevent memory buildup
                     .share();  // Hot-share to prevent double subscription causing duplicate API calls
 
-            // Extract completion signal from the shared stream
-            // Use doOnError for logging - errors propagate naturally without catch-and-rethrow
-            Mono<String> completion = dataStream.ignoreElements()
-                .doOnError(e -> PIPELINE_LOG.error("[{}] Stream error during heartbeat coordination: {}", requestId, e.getMessage()));
-
-            // Heartbeats should stop when the data stream completes to allow the SSE connection
-            // to close cleanly. Otherwise, an infinite heartbeat Flux would keep the stream open.
+            // Heartbeats terminate when data stream completes (success or error).
+            // Errors propagate through dataEvents to onErrorResume below - no duplicate logging here.
             Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .takeUntilOther(completion)
-                    .map(i -> ServerSentEvent.<String>builder().comment("keepalive").build());
+                    .takeUntilOther(dataStream.ignoreElements())
+                    .map(tick -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
             Flux<ServerSentEvent<String>> dataEvents = dataStream
                     .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build());
@@ -141,16 +130,14 @@ public class ChatController extends BaseController {
                         ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
                         String processed = processedResult.html();
                         chatMemory.addAssistant(sessionId, processed);
-                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE - {} chunks, {} total chars, {} citations, {} enrichments",
-                            requestId, chunkCount.get(), processed.length(),
-                            processedResult.citations().size(), processedResult.enrichments().size());
+                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestId);
                     })
                     .onErrorResume(error -> {
                         // Log and send error event to client - errors must be communicated, not silently dropped
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestId, error.getMessage(), error);
+                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestId);
                         return Flux.just(ServerSentEvent.<String>builder()
                             .event("error")
-                            .data("Streaming error: " + error.getMessage())
+                            .data("Streaming error: " + error.getClass().getSimpleName())
                             .build());
                     });
 
@@ -169,75 +156,67 @@ public class ChatController extends BaseController {
      * Dev-only usage in UI; kept simple and safe.
      */
     @GetMapping("/diagnostics/retrieval")
-    public Map<String, Object> retrievalDiagnostics(@RequestParam("q") String q) {
-        try {
-            // Mirror GPT-5 constraints used in buildPromptWithContext
-            List<Document> docs = retrievalService.retrieveWithLimit(q, 3, 600);
-            // Normalize URLs the same way as citations so we never emit file:// links
-            List<Citation> citations = retrievalService.toCitations(docs);
-            List<Map<String, Object>> out = new ArrayList<>();
-            for (Citation c : citations) {
-                Map<String, Object> m = new java.util.HashMap<>();
-                m.put("url", c.getUrl());
-                m.put("title", c.getTitle());
-                m.put("snippet", c.getSnippet());
-                out.add(m);
-            }
-            return Map.of("docs", out);
-        } catch (Exception e) {
-            log.warn("retrieval diagnostics error: {}", e.toString());
-            return Map.of("docs", List.of(), "error", "unavailable");
-        }
+    public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
+        // Mirror GPT-5 constraints used in buildPromptWithContext
+        List<Document> documents = retrievalService.retrieveWithLimit(query, 3, 600);
+        // Normalize URLs the same way as citations so we never emit file:// links
+        List<Citation> citations = retrievalService.toCitations(documents);
+        return RetrievalDiagnosticsResponse.success(citations);
     }
 
     /**
      * Retrieves a list of relevant citations for a given query.
      *
-     * @param q The search query string.
+     * @param query The search query string.
      * @return A {@link List} of {@link Citation} objects.
      */
     @GetMapping("/citations")
-    public List<Citation> citations(@RequestParam("q") String q) {
-        return chatService.citationsFor(q);
+    public List<Citation> citations(@RequestParam("q") String query) {
+        return chatService.citationsFor(query);
     }
 
     /**
      * Exports the last assistant message from a given chat session.
      *
-     * @param sessionId The ID of the chat session. Defaults to "default".
-     * @return A plain text string of the last assistant message.
+     * @param sessionId The ID of the chat session (required).
+     * @return The last assistant message or appropriate HTTP error.
      */
     @GetMapping(value = "/export/last", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String exportLast(@RequestParam(name = "sessionId", required = false) String sessionId) {
+    public ResponseEntity<String> exportLast(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return "No session ID provided";
+            return ResponseEntity.badRequest().body("Session ID is required");
         }
         var turns = chatMemory.getTurns(sessionId);
-        for (int i = turns.size() - 1; i >= 0; i--) {
-            var t = turns.get(i);
-            if ("assistant".equalsIgnoreCase(t.getRole())) return t.getText();
+        for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
+            var turn = turns.get(turnIndex);
+            if ("assistant".equalsIgnoreCase(turn.getRole())) {
+                return ResponseEntity.ok(turn.getText());
+            }
         }
-        return "";
+        return ResponseEntity.status(404).body("No assistant message found in session: " + sessionId);
     }
 
     /**
      * Exports the entire history of a chat session as a formatted string.
      *
-     * @param sessionId The ID of the chat session. Defaults to "default".
-     * @return A plain text string representing the full conversation.
+     * @param sessionId The ID of the chat session (required).
+     * @return The full conversation or appropriate HTTP error.
      */
     @GetMapping(value = "/export/session", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String exportSession(@RequestParam(name = "sessionId", required = false) String sessionId) {
+    public ResponseEntity<String> exportSession(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return "No session ID provided";
+            return ResponseEntity.badRequest().body("Session ID is required");
         }
-        var history = chatMemory.getTurns(sessionId);
-        StringBuilder sb = new StringBuilder();
-        for (var t : history) {
-            String role = t.getRole().equalsIgnoreCase("user") ? "User" : "Assistant";
-            sb.append("### ").append(role).append("\n\n").append(t.getText()).append("\n\n");
+        var turns = chatMemory.getTurns(sessionId);
+        if (turns.isEmpty()) {
+            return ResponseEntity.status(404).body("No history found for session: " + sessionId);
         }
-        return sb.toString();
+        StringBuilder formatted = new StringBuilder();
+        for (var turn : turns) {
+            String role = "user".equalsIgnoreCase(turn.getRole()) ? "User" : "Assistant";
+            formatted.append("### ").append(role).append("\n\n").append(turn.getText()).append("\n\n");
+        }
+        return ResponseEntity.ok(formatted.toString());
     }
 
     
@@ -253,61 +232,51 @@ public class ChatController extends BaseController {
             return ResponseEntity.badRequest().body("No session ID provided");
         }
         chatMemory.clear(sessionId);
-        PIPELINE_LOG.info("Cleared chat session: {}", sessionId);
+        PIPELINE_LOG.info("Cleared chat session");
         return ResponseEntity.ok("Session cleared");
     }
     
     @GetMapping("/health/embeddings")
-    public ResponseEntity<Map<String, Object>> checkEmbeddingsHealth() {
-        Map<String, Object> response = new java.util.HashMap<>();
-        response.put("localEmbeddingEnabled", localEmbeddingEnabled);
-        response.put("serverUrl", localEmbeddingServerUrl);
-
-        if (localEmbeddingEnabled) {
-            try {
-                // Simple health check - try to get models list
-                String healthUrl = localEmbeddingServerUrl + "/v1/models";
-                restTemplate.getForEntity(healthUrl, String.class);
-                response.put("status", "healthy");
-                response.put("serverReachable", true);
-            } catch (Exception e) {
-                response.put("status", "unhealthy");
-                response.put("serverReachable", false);
-                response.put("error", e.getMessage());
-            }
-        } else {
-            response.put("status", "disabled");
-            response.put("serverReachable", null);
+    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
+        if (!localEmbeddingEnabled) {
+            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
         }
 
-        return ResponseEntity.ok(response);
+        try {
+            // Simple health check - try to get models list
+            String healthUrl = localEmbeddingServerUrl + "/v1/models";
+            restTemplate.getForEntity(healthUrl, String.class);
+            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(localEmbeddingServerUrl));
+        } catch (Exception healthCheckError) {
+            return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
+                localEmbeddingServerUrl, healthCheckError.getClass().getSimpleName()));
+        }
     }
     
     /**
      * Processes text using the new AST-based markdown processing.
      * This endpoint provides structured output with better list formatting and Unicode bullet support.
-     * 
-     * @param body JSON object containing the text to process
+     *
+     * @param request The request containing text to process
      * @return ProcessedMarkdown with structured citations and enrichments
+     * @deprecated Scheduled for removal; use unified processing instead.
      */
     @Deprecated(since = "1.0", forRemoval = true)
     @PostMapping("/process-structured")
-    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody Map<String, String> body) {
+    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody ProcessStructuredRequest request) {
+        String text = request.text();
+        if (text == null || text.trim().isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+
         try {
-            String text = body.get("text");
-            if (text == null || text.trim().isEmpty()) {
-                return ResponseEntity.badRequest().build();
-            }
-            
-            ProcessedMarkdown result = unifiedMarkdownService.process(text);
-            PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments", 
-                             result.citations().size(), result.enrichments().size());
-            
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            log.error("Error processing structured markdown", e);
+            ProcessedMarkdown processed = unifiedMarkdownService.process(text);
+            PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments",
+                             processed.citations().size(), processed.enrichments().size());
+            return ResponseEntity.ok(processed);
+        } catch (Exception processingError) {
+            log.error("Error processing structured markdown", processingError);
             return ResponseEntity.internalServerError().build();
         }
     }
 }
-
