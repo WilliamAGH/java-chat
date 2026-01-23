@@ -21,9 +21,10 @@ import reactor.core.scheduler.Schedulers;
 import java.lang.reflect.Method;
  
 
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * OpenAI Java SDK-based streaming service that provides clean, reliable streaming
@@ -41,12 +42,12 @@ public class OpenAIStreamingService {
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int TRUNCATION_SCAN_WINDOW = 2000;
+    private static final String BACKOFF_REASON_STREAM_FAILURE = "stream failure";
+    private static final String BACKOFF_REASON_COMPLETE_FAILURE = "complete failure";
     
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
-    private boolean isAvailable = false;
-    private String primaryDescription = null;
-    private String secondaryDescription = null;
+    private volatile boolean isAvailable = false;
     private final RateLimitManager rateLimitManager;
     // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
     private volatile long primaryBackoffUntilEpochMs = 0L;
@@ -83,7 +84,6 @@ public class OpenAIStreamingService {
                         .timeout(java.time.Duration.ofSeconds(30))
                         .build();
                 log.info("OpenAI client initialized successfully with GitHub Models");
-                this.primaryDescription = "GitHub Models (" + githubModelsBaseUrl + ")";
             }
             if (openaiApiKey != null && !openaiApiKey.isBlank()) {
                 log.info("Initializing OpenAI client with OpenAI API (fallback)");
@@ -93,15 +93,15 @@ public class OpenAIStreamingService {
                         .timeout(java.time.Duration.ofSeconds(30))
                         .build();
                 log.info("OpenAI client initialized successfully with OpenAI API");
-                this.secondaryDescription = "OpenAI (https://api.openai.com/v1)";
             }
             this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
             if (!this.isAvailable) {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
                 this.isAvailable = false;
             }
-        } catch (Exception exception) {
-            log.error("Failed to initialize OpenAI client", exception);
+        } catch (RuntimeException exception) {
+            log.error("Failed to initialize OpenAI client (exception type: {})",
+                exception.getClass().getSimpleName());
             this.isAvailable = false;
         }
     }
@@ -114,7 +114,7 @@ public class OpenAIStreamingService {
      * @return A Flux of content strings as they arrive from the model
      */
     public Flux<String> streamResponse(String prompt, double temperature) {
-        log.debug("Starting OpenAI stream for prompt length: {}", prompt.length());
+        log.debug("Starting OpenAI stream");
         
         return Flux.<String>create(sink -> {
             try {
@@ -133,18 +133,15 @@ public class OpenAIStreamingService {
                 RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
                         ? RateLimitManager.ApiProvider.GITHUB_MODELS
                         : RateLimitManager.ApiProvider.OPENAI;
-                log.info("[LLM] Streaming via {}", describeProvider(streamingClient));
+                log.info("[LLM] Streaming started");
                 try (StreamResponse<ChatCompletionChunk> responseStream =
                         streamingClient.chat().completions().createStreaming(params)) {
                     
                     responseStream.stream()
                         .peek(accumulator::accumulate)  // Accumulate for final result
                         .forEach(chunk -> {
-                            log.debug("Raw chunk: {}", chunk);
                             chunk.choices().forEach(choice -> {
-                                log.debug("Choice delta: {}", choice.delta());
                                 choice.delta().content().ifPresent(content -> {
-                                    log.debug("Received content chunk: '{}'", content);
                                     sink.next(content);
                                 });
                             });
@@ -158,10 +155,11 @@ public class OpenAIStreamingService {
                     }
                     sink.complete();
                     
-                } catch (Exception exception) {
-                    log.error("[LLM] Streaming failed ({}): {}", describeProvider(streamingClient), summarize(exception));
+                } catch (RuntimeException exception) {
+                    log.error("[LLM] Streaming failed (exception type: {})",
+                        exception.getClass().getSimpleName());
                     if (isPrimaryClient(streamingClient) && isRetryablePrimaryFailure(exception)) {
-                        markPrimaryBackoff("stream failure: " + summarize(exception));
+                        markPrimaryBackoff(BACKOFF_REASON_STREAM_FAILURE);
                         if (rateLimitManager != null) {
                             rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
                         }
@@ -169,8 +167,9 @@ public class OpenAIStreamingService {
                     sink.error(exception);
                 }
                 
-            } catch (Exception exception) {
-                log.error("Error setting up OpenAI stream", exception);
+            } catch (RuntimeException exception) {
+                log.error("Error setting up OpenAI stream (exception type: {})",
+                    exception.getClass().getSimpleName());
                 sink.error(exception);
             }
         })
@@ -188,7 +187,7 @@ public class OpenAIStreamingService {
             OpenAIClient blockingClient = selectClientForBlocking();
             ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
             try {
-                log.info("[LLM] Complete via {}", describeProvider(blockingClient));
+                log.info("[LLM] Complete started");
                 ChatCompletion completion = blockingClient.chat().completions().create(params);
                 if (rateLimitManager != null) {
                     rateLimitManager.recordSuccess(isPrimaryClient(blockingClient)
@@ -199,9 +198,9 @@ public class OpenAIStreamingService {
                         .findFirst()
                         .flatMap(choice -> choice.message().content())
                         .orElse("");
-            } catch (Exception primaryException) {
+            } catch (RuntimeException primaryException) {
                 if (isPrimaryClient(blockingClient) && isRetryablePrimaryFailure(primaryException)) {
-                    markPrimaryBackoff("complete failure: " + summarize(primaryException));
+                    markPrimaryBackoff(BACKOFF_REASON_COMPLETE_FAILURE);
                     if (rateLimitManager != null) {
                         rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryException.getMessage());
                     }
@@ -334,19 +333,6 @@ public class OpenAIStreamingService {
         return Objects.equals(client, clientPrimary);
     }
 
-    private String describeProvider(OpenAIClient client) {
-        if (client == null) return "none";
-        if (isPrimaryClient(client) && primaryDescription != null) return primaryDescription;
-        if (Objects.equals(client, clientSecondary) && secondaryDescription != null) return secondaryDescription;
-        return "unknown";
-    }
-
-    private String summarize(Exception exception) {
-        String summary = exception.toString();
-        if (summary.length() > 180) return summary.substring(0, 180) + "…";
-        return summary;
-    }
-    
     private boolean isRateLimit(Throwable throwable) {
         if (throwable instanceof RateLimitException) return true;
         String message = throwable.getMessage();
@@ -358,7 +344,7 @@ public class OpenAIStreamingService {
         return isRateLimit(throwable)
                 || throwable instanceof java.util.concurrent.TimeoutException
                 || throwable instanceof InterruptedException
-                || (throwable.getMessage() != null && throwable.getMessage().toLowerCase().contains("sleep interrupted"))
+                || (throwable.getMessage() != null && throwable.getMessage().toLowerCase(Locale.ROOT).contains("sleep interrupted"))
                 || throwable.toString().contains("401")
                 || throwable.toString().contains("403");
     }
@@ -371,7 +357,7 @@ public class OpenAIStreamingService {
         long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
         this.primaryBackoffUntilEpochMs = until;
         long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
-        log.warn("Temporarily disabling primary provider {} for {}s due to {}",
-                describeProvider(clientPrimary), seconds, reason);
+        log.warn("Temporarily disabling primary provider for {}s due to {}",
+                seconds, reason);
     }
 }

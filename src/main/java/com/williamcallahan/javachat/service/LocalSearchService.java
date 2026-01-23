@@ -10,7 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
-
+/**
+ * Searches locally parsed documents using simple keyword scoring as a fallback when vector retrieval is unavailable.
+ */
 @Service
 public class LocalSearchService {
     private static final Logger log = LoggerFactory.getLogger(LocalSearchService.class);
@@ -23,8 +25,11 @@ public class LocalSearchService {
 
     private final Path parsedDir;
 
+    /**
+     * Creates a local search service rooted at the parsed document directory.
+     */
     public LocalSearchService(@Value("${app.docs.parsed-dir}") String parsedDir) {
-        this.parsedDir = Paths.get(parsedDir);
+        this.parsedDir = Path.of(parsedDir);
     }
 
     /**
@@ -37,7 +42,7 @@ public class LocalSearchService {
     public SearchOutcome search(String query, int topK) {
         Objects.requireNonNull(query, "query must not be null");
         if (!Files.isDirectory(parsedDir)) {
-            log.warn("Local search directory does not exist: {}", parsedDir);
+            log.warn("Local search directory does not exist");
             return SearchOutcome.directoryNotFound(parsedDir.toString());
         }
 
@@ -49,7 +54,7 @@ public class LocalSearchService {
                 .limit(MAX_FILES_TO_SCAN)
                 .collect(Collectors.toList());
 
-            log.debug("Local search scanning {} files for query: {}", txts.size(), query);
+            log.debug("Local search scanning {} files", txts.size());
 
             for (Path p : txts) {
                 try {
@@ -62,7 +67,8 @@ public class LocalSearchService {
                     }
                     if (score > 0) scores.put(p, score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, norm.length()));
                 } catch (IOException fileReadError) {
-                    log.debug("Skipping unreadable file {}: {}", p, fileReadError.getMessage());
+                    log.debug("Skipping unreadable file (exception type: {})",
+                        fileReadError.getClass().getSimpleName());
                 }
             }
 
@@ -73,11 +79,12 @@ public class LocalSearchService {
                 .flatMap(Optional::stream)
                 .collect(Collectors.toList());
 
-            log.info("Local search found {} results for query: {}", results.size(), query);
+            log.info("Local search found {} results", results.size());
             return SearchOutcome.success(results);
 
         } catch (IOException walkError) {
-            log.error("Local search failed to walk directory {}: {}", parsedDir, walkError.getMessage());
+            log.error("Local search failed to walk directory (exception type: {})",
+                walkError.getClass().getSimpleName());
             return SearchOutcome.ioError(walkError.getMessage());
         }
     }
@@ -95,7 +102,8 @@ public class LocalSearchService {
             String url = fromSafeName(safeName);
             return Optional.of(new Result(url, text, score));
         } catch (IOException readError) {
-            log.warn("Failed to read result file {}: {}", p, readError.getMessage());
+            log.warn("Failed to read result file (exception type: {})",
+                readError.getClass().getSimpleName());
             return Optional.empty();
         }
     }
@@ -121,15 +129,30 @@ public class LocalSearchService {
     /**
      * Represents a single search result with URL, text content, and relevance score.
      */
-    public static class Result {
-        public final String url;
-        public final String text;
-        public final double score;
+    public static final class Result {
+        private final String url;
+        private final String text;
+        private final double score;
 
+        /**
+         * Creates a local search result with its source URL, raw text, and relevance score.
+         */
         public Result(String url, String text, double score) {
             this.url = url;
             this.text = text;
             this.score = score;
+        }
+
+        public String url() {
+            return url;
+        }
+
+        public String text() {
+            return text;
+        }
+
+        public double score() {
+            return score;
         }
     }
 
@@ -139,56 +162,75 @@ public class LocalSearchService {
     public static class SearchOutcome {
         private final List<Result> results;
         private final Status status;
-        private final String errorMessage;
+        private final Optional<String> errorMessage;
 
+        /**
+         * Signals the outcome state of a local search, separate from result payload.
+         */
         public enum Status {
             SUCCESS,
             DIRECTORY_NOT_FOUND,
             IO_ERROR
         }
 
-        private SearchOutcome(List<Result> results, Status status, String errorMessage) {
-            this.results = results;
-            this.status = status;
-            this.errorMessage = errorMessage;
+        private SearchOutcome(List<Result> results, Status status, Optional<String> errorMessage) {
+            this.results = List.copyOf(Objects.requireNonNull(results, "results must not be null"));
+            this.status = Objects.requireNonNull(status, "status must not be null");
+            this.errorMessage = Objects.requireNonNull(errorMessage, "errorMessage must not be null");
         }
 
+        /**
+         * Builds a successful search outcome with the provided results.
+         */
         public static SearchOutcome success(List<Result> results) {
-            return new SearchOutcome(results, Status.SUCCESS, null);
+            return new SearchOutcome(results, Status.SUCCESS, Optional.empty());
         }
 
+        /**
+         * Builds a failure outcome for a missing parsed document directory.
+         */
         public static SearchOutcome directoryNotFound(String path) {
             return new SearchOutcome(List.of(), Status.DIRECTORY_NOT_FOUND,
-                "Search directory not found: " + path);
+                Optional.of("Search directory not found: " + path));
         }
 
+        /**
+         * Builds a failure outcome for an I/O error during traversal or reads.
+         */
         public static SearchOutcome ioError(String message) {
-            return new SearchOutcome(List.of(), Status.IO_ERROR, message);
+            return new SearchOutcome(List.of(), Status.IO_ERROR, Optional.of(message));
         }
 
         public List<Result> results() {
-            return results;
+            return List.copyOf(results);
         }
 
         public Status status() {
             return status;
         }
 
-        public String errorMessage() {
+        /**
+         * Returns the error message if present, empty Optional for success cases.
+         *
+         * @return error message wrapped in Optional, never null
+         */
+        public Optional<String> errorMessage() {
             return errorMessage;
         }
 
+        /**
+         * Returns true when the search finished successfully (results may still be empty).
+         */
         public boolean isSuccess() {
             return status == Status.SUCCESS;
         }
 
+        /**
+         * Returns true when the search failed to run, such as due to I/O errors or missing directories.
+         */
         public boolean isFailed() {
             return status != Status.SUCCESS;
         }
     }
 }
-
-
-
-
 

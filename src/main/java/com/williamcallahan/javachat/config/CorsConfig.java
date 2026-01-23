@@ -65,7 +65,7 @@ public class CorsConfig {
      * @return allowed origins
      */
     public List<String> getAllowedOrigins() {
-        return allowedOrigins;
+        return List.copyOf(allowedOrigins);
     }
 
     /**
@@ -83,7 +83,7 @@ public class CorsConfig {
      * @return allowed HTTP methods
      */
     public List<String> getAllowedMethods() {
-        return allowedMethods;
+        return List.copyOf(allowedMethods);
     }
 
     /**
@@ -101,7 +101,7 @@ public class CorsConfig {
      * @return allowed headers
      */
     public List<String> getAllowedHeaders() {
-        return allowedHeaders;
+        return List.copyOf(allowedHeaders);
     }
 
     /**

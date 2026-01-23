@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.config;
 
+import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
@@ -45,7 +46,13 @@ public class CacheConfig {
      */
     @Scheduled(fixedRate = EVICT_INTERVAL)
     public void evictAllCachesAtIntervals() {
-        cacheManager().getCacheNames()
-            .forEach(cacheName -> cacheManager().getCache(cacheName).clear());
+        final CacheManager manager = cacheManager();
+        manager.getCacheNames()
+            .forEach(cacheName -> {
+                final Cache cache = manager.getCache(cacheName);
+                if (cache != null) {
+                    cache.clear();
+                }
+            });
     }
 }

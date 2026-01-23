@@ -14,14 +14,21 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.stream.Stream;
 //
 import java.time.Duration;
 import java.util.*;
 
+/**
+ * Ingests documentation content into the vector store with chunking, caching, and local snapshots.
+ */
 @Service
 public class DocsIngestionService {
+    private static final String DEFAULT_DOCS_ROOT = "data/docs";
+    private static final String SPRING_BOOT_REFERENCE_PATH = "/data/docs/spring-boot/reference.html";
+    private static final String SPRING_BOOT_REFERENCE_URL =
+        "https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/";
+    private static final String FILE_URL_PREFIX = "file://";
     private final ProgressTracker progressTracker;
     private static final Logger log = LoggerFactory.getLogger(DocsIngestionService.class);
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
@@ -36,6 +43,9 @@ public class DocsIngestionService {
     private final EmbeddingCacheService embeddingCache;
     private final boolean localOnlyMode;
 
+    /**
+     * Wires ingestion dependencies and determines whether to upload or cache embeddings.
+     */
     public DocsIngestionService(@Value("${app.docs.root-url}") String rootUrl,
                                 VectorStore vectorStore,
                                 ChunkProcessingService chunkProcessingService,
@@ -64,6 +74,9 @@ public class DocsIngestionService {
         }
     }
 
+    /**
+     * Crawls from the configured root URL and ingests up to the requested page limit.
+     */
     public void crawlAndIngest(int maxPages) throws IOException {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> queue = new ArrayDeque<>();
@@ -98,12 +111,11 @@ public class DocsIngestionService {
             if (!documents.isEmpty()) {
                 if (localOnlyMode) {
                     // Local-only mode: compute and cache embeddings without uploading
-                    INDEXING_LOG.info("[INDEXING] Caching {} documents locally for URL: {}", 
-                        documents.size(), url);
+                    INDEXING_LOG.info("[INDEXING] Caching {} documents locally", documents.size());
                     try {
                         // Compute and cache embeddings
                         embeddingCache.getOrComputeEmbeddings(documents);
-                        INDEXING_LOG.info("[INDEXING] ✓ Successfully cached {} documents locally ({})", 
+                        INDEXING_LOG.info("[INDEXING] ✓ Successfully cached {} documents locally ({})",
                             documents.size(), progressTracker.formatPercent());
                         
                         // Mark hashes as ingested (cached) after successful caching
@@ -111,16 +123,16 @@ public class DocsIngestionService {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
                         }
-                    } catch (Exception e) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally: {}", e.getMessage());
+                    } catch (RuntimeException e) {
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally (exception type: {})",
+                            e.getClass().getSimpleName());
                     }
                 } else {
                     // Upload mode: send to Qdrant
-                    INDEXING_LOG.info("[INDEXING] Adding {} documents to Qdrant for URL: {}", 
-                        documents.size(), url);
+                    INDEXING_LOG.info("[INDEXING] Adding {} documents to Qdrant", documents.size());
                     try {
                         vectorStore.add(documents);
-                        INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})", 
+                        INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})",
                             documents.size(), progressTracker.formatPercent());
                         
                         // Mark hashes as ingested ONLY after successful addition
@@ -128,14 +140,14 @@ public class DocsIngestionService {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
                         }
-                    } catch (Exception e) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant: {}", 
-                            e.getMessage());
+                    } catch (RuntimeException e) {
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant (exception type: {})",
+                            e.getClass().getSimpleName());
                         throw e;
                     }
                 }
             } else {
-                INDEXING_LOG.warn("[INDEXING] No documents to add for URL: {}", url);
+                INDEXING_LOG.warn("[INDEXING] No documents to add for URL");
             }
         }
     }
@@ -146,23 +158,35 @@ public class DocsIngestionService {
      * Returns the number of files processed (not chunks).
      */
     public int ingestLocalDirectory(String rootDir, int maxFiles) throws IOException {
-        Path root = Paths.get(rootDir);
+        Path root = Path.of(rootDir).toAbsolutePath().normalize();
+        Path baseDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
+        if (!root.startsWith(baseDir)) {
+            throw new IllegalArgumentException("Local docs directory must be under " + baseDir);
+        }
         if (!Files.exists(root)) {
             throw new IllegalArgumentException("Local docs directory does not exist: " + rootDir);
         }
         final int[] processed = {0};
         try (Stream<Path> paths = Files.walk(root)) {
-            Iterator<Path> it = paths
-                    .filter(p -> !Files.isDirectory(p))
-                    .filter(p -> {
-                        String name = p.getFileName().toString().toLowerCase();
+            Iterator<Path> pathIterator = paths
+                    .filter(pathCandidate -> !Files.isDirectory(pathCandidate))
+                    .filter(pathCandidate -> {
+                        Path fileNamePath = pathCandidate.getFileName();
+                        if (fileNamePath == null) {
+                            return false;
+                        }
+                        String name = fileNamePath.toString().toLowerCase(Locale.ROOT);
                         return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
                     })
                     .iterator();
-            while (it.hasNext() && processed[0] < maxFiles) {
-                Path file = it.next();
+            while (pathIterator.hasNext() && processed[0] < maxFiles) {
+                Path file = pathIterator.next();
+                Path fileNamePath = file.getFileName();
+                if (fileNamePath == null) {
+                    continue;
+                }
                 long fileStartMillis = System.currentTimeMillis();
-                String fileName = file.getFileName().toString().toLowerCase();
+                String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
                 String title;
                 String bodyText = null;
                 String url = mapLocalPathToUrl(file);
@@ -176,12 +200,14 @@ public class DocsIngestionService {
                         title = extractTitleFromMetadata(metadata, file.getFileName().toString());
                         packageName = "";
                         // For recognized book PDFs, point URL to public /pdfs path
-                        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(file.toString());
-                        if (publicPdf != null) {
-                            url = publicPdf;
-                        }
-                    } catch (Exception e) {
-                        log.error("Failed to extract PDF content from {}: {}", file, e.getMessage());
+                        final Optional<String> publicPdfUrl =
+                            com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(
+                                file.toString()
+                            );
+                        url = publicPdfUrl.orElse(url);
+                    } catch (IOException e) {
+                        log.error("Failed to extract PDF content (exception type: {})",
+                            e.getClass().getSimpleName());
                         continue;
                     }
                 } else {
@@ -200,8 +226,8 @@ public class DocsIngestionService {
                 if (fileName.endsWith(".pdf")) {
                     try {
                         documents = chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
-                    } catch (Exception e) {
-                        log.error("PDF chunking failed for {}: {}", file, e.getMessage());
+                    } catch (IOException e) {
+                        log.error("PDF chunking failed (exception type: {})", e.getClass().getSimpleName());
                         continue;
                     }
                 } else {
@@ -210,10 +236,8 @@ public class DocsIngestionService {
 
                 // Add documents to vector store or cache
                 if (!documents.isEmpty()) {
-                    INDEXING_LOG.info("[INDEXING] Processing file: {} with {} chunks", 
-                        file.getFileName(), documents.size());
-                    INDEXING_LOG.debug("[INDEXING] First chunk preview: {}", 
-                        documents.get(0).getText().substring(0, Math.min(100, documents.get(0).getText().length())));
+                    INDEXING_LOG.info("[INDEXING] Processing file with {} chunks",
+                        documents.size());
                     
                     try {
                         long startTime = System.currentTimeMillis();
@@ -222,31 +246,31 @@ public class DocsIngestionService {
                             // Local-only mode: compute and cache embeddings
                             embeddingCache.getOrComputeEmbeddings(documents);
                             long duration = System.currentTimeMillis() - startTime;
-                            INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms for file: {} ({})", 
-                                documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                            INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
+                                documents.size(), duration, progressTracker.formatPercent());
                         } else {
                             // Upload mode: send to Qdrant with fallback to cache
                             try {
                                 vectorStore.add(documents);
                                 long duration = System.currentTimeMillis() - startTime;
-                                INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms for file: {} ({})", 
-                                    documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
-                            } catch (Exception qdrantError) {
+                                INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
+                                    documents.size(), duration, progressTracker.formatPercent());
+                            } catch (RuntimeException qdrantError) {
                                 // Qdrant failed (could be full or connection issue), fallback to local cache
-                                INDEXING_LOG.warn("[INDEXING] Qdrant upload failed ({}), falling back to local cache", 
-                                    qdrantError.getMessage());
+                                INDEXING_LOG.warn("[INDEXING] Qdrant upload failed (exception type: {}), falling back to local cache",
+                                    qdrantError.getClass().getSimpleName());
                                 embeddingCache.getOrComputeEmbeddings(documents);
                                 long duration = System.currentTimeMillis() - startTime;
-                                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms for file: {} ({})", 
-                                    documents.size(), duration, file.getFileName(), progressTracker.formatPercent());
+                                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
+                                    documents.size(), duration, progressTracker.formatPercent());
                             }
                         }
                         
                         // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
                         long totalDuration = System.currentTimeMillis() - fileStartMillis;
                         String destination = localOnlyMode ? "cache" : "Qdrant";
-                        INDEXING_LOG.info("[INDEXING] ✔ Completed processing file: {} — {}/{} chunks to {} in {}ms (end-to-end) ({})",
-                            file.getFileName(), documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
+                        INDEXING_LOG.info("[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
+                            documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
                         
                         // Mark hashes as processed after successful addition/caching
                         for (org.springframework.ai.document.Document aiDoc : documents) {
@@ -255,35 +279,36 @@ public class DocsIngestionService {
                         }
                         
                         processed[0]++;
-                    } catch (Exception e) {
+                    } catch (RuntimeException e) {
                         String operation = localOnlyMode ? "cache" : "index";
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to {} {}: {}", 
-                            operation, file.getFileName(), e.getMessage());
-                        log.error("Processing error details:", e);
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to {} file (exception type: {})",
+                            operation, e.getClass().getSimpleName());
                     }
                 } else {
-                    INDEXING_LOG.debug("[INDEXING] Skipping empty document: {}", file.getFileName());
+                    INDEXING_LOG.debug("[INDEXING] Skipping empty document");
                 }
             }
         }
         return processed[0];
     }
 
-    private String mapLocalPathToUrl(Path file) {
-        String p = file.toAbsolutePath().toString().replace('\\', '/');
-        // If book PDF, map to public /pdfs path
-        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(p);
-        if (publicPdf != null) return publicPdf;
-        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
-        if (embedded != null) return embedded;
-        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
-        if (mapped != null) return mapped;
-        // Known single-file mirrors
-        if (p.contains("/data/docs/spring-boot/reference.html")) {
-            return "https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/";
+    private String mapLocalPathToUrl(final Path file) {
+        final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
+        final Optional<String> resolvedUrl = com.williamcallahan.javachat.config.DocsSourceRegistry
+            .mapBookLocalToPublic(absolutePath)
+            .or(() -> com.williamcallahan.javachat.config.DocsSourceRegistry
+                .reconstructFromEmbeddedHost(absolutePath))
+            .or(() -> com.williamcallahan.javachat.config.DocsSourceRegistry
+                .mapLocalPrefixToRemote(absolutePath))
+            .or(() -> mapKnownMirrorUrl(absolutePath));
+        return resolvedUrl.orElse(FILE_URL_PREFIX + absolutePath);
+    }
+
+    private Optional<String> mapKnownMirrorUrl(final String absolutePath) {
+        if (absolutePath.contains(SPRING_BOOT_REFERENCE_PATH)) {
+            return Optional.of(SPRING_BOOT_REFERENCE_URL);
         }
-        // Fallback to file:// URL for traceability
-        return "file://" + p;
+        return Optional.empty();
     }
 
     private String extractTitleFromMetadata(String metadata, String fileName) {
@@ -293,7 +318,7 @@ public class DocsIngestionService {
             // Normalize line endings
             m = m.replace("\r\n", "\n");
             // Case-insensitive search for "Title:"
-            String lower = m.toLowerCase();
+            String lower = m.toLowerCase(Locale.ROOT);
             String key = "title:";
             int startIdx = lower.indexOf(key);
             if (startIdx >= 0) {

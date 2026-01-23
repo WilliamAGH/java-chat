@@ -2,7 +2,9 @@ package com.williamcallahan.javachat.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -49,6 +51,9 @@ public class RateLimitManager {
         new ConcurrentHashMap<>();
     private final Environment env;
 
+    /**
+     * Describes supported LLM providers and their typical rate-limit characteristics.
+     */
     public enum ApiProvider {
         OPENAI("openai", 500, "24h"),
         GITHUB_MODELS("github_models", 150, "24h"),
@@ -77,6 +82,9 @@ public class RateLimitManager {
         }
     }
 
+    /**
+     * Tracks in-memory availability state and backoff timing for a single provider.
+     */
     public static class ApiEndpointState {
 
         // Testing live refresh functionality
@@ -86,11 +94,8 @@ public class RateLimitManager {
         /**
          * Tracks consecutive failures for future circuit breaker implementation.
          * Currently incremented but not used for decision making.
-         * Future enhancement: After N consecutive failures, apply longer backoff periods
-         * or temporarily disable the provider to prevent cascading failures.
          */
-        @SuppressWarnings("unused") // Reserved for future circuit breaker logic
-        private volatile int consecutiveFailures = 0;
+        private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
 
         private volatile int backoffMultiplier = 1;
         private final AtomicInteger requestsToday = new AtomicInteger(0);
@@ -98,6 +103,9 @@ public class RateLimitManager {
             Duration.ofDays(1)
         );
 
+        /**
+         * Reports whether the provider is eligible for requests based on the current circuit state.
+         */
         public boolean isAvailable() {
             if (circuitOpen && Instant.now().isBefore(nextRetryTime)) {
                 return false;
@@ -109,15 +117,23 @@ public class RateLimitManager {
             return true;
         }
 
+        /**
+         * Records a successful request and clears any active backoff state.
+         */
         public void recordSuccess() {
-            consecutiveFailures = 0;
+            consecutiveFailures.set(0);
             backoffMultiplier = 1;
             circuitOpen = false;
             requestsToday.incrementAndGet();
         }
 
+        /**
+         * Records a rate limit and computes the next retry time using explicit retry headers or exponential backoff.
+         *
+         * @param retryAfterSeconds seconds until retry when known
+         */
         public void recordRateLimit(long retryAfterSeconds) {
-            consecutiveFailures++;
+            consecutiveFailures.incrementAndGet();
             circuitOpen = true;
 
             if (retryAfterSeconds > 0) {
@@ -129,6 +145,9 @@ public class RateLimitManager {
             }
         }
 
+        /**
+         * Returns the number of requests counted for the current rolling day window.
+         */
         public int getRequestsToday() {
             if (Instant.now().isAfter(dayReset)) {
                 requestsToday.set(0);
@@ -138,6 +157,9 @@ public class RateLimitManager {
         }
     }
 
+    /**
+     * Builds a manager that combines in-memory circuit state with persisted rate-limit state.
+     */
     public RateLimitManager(RateLimitState rateLimitState, Environment env) {
         this.rateLimitState = rateLimitState;
         this.env = env;
@@ -157,10 +179,13 @@ public class RateLimitManager {
         return s != null && !s.trim().isEmpty();
     }
 
+    /**
+     * Reports whether the provider can be used right now based on configuration, persisted rate limits, and in-memory backoff.
+     */
     public boolean isProviderAvailable(ApiProvider provider) {
         // First check if provider is actually configured
         if (!isProviderConfigured(provider)) {
-            log.debug("Provider {} not configured; treating as unavailable", provider.getName());
+            log.debug("Provider not configured; treating as unavailable");
             return false;
         }
 
@@ -170,11 +195,7 @@ public class RateLimitManager {
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.debug(
-                    "Provider {} is rate limited for {} (persistent state)",
-                    provider.getName(),
-                    formatDuration(remaining)
-                );
+                log.debug("Provider is rate limited (persistent state)");
                 return false;
             }
         }
@@ -186,26 +207,21 @@ public class RateLimitManager {
         );
 
         if (!state.isAvailable()) {
-            log.debug(
-                "Provider {} is in circuit breaker state until {}",
-                provider.getName(),
-                state.nextRetryTime
-            );
+            log.debug("Provider is in circuit breaker state");
             return false;
         }
 
         if (state.getRequestsToday() >= provider.dailyLimit) {
-            log.warn(
-                "Provider {} has reached daily limit of {} requests",
-                provider.getName(),
-                provider.dailyLimit
-            );
+            log.warn("Provider has reached daily limit");
             return false;
         }
 
         return true;
     }
 
+    /**
+     * Records a successful provider request in both in-memory and persisted rate limit state.
+     */
     public void recordSuccess(ApiProvider provider) {
         // Update both in-memory and persistent state
         ApiEndpointState state = endpointStates.computeIfAbsent(
@@ -215,14 +231,12 @@ public class RateLimitManager {
         state.recordSuccess();
         rateLimitState.recordSuccess(provider.getName());
 
-        log.debug(
-            "Provider {} request successful. Daily usage: {}/{}",
-            provider.getName(),
-            state.getRequestsToday(),
-            provider.dailyLimit
-        );
+        log.debug("Provider request successful");
     }
 
+    /**
+     * Records a rate limit for the provider using best-effort parsing of reset or retry information.
+     */
     public void recordRateLimit(ApiProvider provider, String errorMessage) {
         // Extract reset time from error or headers
         Instant resetTime = parseResetTimeFromError(errorMessage);
@@ -253,12 +267,7 @@ public class RateLimitManager {
             provider.getTypicalRateLimitWindow()
         );
 
-        log.warn(
-            "Provider {} rate limited. Reset time: {}, Retry after: {} seconds",
-            provider.getName(),
-            resetTime != null ? resetTime : state.nextRetryTime,
-            retryAfterSeconds
-        );
+        log.warn("Provider rate limited");
     }
 
     /**
@@ -314,11 +323,8 @@ public class RateLimitManager {
         } catch (NumberFormatException e) {
             try {
                 return Instant.parse(resetHeader);
-            } catch (Exception ex) {
-                log.debug(
-                    "Could not parse rate limit reset header: {}",
-                    resetHeader
-                );
+            } catch (DateTimeParseException ex) {
+                log.debug("Could not parse rate limit reset header");
                 return null;
             }
         }
@@ -334,7 +340,7 @@ public class RateLimitManager {
         try {
             return Long.parseLong(retryAfter);
         } catch (NumberFormatException e) {
-            log.debug("Could not parse Retry-After header: {}", retryAfter);
+            log.debug("Could not parse Retry-After header");
             return 0;
         }
     }
@@ -376,32 +382,45 @@ public class RateLimitManager {
     private long extractRetryAfter(String errorMessage) {
         if (errorMessage == null) return 0;
 
-        try {
-            if (errorMessage.contains("Please wait")) {
-                String[] parts = errorMessage.split("Please wait ");
-                if (parts.length > 1) {
-                    String secondsPart = parts[1].split(" seconds")[0].trim();
+        if (errorMessage.contains("Please wait")) {
+            String[] parts = errorMessage.split("Please wait ");
+            if (parts.length > 1) {
+                String secondsPart = parts[1].split(" seconds")[0].trim();
+                if (isDigits(secondsPart)) {
                     return Long.parseLong(secondsPart);
                 }
             }
+        }
 
-            if (errorMessage.contains("retry-after")) {
-                String[] parts = errorMessage.split("retry-after[: ]+");
-                if (parts.length > 1) {
-                    String secondsPart = parts[1].replaceAll("[^0-9]", "");
-                    if (!secondsPart.isEmpty()) {
-                        return Long.parseLong(secondsPart);
-                    }
+        if (errorMessage.contains("retry-after")) {
+            String[] parts = errorMessage.split("retry-after[: ]+");
+            if (parts.length > 1) {
+                String secondsPart = parts[1].replaceAll("[^0-9]", "");
+                if (isDigits(secondsPart)) {
+                    return Long.parseLong(secondsPart);
                 }
             }
-        } catch (Exception e) {
-            log.debug("Could not extract retry-after from error message", e);
         }
 
         return 0;
     }
 
-    public ApiProvider selectBestProvider() {
+    private boolean isDigits(String candidate) {
+        if (candidate == null || candidate.isBlank()) {
+            return false;
+        }
+        for (int index = 0; index < candidate.length(); index++) {
+            if (!Character.isDigit(candidate.charAt(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Selects the highest-priority configured provider that is currently available.
+     */
+    public Optional<ApiProvider> selectBestProvider() {
         // Priority order: OpenAI > GitHub Models > Local
         for (ApiProvider provider : new ApiProvider[] {
             ApiProvider.OPENAI,
@@ -409,67 +428,39 @@ public class RateLimitManager {
             ApiProvider.LOCAL,
         }) {
             if (!isProviderConfigured(provider)) {
-                log.debug(
-                    "Skipping provider {}: not configured",
-                    provider.getName()
-                );
+                log.debug("Skipping provider: not configured");
                 continue;
             }
             if (isProviderAvailable(provider)) {
-                log.debug("Selected provider: {}", provider.getName());
-                return provider;
+                log.debug("Selected provider");
+                return Optional.of(provider);
             }
         }
 
         // Log detailed status for debugging
         for (ApiProvider provider : ApiProvider.values()) {
             if (!isProviderConfigured(provider)) {
-                log.warn(
-                    "Provider {} unavailable - missing configuration (API key/token)",
-                    provider.getName()
-                );
+                log.warn("Provider unavailable - missing configuration (API key/token)");
                 continue;
             }
             Duration remaining = rateLimitState.getRemainingWaitTime(
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.warn(
-                    "Provider {} unavailable - rate limited for {}",
-                    provider.getName(),
-                    formatDuration(remaining)
-                );
+                log.warn("Provider unavailable - rate limited");
             }
         }
 
-        return null;
+        return Optional.empty();
     }
 
+    /**
+     * Clears all in-memory circuit and usage counters without modifying persisted state.
+     */
     public void reset() {
         endpointStates.clear();
         dailyUsage.clear();
         resetTimes.clear();
         log.info("Rate limit manager reset (in-memory state only)");
-    }
-
-    private String formatDuration(Duration duration) {
-        if (duration.isNegative()) {
-            return "0s";
-        }
-
-        long days = duration.toDays();
-        long hours = duration.toHours() % 24;
-        long minutes = duration.toMinutes() % 60;
-        long seconds = duration.getSeconds() % 60;
-
-        if (days > 0) {
-            return String.format("%dd %dh %dm", days, hours, minutes);
-        } else if (hours > 0) {
-            return String.format("%dh %dm", hours, minutes);
-        } else if (minutes > 0) {
-            return String.format("%dm %ds", minutes, seconds);
-        } else {
-            return String.format("%ds", seconds);
-        }
     }
 }

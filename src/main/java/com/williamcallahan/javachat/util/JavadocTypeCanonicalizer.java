@@ -1,65 +1,67 @@
 package com.williamcallahan.javachat.util;
 
+/**
+ * Canonicalizes Javadoc parameter type tokens into fully qualified names.
+ */
 final class JavadocTypeCanonicalizer {
 
     private JavadocTypeCanonicalizer() {}
 
-    static String canonicalizeType(String raw, String packageName, String fullClassName) {
-        String t = raw.trim();
-        if (t.isEmpty()) return null;
+    /**
+     * Canonicalizes a raw type token from Javadoc text into a stable signature form.
+     *
+     * @param rawType raw type token extracted from Javadoc
+     * @param packageName package of the enclosing class
+     * @param fullClassName fully qualified class name for nested type resolution
+     * @return canonicalized type signature or null when the type cannot be resolved
+     */
+    static String canonicalizeType(String rawType, String packageName, String fullClassName) {
+        String trimmedType = rawType.trim();
+        if (trimmedType.isEmpty()) {
+            return null;
+        }
 
         // Remove parameter names if present (assume last whitespace splits type and name)
-        // But be careful with generic spaces; so only split on last space not inside generics
-        t = stripParamName(t);
+        trimmedType = stripParamName(trimmedType);
 
         // Strip generics
-        t = stripGenerics(t);
+        trimmedType = stripGenerics(trimmedType);
 
         // Handle varargs and arrays
-        boolean varargs = t.endsWith("...");
-        if (varargs) t = t.substring(0, t.length() - 3).trim();
-        int arrayDims = 0;
-        while (t.endsWith("[]")) { arrayDims++; t = t.substring(0, t.length() - 2).trim(); }
+        boolean isVarargs = trimmedType.endsWith("...");
+        if (isVarargs) {
+            trimmedType = trimmedType.substring(0, trimmedType.length() - 3).trim();
+        }
+        int arrayDimensions = countArrayDimensions(trimmedType);
+        trimmedType = trimArraySuffix(trimmedType, arrayDimensions);
 
         // Primitives and void
-        if (isPrimitiveOrVoid(t)) {
-            String base = t;
-            String suffix = varargs ? "..." : repeatArray(arrayDims);
-            return base + suffix;
+        if (isPrimitiveOrVoid(trimmedType)) {
+            return appendSuffix(trimmedType, isVarargs, arrayDimensions);
         }
 
         // java.lang simple types
-        String javaLang = mapJavaLang(t);
+        String javaLang = mapJavaLang(trimmedType);
         if (javaLang != null) {
-            String suffix = varargs ? "..." : repeatArray(arrayDims);
-            return javaLang + suffix;
+            return appendSuffix(javaLang, isVarargs, arrayDimensions);
         }
 
         // If already qualified with a package
-        if (t.contains(".")) {
-            // Relative to current package (e.g., Locale.Category)
-            if (Character.isUpperCase(t.charAt(0))) {
-                String pkg = (packageName == null || packageName.isBlank()) ? null : packageName;
-                if (pkg != null) {
-                    String fqn = pkg + "." + t;
-                    String suffix = varargs ? "..." : repeatArray(arrayDims);
-                    return fqn + suffix;
-                }
+        if (trimmedType.contains(".")) {
+            String qualified = resolveRelativeQualifiedType(trimmedType, packageName, arrayDimensions, isVarargs);
+            if (qualified != null) {
+                return qualified;
             }
-            // Looks fully qualified already
-            String suffix = varargs ? "..." : repeatArray(arrayDims);
-            return t + suffix;
+            return appendSuffix(trimmedType, isVarargs, arrayDimensions);
         }
 
         // Possibly nested type of current class (e.g., Builder on Outer page)
-        if (Character.isUpperCase(t.charAt(0))) {
-            String pkg = (packageName == null || packageName.isBlank()) ? null : packageName;
-            if (pkg != null) {
-                // fullClassName may be Outer or Outer.Inner
+        if (Character.isUpperCase(trimmedType.charAt(0))) {
+            String packagePrefix = (packageName == null || packageName.isBlank()) ? null : packageName;
+            if (packagePrefix != null) {
                 String enclosing = fullClassName;
-                String fqn = pkg + "." + enclosing + "." + t;
-                String suffix = varargs ? "..." : repeatArray(arrayDims);
-                return fqn + suffix;
+                String fullyQualified = packagePrefix + "." + enclosing + "." + trimmedType;
+                return appendSuffix(fullyQualified, isVarargs, arrayDimensions);
             }
         }
 
@@ -67,37 +69,100 @@ final class JavadocTypeCanonicalizer {
         return null;
     }
 
-    private static String stripGenerics(String x) {
-        int depth = 0; StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < x.length(); i++) {
-            char c = x.charAt(i);
-            if (c == '<') { depth++; continue; }
-            if (c == '>') { if (depth > 0) depth--; continue; }
-            if (depth == 0) sb.append(c);
+    private static String resolveRelativeQualifiedType(
+        String trimmedType,
+        String packageName,
+        int arrayDimensions,
+        boolean isVarargs
+    ) {
+        if (!Character.isUpperCase(trimmedType.charAt(0))) {
+            return null;
         }
-        return sb.toString().trim();
-    }
-
-    private static String stripParamName(String x) {
-        int depth = 0; int lastSpace = -1;
-        for (int i = 0; i < x.length(); i++) {
-            char c = x.charAt(i);
-            if (c == '<') depth++;
-            else if (c == '>' && depth > 0) depth--;
-            else if (c == ' ' && depth == 0) lastSpace = i;
+        String packagePrefix = (packageName == null || packageName.isBlank()) ? null : packageName;
+        if (packagePrefix == null) {
+            return null;
         }
-        if (lastSpace >= 0) return x.substring(0, lastSpace).trim();
-        return x.trim();
+        String fullyQualified = packagePrefix + "." + trimmedType;
+        return appendSuffix(fullyQualified, isVarargs, arrayDimensions);
     }
 
-    private static boolean isPrimitiveOrVoid(String t) {
-        return t.equals("byte") || t.equals("short") || t.equals("int") || t.equals("long") ||
-               t.equals("char") || t.equals("float") || t.equals("double") || t.equals("boolean") ||
-               t.equals("void");
+    private static int countArrayDimensions(String typeText) {
+        int arrayDimensions = 0;
+        while (typeText.endsWith("[]")) {
+            arrayDimensions++;
+            typeText = typeText.substring(0, typeText.length() - 2).trim();
+        }
+        return arrayDimensions;
     }
 
-    private static String mapJavaLang(String t) {
-        return switch (t) {
+    private static String trimArraySuffix(String typeText, int arrayDimensions) {
+        String trimmed = typeText;
+        for (int dimensionIndex = 0; dimensionIndex < arrayDimensions; dimensionIndex++) {
+            trimmed = trimmed.substring(0, trimmed.length() - 2).trim();
+        }
+        return trimmed;
+    }
+
+    private static String appendSuffix(String baseType, boolean isVarargs, int arrayDimensions) {
+        String suffix = isVarargs ? "..." : repeatArray(arrayDimensions);
+        return baseType + suffix;
+    }
+
+    private static String stripGenerics(String typeText) {
+        int genericDepth = 0;
+        StringBuilder builder = new StringBuilder();
+        for (int charIndex = 0; charIndex < typeText.length(); charIndex++) {
+            char currentChar = typeText.charAt(charIndex);
+            if (currentChar == '<') {
+                genericDepth++;
+                continue;
+            }
+            if (currentChar == '>') {
+                if (genericDepth > 0) {
+                    genericDepth--;
+                }
+                continue;
+            }
+            if (genericDepth == 0) {
+                builder.append(currentChar);
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private static String stripParamName(String typeText) {
+        int genericDepth = 0;
+        int lastSpaceIndex = -1;
+        for (int charIndex = 0; charIndex < typeText.length(); charIndex++) {
+            char currentChar = typeText.charAt(charIndex);
+            if (currentChar == '<') {
+                genericDepth++;
+            } else if (currentChar == '>' && genericDepth > 0) {
+                genericDepth--;
+            } else if (currentChar == ' ' && genericDepth == 0) {
+                lastSpaceIndex = charIndex;
+            }
+        }
+        if (lastSpaceIndex >= 0) {
+            return typeText.substring(0, lastSpaceIndex).trim();
+        }
+        return typeText.trim();
+    }
+
+    private static boolean isPrimitiveOrVoid(String typeText) {
+        return typeText.equals("byte")
+            || typeText.equals("short")
+            || typeText.equals("int")
+            || typeText.equals("long")
+            || typeText.equals("char")
+            || typeText.equals("float")
+            || typeText.equals("double")
+            || typeText.equals("boolean")
+            || typeText.equals("void");
+    }
+
+    private static String mapJavaLang(String typeText) {
+        return switch (typeText) {
             case "String" -> "java.lang.String";
             case "Integer" -> "java.lang.Integer";
             case "Long" -> "java.lang.Long";
@@ -114,10 +179,14 @@ final class JavadocTypeCanonicalizer {
         };
     }
 
-    private static String repeatArray(int dims) {
-        if (dims <= 0) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < dims; i++) sb.append("[]");
-        return sb.toString();
+    private static String repeatArray(int arrayDimensions) {
+        if (arrayDimensions <= 0) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int dimensionIndex = 0; dimensionIndex < arrayDimensions; dimensionIndex++) {
+            builder.append("[]");
+        }
+        return builder.toString();
     }
 }

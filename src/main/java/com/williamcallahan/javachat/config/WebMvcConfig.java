@@ -17,10 +17,20 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AppProperties appProperties;
 
+    /**
+     * Creates MVC config with application properties for CORS rules.
+     *
+     * @param appProperties application configuration properties
+     */
     public WebMvcConfig(AppProperties appProperties) {
         this.appProperties = appProperties;
     }
 
+    /**
+     * Configures CORS for API endpoints using the configured allow lists.
+     *
+     * @param registry CORS registry to update
+     */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         var cors = appProperties.getCors();
@@ -32,6 +42,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
             .maxAge(cors.getMaxAgeSeconds());
     }
 
+    /**
+     * Registers SPA view controllers that forward routes to index.html.
+     *
+     * @param registry view controller registry
+     */
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
         // SPA fallback: forward non-file routes to index.html

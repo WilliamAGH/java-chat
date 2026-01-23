@@ -16,7 +16,7 @@ public class LocalEmbedding {
     private static final String DIM_KEY = "app.local-embedding.dimensions";
     private static final String NULL_TEXT_FMT = "%s must not be null.";
     private static final String BLANK_URL_MSG = "Local embedding URL must not be blank when enabled.";
-    private static final String DIM_POS_MSG = "Local embedding dimensions must be greater than 0.";
+    private static final String POSITIVE_FMT = "%s must be greater than 0.";
 
     private boolean enabled;
     private String serverUrl = URL_DEF;
@@ -37,7 +37,7 @@ public class LocalEmbedding {
         requireNonNullText(URL_KEY, serverUrl);
         requireNonNullText(MODEL_KEY, model);
         if (dimensions < MIN_POSITIVE) {
-            throw new IllegalArgumentException(DIM_POS_MSG);
+            throw new IllegalArgumentException(String.format(Locale.ROOT, POSITIVE_FMT, DIM_KEY));
         }
         if (enabled && serverUrl.isBlank()) {
             throw new IllegalStateException(BLANK_URL_MSG);

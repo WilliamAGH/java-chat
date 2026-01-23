@@ -8,4 +8,15 @@
     <Match>
         <Class name="com.williamcallahan.javachat.config.WebMvcConfig"/>
     </Match>
+
+    <!--
+        Error handlers must respond to any HTTP method that may trigger an error.
+        CustomErrorController explicitly allows common methods to ensure consistent error rendering
+        for browser requests and API clients; this is not an application endpoint intended for state changes.
+    -->
+    <Match>
+        <Bug pattern="SPRING_CSRF_UNRESTRICTED_REQUEST_MAPPING"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+        <Method name="handleError"/>
+    </Match>
 </FindBugsFilter>

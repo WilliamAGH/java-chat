@@ -6,6 +6,7 @@ import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -179,9 +180,9 @@ public class HtmlContentExtractor {
      * Check if element is likely navigation.
      */
     private boolean isNavigationElement(Element element) {
-        String className = element.className().toLowerCase();
-        String id = element.id().toLowerCase();
-        String text = element.text().toLowerCase();
+        String className = element.className().toLowerCase(Locale.ROOT);
+        String id = element.id().toLowerCase(Locale.ROOT);
+        String text = element.text().toLowerCase(Locale.ROOT);
         
         return className.contains("nav") || 
                className.contains("menu") ||
@@ -200,10 +201,10 @@ public class HtmlContentExtractor {
      */
     private boolean containsExcessiveNoise(String text) {
         int noiseCount = 0;
-        String lowerText = text.toLowerCase();
+        String lowerText = text.toLowerCase(Locale.ROOT);
         
         for (String noise : NOISE_PATTERNS) {
-            if (lowerText.contains(noise.toLowerCase())) {
+            if (lowerText.contains(noise.toLowerCase(Locale.ROOT))) {
                 noiseCount++;
             }
         }

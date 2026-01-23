@@ -17,7 +17,7 @@ import java.time.Duration;
 @Configuration
 @ConfigurationPropertiesScan(basePackageClasses = AppProperties.class)
 public class AiConfig {
-    private static final long RESPONSE_TIMEOUT_SECONDS = 120;
+    private static final long RESPONSE_TIMEOUT_MINUTES = 2;
     private static final int CONNECT_TIMEOUT_MILLIS = 30_000;
 
     // ChatModel and EmbeddingModel are auto-configured by Spring AI starter
@@ -53,8 +53,8 @@ public class AiConfig {
         // Configure HTTP client with increased timeouts for GitHub Models API
         // GitHub Models can be slower than OpenAI, especially for complex requests
         final HttpClient httpClient = HttpClient.create()
-            .responseTimeout(Duration.ofSeconds(RESPONSE_TIMEOUT_SECONDS)) // 2 minutes for response
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS); // 30 seconds for connection
+            .responseTimeout(Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES))
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS);
 
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(httpClient));

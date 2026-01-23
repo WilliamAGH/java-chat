@@ -78,6 +78,8 @@
     <rule ref="category/java/design.xml/CyclomaticComplexity">
         <properties>
             <property name="methodReportLevel" value="50"/>
+            <!-- Keep the signal focused on truly complex methods; class totals are noisy for parser-style helpers. -->
+            <property name="classReportLevel" value="200"/>
         </properties>
     </rule>
     <rule ref="category/java/design.xml/FinalFieldCouldBeStatic"/>

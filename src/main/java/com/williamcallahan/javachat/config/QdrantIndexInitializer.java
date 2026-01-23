@@ -98,8 +98,9 @@ public class QdrantIndexInitializer {
             createPayloadIndex("url", "keyword");
             createPayloadIndex("hash", "keyword");
             createPayloadIndex("chunkIndex", "integer");
-        } catch (Exception e) {
-            log.warn("Unable to ensure Qdrant payload indexes (will continue): {}", e.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Unable to ensure Qdrant payload indexes (exception type: {})",
+                e.getClass().getSimpleName());
         }
     }
 
@@ -137,20 +138,19 @@ public class QdrantIndexInitializer {
                     // Use PUT for Qdrant payload index creation (official API)
                     ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers),
                         String.class);
-                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT urlId={} (status={})",
-                            field, schema, Integer.toHexString(Objects.hashCode(url)), resp.getStatusCode());
+                    log.info("[QDRANT] Ensured payload index (status={})", resp.getStatusCode().value());
                     return;
-                } catch (Exception putEx) {
+                } catch (RuntimeException putEx) {
                     lastError = putEx;
-                    log.debug("[QDRANT] PUT failed for index '{}' (exceptionType={})", field,
-                        putEx.getClass().getName());
+                    log.debug("[QDRANT] PUT failed for index (exceptionType={})",
+                        putEx.getClass().getSimpleName());
                     // Continue to next URL candidate if available
                 }
             }
         }
         // If we reach here, all attempts failed; log once at INFO to avoid noisy warnings.
-        log.info("[QDRANT] Could not ensure payload index '{}' (schema={}). Last error type: {}", field, schema,
-                lastError != null ? lastError.getClass().getName() : "unknown");
+        log.info("[QDRANT] Could not ensure payload index. Last error type: {}",
+                lastError != null ? lastError.getClass().getSimpleName() : "unknown");
     }
 
     private record PayloadIndexRequest(

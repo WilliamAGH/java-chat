@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.ModelAndView;
 
 import java.util.Map;
@@ -37,7 +38,12 @@ public class CustomErrorController implements ErrorController {
      * @param model Spring MVC model for template rendering
      * @return ModelAndView for HTML requests or ResponseEntity for API requests
      */
-    @RequestMapping(ERROR_PATH)
+    // Explicitly specify all HTTP methods - error handlers must respond to any request type
+    // that might generate an error. This is intentional, not a CSRF risk.
+    @RequestMapping(value = ERROR_PATH, method = {
+        RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT,
+        RequestMethod.DELETE, RequestMethod.PATCH, RequestMethod.HEAD, RequestMethod.OPTIONS
+    })
     public Object handleError(HttpServletRequest request, Model model) {
         // Get error details from request attributes
         Object status = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);

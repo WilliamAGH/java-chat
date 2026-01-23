@@ -13,7 +13,6 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +29,19 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     private final String modelName;         // embedding model id
     private final int dimensionsHint;       // used only as a hint; actual vector size comes from response
     private final RestTemplate restTemplate;
+
+    private record EmbeddingRequestPayload(String model, String input) {
+    }
+
+    private static final class EmbeddingApiResponseException extends IllegalStateException {
+        private EmbeddingApiResponseException(String message, Exception cause) {
+            super(message, cause);
+        }
+
+        private EmbeddingApiResponseException(String message) {
+            super(message);
+        }
+    }
 
     public OpenAiCompatibleEmbeddingModel(String baseUrl,
                                           String apiKey,
@@ -67,57 +79,56 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
                 endpoint = endpoint + "/v1/embeddings";
             }
         }
-        List<Embedding> results = new ArrayList<>();
+        List<Embedding> embeddings = new ArrayList<>();
 
-        for (int i = 0; i < request.getInstructions().size(); i++) {
-            String input = request.getInstructions().get(i);
-
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", modelName);
-            body.put("input", input);
+        List<String> instructions = request.getInstructions();
+        for (int instructionIndex = 0; instructionIndex < instructions.size(); instructionIndex++) {
+            String inputText = instructions.get(instructionIndex);
+            EmbeddingRequestPayload payload = new EmbeddingRequestPayload(modelName, inputText);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Bearer " + apiKey);
 
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+            HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(payload, headers);
 
             try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> response = restTemplate.postForObject(endpoint, entity, Map.class);
-                if (response == null || !response.containsKey("data")) {
-                    log.warn("[EMBEDDING] Remote response missing 'data' field; falling back on zero vector");
-                    results.add(new Embedding(new float[dimensions()], i));
-                    continue;
+                Object rawResponse = restTemplate.postForObject(endpoint, entity, Object.class);
+                if (rawResponse == null) {
+                    throw new EmbeddingApiResponseException("Remote embedding response was null");
                 }
 
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
-                if (data.isEmpty()) {
-                    log.warn("[EMBEDDING] Remote response 'data' empty; using zero vector");
-                    results.add(new Embedding(new float[dimensions()], i));
-                    continue;
+                Map<?, ?> responseMap = requireMap(rawResponse, "response");
+                Object responsePayload = responseMap.get("data");
+                if (!(responsePayload instanceof List<?> responseEntries) || responseEntries.isEmpty()) {
+                    throw new EmbeddingApiResponseException("Remote embedding response missing 'data' entries");
                 }
 
-                @SuppressWarnings("unchecked")
-                List<Number> vec = (List<Number>) data.get(0).get("embedding");
-                if (vec == null || vec.isEmpty()) {
-                    log.warn("[EMBEDDING] Remote embedding array empty; using zero vector");
-                    results.add(new Embedding(new float[dimensions()], i));
-                    continue;
+                Object firstEntry = responseEntries.get(0);
+                Map<?, ?> firstEntryMap = requireMap(firstEntry, "data[0]");
+                Object embeddingPayload = firstEntryMap.get("embedding");
+                if (!(embeddingPayload instanceof List<?> embeddingEntries) || embeddingEntries.isEmpty()) {
+                    throw new EmbeddingApiResponseException("Remote embedding response missing embedding values");
                 }
 
-                float[] out = new float[vec.size()];
-                for (int j = 0; j < vec.size(); j++) out[j] = vec.get(j).floatValue();
-                results.add(new Embedding(out, i));
-            } catch (Exception e) {
-                log.warn("[EMBEDDING] Remote embedding call failed: {}", e.getMessage());
-                // Propagate to let GracefulEmbeddingModel trigger fallback
-                throw e;
+                float[] vector = new float[embeddingEntries.size()];
+                for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
+                    Object numericEntry = embeddingEntries.get(vectorIndex);
+                    if (!(numericEntry instanceof Number numberValue)) {
+                        throw new EmbeddingApiResponseException("Non-numeric embedding value at index " + vectorIndex);
+                    }
+                    vector[vectorIndex] = numberValue.floatValue();
+                }
+                embeddings.add(new Embedding(vector, instructionIndex));
+            } catch (EmbeddingApiResponseException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                log.warn("[EMBEDDING] Remote embedding call failed: {}", exception.getMessage());
+                throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
             }
         }
 
-        return new EmbeddingResponse(results);
+        return new EmbeddingResponse(embeddings);
     }
 
     @Override
@@ -127,8 +138,18 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
 
     @Override
     public float[] embed(org.springframework.ai.document.Document document) {
-        EmbeddingRequest req = new EmbeddingRequest(List.of(document.getText()), null);
-        EmbeddingResponse res = call(req);
-        return res.getResults().isEmpty() ? new float[dimensions()] : res.getResults().get(0).getOutput();
+        EmbeddingRequest embeddingRequest = new EmbeddingRequest(List.of(document.getText()), null);
+        EmbeddingResponse embeddingResponse = call(embeddingRequest);
+        if (embeddingResponse.getResults().isEmpty()) {
+            throw new EmbeddingApiResponseException("Embedding response was empty");
+        }
+        return embeddingResponse.getResults().get(0).getOutput();
+    }
+
+    private Map<?, ?> requireMap(Object candidate, String description) {
+        if (candidate instanceof Map<?, ?> mappedResponse) {
+            return mappedResponse;
+        }
+        throw new EmbeddingApiResponseException("Expected map for " + description + ", got " + candidate.getClass().getName());
     }
 }

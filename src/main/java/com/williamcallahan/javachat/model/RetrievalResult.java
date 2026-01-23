@@ -15,6 +15,15 @@ public record RetrievalResult(
     String qualityReason
 ) {
 
+    public RetrievalResult {
+        documents = documents == null ? List.of() : List.copyOf(documents);
+    }
+
+    @Override
+    public List<Document> documents() {
+        return List.copyOf(documents);
+    }
+
     /**
      * Indicates the quality/source of retrieval results.
      */

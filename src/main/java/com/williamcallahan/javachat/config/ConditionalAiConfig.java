@@ -1,6 +1,6 @@
 package com.williamcallahan.javachat.config;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
@@ -11,10 +11,6 @@ import org.springframework.context.annotation.Import;
 @Configuration
 public class ConditionalAiConfig {
 
-    private static final String OPENAI_API_KEY = "spring.ai.openai.api-key";
-    private static final String OPENAI_CHAT_KEY = "spring.ai.openai.chat.api-key";
-    private static final String NON_EMPTY_FLAG = "!empty";
-
     /**
      * Creates conditional AI configuration.
      */
@@ -22,13 +18,13 @@ public class ConditionalAiConfig {
     }
 
     /**
-     * Enables Spring AI configuration when API keys are available.
+     * Enables Spring AI configuration when at least one API key is non-empty.
+     * Uses SpEL expression because @ConditionalOnProperty havingValue does literal
+     * string comparison and cannot check for "non-empty" values.
      */
     @Configuration
-    @ConditionalOnProperty(
-        value = {OPENAI_API_KEY, OPENAI_CHAT_KEY},
-        matchIfMissing = false,
-        havingValue = NON_EMPTY_FLAG
+    @ConditionalOnExpression(
+        "!'${spring.ai.openai.api-key:}'.isEmpty() or !'${spring.ai.openai.chat.api-key:}'.isEmpty()"
     )
     @Import({
         org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration.class,

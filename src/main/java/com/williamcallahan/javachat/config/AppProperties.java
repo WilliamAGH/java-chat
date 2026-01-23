@@ -55,7 +55,7 @@ public class AppProperties {
      * @return retrieval augmentation configuration
      */
     public RetrievalAugmentationConfig getRag() {
-        return rag;
+        return copyRagConfig(rag);
     }
 
     /**
@@ -73,7 +73,7 @@ public class AppProperties {
      * @return local embedding configuration
      */
     public LocalEmbedding getLocalEmbedding() {
-        return localEmbedding;
+        return copyLocalEmbedding(localEmbedding);
     }
 
     /**
@@ -91,7 +91,7 @@ public class AppProperties {
      * @return remote embedding configuration
      */
     public RemoteEmbedding getRemoteEmbedding() {
-        return remoteEmbedding;
+        return copyRemoteEmbedding(remoteEmbedding);
     }
 
     /**
@@ -109,7 +109,7 @@ public class AppProperties {
      * @return documentation configuration
      */
     public DocumentationConfig getDocs() {
-        return docs;
+        return copyDocumentationConfig(docs);
     }
 
     /**
@@ -127,7 +127,7 @@ public class AppProperties {
      * @return diagnostics configuration
      */
     public Diagnostics getDiagnostics() {
-        return diagnostics;
+        return copyDiagnostics(diagnostics);
     }
 
     /**
@@ -145,7 +145,7 @@ public class AppProperties {
      * @return Qdrant configuration
      */
     public Qdrant getQdrant() {
-        return qdrant;
+        return copyQdrant(qdrant);
     }
 
     /**
@@ -163,7 +163,7 @@ public class AppProperties {
      * @return CORS configuration
      */
     public CorsConfig getCors() {
-        return cors;
+        return copyCorsConfig(cors);
     }
 
     /**
@@ -180,6 +180,69 @@ public class AppProperties {
             throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
         }
         return section;
+    }
+
+    private static RetrievalAugmentationConfig copyRagConfig(final RetrievalAugmentationConfig sourceConfig) {
+        final RetrievalAugmentationConfig copy = new RetrievalAugmentationConfig();
+        copy.setSearchTopK(sourceConfig.getSearchTopK());
+        copy.setSearchReturnK(sourceConfig.getSearchReturnK());
+        copy.setChunkMaxTokens(sourceConfig.getChunkMaxTokens());
+        copy.setChunkOverlapTokens(sourceConfig.getChunkOverlapTokens());
+        copy.setSearchCitations(sourceConfig.getSearchCitations());
+        copy.setSearchMmrLambda(sourceConfig.getSearchMmrLambda());
+        return copy;
+    }
+
+    private static LocalEmbedding copyLocalEmbedding(final LocalEmbedding sourceConfig) {
+        final LocalEmbedding copy = new LocalEmbedding();
+        copy.setEnabled(sourceConfig.isEnabled());
+        copy.setServerUrl(sourceConfig.getServerUrl());
+        copy.setModel(sourceConfig.getModel());
+        copy.setDimensions(sourceConfig.getDimensions());
+        copy.setUseHashWhenDisabled(sourceConfig.isUseHashWhenDisabled());
+        return copy;
+    }
+
+    private static RemoteEmbedding copyRemoteEmbedding(final RemoteEmbedding sourceConfig) {
+        final RemoteEmbedding copy = new RemoteEmbedding();
+        copy.setServerUrl(sourceConfig.getServerUrl());
+        copy.setModel(sourceConfig.getModel());
+        copy.setApiKey(sourceConfig.getApiKey());
+        copy.setDimensions(sourceConfig.getDimensions());
+        return copy;
+    }
+
+    private static DocumentationConfig copyDocumentationConfig(final DocumentationConfig sourceConfig) {
+        final DocumentationConfig copy = new DocumentationConfig();
+        copy.setRootUrl(sourceConfig.getRootUrl());
+        copy.setJdkVersion(sourceConfig.getJdkVersion());
+        copy.setSnapshotDir(sourceConfig.getSnapshotDir());
+        copy.setParsedDir(sourceConfig.getParsedDir());
+        copy.setIndexDir(sourceConfig.getIndexDir());
+        return copy;
+    }
+
+    private static Diagnostics copyDiagnostics(final Diagnostics sourceConfig) {
+        final Diagnostics copy = new Diagnostics();
+        copy.setStreamChunkLogging(sourceConfig.isStreamChunkLogging());
+        copy.setStreamChunkSample(sourceConfig.getStreamChunkSample());
+        return copy;
+    }
+
+    private static Qdrant copyQdrant(final Qdrant sourceConfig) {
+        final Qdrant copy = new Qdrant();
+        copy.setEnsurePayloadIndexes(sourceConfig.isEnsurePayloadIndexes());
+        return copy;
+    }
+
+    private static CorsConfig copyCorsConfig(final CorsConfig sourceConfig) {
+        final CorsConfig copy = new CorsConfig();
+        copy.setAllowedOrigins(sourceConfig.getAllowedOrigins());
+        copy.setAllowedMethods(sourceConfig.getAllowedMethods());
+        copy.setAllowedHeaders(sourceConfig.getAllowedHeaders());
+        copy.setAllowCredentials(sourceConfig.isAllowCredentials());
+        copy.setMaxAgeSeconds(sourceConfig.getMaxAgeSeconds());
+        return copy;
     }
 
     /**

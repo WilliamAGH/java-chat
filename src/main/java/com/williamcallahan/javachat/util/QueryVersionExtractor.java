@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.util;
 
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -107,7 +108,7 @@ public final class QueryVersionExtractor {
             if (url == null) {
                 return false;
             }
-            String lowerUrl = url.toLowerCase();
+            String lowerUrl = url.toLowerCase(Locale.ROOT);
             return lowerUrl.contains(javaPattern)
                 || lowerUrl.contains(jdkPattern)
                 || lowerUrl.contains(eaPattern);

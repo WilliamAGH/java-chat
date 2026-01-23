@@ -47,10 +47,16 @@ public class ExternalServiceHealth {
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
     private static final Duration HEALTHY_CHECK_INTERVAL = Duration.ofHours(1);
     
+    /**
+     * Creates the health monitor with a WebClient for outbound checks.
+     */
     public ExternalServiceHealth(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
     }
     
+    /**
+     * Seeds known services and performs the initial health checks.
+     */
     @PostConstruct
     public void init() {
         // Initialize service statuses
@@ -261,16 +267,47 @@ public class ExternalServiceHealth {
      * Public DTO for service health information
      */
     public static class ServiceInfo {
-        public final String name;
-        public final boolean isHealthy;
-        public final String message;
-        public final Duration timeUntilNextCheck;
-        
+        private final String name;
+        private final boolean healthy;
+        private final String message;
+        private final Duration timeUntilNextCheck;
+
+        /**
+         * Creates a snapshot of service health status.
+         */
         public ServiceInfo(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
             this.name = name;
-            this.isHealthy = isHealthy;
+            this.healthy = isHealthy;
             this.message = message;
             this.timeUntilNextCheck = timeUntilNextCheck;
+        }
+
+        /**
+         * Returns the service identifier.
+         */
+        public String name() {
+            return name;
+        }
+
+        /**
+         * Indicates whether the service is currently healthy.
+         */
+        public boolean isHealthy() {
+            return healthy;
+        }
+
+        /**
+         * Describes the current health state in human-readable form.
+         */
+        public String message() {
+            return message;
+        }
+
+        /**
+         * Returns the time until the next scheduled check, if applicable.
+         */
+        public Duration timeUntilNextCheck() {
+            return timeUntilNextCheck;
         }
     }
 }

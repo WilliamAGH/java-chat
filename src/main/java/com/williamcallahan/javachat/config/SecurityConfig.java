@@ -18,18 +18,11 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  */
 @Configuration
 public class SecurityConfig {
-
-    private final AppProperties appProperties;
-
-    public SecurityConfig(AppProperties appProperties) {
-        this.appProperties = appProperties;
-    }
-
     /**
      * CORS configuration source for Spring Security filter chain integration.
      */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(AppProperties appProperties) {
         var cors = appProperties.getCors();
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(cors.getAllowedOrigins());
@@ -58,7 +51,7 @@ public class SecurityConfig {
             )
             // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
             .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf.ignoringRequestMatchers(EndpointRequest.toAnyEndpoint()))
             .httpBasic(b -> b.disable())
             .formLogin(f -> f.disable());
         return http.build();
@@ -73,7 +66,7 @@ public class SecurityConfig {
             CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
             .cors(c -> c.configurationSource(corsConfigurationSource))
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/",

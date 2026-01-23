@@ -158,11 +158,9 @@ tasks.withType<Pmd>().configureEach {
     }
 }
 
-// Test configuration
+// Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
-    useJUnitPlatform {
-        excludeTags("integration")
-    }
+    useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
@@ -170,14 +168,14 @@ tasks.withType<Test> {
     )
 }
 
+// Unit test task - exclude integration tests
 tasks.test {
-    // Exclude integration tests by default
     useJUnitPlatform {
         excludeTags("integration")
     }
 }
 
-// Integration test task
+// Integration test task - only run integration-tagged tests
 tasks.register<Test>("integrationTest") {
     description = "Runs integration tests."
     group = "verification"

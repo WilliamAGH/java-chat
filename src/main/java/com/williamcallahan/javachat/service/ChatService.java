@@ -14,6 +14,9 @@ import reactor.core.publisher.Flux;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Builds chat prompts, enriches them with retrieval context, and delegates streaming to the LLM provider.
+ */
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
@@ -26,6 +29,9 @@ public class ChatService {
     @Autowired
     private MarkdownService markdownService;
 
+    /**
+     * Creates the chat service with streaming and retrieval dependencies.
+     */
     public ChatService(OpenAIStreamingService openAIStreamingService,
                        RetrievalService retrievalService,
                        SystemPromptConfig systemPromptConfig) {
@@ -59,11 +65,12 @@ public class ChatService {
         
         logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document d = contextDocs.get(docIndex);
             String rawUrl = String.valueOf(d.getMetadata().get("url"));
             String normUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(normUrl).append("\n").append(d.getText());
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
+                .append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -92,23 +99,30 @@ public class ChatService {
      * Normalize URLs placed into the LLM prompt so the model never sees local file:/// paths
      * or malformed mirrors. This mirrors RetrievalService's normalization without exposing it.
      */
-    private String normalizeUrlForPrompt(String url) {
-        if (url == null || url.isBlank()) return url;
-        String u = url.trim();
+    private String normalizeUrlForPrompt(String rawUrl) {
+        if (rawUrl == null || rawUrl.isBlank()) return rawUrl;
+        String trimmedUrl = rawUrl.trim();
         // Already HTTP(S): canonicalize and fix common spring paths
-        if (u.startsWith("http://") || u.startsWith("https://")) {
-            return canonicalizeHttpDocUrl(u);
+        if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
+            return canonicalizeHttpDocUrl(trimmedUrl);
         }
         // Map book PDFs to public server path
-        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(u.startsWith("file://") ? u.substring("file://".length()) : u);
-        if (publicPdf != null) return publicPdf;
+        String resolvedPath = trimmedUrl.startsWith("file://")
+            ? trimmedUrl.substring("file://".length())
+            : trimmedUrl;
+        var publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(resolvedPath);
+        if (publicPdf.isPresent()) {
+            return publicPdf.get();
+        }
         // Only handle file:// beyond this point
-        if (!u.startsWith("file://")) return u;
-        String p = u.substring("file://".length());
-        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
-        if (embedded != null) return canonicalizeHttpDocUrl(embedded);
-        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
-        return mapped != null ? canonicalizeHttpDocUrl(mapped) : u; // final fallback: keep original
+        if (!trimmedUrl.startsWith("file://")) return trimmedUrl;
+        String localPath = trimmedUrl.substring("file://".length());
+        var embeddedUrl = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(localPath);
+        if (embeddedUrl.isPresent()) {
+            return canonicalizeHttpDocUrl(embeddedUrl.get());
+        }
+        var mappedUrl = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(localPath);
+        return mappedUrl.map(this::canonicalizeHttpDocUrl).orElse(trimmedUrl);
     }
 
     private String canonicalizeHttpDocUrl(String url) {
@@ -126,10 +140,6 @@ public class ChatService {
         return prefix + rest;
     }
 
-    /**
-     * Stream answer reusing existing pipeline but with preselected context documents
-     * and optional guidance to prepend to the system context.
-     */
     /**
      * Legacy streaming with preselected context. Prefer building a prompt with
      * {@link #buildPromptWithContextAndGuidance(List, String, List, String)} and
@@ -149,11 +159,12 @@ public class ChatService {
         
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document d = contextDocs.get(docIndex);
             String rawUrl = String.valueOf(d.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
+                .append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -170,6 +181,9 @@ public class ChatService {
                 });
     }
 
+    /**
+     * Resolves citations for a query using the retrieval pipeline.
+     */
     public List<Citation> citationsFor(String userQuery) {
         List<Document> docs = retrievalService.retrieve(userQuery);
         return retrievalService.toCitations(docs);
@@ -187,13 +201,15 @@ public class ChatService {
     }
     
     /**
-     * Build a complete prompt with context for OpenAI streaming service.
-     * This reuses the existing prompt building logic from streamAnswer.
+     * Builds a full prompt with retrieval context for the default model.
      */
     public String buildPromptWithContext(List<Message> history, String latestUserMessage) {
         return buildPromptWithContext(history, latestUserMessage, null);
     }
     
+    /**
+     * Builds a full prompt with retrieval context and an optional model hint.
+     */
     public String buildPromptWithContext(List<Message> history, String latestUserMessage, String modelHint) {
         // For GPT-5, use fewer RAG documents due to 8K token input limit
         List<Document> contextDocs;
@@ -220,11 +236,12 @@ public class ChatService {
             }
         }
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document d = contextDocs.get(docIndex);
             String rawUrl = String.valueOf(d.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
+                .append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -249,11 +266,12 @@ public class ChatService {
 
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document d = contextDocs.get(docIndex);
             String rawUrl = String.valueOf(d.getMetadata().get("url"));
             String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
+                .append("\n").append(d.getText());
         }
 
         List<Message> messages = new ArrayList<>();
@@ -264,13 +282,6 @@ public class ChatService {
         return buildPromptFromMessages(messages);
     }
     
-    /**
-     * Process response text with markdown rendering.
-     * This can be used to pre-render markdown on the server side.
-     * 
-     * @param text The raw text response from AI
-     * @return HTML-rendered markdown
-     */
     /**
      * Legacy markdown rendering path. Prefer {@link UnifiedMarkdownService}
      * integration where possible and avoid rendering on the hot path.
@@ -296,10 +307,6 @@ public class ChatService {
         }
     }
     
-    /**
-     * Stream answers with optional markdown processing.
-     * Each chunk can be processed through markdown if needed.
-     */
     /**
      * Legacy streaming with optional markdown render. Use OpenAIStreamingService instead.
      */

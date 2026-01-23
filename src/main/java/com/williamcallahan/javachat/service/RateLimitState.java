@@ -14,6 +14,7 @@ import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -36,9 +37,12 @@ public class RateLimitState {
     private Map<String, ProviderState> providerStates = new ConcurrentHashMap<>();
 
     // Prefer Spring Boot's auto-configured ObjectMapper (with modules) and fall back to a local one.
+    /**
+     * Creates persistent rate limit state storage using the provided ObjectMapper configuration when available.
+     */
     public RateLimitState(ObjectMapper objectMapper) {
         if (objectMapper != null) {
-            this.objectMapper = objectMapper;
+            this.objectMapper = objectMapper.copy();
         } else {
             ObjectMapper fallback = new ObjectMapper();
             // Register JavaTimeModule to handle Java time types
@@ -49,6 +53,9 @@ public class RateLimitState {
         }
     }
 
+    /**
+     * Loads persisted state and schedules periodic persistence to survive application restarts.
+     */
     @PostConstruct
     public void init() {
         loadState();
@@ -57,6 +64,9 @@ public class RateLimitState {
         log.info("RateLimitState initialized with persistent storage at: {}", STATE_FILE);
     }
 
+    /**
+     * Persists state and shuts down background tasks during application teardown.
+     */
     @PreDestroy
     public void shutdown() {
         // Be defensive during shutdown so failures here never take down the app with NoClassDefFoundError
@@ -97,12 +107,11 @@ public class RateLimitState {
             }
 
             state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
-            log.warn("Provider {} has {} consecutive failures. Extended backoff until: {}",
-                provider, state.consecutiveFailures, state.rateLimitedUntil);
+            log.warn("Provider has consecutive failures. Extended backoff.");
         }
 
         safeSaveState();
-        log.info("Provider {} rate limited until: {} (window: {})", provider, resetTime, rateLimitWindow);
+        log.info("Provider rate limited.");
     }
 
     /**
@@ -159,7 +168,7 @@ public class RateLimitState {
             return Duration.ofHours(1); // Default to 1 hour
         }
 
-        window = window.toLowerCase().trim();
+        window = window.toLowerCase(Locale.ROOT).trim();
 
         try {
             if (window.endsWith("d")) {
@@ -175,8 +184,8 @@ public class RateLimitState {
                 // Try to parse as hours by default
                 return Duration.ofHours(Long.parseLong(window));
             }
-        } catch (Exception e) {
-            log.warn("Failed to parse rate limit window '{}', using 1 hour default", window, e);
+        } catch (NumberFormatException e) {
+            log.warn("Failed to parse rate limit window, using 1 hour default");
             return Duration.ofHours(1);
         }
     }
@@ -186,21 +195,21 @@ public class RateLimitState {
         if (file.exists()) {
             try {
                 StateData data = objectMapper.readValue(file, StateData.class);
-                if (data != null && data.providers != null) {
-                    providerStates = new ConcurrentHashMap<>(data.providers);
+                if (data != null && data.getProviders() != null) {
+                    providerStates = new ConcurrentHashMap<>(data.getProviders());
                     log.info("Loaded rate limit state for {} providers", providerStates.size());
 
                     // Log current state
                     for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
                         if (!isAvailable(entry.getKey())) {
                             Duration remaining = getRemainingWaitTime(entry.getKey());
-                            log.warn("Provider {} is rate limited for {} more",
-                                entry.getKey(), formatDuration(remaining));
+                            log.warn("Provider is rate limited for {} more", formatDuration(remaining));
                         }
                     }
                 }
             } catch (IOException e) {
-                log.warn("Failed to load rate limit state, starting fresh", e);
+                log.warn("Failed to load rate limit state, starting fresh (exception type: {})",
+                    e.getClass().getSimpleName());
             }
         }
     }
@@ -210,20 +219,22 @@ public class RateLimitState {
             saveState();
         } catch (Throwable t) {
             // Avoid failing the app for persistence errors; log and continue
-            log.error("Failed to save rate limit state", t);
+            log.error("Failed to save rate limit state (exception type: {})",
+                t.getClass().getSimpleName());
         }
     }
 
     private void saveState() throws IOException {
         synchronized (saveLock) {
             File file = new File(STATE_FILE);
-            if (file.getParentFile() != null) {
-                file.getParentFile().mkdirs();
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                throw new IOException("Failed to create state directory: " + parent);
             }
 
             StateData data = new StateData();
-            data.providers = new ConcurrentHashMap<>(providerStates);
-            data.savedAt = Instant.now();
+            data.setProviders(new ConcurrentHashMap<>(providerStates));
+            data.setSavedAt(Instant.now());
 
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
         }
@@ -243,19 +254,89 @@ public class RateLimitState {
         }
     }
 
+    /**
+     * Defines the persisted JSON payload for rate limit state storage.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class StateData {
-        public Map<String, ProviderState> providers;
-        public Instant savedAt;
+        private Map<String, ProviderState> providers;
+        private Instant savedAt;
+
+        public Map<String, ProviderState> getProviders() {
+            return providers == null ? Map.of() : providers;
+        }
+
+        public void setProviders(Map<String, ProviderState> providers) {
+            this.providers = providers == null ? Map.of() : Map.copyOf(providers);
+        }
+
+        public Instant getSavedAt() {
+            return savedAt;
+        }
+
+        public void setSavedAt(Instant savedAt) {
+            this.savedAt = savedAt;
+        }
     }
 
+    /**
+     * Holds per-provider timestamps and counters used to compute backoff and availability.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderState {
-        public Instant rateLimitedUntil;
-        public Instant lastSuccess;
-        public Instant lastFailure;
-        public int consecutiveFailures;
-        public long totalSuccesses;
-        public long totalFailures;
+        private Instant rateLimitedUntil;
+        private Instant lastSuccess;
+        private Instant lastFailure;
+        private int consecutiveFailures;
+        private long totalSuccesses;
+        private long totalFailures;
+
+        public Instant getRateLimitedUntil() {
+            return rateLimitedUntil;
+        }
+
+        public void setRateLimitedUntil(Instant rateLimitedUntil) {
+            this.rateLimitedUntil = rateLimitedUntil;
+        }
+
+        public Instant getLastSuccess() {
+            return lastSuccess;
+        }
+
+        public void setLastSuccess(Instant lastSuccess) {
+            this.lastSuccess = lastSuccess;
+        }
+
+        public Instant getLastFailure() {
+            return lastFailure;
+        }
+
+        public void setLastFailure(Instant lastFailure) {
+            this.lastFailure = lastFailure;
+        }
+
+        public int getConsecutiveFailures() {
+            return consecutiveFailures;
+        }
+
+        public void setConsecutiveFailures(int consecutiveFailures) {
+            this.consecutiveFailures = consecutiveFailures;
+        }
+
+        public long getTotalSuccesses() {
+            return totalSuccesses;
+        }
+
+        public void setTotalSuccesses(long totalSuccesses) {
+            this.totalSuccesses = totalSuccesses;
+        }
+
+        public long getTotalFailures() {
+            return totalFailures;
+        }
+
+        public void setTotalFailures(long totalFailures) {
+            this.totalFailures = totalFailures;
+        }
     }
 }

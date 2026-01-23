@@ -18,7 +18,7 @@ public class RemoteEmbedding {
     private static final String API_KEY_PROP = "app.remote-embedding.api-key";
     private static final String DIM_KEY = "app.remote-embedding.dimensions";
     private static final String NULL_TEXT_FMT = "%s must not be null.";
-    private static final String DIM_POS_MSG = "Remote embedding dimensions must be greater than 0.";
+    private static final String POSITIVE_FMT = "%s must be greater than 0.";
 
     private String serverUrl = URL_DEF;
     private String model = MODEL_DEF;
@@ -39,7 +39,7 @@ public class RemoteEmbedding {
         requireNonNullText(MODEL_KEY, model);
         requireNonNullText(API_KEY_PROP, apiKey);
         if (dimensions < MIN_POSITIVE) {
-            throw new IllegalArgumentException(DIM_POS_MSG);
+            throw new IllegalArgumentException(String.format(Locale.ROOT, POSITIVE_FMT, DIM_KEY));
         }
     }
 

@@ -19,8 +19,9 @@ public class DocumentationConfig {
     private static final String PARSED_DIR_KEY = "app.docs.parsed-dir";
     private static final String INDEX_DIR_KEY = "app.docs.index-dir";
     private static final String NULL_TEXT_FMT = "%s must not be null.";
+    private static final String BLANK_TEXT_FMT = "%s must not be blank.";
     private static final String BLANK_ROOT_MSG = "Documentation root URL must not be blank.";
-    private static final String POSITIVE_MSG = "JDK version must be greater than 0.";
+    private static final String POSITIVE_FMT = "%s must be greater than 0.";
 
     private String rootUrl = ROOT_URL_DEF;
     private int jdkVersion = JDK_DEF;
@@ -43,10 +44,19 @@ public class DocumentationConfig {
         requireNonNullText(PARSED_DIR_KEY, parsedDir);
         requireNonNullText(INDEX_DIR_KEY, indexDir);
         if (jdkVersion < MIN_POSITIVE) {
-            throw new IllegalArgumentException(POSITIVE_MSG);
+            throw new IllegalArgumentException(String.format(Locale.ROOT, POSITIVE_FMT, JDK_KEY));
         }
         if (rootUrl.isBlank()) {
             throw new IllegalStateException(BLANK_ROOT_MSG);
+        }
+        if (snapshotDir.isBlank()) {
+            throw new IllegalStateException(String.format(Locale.ROOT, BLANK_TEXT_FMT, SNAP_DIR_KEY));
+        }
+        if (parsedDir.isBlank()) {
+            throw new IllegalStateException(String.format(Locale.ROOT, BLANK_TEXT_FMT, PARSED_DIR_KEY));
+        }
+        if (indexDir.isBlank()) {
+            throw new IllegalStateException(String.format(Locale.ROOT, BLANK_TEXT_FMT, INDEX_DIR_KEY));
         }
     }
 
