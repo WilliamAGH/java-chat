@@ -2,10 +2,13 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
+import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,17 +45,31 @@ public class RetrievalService {
     }
 
     public List<Document> retrieve(String query) {
+        // Extract version filter patterns if query mentions a specific Java version
+        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
+
+        // Boost query with version context for better semantic matching
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+
         // Initial vector search
         List<Document> docs;
         try {
-            int topK = Math.max(1, props.getRag().getSearchTopK());
+            // Fetch more candidates when version filtering is active
+            int baseTopK = Math.max(1, props.getRag().getSearchTopK());
+            int topK = versionFilter.isPresent() ? baseTopK * 2 : baseTopK;
+
             log.info("=== RETRIEVAL DEBUG ===");
             log.info("Query: '{}'", query);
+            if (versionFilter.isPresent()) {
+                log.info("Version detected: Java {}, using boosted query and expanded topK",
+                    versionFilter.get().versionNumber());
+            }
+            log.info("Boosted query: '{}'", boostedQuery);
             log.info("TopK requested: {}", topK);
             log.info("VectorStore class: {}", vectorStore.getClass().getName());
 
             SearchRequest searchRequest = SearchRequest.builder()
-                .query(query)
+                .query(boostedQuery)
                 .topK(topK)
                 .build();
 
@@ -65,6 +82,26 @@ public class RetrievalService {
             docs = vectorStore.similaritySearch(searchRequest);
 
             log.info("VectorStore returned {} documents", docs.size());
+
+            // Apply version-based post-filtering if version was detected
+            if (versionFilter.isPresent()) {
+                VersionFilterPatterns filter = versionFilter.get();
+                List<Document> versionMatchedDocs = docs.stream()
+                    .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
+                    .collect(Collectors.toList());
+
+                log.info("Version filter matched {} of {} documents for Java {}",
+                    versionMatchedDocs.size(), docs.size(), filter.versionNumber());
+
+                // Use version-matched docs if we have enough, otherwise fall back to all docs
+                if (versionMatchedDocs.size() >= 2) {
+                    docs = versionMatchedDocs;
+                } else {
+                    log.info("Insufficient version-specific docs ({}), using all {} candidates",
+                        versionMatchedDocs.size(), docs.size());
+                }
+            }
+
             if (!docs.isEmpty()) {
                 log.info("First doc metadata: {}", docs.get(0).getMetadata());
                 log.info(
@@ -119,13 +156,22 @@ public class RetrievalService {
         int maxDocs,
         int maxTokensPerDoc
     ) {
+        // Extract version filter patterns if query mentions a specific Java version
+        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
+
+        // Boost query with version context for better semantic matching
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+
         // Initial vector search with custom topK
         List<Document> docs;
         try {
-            int topK = Math.max(
+            int baseTopK = Math.max(
                 1,
                 Math.max(maxDocs, props.getRag().getSearchTopK())
             );
+            // Fetch more candidates when version filtering is active
+            int topK = versionFilter.isPresent() ? baseTopK * 2 : baseTopK;
+
             log.info("=== LIMITED RETRIEVAL DEBUG ===");
             log.info(
                 "Query: '{}', MaxDocs: {}, MaxTokensPerDoc: {}",
@@ -133,10 +179,15 @@ public class RetrievalService {
                 maxDocs,
                 maxTokensPerDoc
             );
+            if (versionFilter.isPresent()) {
+                log.info("Version detected: Java {}, using boosted query and expanded topK",
+                    versionFilter.get().versionNumber());
+            }
+            log.info("Boosted query: '{}'", boostedQuery);
             log.info("TopK requested: {}", topK);
 
             SearchRequest searchRequest = SearchRequest.builder()
-                .query(query)
+                .query(boostedQuery)
                 .topK(topK)
                 .build();
 
@@ -145,6 +196,25 @@ public class RetrievalService {
                 "VectorStore returned {} documents for limited retrieval",
                 docs.size()
             );
+
+            // Apply version-based post-filtering if version was detected
+            if (versionFilter.isPresent()) {
+                VersionFilterPatterns filter = versionFilter.get();
+                List<Document> versionMatchedDocs = docs.stream()
+                    .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
+                    .collect(Collectors.toList());
+
+                log.info("Version filter matched {} of {} documents for Java {}",
+                    versionMatchedDocs.size(), docs.size(), filter.versionNumber());
+
+                // Use version-matched docs if we have enough, otherwise fall back to all docs
+                if (versionMatchedDocs.size() >= 2) {
+                    docs = versionMatchedDocs;
+                } else {
+                    log.info("Insufficient version-specific docs ({}), using all {} candidates",
+                        versionMatchedDocs.size(), docs.size());
+                }
+            }
         } catch (Exception e) {
             String errorType = determineErrorType(e);
             log.warn(
@@ -278,6 +348,7 @@ public class RetrievalService {
 
     /**
      * Handle vector search failure by logging context and falling back to local keyword search.
+     * Documents returned include metadata indicating they came from fallback search.
      */
     private List<Document> handleVectorSearchFailure(
         Exception e,
@@ -293,10 +364,25 @@ public class RetrievalService {
         logUserFriendlyErrorContext(e, errorType);
 
         // Use searchTopK (not searchReturnK) to match the primary path's candidate pool size
-        var results = localSearch.search(query, props.getRag().getSearchTopK());
-        return results
+        LocalSearchService.SearchOutcome outcome = localSearch.search(query, props.getRag().getSearchTopK());
+
+        if (outcome.isFailed()) {
+            log.error("Local keyword search also failed: {} - returning empty results", outcome.errorMessage());
+            return List.of();
+        }
+
+        log.info("Local keyword search returned {} results (fallback from: {})",
+            outcome.results().size(), errorType);
+
+        return outcome.results()
             .stream()
-            .map(r -> documentFactory.createLocalDocument(r.text, r.url))
+            .map(r -> {
+                Document doc = documentFactory.createLocalDocument(r.text, r.url);
+                // Mark document as coming from fallback search
+                doc.getMetadata().put("retrievalSource", "keyword_fallback");
+                doc.getMetadata().put("fallbackReason", errorType);
+                return doc;
+            })
             .limit(props.getRag().getSearchReturnK())
             .collect(Collectors.toList());
     }
