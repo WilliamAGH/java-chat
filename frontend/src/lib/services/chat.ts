@@ -86,8 +86,8 @@ export async function streamChat(
         }
 
         if (line.startsWith('data:')) {
-          // Preserve whitespace exactly as sent - important for word separation
-          const data = line.slice(5)
+          // Per SSE spec, strip optional space after "data:" prefix
+          const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
 
           // Skip [DONE] token
           if (data === '[DONE]') {
