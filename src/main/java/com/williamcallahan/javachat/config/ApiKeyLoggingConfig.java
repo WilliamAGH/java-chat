@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import jakarta.annotation.PostConstruct;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,7 +58,10 @@ public class ApiKeyLoggingConfig {
      */
     @PostConstruct
     public void logApiKeyStatus() {
-        final boolean devProfile = DEV_PROFILE.equalsIgnoreCase(activeProfile);
+        String normalizedProfile = activeProfile == null
+            ? ""
+            : activeProfile.trim().toLowerCase(Locale.ROOT);
+        final boolean devProfile = DEV_PROFILE.equals(normalizedProfile);
         final boolean githubModelsEnabled = baseUrl != null && baseUrl.contains(GITHUB_MODELS_HOST);
 
         if (LOGGER.isInfoEnabled()) {

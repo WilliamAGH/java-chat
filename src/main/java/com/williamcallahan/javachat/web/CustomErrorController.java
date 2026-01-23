@@ -29,6 +29,8 @@ public class CustomErrorController implements ErrorController {
     
     /**
      * Creates the error controller backed by the shared exception response builder.
+     *
+     * @param exceptionBuilder standardized error response builder
      */
     public CustomErrorController(ExceptionResponseBuilder exceptionBuilder) {
         this.exceptionBuilder = exceptionBuilder;
@@ -58,17 +60,14 @@ public class CustomErrorController implements ErrorController {
         String errorMessage = message != null ? message.toString() : "An unexpected error occurred";
         String uri = requestUri != null ? requestUri.toString() : request.getRequestURI();
         
-        // Log the error for monitoring
-        log.error("Error {} occurred for URI {}: {}", statusCode, uri, errorMessage);
-        if (exception instanceof Exception) {
-            log.error("Exception details:", (Exception) exception);
+        // Log the error for monitoring without echoing request-derived strings
+        log.error("Error {} occurred while handling request", statusCode);
+        if (exception instanceof Exception exceptionInstance) {
+            log.error("Exception type: {}", exceptionInstance.getClass().getSimpleName());
         }
         
         // Determine if this is an API request or a page request
-        String acceptHeader = request.getHeader("Accept");
-        boolean isApiRequest = acceptHeader != null && 
-            (acceptHeader.contains("application/json") || 
-             uri.startsWith("/api/"));
+        boolean isApiRequest = uri.startsWith("/api/");
         
         if (isApiRequest) {
             // Return JSON error response for API requests
@@ -121,10 +120,8 @@ public class CustomErrorController implements ErrorController {
             case 502:
             case 503:
             default:
-                // Redirect to general error page with status and message as query parameters
-                String errorUrl = String.format("/error.html?status=%d&message=%s", 
-                    statusCode, 
-                    java.net.URLEncoder.encode(message, java.nio.charset.StandardCharsets.UTF_8));
+                // Redirect to general error page with status as a query parameter
+                String errorUrl = String.format("/error.html?status=%d", statusCode);
                 modelAndView.setViewName("forward:" + errorUrl);
                 break;
         }

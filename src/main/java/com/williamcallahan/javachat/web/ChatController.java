@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -25,16 +26,20 @@ import org.springframework.http.codec.ServerSentEvent;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Exposes chat endpoints for streaming responses, session history management, and diagnostics.
  */
 @RestController
 @RequestMapping("/api/chat")
+@PermitAll
 public class ChatController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
+    private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
     
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -52,6 +57,13 @@ public class ChatController extends BaseController {
 
 	    /**
 	     * Creates the chat controller wired to chat, retrieval, and markdown services.
+	     *
+	     * @param chatService chat orchestration service
+	     * @param chatMemory conversation memory service
+	     * @param unifiedMarkdownService unified markdown renderer
+	     * @param openAIStreamingService streaming LLM client
+	     * @param retrievalService retrieval service for diagnostics
+	     * @param exceptionBuilder shared exception response builder
 	     */
 	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
 	                         UnifiedMarkdownService unifiedMarkdownService,
@@ -86,17 +98,17 @@ public class ChatController extends BaseController {
         // Critical proxy headers for streaming
         response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
         response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
-        String requestId = "REQ-" + System.currentTimeMillis() + "-" + Thread.currentThread().threadId();
+        long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
         String sessionId = request.resolvedSessionId();
         String userQuery = request.userQuery();
 
-        PIPELINE_LOG.info("[{}] ============================================", requestId);
-        PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestId);
-        PIPELINE_LOG.info("[{}] ============================================", requestId);
+        PIPELINE_LOG.info("[{}] ============================================", requestToken);
+        PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
+        PIPELINE_LOG.info("[{}] ============================================", requestToken);
         
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
-        PIPELINE_LOG.info("[{}] Chat history loaded", requestId);
+        PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
         
         chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
@@ -108,7 +120,7 @@ public class ChatController extends BaseController {
         
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
-            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestId);
+            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestToken);
             
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             // Use .share() to hot-share the stream and prevent double API subscription
@@ -136,11 +148,11 @@ public class ChatController extends BaseController {
                         ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
                         String processed = processedResult.html();
                         chatMemory.addAssistant(sessionId, processed);
-                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestId);
+                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                     })
                     .onErrorResume(error -> {
                         // Log and send error event to client - errors must be communicated, not silently dropped
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestId);
+                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
                         return Flux.just(ServerSentEvent.<String>builder()
                             .event("error")
                             .data("Streaming error: " + error.getClass().getSimpleName())
@@ -149,7 +161,7 @@ public class ChatController extends BaseController {
 
         } else {
             // Service unavailable - send structured error event so client can handle appropriately
-            PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestId);
+            PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
             return Flux.just(ServerSentEvent.<String>builder()
                 .event("error")
                 .data("Service temporarily unavailable. The streaming service is not ready.")
@@ -195,7 +207,10 @@ public class ChatController extends BaseController {
         var turns = chatMemory.getTurns(sessionId);
         for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
             var turn = turns.get(turnIndex);
-            if ("assistant".equalsIgnoreCase(turn.getRole())) {
+            String normalizedRole = turn.getRole() == null
+                ? ""
+                : turn.getRole().trim().toLowerCase(Locale.ROOT);
+            if ("assistant".equals(normalizedRole)) {
                 return ResponseEntity.ok(turn.getText());
             }
         }
@@ -219,7 +234,10 @@ public class ChatController extends BaseController {
         }
         StringBuilder formatted = new StringBuilder();
         for (var turn : turns) {
-            String role = "user".equalsIgnoreCase(turn.getRole()) ? "User" : "Assistant";
+            String normalizedRole = turn.getRole() == null
+                ? ""
+                : turn.getRole().trim().toLowerCase(Locale.ROOT);
+            String role = "user".equals(normalizedRole) ? "User" : "Assistant";
             formatted.append("### ").append(role).append("\n\n").append(turn.getText()).append("\n\n");
         }
         return ResponseEntity.ok(formatted.toString());

@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Locale;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -34,10 +35,14 @@ public class SiteUrlResolver {
      * @return base URL like {@code https://example.com}
      */
     public String resolvePublicBaseUrl(HttpServletRequest request) {
-        Optional<String> forwardedProto = firstHeaderToken(request, HDR_FORWARDED_PROTO);
+        Optional<String> forwardedProto = firstHeaderToken(request, HDR_FORWARDED_PROTO)
+            .flatMap(SiteUrlResolver::normalizeScheme);
         String scheme = forwardedProto.orElseGet(request::getScheme);
-        String hostHeader = firstHeaderToken(request, HDR_FORWARDED_HOST).orElseGet(request::getServerName);
-        Optional<Integer> forwardedPort = firstHeaderToken(request, HDR_FORWARDED_PORT).flatMap(SiteUrlResolver::parsePort);
+        String hostHeader = firstHeaderToken(request, HDR_FORWARDED_HOST)
+            .flatMap(SiteUrlResolver::sanitizeHost)
+            .orElseGet(request::getServerName);
+        Optional<Integer> forwardedPort = firstHeaderToken(request, HDR_FORWARDED_PORT)
+            .flatMap(SiteUrlResolver::parsePort);
 
         // If X-Forwarded-Host already includes a port (common in some proxies), keep it as-is.
         // This is intentionally conservative to avoid breaking IPv6 bracketed hosts.
@@ -61,12 +66,12 @@ public class SiteUrlResolver {
     }
 
     private static Optional<String> firstHeaderToken(HttpServletRequest request, String headerName) {
-        String raw = request.getHeader(headerName);
-        if (raw == null) {
+        String rawHeader = request.getHeader(headerName);
+        if (rawHeader == null) {
             return Optional.empty();
         }
 
-        String trimmed = raw.trim();
+        String trimmed = rawHeader.trim();
         if (trimmed.isEmpty()) {
             return Optional.empty();
         }
@@ -74,6 +79,40 @@ public class SiteUrlResolver {
         int commaIndex = trimmed.indexOf(',');
         String token = commaIndex >= 0 ? trimmed.substring(0, commaIndex).trim() : trimmed;
         return token.isEmpty() ? Optional.empty() : Optional.of(token);
+    }
+
+    private static Optional<String> normalizeScheme(String scheme) {
+        if (scheme == null) {
+            return Optional.empty();
+        }
+        String normalizedScheme = scheme.trim().toLowerCase(Locale.ROOT);
+        if ("http".equals(normalizedScheme) || SCHEME_HTTPS.equals(normalizedScheme)) {
+            return Optional.of(normalizedScheme);
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> sanitizeHost(String host) {
+        if (host == null) {
+            return Optional.empty();
+        }
+        String trimmedHost = host.trim();
+        if (trimmedHost.isEmpty()) {
+            return Optional.empty();
+        }
+        for (int charIndex = 0; charIndex < trimmedHost.length(); charIndex++) {
+            char currentChar = trimmedHost.charAt(charIndex);
+            boolean allowed = Character.isLetterOrDigit(currentChar)
+                || currentChar == '.'
+                || currentChar == '-'
+                || currentChar == ':'
+                || currentChar == '['
+                || currentChar == ']';
+            if (!allowed) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(trimmedHost);
     }
 
     private static Optional<Integer> parsePort(String rawPort) {
@@ -89,10 +128,10 @@ public class SiteUrlResolver {
     }
 
     private static boolean isDefaultPort(String scheme, int port) {
-        if (SCHEME_HTTPS.equalsIgnoreCase(scheme)) {
+        String normalizedScheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
+        if (SCHEME_HTTPS.equals(normalizedScheme)) {
             return port == DEFAULT_HTTPS_PORT;
         }
         return port == DEFAULT_HTTP_PORT;
     }
 }
-
