@@ -1,0 +1,225 @@
+<script lang="ts">
+  import { tick } from 'svelte'
+  import MessageBubble from './MessageBubble.svelte'
+  import ChatInput from './ChatInput.svelte'
+  import WelcomeScreen from './WelcomeScreen.svelte'
+  import { streamChat, type ChatMessage } from '../services/chat'
+
+  let messages = $state<ChatMessage[]>([])
+  let isStreaming = $state(false)
+  let currentStreamingContent = $state('')
+  let messagesContainer: HTMLElement | null = $state(null)
+  let shouldAutoScroll = $state(true)
+
+  const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
+
+  function checkAutoScroll() {
+    if (!messagesContainer) return
+    const threshold = 100
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainer
+    shouldAutoScroll = scrollHeight - scrollTop - clientHeight < threshold
+  }
+
+  async function scrollToBottom() {
+    await tick()
+    if (messagesContainer && shouldAutoScroll) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth'
+      })
+    }
+  }
+
+  async function handleSend(message: string) {
+    if (!message.trim() || isStreaming) return
+
+    // Add user message
+    messages = [...messages, {
+      role: 'user',
+      content: message,
+      timestamp: Date.now()
+    }]
+
+    shouldAutoScroll = true
+    await scrollToBottom()
+
+    // Start streaming
+    isStreaming = true
+    currentStreamingContent = ''
+
+    try {
+      await streamChat(
+        sessionId,
+        message,
+        (chunk) => {
+          currentStreamingContent += chunk
+          scrollToBottom()
+        }
+      )
+
+      // Add completed assistant message
+      messages = [...messages, {
+        role: 'assistant',
+        content: currentStreamingContent,
+        timestamp: Date.now()
+      }]
+    } catch (error) {
+      console.error('Stream error:', error)
+      messages = [...messages, {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.',
+        timestamp: Date.now(),
+        isError: true
+      }]
+    } finally {
+      isStreaming = false
+      currentStreamingContent = ''
+      await scrollToBottom()
+    }
+  }
+
+  function handleSuggestionClick(suggestion: string) {
+    handleSend(suggestion)
+  }
+</script>
+
+<div class="chat-view">
+  <div
+    class="messages-container"
+    bind:this={messagesContainer}
+    onscroll={checkAutoScroll}
+  >
+    <div class="messages-inner">
+      {#if messages.length === 0 && !isStreaming}
+        <WelcomeScreen onSuggestionClick={handleSuggestionClick} />
+      {:else}
+        <div class="messages-list">
+          {#each messages as message, i (message.timestamp)}
+            <MessageBubble {message} index={i} />
+          {/each}
+
+          {#if isStreaming && currentStreamingContent}
+            <MessageBubble
+              message={{
+                role: 'assistant',
+                content: currentStreamingContent,
+                timestamp: Date.now()
+              }}
+              index={messages.length}
+              isStreaming={true}
+            />
+          {:else if isStreaming}
+            <div class="loading-indicator">
+              <div class="loading-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <ChatInput onSend={handleSend} disabled={isStreaming} />
+</div>
+
+<style>
+  .chat-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .messages-container {
+    flex: 1;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+  }
+
+  .messages-inner {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: var(--space-6);
+  }
+
+  .messages-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  /* Loading indicator */
+  .loading-indicator {
+    display: flex;
+    justify-content: flex-start;
+    padding-left: var(--space-4);
+  }
+
+  .loading-dots {
+    display: flex;
+    gap: 6px;
+    padding: var(--space-4);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    background: var(--color-text-muted);
+    border-radius: 50%;
+    animation: bounce 1.4s infinite ease-in-out both;
+  }
+
+  .dot:nth-child(1) { animation-delay: -0.32s; }
+  .dot:nth-child(2) { animation-delay: -0.16s; }
+  .dot:nth-child(3) { animation-delay: 0s; }
+
+  @keyframes bounce {
+    0%, 80%, 100% {
+      transform: scale(0.8);
+      opacity: 0.5;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Tablet */
+  @media (max-width: 768px) {
+    .messages-inner {
+      padding: var(--space-4);
+    }
+  }
+
+  /* Mobile */
+  @media (max-width: 640px) {
+    .messages-inner {
+      padding: var(--space-3);
+    }
+
+    .messages-list {
+      gap: var(--space-4);
+    }
+
+    .loading-dots {
+      padding: var(--space-3);
+    }
+  }
+
+  /* Small phones */
+  @media (max-width: 380px) {
+    .messages-inner {
+      padding: var(--space-2);
+    }
+
+    .messages-list {
+      gap: var(--space-3);
+    }
+  }
+</style>
