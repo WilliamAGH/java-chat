@@ -163,8 +163,8 @@ public class UnifiedMarkdownService {
                 processingTime
             );
             
-            // Cache the result
-            processCache.put(markdown, result);
+            // Cache the result using the original input key for consistency
+            processCache.put(cacheKey, result);
             
             logger.debug("Processed markdown in {}ms: {} citations, {} enrichments", 
                         processingTime, citations.size(), enrichments.size());
