@@ -8,11 +8,19 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class JavaChatApplication {
 
-    public static void main(String[] args) {
+    /**
+     * Entry point for the Java Chat Spring Boot application.
+     *
+     * @param args command-line arguments
+     */
+    public static void main(final String[] args) {
         // Disable Netty native OpenSSL (tcnative) to avoid Alpine musl segfaults
         System.setProperty("io.netty.handler.ssl.noOpenSsl", "true");
         System.setProperty("io.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl", "true");
         SpringApplication.run(JavaChatApplication.class, args);
+    }
+
+    private JavaChatApplication() {
     }
 
 }
