@@ -345,7 +345,7 @@ Modes & objectives:
 ### Chat Model
 - **OpenAI Java SDK (standardized)**: All streaming and non-streaming chat uses `OpenAIStreamingService`
   - ✅ Official SDK streaming, no manual SSE parsing
-  - ✅ Prompt truncation for GPT‑5 (8K input) handled centrally
+  - ✅ Prompt truncation for GPT‑5 context window (~400K tokens, 128K max output) handled centrally
   - ✅ Clean, reliable streaming and consolidated error handling
 
 ### Legacy Deletions
