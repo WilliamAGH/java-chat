@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,22 +108,33 @@ public class DocumentProcessor {
     }
 
     private ProcessingOutcome processDocumentationSet(final String docsDirectory, final DocumentationSet docSet) {
-        final Path docsPath = Paths.get(docsDirectory).resolve(docSet.relativePath());
+        final Path basePath = Paths.get(docsDirectory).toAbsolutePath().normalize();
+        final Path docsPath = basePath.resolve(docSet.relativePath()).normalize();
+
+        if (!docsPath.startsWith(basePath)) {
+            LOGGER.warn("Skipping docSetId={} (path escaped base directory)",
+                Integer.toHexString(Objects.hashCode(docSet.displayName())));
+            return new ProcessingOutcome.Skipped(docSet.displayName(), "invalid path");
+        }
 
         if (!Files.exists(docsPath) || !Files.isDirectory(docsPath)) {
-            LOGGER.debug("Skipping {} (directory not found: {})", docSet.displayName(), docsPath);
+            LOGGER.debug("Skipping docSetId={} (directory not found, pathId={})",
+                Integer.toHexString(Objects.hashCode(docSet.displayName())),
+                Integer.toHexString(Objects.hashCode(docsPath)));
             return new ProcessingOutcome.Skipped(docSet.displayName(), "directory not found");
         }
 
         final long fileCount = countEligibleFiles(docsPath);
         if (fileCount <= 0) {
-            LOGGER.debug("Skipping {} (no eligible files in {})", docSet.displayName(), docsPath);
+            LOGGER.debug("Skipping docSetId={} (no eligible files, pathId={})",
+                Integer.toHexString(Objects.hashCode(docSet.displayName())),
+                Integer.toHexString(Objects.hashCode(docsPath)));
             return new ProcessingOutcome.Skipped(docSet.displayName(), "no eligible files");
         }
 
         LOGGER.info("-----------------------------------------------");
-        LOGGER.info("Processing: {}", docSet.displayName());
-        LOGGER.info("Path: {}", docsPath);
+        LOGGER.info("Processing docSetId={}", Integer.toHexString(Objects.hashCode(docSet.displayName())));
+        LOGGER.info("Path id: {}", Integer.toHexString(Objects.hashCode(docsPath)));
         LOGGER.info("Files to process: {}", fileCount);
 
         final long startMillis = System.currentTimeMillis();
@@ -138,9 +150,11 @@ public class DocumentProcessor {
             return new ProcessingOutcome.Success(processed, duplicates);
 
         } catch (IOException ioException) {
-            LOGGER.error("Failed to process {}: {}", docSet.displayName(), ioException.getMessage());
+            LOGGER.error("Failed to process docSetId={} (exceptionType={})",
+                Integer.toHexString(Objects.hashCode(docSet.displayName())),
+                ioException.getClass().getName());
             LOGGER.debug("Stack trace:", ioException);
-            return new ProcessingOutcome.Failed(docSet.displayName(), ioException);
+            return new ProcessingOutcome.Failed(docSet.displayName(), ioException.getMessage());
         }
     }
 
@@ -159,7 +173,11 @@ public class DocumentProcessor {
     }
 
     private static boolean isEligibleFile(final Path filePath) {
-        final String fileName = filePath.getFileName().toString().toLowerCase(Locale.ROOT);
+        final Path fileNamePath = filePath.getFileName();
+        if (fileNamePath == null) {
+            return false;
+        }
+        final String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
         return fileName.endsWith(".html") || fileName.endsWith(".htm") || fileName.endsWith(".pdf");
     }
 
@@ -167,8 +185,10 @@ public class DocumentProcessor {
         LOGGER.info("===============================================");
         LOGGER.info("Starting Document Processing with Deduplication");
         LOGGER.info("===============================================");
-        LOGGER.info("Documentation directory: {}", config.docsDirectory());
-        LOGGER.info("Qdrant Collection: {}", config.qdrantCollection());
+        LOGGER.info("Documentation directory id: {}",
+            Integer.toHexString(Objects.hashCode(config.docsDirectory())));
+        LOGGER.info("Qdrant collection id: {}",
+            Integer.toHexString(Objects.hashCode(config.qdrantCollection())));
         LOGGER.info("Deduplication: ENABLED (using content hashes)");
         LOGGER.info("");
     }
@@ -199,10 +219,11 @@ public class DocumentProcessor {
         LOGGER.info("Each document chunk is identified by a SHA-256 hash of its content.");
         LOGGER.info("");
         LOGGER.info("Next steps:");
-        LOGGER.info("1. Verify in Qdrant Dashboard: http://{}:{}/dashboard",
-            config.qdrantHost(), config.qdrantPort());
-        LOGGER.info("2. Test retrieval: curl http://localhost:{}/api/search?query='Java streams'",
-            config.appPort());
+        LOGGER.info("1. Verify in Qdrant Dashboard (hostId={}, port={})",
+            Integer.toHexString(Objects.hashCode(config.qdrantHost())),
+            Integer.toHexString(Objects.hashCode(config.qdrantPort())));
+        LOGGER.info("2. Test retrieval (appPort={})",
+            Integer.toHexString(Objects.hashCode(config.appPort())));
         LOGGER.info("3. Start chat: mvn spring-boot:run");
         LOGGER.info("===============================================");
     }
@@ -286,6 +307,11 @@ public class DocumentProcessor {
      * Thrown when document processing completes but one or more documentation sets failed.
      */
     public static class DocumentProcessingException extends RuntimeException {
+        /**
+         * Creates a processing exception with a descriptive message.
+         *
+         * @param message explanation of the processing failure
+         */
         public DocumentProcessingException(final String message) {
             super(message);
         }
