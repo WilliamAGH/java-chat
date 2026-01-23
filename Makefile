@@ -23,7 +23,7 @@ RUN_ARGS := \
   --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
 
-.PHONY: help clean build test run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: help clean build test lint run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ build: ## Build the project (skip tests)
 test: ## Run tests (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
 	  $(MVNW) test
+
+lint: ## Run static analysis (SpotBugs + PMD)
+	$(MVNW) compile spotbugs:check pmd:check
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
