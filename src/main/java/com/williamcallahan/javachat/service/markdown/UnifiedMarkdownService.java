@@ -641,11 +641,11 @@ public class UnifiedMarkdownService {
                                 break;
                             }
                             MarkdownEnrichment enrichment = switch (type) {
-                                case "hint" -> Hint.create(content, absolutePosition + i);
-                                case "warning" -> Warning.create(content, absolutePosition + i);
-                                case "background" -> Background.create(content, absolutePosition + i);
-                                case "example" -> Example.create(content, absolutePosition + i);
-                                case "reminder" -> Reminder.create(content, absolutePosition + i);
+                                case "hint" -> Hint.create(content, absolutePosition);
+                                case "warning" -> Warning.create(content, absolutePosition);
+                                case "background" -> Background.create(content, absolutePosition);
+                                case "example" -> Example.create(content, absolutePosition);
+                                case "reminder" -> Reminder.create(content, absolutePosition);
                                 default -> null;
                             };
                             if (enrichment != null) {
