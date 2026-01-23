@@ -165,6 +165,8 @@
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
     margin: 0;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   /* Assistant content - prose styles */
@@ -172,6 +174,8 @@
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
     color: var(--color-text-primary);
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   .assistant-content :global(p) {
