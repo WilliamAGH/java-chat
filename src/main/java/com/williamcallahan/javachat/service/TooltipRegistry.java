@@ -26,9 +26,26 @@ public class TooltipRegistry {
             this.link = link;
         }
 
-        public String getTerm() { return term; }
-        public String getDefinition() { return definition; }
-        public String getLink() { return link; }
+        /**
+         * Returns the tooltip term displayed in the UI.
+         */
+        public String getTerm() {
+            return term;
+        }
+
+        /**
+         * Returns the short tooltip definition.
+         */
+        public String getDefinition() {
+            return definition;
+        }
+
+        /**
+         * Returns the reference link for the term, when available.
+         */
+        public String getLink() {
+            return link;
+        }
     }
 
     private final Map<String, TooltipDefinition> glossary = new LinkedHashMap<>();

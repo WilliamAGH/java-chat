@@ -48,12 +48,18 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
 
 	/**
 	 * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
+	 *
+	 * @param baseUrl base URL for the embedding API
+	 * @param apiKey API key for the embedding provider
+	 * @param modelName model identifier for embeddings
+	 * @param dimensionsHint expected embedding dimensions (used as a hint)
+	 * @param restTemplateBuilder RestTemplate builder for HTTP calls
 	 */
 	public OpenAiCompatibleEmbeddingModel(String baseUrl,
-	                                          String apiKey,
-	                                          String modelName,
-	                                          int dimensionsHint,
-	                                          RestTemplateBuilder restTemplateBuilder) {
+	                                      String apiKey,
+	                                      String modelName,
+	                                      int dimensionsHint,
+	                                      RestTemplateBuilder restTemplateBuilder) {
         this.baseUrl = baseUrl != null && baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.modelName = modelName;
@@ -132,7 +138,8 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
             } catch (EmbeddingApiResponseException exception) {
                 throw exception;
             } catch (Exception exception) {
-                log.warn("[EMBEDDING] Remote embedding call failed: {}", exception.getMessage());
+                log.warn("[EMBEDDING] Remote embedding call failed (exception type: {})",
+                    exception.getClass().getSimpleName());
                 throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
             }
         }

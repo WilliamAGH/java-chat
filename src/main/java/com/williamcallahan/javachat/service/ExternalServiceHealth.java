@@ -23,130 +23,141 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class ExternalServiceHealth {
     private static final Logger log = LoggerFactory.getLogger(ExternalServiceHealth.class);
-    
+
+    /** Known external service identifiers for type-safe health checks. */
+    public static final String SERVICE_QDRANT = "qdrant";
+
     private final WebClient webClient;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
-    
+
     @Value("${QDRANT_HOST:localhost}")
     private String qdrantHost;
-    
+
     @Value("${QDRANT_PORT:6334}")
     private int qdrantPort;
-    
+
     @Value("${QDRANT_SSL:false}")
     private boolean qdrantSsl;
-    
+
     @Value("${QDRANT_API_KEY:}")
     private String qdrantApiKey;
-    
+
     @Value("${QDRANT_COLLECTION:java-chat}")
     private String qdrantCollection;
-    
+
     // Health check intervals
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
     private static final Duration HEALTHY_CHECK_INTERVAL = Duration.ofHours(1);
-    
+
     /**
      * Creates the health monitor with a WebClient for outbound checks.
+     *
+     * @param webClientBuilder WebClient builder for outbound checks
      */
     public ExternalServiceHealth(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
     }
-    
+
     /**
      * Seeds known services and performs the initial health checks.
      */
     @PostConstruct
     public void init() {
         // Initialize service statuses
-        serviceStatuses.put("qdrant", new ServiceStatus("qdrant"));
-        
+        serviceStatuses.put(SERVICE_QDRANT, new ServiceStatus(SERVICE_QDRANT));
+
         // Perform initial health checks
         checkQdrantHealth();
-        
+
         log.info("ExternalServiceHealth initialized, monitoring {} services", serviceStatuses.size());
     }
-    
+
     /**
-     * Check if a service is currently healthy and available for use
+     * Checks whether a service is currently healthy and available for use.
+     *
+     * @param serviceName logical service name (for example, {@link #SERVICE_QDRANT})
+     * @return true when the service is healthy or unknown, false when in backoff
      */
     public boolean isHealthy(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status == null) {
             return true; // Unknown services are assumed healthy
         }
-        
+
         // If the service is healthy, return true
         if (status.isHealthy.get()) {
             return true;
         }
-        
+
         // If unhealthy, check if we should retry based on backoff
         Instant nextCheck = status.lastCheck.plus(status.currentBackoff);
         if (Instant.now().isAfter(nextCheck)) {
             // Time to retry - trigger async health check
-            if ("qdrant".equals(serviceName)) {
+            if (SERVICE_QDRANT.equals(serviceName)) {
                 checkQdrantHealthAsync();
             }
         }
-        
+
         return false;
     }
-    
+
     /**
-     * Get detailed status for a service
+     * Returns detailed status information for a service.
+     *
+     * @param serviceName logical service name
+     * @return service status details for UI/diagnostics
      */
     public ServiceInfo getServiceInfo(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status == null) {
             return new ServiceInfo(serviceName, true, "Unknown service", null);
         }
-        
+
         String message;
         Duration timeUntilNextCheck = null;
-        
+
         if (status.isHealthy.get()) {
-            message = String.format("Healthy (checked %s ago)", 
+            message = String.format("Healthy (checked %s ago)",
                 formatDuration(Duration.between(status.lastCheck, Instant.now())));
         } else {
-            timeUntilNextCheck = Duration.between(Instant.now(), 
+            timeUntilNextCheck = Duration.between(Instant.now(),
                 status.lastCheck.plus(status.currentBackoff));
-            
+
             if (timeUntilNextCheck.isNegative()) {
                 message = "Unhealthy (checking now...)";
                 timeUntilNextCheck = Duration.ZERO;
             } else {
-                message = String.format("Unhealthy (failed %d times, next check in %s)", 
+                message = String.format("Unhealthy (failed %d times, next check in %s)",
                     status.consecutiveFailures.get(), formatDuration(timeUntilNextCheck));
             }
         }
-        
+
         return new ServiceInfo(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
     }
-    
+
     /**
-     * Scheduled health check for Qdrant (runs every hour for healthy services)
+     * Scheduled health check for Qdrant (runs every hour for healthy services).
      */
     @Scheduled(fixedDelay = 3600000) // 1 hour
     public void scheduledQdrantHealthCheck() {
-        ServiceStatus status = serviceStatuses.get("qdrant");
+        ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status != null && status.isHealthy.get()) {
             checkQdrantHealth();
         }
     }
-    
+
     private void checkQdrantHealthAsync() {
         checkQdrantHealth();
     }
-    
+
     private void checkQdrantHealth() {
-        ServiceStatus status = serviceStatuses.get("qdrant");
+        ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
-        
+
         String protocol = qdrantSsl ? "https" : "http";
         String healthUrl;
-        
+
         if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
             // For Qdrant Cloud, check collections endpoint instead of /health (which returns 403)
             healthUrl = String.format("%s://%s/collections", protocol, qdrantHost);
@@ -155,63 +166,71 @@ public class ExternalServiceHealth {
             int restPort = (qdrantPort == 6334) ? 6333 : qdrantPort; // Convert gRPC port to REST port
             healthUrl = String.format("%s://%s:%d/health", protocol, qdrantHost, restPort);
         }
-        
+
         var requestSpec = webClient.get().uri(healthUrl);
-        
+
         // Add API key for cloud instances
         if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
             requestSpec = requestSpec.header("api-key", qdrantApiKey);
         }
-        
+
         requestSpec
             .retrieve()
             .toBodilessEntity()
             .timeout(Duration.ofSeconds(5))
             .doOnSuccess(response -> {
                 status.markHealthy();
-                log.debug("Qdrant health check succeeded via {}", healthUrl);
+                log.debug("Qdrant health check succeeded");
             })
             .doOnError(error -> {
                 status.markUnhealthy();
-                log.warn("Qdrant health check failed: {} - Will retry in {}", 
-                    error.getMessage(), formatDuration(status.currentBackoff));
+                log.warn("Qdrant health check failed (exception type: {}) - Will retry in {}",
+                    error.getClass().getSimpleName(), formatDuration(status.currentBackoff));
             })
             .onErrorResume(error -> Mono.empty())
             .subscribe();
     }
-    
+
     /**
-     * Force a health check for a specific service
+     * Forces a health check for a specific service.
+     *
+     * @param serviceName logical service name
      */
     public void forceHealthCheck(String serviceName) {
-        if ("qdrant".equals(serviceName)) {
+        if (SERVICE_QDRANT.equals(serviceName)) {
             checkQdrantHealth();
         }
     }
-    
+
     /**
-     * Reset a service's health status (useful for manual intervention)
+     * Resets a service's health status (useful for manual intervention).
+     *
+     * @param serviceName logical service name
      */
     public void resetServiceStatus(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status != null) {
             status.reset();
-            log.info("Reset health status for service: {}", serviceName);
-            
+            if (SERVICE_QDRANT.equals(serviceName)) {
+                log.info("Reset health status for Qdrant");
+            } else {
+                log.info("Reset health status for service");
+            }
+
             // Trigger immediate health check
             forceHealthCheck(serviceName);
         }
     }
-    
+
     private String formatDuration(Duration duration) {
         if (duration.isNegative()) {
             return "0m";
         }
-        
+
         long days = duration.toDays();
         long hours = duration.toHours() % 24;
         long minutes = duration.toMinutes() % 60;
-        
+
         if (days > 0) {
             return String.format("%dd %dh", days, hours);
         } else if (hours > 0) {
@@ -220,7 +239,7 @@ public class ExternalServiceHealth {
             return String.format("%dm", minutes);
         }
     }
-    
+
     /**
      * Internal class to track service status with exponential backoff
      */
@@ -229,32 +248,32 @@ public class ExternalServiceHealth {
         final AtomicInteger consecutiveFailures = new AtomicInteger(0);
         volatile Instant lastCheck = Instant.now();
         volatile Duration currentBackoff = INITIAL_CHECK_INTERVAL;
-        
+
         ServiceStatus(String name) {
             // Name parameter kept for future use if needed
         }
-        
+
         void markHealthy() {
             isHealthy.set(true);
             consecutiveFailures.set(0);
             currentBackoff = HEALTHY_CHECK_INTERVAL;
             lastCheck = Instant.now();
         }
-        
+
         void markUnhealthy() {
             isHealthy.set(false);
             int failures = consecutiveFailures.incrementAndGet();
-            
+
             // Exponential backoff: 1min, 2min, 4min, 8min, ..., max 1 day
             Duration newBackoff = INITIAL_CHECK_INTERVAL.multipliedBy((long) Math.pow(2, failures - 1));
             if (newBackoff.compareTo(MAX_CHECK_INTERVAL) > 0) {
                 newBackoff = MAX_CHECK_INTERVAL;
             }
-            
+
             currentBackoff = newBackoff;
             lastCheck = Instant.now();
         }
-        
+
         void reset() {
             isHealthy.set(false);
             consecutiveFailures.set(0);
@@ -262,7 +281,7 @@ public class ExternalServiceHealth {
             lastCheck = Instant.EPOCH; // Force immediate check
         }
     }
-    
+
     /**
      * Public DTO for service health information
      */

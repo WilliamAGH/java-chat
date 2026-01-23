@@ -22,6 +22,9 @@ public class EmbeddingCacheController {
 
     private final EmbeddingCacheService embeddingCacheService;
 
+    /**
+     * Creates the embedding cache controller backed by the embedding cache service.
+     */
     public EmbeddingCacheController(EmbeddingCacheService embeddingCacheService) {
         this.embeddingCacheService = embeddingCacheService;
     }

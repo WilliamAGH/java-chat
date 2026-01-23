@@ -18,6 +18,9 @@ import java.io.IOException;
 public class AuditController {
     private final AuditService auditService;
 
+    /**
+     * Creates the audit controller backed by the audit service.
+     */
     public AuditController(AuditService auditService) {
         this.auditService = auditService;
     }
@@ -34,4 +37,3 @@ public class AuditController {
         return ResponseEntity.ok(auditService.auditByUrl(url));
     }
 }
-

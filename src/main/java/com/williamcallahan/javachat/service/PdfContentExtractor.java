@@ -13,6 +13,9 @@ import java.nio.file.Path;
 /**
  * Extracts text and basic metadata from PDF documents using Apache PDFBox.
  */
+/**
+ * Extracts text content and metadata from PDF documents.
+ */
 @Service
 public class PdfContentExtractor {
     private static final Logger log = LoggerFactory.getLogger(PdfContentExtractor.class);
@@ -25,7 +28,7 @@ public class PdfContentExtractor {
      * @throws IOException if the PDF cannot be read
      */
     public String extractTextFromPdf(Path pdfPath) throws IOException {
-        log.info("Extracting text from PDF: {}", pdfPath.getFileName());
+        log.info("Extracting text from PDF");
         
         try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
             PDFTextStripper stripper = new PDFTextStripper();
@@ -57,7 +60,7 @@ public class PdfContentExtractor {
      * @throws IOException if the PDF cannot be read
      */
     public String extractTextFromPdfRange(Path pdfPath, int startPage, int endPage) throws IOException {
-        log.info("Extracting text from PDF {} (pages {}-{})", pdfPath.getFileName(), startPage, endPage);
+        log.info("Extracting text from PDF pages {}-{}", startPage, endPage);
         
         try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
             PDFTextStripper stripper = new PDFTextStripper();

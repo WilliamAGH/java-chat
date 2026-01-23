@@ -75,8 +75,8 @@ public class RetrievalService {
         try {
             int baseTopK = Math.max(1, props.getRag().getSearchTopK());
             docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
-        } catch (RuntimeException e) {
-            return handleVectorSearchFailure(e, query);
+        } catch (RuntimeException exception) {
+            return handleVectorSearchFailure(exception, query);
         }
 
         // MMR re-ranking using embeddings

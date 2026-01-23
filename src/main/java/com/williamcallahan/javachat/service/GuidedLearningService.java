@@ -91,7 +91,7 @@ public class GuidedLearningService {
      * Builds enrichment markers for a lesson using retrieved snippets and the configured JDK version.
      */
     public Enrichment enrichmentForLesson(String slug) {
-        logger.debug("GuidedLearningService.enrichmentForLesson called for slug: {}", slug);
+        logger.debug("GuidedLearningService.enrichmentForLesson called");
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         if (lesson == null) return emptyEnrichment();
         String query = buildLessonQuery(lesson);
@@ -312,7 +312,6 @@ To run this program, follow these steps:
     }
 
     private List<Document> filterToBook(List<Document> docs) {
-        if (docs == null) return List.of();
         List<Document> filtered = new ArrayList<>();
         for (Document document : docs) {
             String url = String.valueOf(document.getMetadata().getOrDefault("url", ""));

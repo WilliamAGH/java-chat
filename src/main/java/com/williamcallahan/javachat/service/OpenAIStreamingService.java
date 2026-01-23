@@ -42,8 +42,6 @@ public class OpenAIStreamingService {
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int TRUNCATION_SCAN_WINDOW = 2000;
-    private static final String BACKOFF_REASON_STREAM_FAILURE = "stream failure";
-    private static final String BACKOFF_REASON_COMPLETE_FAILURE = "complete failure";
     
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
@@ -165,7 +163,7 @@ public class OpenAIStreamingService {
                     log.error("[LLM] Streaming failed (exception type: {})",
                         exception.getClass().getSimpleName());
                     if (isPrimaryClient(streamingClient) && isRetryablePrimaryFailure(exception)) {
-                        markPrimaryBackoff(BACKOFF_REASON_STREAM_FAILURE);
+                        markPrimaryBackoff();
                         if (rateLimitManager != null) {
                             rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
                         }
@@ -189,7 +187,7 @@ public class OpenAIStreamingService {
      */
     public Mono<String> complete(String prompt, double temperature) {
         final String truncatedPrompt = truncatePromptForModel(prompt);
-        return Mono.fromCallable(() -> {
+        return Mono.defer(() -> {
             OpenAIClient blockingClient = selectClientForBlocking();
             ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
             try {
@@ -200,18 +198,19 @@ public class OpenAIStreamingService {
                             ? RateLimitManager.ApiProvider.GITHUB_MODELS
                             : RateLimitManager.ApiProvider.OPENAI);
                 }
-                return completion.choices().stream()
+                String response = completion.choices().stream()
                         .findFirst()
                         .flatMap(choice -> choice.message().content())
                         .orElse("");
+                return Mono.just(response);
             } catch (RuntimeException primaryException) {
                 if (isPrimaryClient(blockingClient) && isRetryablePrimaryFailure(primaryException)) {
-                    markPrimaryBackoff(BACKOFF_REASON_COMPLETE_FAILURE);
+                    markPrimaryBackoff();
                     if (rateLimitManager != null) {
                         rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryException.getMessage());
                     }
                 }
-                throw primaryException;
+                return Mono.error(primaryException);
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -281,7 +280,8 @@ public class OpenAIStreamingService {
         final int MAX_CHARS_GPT5_INPUT = 28_000; // ~7k tokens, under 8k input limit
         final int MAX_CHARS_DEFAULT = 400_000;   // generous for high-context models
 
-        int limit = ("gpt-5".equalsIgnoreCase(model) || "gpt-5-chat".equalsIgnoreCase(model))
+        String modelId = model == null ? "" : model.toLowerCase(Locale.ROOT);
+        int limit = ("gpt-5".equals(modelId) || "gpt-5-chat".equals(modelId))
             ? MAX_CHARS_GPT5_INPUT
             : MAX_CHARS_DEFAULT;
 
@@ -359,11 +359,10 @@ public class OpenAIStreamingService {
         return System.currentTimeMillis() < primaryBackoffUntilEpochMs;
     }
     
-    private void markPrimaryBackoff(String reason) {
+    private void markPrimaryBackoff() {
         long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
         this.primaryBackoffUntilEpochMs = until;
         long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
-        log.warn("Temporarily disabling primary provider for {}s due to {}",
-                seconds, reason);
+        log.warn("Temporarily disabling primary provider for {}s", seconds);
     }
 }

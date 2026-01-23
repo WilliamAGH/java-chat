@@ -250,7 +250,7 @@ public class MarkdownStreamProcessor {
         
         // Count actual ``` fence markers, not individual backticks
         int fenceCount = countCodeFences(content);
-        boolean inCodeBlock = (fenceCount % 2) == 1;
+        boolean inCodeBlock = (fenceCount & 1) == 1;
         
         if (inCodeBlock) {
             currentState = StreamState.IN_CODE_BLOCK;

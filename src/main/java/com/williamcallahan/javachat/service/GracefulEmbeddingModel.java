@@ -35,6 +35,11 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
 
     /**
      * Creates a model with primary, secondary, and hash-based fallback options.
+     *
+     * @param primaryModel primary embedding provider
+     * @param secondaryModel secondary embedding provider (optional)
+     * @param hashingModel deterministic hash-based fallback model
+     * @param enableHashFallback enable hash-based fallback when remote providers fail
      */
     public GracefulEmbeddingModel(
         EmbeddingModel primaryModel,
@@ -50,6 +55,10 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
 
     /**
      * Creates a model with a primary model and hash-based fallback only.
+     *
+     * @param primaryModel primary embedding provider
+     * @param hashingModel deterministic hash-based fallback model
+     * @param enableHashFallback enable hash-based fallback when remote providers fail
      */
     public GracefulEmbeddingModel(
         EmbeddingModel primaryModel,
@@ -79,8 +88,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                 }
             } catch (Exception exception) {
                 log.warn(
-                    "[EMBEDDING] Primary embedding service failed: {}",
-                    exception.getMessage()
+                    "[EMBEDDING] Primary embedding service failed (exception type: {})",
+                    exception.getClass().getSimpleName()
                 );
                 primaryAvailable = false;
                 lastPrimaryCheck = System.currentTimeMillis();
@@ -106,8 +115,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                 }
             } catch (Exception exception) {
                 log.warn(
-                    "[EMBEDDING] Secondary embedding service failed: {}",
-                    exception.getMessage()
+                    "[EMBEDDING] Secondary embedding service failed (exception type: {})",
+                    exception.getClass().getSimpleName()
                 );
                 secondaryAvailable = false;
                 lastSecondaryCheck = System.currentTimeMillis();
@@ -123,8 +132,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                 return hashingModel.call(request);
             } catch (Exception exception) {
                 log.error(
-                    "[EMBEDDING] Hash-based fallback failed: {}",
-                    exception.getMessage()
+                    "[EMBEDDING] Hash-based fallback failed (exception type: {})",
+                    exception.getClass().getSimpleName()
                 );
             }
         }
@@ -162,8 +171,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                 return primaryModel.dimensions();
             } catch (Exception exception) {
                 log.debug(
-                    "[EMBEDDING] Could not get dimensions from primary model: {}",
-                    exception.getMessage()
+                    "[EMBEDDING] Could not get dimensions from primary model (exception type: {})",
+                    exception.getClass().getSimpleName()
                 );
             }
         }
@@ -173,8 +182,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                 return secondaryModel.dimensions();
             } catch (Exception exception) {
                 log.debug(
-                    "[EMBEDDING] Could not get dimensions from secondary model: {}",
-                    exception.getMessage()
+                    "[EMBEDDING] Could not get dimensions from secondary model (exception type: {})",
+                    exception.getClass().getSimpleName()
                 );
             }
         }

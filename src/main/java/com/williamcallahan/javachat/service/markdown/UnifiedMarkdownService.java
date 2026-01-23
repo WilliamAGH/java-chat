@@ -322,39 +322,30 @@ public class UnifiedMarkdownService {
         InlineListBlock primaryBlock,
         java.util.List<String> nestedSegments,
         String trailingText
-    ) {
-        static InlineListParse tryParse(String input) {
-            if (input == null) return null;
-            String text = input.strip();
-            if (text.isEmpty()) return null;
+	    ) {
+	        static InlineListParse tryParse(String input) {
+	            if (input == null) return null;
+	            String text = input.strip();
+	            if (text.isEmpty()) return null;
 
             InlineListParse ordered = tryParseOrdered(text);
             if (ordered != null) return ordered;
             return tryParseBulleted(text);
-        }
-
-	        /**
-	         * Defines ordered list marker styles recognized by the inline list parser.
-	         */
-	        private enum OrderedKind {
-	            NUMERIC,
-	            ROMAN_LOWER,
-	            LETTER_LOWER
 	        }
 
-        private record Marker(int markerStartIndex, int contentStartIndex) {}
+	        private record Marker(int markerStartIndex, int contentStartIndex) {}
 
         private static InlineListParse tryParseOrdered(String text) {
-            InlineListParse numeric = parseOrderedKind(text, OrderedKind.NUMERIC);
+            InlineListParse numeric = parseInlineListOrderedKind(text, InlineListOrderedKind.NUMERIC);
             if (numeric != null) return numeric;
 
-            InlineListParse roman = parseOrderedKind(text, OrderedKind.ROMAN_LOWER);
+            InlineListParse roman = parseInlineListOrderedKind(text, InlineListOrderedKind.ROMAN_LOWER);
             if (roman != null) return roman;
 
-            return parseOrderedKind(text, OrderedKind.LETTER_LOWER);
+            return parseInlineListOrderedKind(text, InlineListOrderedKind.LETTER_LOWER);
         }
 
-        private static InlineListParse parseOrderedKind(String text, OrderedKind kind) {
+        private static InlineListParse parseInlineListOrderedKind(String text, InlineListOrderedKind kind) {
             java.util.List<Marker> markers = findOrderedMarkers(text, kind);
             if (markers.size() < 2) return null;
 
@@ -383,7 +374,7 @@ public class UnifiedMarkdownService {
         }
 
         private static InlineListParse tryParseBulleted(String text) {
-            BulletKind bulletKind = findFirstBulletKind(text);
+            InlineListBulletKind bulletKind = findFirstInlineListBulletKind(text);
             if (bulletKind == null) return null;
 
             java.util.List<Marker> markers = findBulletMarkers(text, bulletKind);
@@ -412,30 +403,10 @@ public class UnifiedMarkdownService {
             return new InlineListParse(leading, primaryBlock, nestedSegments, "");
         }
 
-	        /**
-	         * Defines supported bullet marker characters recognized by the inline list parser.
-	         */
-	        private enum BulletKind {
-	            DASH('-'),
-	            ASTERISK('*'),
-	            PLUS('+'),
-	            BULLET('•');
-
-            private final char markerChar;
-
-            BulletKind(char markerChar) {
-                this.markerChar = markerChar;
-            }
-
-            char markerChar() {
-                return markerChar;
-            }
-        }
-
-        private static BulletKind findFirstBulletKind(String text) {
+        private static InlineListBulletKind findFirstInlineListBulletKind(String text) {
             for (int index = 0; index < text.length(); index++) {
                 char character = text.charAt(index);
-                BulletKind kind = bulletKind(character);
+                InlineListBulletKind kind = bulletKind(character);
                 if (kind == null) continue;
                 if (isBulletListIntro(text, index) && hasSecondBulletMarker(text, kind, index + 1)) {
                     return kind;
@@ -444,7 +415,7 @@ public class UnifiedMarkdownService {
             return null;
         }
 
-        private static boolean hasSecondBulletMarker(String text, BulletKind kind, int startIndex) {
+        private static boolean hasSecondBulletMarker(String text, InlineListBulletKind kind, int startIndex) {
             for (int index = startIndex; index < text.length(); index++) {
                 if (text.charAt(index) == kind.markerChar() && isBulletMarker(text, index, kind)) {
                     return true;
@@ -453,15 +424,15 @@ public class UnifiedMarkdownService {
             return false;
         }
 
-        private static BulletKind bulletKind(char character) {
-            return switch (character) {
-                case '-' -> BulletKind.DASH;
-                case '*' -> BulletKind.ASTERISK;
-                case '+' -> BulletKind.PLUS;
-                case '•' -> BulletKind.BULLET;
-                default -> null;
-            };
-        }
+	        private static InlineListBulletKind bulletKind(char character) {
+	            return switch (character) {
+	                case '-' -> InlineListBulletKind.DASH;
+	                case '*' -> InlineListBulletKind.ASTERISK;
+	                case '+' -> InlineListBulletKind.PLUS;
+	                case '•' -> InlineListBulletKind.BULLET;
+	                default -> null;
+	            };
+	        }
 
 	        private static boolean isBulletListIntro(String text, int markerIndex) {
 	            if (markerIndex == 0) return true;
@@ -471,14 +442,14 @@ public class UnifiedMarkdownService {
 	                || (previousChar == ' ' && markerIndex >= 2 && text.charAt(markerIndex - 2) == ':');
 	        }
 
-	        private static boolean isBulletMarker(String text, int markerIndex, BulletKind kind) {
+	        private static boolean isBulletMarker(String text, int markerIndex, InlineListBulletKind kind) {
 	            // Require a space after the marker to avoid catching punctuation/minus uses.
 	            return text.charAt(markerIndex) == kind.markerChar()
 	                && markerIndex + 1 < text.length()
 	                && text.charAt(markerIndex + 1) == ' ';
 	        }
 
-        private static java.util.List<Marker> findBulletMarkers(String text, BulletKind kind) {
+        private static java.util.List<Marker> findBulletMarkers(String text, InlineListBulletKind kind) {
             java.util.List<Marker> markers = new java.util.ArrayList<>();
             boolean hasIntro = false;
             for (int index = 0; index < text.length(); index++) {
@@ -497,7 +468,7 @@ public class UnifiedMarkdownService {
             return markers;
         }
 
-        private static java.util.List<Marker> findOrderedMarkers(String text, OrderedKind kind) {
+        private static java.util.List<Marker> findOrderedMarkers(String text, InlineListOrderedKind kind) {
             java.util.List<Marker> markers = new java.util.ArrayList<>();
             int index = 0;
             while (index < text.length()) {
@@ -512,7 +483,7 @@ public class UnifiedMarkdownService {
             return markers;
         }
 
-        private static Marker tryReadOrderedMarkerAt(String text, int index, OrderedKind kind) {
+        private static Marker tryReadOrderedMarkerAt(String text, int index, InlineListOrderedKind kind) {
             if (index < 0 || index >= text.length()) return null;
             if (!isMarkerBoundary(text, index)) return null;
 

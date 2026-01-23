@@ -72,9 +72,9 @@ public class RateLimitState {
         // Be defensive during shutdown so failures here never take down the app with NoClassDefFoundError
         try {
             safeSaveState();
-        } catch (Throwable t) {
+        } catch (Throwable throwable) {
             // Avoid logging frameworks during teardown if classloading is unstable
-            System.err.println("[RateLimitState] Failed to save state on shutdown: " + t);
+            System.err.println("[RateLimitState] Failed to save state on shutdown: " + throwable);
         }
         scheduler.shutdown();
     }
@@ -83,7 +83,7 @@ public class RateLimitState {
      * Record a rate limit hit with proper backoff calculation
      */
     public void recordRateLimit(String provider, Instant resetTime, String rateLimitWindow) {
-        ProviderState state = providerStates.computeIfAbsent(provider, k -> new ProviderState());
+        ProviderState state = providerStates.computeIfAbsent(provider, providerKey -> new ProviderState());
 
         // Parse rate limit window (e.g., "24h", "1d", "6h")
         Duration windowDuration = parseRateLimitWindow(rateLimitWindow);
@@ -118,7 +118,7 @@ public class RateLimitState {
      * Record a successful API call
      */
     public void recordSuccess(String provider) {
-        ProviderState state = providerStates.computeIfAbsent(provider, k -> new ProviderState());
+        ProviderState state = providerStates.computeIfAbsent(provider, providerKey -> new ProviderState());
         state.consecutiveFailures = 0;
         state.lastSuccess = Instant.now();
         state.totalSuccesses++;
@@ -184,7 +184,7 @@ public class RateLimitState {
                 // Try to parse as hours by default
                 return Duration.ofHours(Long.parseLong(window));
             }
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException exception) {
             log.warn("Failed to parse rate limit window, using 1 hour default");
             return Duration.ofHours(1);
         }
@@ -207,9 +207,9 @@ public class RateLimitState {
                         }
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException exception) {
                 log.warn("Failed to load rate limit state, starting fresh (exception type: {})",
-                    e.getClass().getSimpleName());
+                    exception.getClass().getSimpleName());
             }
         }
     }
@@ -217,10 +217,14 @@ public class RateLimitState {
     private void safeSaveState() {
         try {
             saveState();
-        } catch (Throwable t) {
-            // Avoid failing the app for persistence errors; log and continue
-            log.error("Failed to save rate limit state (exception type: {})",
-                t.getClass().getSimpleName());
+        } catch (IOException ioException) {
+            // Persistence failures are non-fatal; state will be rebuilt on next startup
+            log.error("Failed to save rate limit state to disk (exception type: {})",
+                ioException.getClass().getSimpleName());
+        } catch (RuntimeException runtimeException) {
+            // Catch unexpected runtime errors but let Errors (OOM, etc.) propagate
+            log.error("Unexpected error saving rate limit state (exception type: {})",
+                runtimeException.getClass().getSimpleName());
         }
     }
 
@@ -262,18 +266,30 @@ public class RateLimitState {
         private Map<String, ProviderState> providers;
         private Instant savedAt;
 
+        /**
+         * Returns the persisted provider state map.
+         */
         public Map<String, ProviderState> getProviders() {
             return providers == null ? Map.of() : providers;
         }
 
+        /**
+         * Sets the persisted provider state map, defaulting to an empty map when null.
+         */
         public void setProviders(Map<String, ProviderState> providers) {
             this.providers = providers == null ? Map.of() : Map.copyOf(providers);
         }
 
+        /**
+         * Returns the last time the state was saved.
+         */
         public Instant getSavedAt() {
             return savedAt;
         }
 
+        /**
+         * Sets the last saved timestamp for the persisted state.
+         */
         public void setSavedAt(Instant savedAt) {
             this.savedAt = savedAt;
         }
@@ -291,50 +307,86 @@ public class RateLimitState {
         private long totalSuccesses;
         private long totalFailures;
 
+        /**
+         * Returns the timestamp when the provider becomes available again.
+         */
         public Instant getRateLimitedUntil() {
             return rateLimitedUntil;
         }
 
+        /**
+         * Sets the timestamp when the provider becomes available again.
+         */
         public void setRateLimitedUntil(Instant rateLimitedUntil) {
             this.rateLimitedUntil = rateLimitedUntil;
         }
 
+        /**
+         * Returns the timestamp of the last successful call.
+         */
         public Instant getLastSuccess() {
             return lastSuccess;
         }
 
+        /**
+         * Sets the timestamp of the last successful call.
+         */
         public void setLastSuccess(Instant lastSuccess) {
             this.lastSuccess = lastSuccess;
         }
 
+        /**
+         * Returns the timestamp of the last failure.
+         */
         public Instant getLastFailure() {
             return lastFailure;
         }
 
+        /**
+         * Sets the timestamp of the last failure.
+         */
         public void setLastFailure(Instant lastFailure) {
             this.lastFailure = lastFailure;
         }
 
+        /**
+         * Returns the current consecutive failure count.
+         */
         public int getConsecutiveFailures() {
             return consecutiveFailures;
         }
 
+        /**
+         * Sets the current consecutive failure count.
+         */
         public void setConsecutiveFailures(int consecutiveFailures) {
             this.consecutiveFailures = consecutiveFailures;
         }
 
+        /**
+         * Returns the total number of successful calls recorded.
+         */
         public long getTotalSuccesses() {
             return totalSuccesses;
         }
 
+        /**
+         * Sets the total number of successful calls recorded.
+         */
         public void setTotalSuccesses(long totalSuccesses) {
             this.totalSuccesses = totalSuccesses;
         }
 
+        /**
+         * Returns the total number of failed calls recorded.
+         */
         public long getTotalFailures() {
             return totalFailures;
         }
 
+        /**
+         * Sets the total number of failed calls recorded.
+         */
         public void setTotalFailures(long totalFailures) {
             this.totalFailures = totalFailures;
         }

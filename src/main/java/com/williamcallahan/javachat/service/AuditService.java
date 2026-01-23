@@ -47,6 +47,9 @@ public class AuditService {
 
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
+     *
+     * @param localStore local snapshot and chunk storage
+     * @param hasher content hashing helper
      */
     public AuditService(LocalStoreService localStore, ContentHasher hasher) {
         this.localStore = localStore;
@@ -69,18 +72,26 @@ public class AuditService {
 
     private Set<String> getExpectedHashes(String url) throws IOException {
         // 1) Enumerate parsed chunks for this URL
-        String safeBase = localStore.toSafeName(url) + "_";
+        String safeName = localStore.toSafeName(url);
+        if (safeName == null || safeName.isEmpty()) {
+            log.warn("Cannot audit URL with invalid safe name mapping");
+            return Set.of();
+        }
+        String safeBase = safeName + "_";
         Path parsedRoot = localStore.getParsedDir();
 
         // pattern: <safeBase><index>_<hash12>.txt
         Pattern chunkPattern = Pattern.compile(
-            Pattern.quote(localStore.toSafeName(url)) + "_" + "(\\d+)" + "_" + "([0-9a-f]{12})" + "\\.txt"
+            Pattern.quote(safeName) + "_" + "(\\d+)" + "_" + "([0-9a-f]{12})" + "\\.txt"
         );
 
         List<Path> parsedFiles = new ArrayList<>();
         try (var stream = Files.walk(parsedRoot)) {
             stream.filter(Files::isRegularFile)
-                .filter(filePath -> filePath.getFileName().toString().startsWith(safeBase))
+                .filter(filePath -> {
+                    Path fileName = filePath.getFileName();
+                    return fileName != null && fileName.toString().startsWith(safeBase);
+                })
                 .forEach(parsedFiles::add);
         }
 
@@ -172,7 +183,8 @@ public class AuditService {
             );
             hashes.addAll(extractHashes(response.getBody()));
         } catch (Exception requestFailure) {
-            log.warn("Qdrant scroll failed: {}", requestFailure.getMessage());
+            log.warn("Qdrant scroll failed (exception type: {})",
+                requestFailure.getClass().getSimpleName());
         }
         return hashes;
     }

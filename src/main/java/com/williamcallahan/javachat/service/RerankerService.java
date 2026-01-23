@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -13,6 +14,9 @@ import org.springframework.stereotype.Service;
 /**
  * Reorders retrieved documents by relevance using an LLM-based reranking prompt with caching and fast timeouts.
  */
+/**
+ * Reorders retrieved documents using an LLM-driven relevance ranking.
+ */
 @Service
 public class RerankerService {
 
@@ -25,9 +29,14 @@ public class RerankerService {
 	    /**
 	     * Creates a reranker backed by the streaming service for low-latency LLM completion calls.
 	     */
-	    public RerankerService(OpenAIStreamingService openAIStreamingService) {
-	        this.openAIStreamingService = openAIStreamingService;
-	    }
+    /**
+     * Creates a reranker backed by the streaming LLM client.
+     *
+     * @param openAIStreamingService streaming LLM client
+     */
+    public RerankerService(OpenAIStreamingService openAIStreamingService) {
+        this.openAIStreamingService = openAIStreamingService;
+    }
 
     /**
      * Rerank documents by relevance to query using LLM.
@@ -46,7 +55,7 @@ public class RerankerService {
             return docs;
         }
 
-        log.debug("Reranking {} documents for query: {}", docs.size(), query);
+        log.debug("Reranking {} documents", docs.size());
 
         try {
             String response = callLlmForReranking(query, docs);
@@ -64,8 +73,11 @@ public class RerankerService {
 
             log.debug("Successfully reranked {} documents", reordered.size());
             return limitDocs(reordered, returnK);
-        } catch (Exception exception) {
-            log.error("Reranking failed, using original document order", exception);
+        } catch (JsonProcessingException exception) {
+            log.error("Reranking failed to parse response; using original document order", exception);
+            return limitDocs(docs, returnK);
+        } catch (RuntimeException exception) {
+            log.error("Reranking failed; using original document order", exception);
             return limitDocs(docs, returnK);
         }
     }
@@ -91,8 +103,8 @@ public class RerankerService {
             .timeout(java.time.Duration.ofSeconds(4))
             .onErrorResume(error -> {
                 log.debug(
-                    "Reranker LLM call short-circuited: {}",
-                    error.toString()
+                    "Reranker LLM call short-circuited (exception type: {})",
+                    error.getClass().getSimpleName()
                 );
                 return reactor.core.publisher.Mono.empty();
             })
@@ -117,19 +129,25 @@ public class RerankerService {
         prompt.append(
             "Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n"
         );
-        prompt.append("Query: ").append(query).append("\n\n");
+	        prompt.append("Query: ").append(query).append("\n\n");
 
-        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
-            Document document = docs.get(docIndex);
-            prompt
-                .append("[")
-                .append(docIndex)
+	        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
+	            Document document = docs.get(docIndex);
+	            var metadata = document.getMetadata();
+	            Object titleValue = metadata.get("title");
+	            Object urlValue = metadata.get("url");
+	            String title = titleValue == null ? "" : String.valueOf(titleValue);
+	            String url = urlValue == null ? "" : String.valueOf(urlValue);
+	            String text = document.getText();
+	            prompt
+	                .append("[")
+	                .append(docIndex)
                 .append("] ")
-                .append(document.getMetadata().get("title"))
+                .append(title)
                 .append(" | ")
-                .append(document.getMetadata().get("url"))
+                .append(url)
                 .append("\n")
-                .append(trim(document.getText(), 500))
+                .append(trim(text == null ? "" : text, 500))
                 .append("\n\n");
         }
 
@@ -142,7 +160,7 @@ public class RerankerService {
     private List<Document> parseRerankResponse(
         String response,
         List<Document> docs
-    ) throws Exception {
+    ) throws JsonProcessingException {
         String json = extractJsonFromResponse(response);
         JsonNode root = mapper.readTree(json);
 
@@ -204,13 +222,13 @@ public class RerankerService {
         if (docs == null || docs.isEmpty()) {
             return "empty";
         }
-        StringBuilder sb = new StringBuilder();
+        StringBuilder hashBuilder = new StringBuilder();
         for (Document doc : docs) {
             Object url = doc.getMetadata().get("url");
             String text = doc.getText();
-            sb.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
-            sb.append("|");
+            hashBuilder.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
+            hashBuilder.append("|");
         }
-        return Integer.toHexString(sb.toString().hashCode());
+        return Integer.toHexString(hashBuilder.toString().hashCode());
     }
 }
