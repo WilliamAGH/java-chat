@@ -35,6 +35,12 @@ import java.util.Objects;
 @Service
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
+    private static final String USER_MARKER = "User:";
+    private static final String CONTEXT_MARKER = "[CTX ";
+    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
+    private static final String PARAGRAPH_SEPARATOR = "\n\n";
+    private static final int TRUNCATION_SCAN_WINDOW = 2000;
     
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
@@ -94,8 +100,8 @@ public class OpenAIStreamingService {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
                 this.isAvailable = false;
             }
-        } catch (Exception e) {
-            log.error("Failed to initialize OpenAI client", e);
+        } catch (Exception exception) {
+            log.error("Failed to initialize OpenAI client", exception);
             this.isAvailable = false;
         }
     }
@@ -113,8 +119,8 @@ public class OpenAIStreamingService {
         return Flux.<String>create(sink -> {
             try {
                 ChatCompletionCreateParams params = buildChatParams(prompt, temperature);
-                OpenAIClient first = selectClientForStreaming();
-                if (first == null) {
+                OpenAIClient streamingClient = selectClientForStreaming();
+                if (streamingClient == null) {
                     log.error("No OpenAI-compatible client is configured or available for streaming. "
                             + "Check API credentials and configuration.");
                     sink.error(new IllegalStateException(
@@ -124,14 +130,14 @@ public class OpenAIStreamingService {
                 ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
                 AtomicReference<ChatCompletion> finalCompletion = new AtomicReference<>();
                 
-                RateLimitManager.ApiProvider firstProvider = (Objects.equals(first, clientPrimary))
+                RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
                         ? RateLimitManager.ApiProvider.GITHUB_MODELS
                         : RateLimitManager.ApiProvider.OPENAI;
-                log.info("[LLM] Streaming via {}", describeProvider(first));
-                try (StreamResponse<ChatCompletionChunk> streamResponse =
-                        first.chat().completions().createStreaming(params)) {
+                log.info("[LLM] Streaming via {}", describeProvider(streamingClient));
+                try (StreamResponse<ChatCompletionChunk> responseStream =
+                        streamingClient.chat().completions().createStreaming(params)) {
                     
-                    streamResponse.stream()
+                    responseStream.stream()
                         .peek(accumulator::accumulate)  // Accumulate for final result
                         .forEach(chunk -> {
                             log.debug("Raw chunk: {}", chunk);
@@ -148,45 +154,24 @@ public class OpenAIStreamingService {
                     finalCompletion.set(accumulator.chatCompletion());
                     log.debug("Stream completed successfully");
                     if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(firstProvider);
+                        rateLimitManager.recordSuccess(activeProvider);
                     }
                     sink.complete();
                     
-                } catch (Exception e) {
-                    log.error("[LLM] Primary streaming failed ({}): {}", describeProvider(first), summarize(e));
-                    if (Objects.equals(first, clientPrimary) && isRetryablePrimaryFailure(e)) {
-                        markPrimaryBackoff("stream failure: " + summarize(e));
+                } catch (Exception exception) {
+                    log.error("[LLM] Streaming failed ({}): {}", describeProvider(streamingClient), summarize(exception));
+                    if (isPrimaryClient(streamingClient) && isRetryablePrimaryFailure(exception)) {
+                        markPrimaryBackoff("stream failure: " + summarize(exception));
                         if (rateLimitManager != null) {
-                            rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, e.getMessage());
+                            rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
                         }
                     }
-                    // Fallback once if secondary available
-                    try {
-                        OpenAIClient alt = selectAlternateClient();
-                        if (alt != null) {
-                            log.info("[LLM] Retrying streaming with alternate provider: {}", describeProvider(alt));
-                            try (StreamResponse<ChatCompletionChunk> altResponse =
-                                         alt.chat().completions().createStreaming(params)) {
-                                altResponse.stream()
-                                        .peek(com.openai.helpers.ChatCompletionAccumulator.create()::accumulate)
-                                        .forEach(chunk -> chunk.choices().forEach(choice ->
-                                                choice.delta().content().ifPresent(sink::next)));
-                                if (rateLimitManager != null) {
-                                    rateLimitManager.recordSuccess(RateLimitManager.ApiProvider.OPENAI);
-                                }
-                                sink.complete();
-                                return;
-                            }
-                        }
-                    } catch (Exception ex) {
-                        log.error("[LLM] Alternate provider streaming failed ({}): {}", describeProvider(selectAlternateClient()), summarize(ex));
-                    }
-                    sink.error(e);
+                    sink.error(exception);
                 }
                 
-            } catch (Exception e) {
-                log.error("Error setting up OpenAI stream", e);
-                sink.error(e);
+            } catch (Exception exception) {
+                log.error("Error setting up OpenAI stream", exception);
+                sink.error(exception);
             }
         })
         // Move blocking SDK stream consumption off the servlet thread.
@@ -200,13 +185,13 @@ public class OpenAIStreamingService {
     public Mono<String> complete(String prompt, double temperature) {
         final String truncatedPrompt = truncatePromptForModel(prompt);
         return Mono.fromCallable(() -> {
-            OpenAIClient first = selectClientForBlocking();
+            OpenAIClient blockingClient = selectClientForBlocking();
             ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
             try {
-                log.info("[LLM] Complete via {}", describeProvider(first));
-                ChatCompletion completion = first.chat().completions().create(params);
+                log.info("[LLM] Complete via {}", describeProvider(blockingClient));
+                ChatCompletion completion = blockingClient.chat().completions().create(params);
                 if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(Objects.equals(first, clientPrimary)
+                    rateLimitManager.recordSuccess(isPrimaryClient(blockingClient)
                             ? RateLimitManager.ApiProvider.GITHUB_MODELS
                             : RateLimitManager.ApiProvider.OPENAI);
                 }
@@ -214,27 +199,14 @@ public class OpenAIStreamingService {
                         .findFirst()
                         .flatMap(choice -> choice.message().content())
                         .orElse("");
-            } catch (Exception primaryError) {
-                if (Objects.equals(first, clientPrimary) && isRetryablePrimaryFailure(primaryError)) {
-                    markPrimaryBackoff("complete failure: " + summarize(primaryError));
+            } catch (Exception primaryException) {
+                if (isPrimaryClient(blockingClient) && isRetryablePrimaryFailure(primaryException)) {
+                    markPrimaryBackoff("complete failure: " + summarize(primaryException));
                     if (rateLimitManager != null) {
-                        rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryError.getMessage());
+                        rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryException.getMessage());
                     }
                 }
-                OpenAIClient alt = selectAlternateClient();
-                if (alt != null) {
-                    log.warn("[LLM] Primary complete failed ({}), retrying with {}: {}",
-                            describeProvider(first), describeProvider(alt), summarize(primaryError));
-                    ChatCompletion completion = alt.chat().completions().create(params);
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(RateLimitManager.ApiProvider.OPENAI);
-                    }
-                    return completion.choices().stream()
-                            .findFirst()
-                            .flatMap(choice -> choice.message().content())
-                            .orElse("");
-                }
-                throw primaryError;
+                throw primaryException;
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -249,40 +221,46 @@ public class OpenAIStreamingService {
         builder.maxCompletionTokens(4000);
         log.debug("Using GPT-5 configuration (no regression)");
 
-        // Attempt to set reasoning_effort=minimal when supported by the SDK
-        trySetReasoningEffort(builder);
+        // Set reasoning_effort=minimal; fail fast if unsupported
+        applyReasoningEffort(builder);
 
         return builder.build();
     }
 
     /**
-     * Best-effort application of reasoning_effort="minimal" without creating a compile-time
-     * dependency on specific SDK versions. Uses reflection to call either a typed
-     * reasoningEffort(Enum) method, or falls back to an extra body map if available.
+     * Applies reasoning_effort="minimal" for GPT-5 prompts.
      */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private void trySetReasoningEffort(ChatCompletionCreateParams.Builder builder) {
-        try {
-            // 1) Preferred: builder.reasoningEffort(ReasoningEffort.MINIMAL)
-            for (Method m : builder.getClass().getMethods()) {
-                if ("reasoningEffort".equals(m.getName()) && m.getParameterCount() == 1) {
-                    Class<?> paramType = m.getParameterTypes()[0];
-                    if (paramType.isEnum()) {
-                        Object minimal = Enum.valueOf((Class<Enum>) paramType, "MINIMAL");
-                        m.invoke(builder, minimal);
-                        log.info("[LLM] reasoning_effort=MINIMAL (SDK enum)");
-                        return;
-                    }
+    private void applyReasoningEffort(ChatCompletionCreateParams.Builder builder) {
+        Method reasoningMethod = findReasoningEffortMethod(builder);
+        if (reasoningMethod != null) {
+            try {
+                Class<?> parameterType = reasoningMethod.getParameterTypes()[0];
+                if (!parameterType.isEnum()) {
+                    throw new IllegalStateException("Unsupported reasoningEffort parameter type: " + parameterType.getName());
                 }
+                Class<? extends Enum> enumType = parameterType.asSubclass(Enum.class);
+                Object minimal = Enum.valueOf(enumType, "MINIMAL");
+                reasoningMethod.invoke(builder, minimal);
+                log.info("[LLM] reasoning_effort=MINIMAL (SDK enum)");
+                return;
+            } catch (ReflectiveOperationException | IllegalArgumentException exception) {
+                throw new IllegalStateException("Failed to apply reasoning_effort via SDK enum", exception);
             }
-
-            // 2) Fallback: Chat Completions supports only top-level "reasoning_effort"
-            //    Do NOT send a nested "reasoning" object on this endpoint.
-            builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
-            log.info("[LLM] reasoning_effort set via additional body property");
-        } catch (Exception ex) {
-            log.debug("Skipping reasoning_effort due to SDK compatibility: {}", ex.toString());
         }
+
+        // Chat Completions supports only top-level "reasoning_effort"
+        // Do NOT send a nested "reasoning" object on this endpoint.
+        builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
+        log.info("[LLM] reasoning_effort set via additional body property");
+    }
+
+    private Method findReasoningEffortMethod(ChatCompletionCreateParams.Builder builder) {
+        for (Method method : builder.getClass().getMethods()) {
+            if ("reasoningEffort".equals(method.getName()) && method.getParameterCount() == 1) {
+                return method;
+            }
+        }
+        return null;
     }
     
     
@@ -305,18 +283,21 @@ public class OpenAIStreamingService {
         if (prompt.length() <= limit) return prompt;
 
         // Prefer keeping the most recent context and user message
-        String marker = "User:";
-        int lastUserIdx = prompt.lastIndexOf(marker);
-        if (lastUserIdx > 0 && lastUserIdx > prompt.length() - 2_000) {
-            String recent = prompt.substring(Math.max(0, prompt.length() - limit));
+        int lastUserMarkerIndex = prompt.lastIndexOf(USER_MARKER);
+        if (lastUserMarkerIndex > 0 && lastUserMarkerIndex > prompt.length() - TRUNCATION_SCAN_WINDOW) {
+            String recentContext = prompt.substring(Math.max(0, prompt.length() - limit));
             // Trim to a clean-ish boundary
-            int para = recent.indexOf("\n\n");
-            if (para > 0 && para < 2_000) recent = recent.substring(para + 2);
-            int ctx = recent.indexOf("[CTX ");
-            if (ctx > 0 && ctx < 2_000) recent = recent.substring(ctx);
-            return "[Context truncated due to GPT-5 8K input limit]\n\n" + recent;
+            int paragraphBoundaryIndex = recentContext.indexOf(PARAGRAPH_SEPARATOR);
+            if (paragraphBoundaryIndex > 0 && paragraphBoundaryIndex < TRUNCATION_SCAN_WINDOW) {
+                recentContext = recentContext.substring(paragraphBoundaryIndex + PARAGRAPH_SEPARATOR.length());
+            }
+            int contextMarkerIndex = recentContext.indexOf(CONTEXT_MARKER);
+            if (contextMarkerIndex > 0 && contextMarkerIndex < TRUNCATION_SCAN_WINDOW) {
+                recentContext = recentContext.substring(contextMarkerIndex);
+            }
+            return TRUNCATION_NOTICE_GPT5 + recentContext;
         }
-        return "[Context truncated due to model input limit]\n\n" + prompt.substring(prompt.length() - limit);
+        return TRUNCATION_NOTICE_GENERIC + prompt.substring(prompt.length() - limit);
     }
     
     /**
@@ -349,41 +330,37 @@ public class OpenAIStreamingService {
         return selectClientForStreaming();
     }
 
-    private OpenAIClient selectAlternateClient() {
-        if (clientPrimary != null && clientSecondary != null) {
-            // If we failed on primary, return secondary
-            return clientSecondary;
-        }
-        return null;
+    private boolean isPrimaryClient(OpenAIClient client) {
+        return Objects.equals(client, clientPrimary);
     }
 
     private String describeProvider(OpenAIClient client) {
         if (client == null) return "none";
-        if (Objects.equals(client, clientPrimary) && primaryDescription != null) return primaryDescription;
+        if (isPrimaryClient(client) && primaryDescription != null) return primaryDescription;
         if (Objects.equals(client, clientSecondary) && secondaryDescription != null) return secondaryDescription;
         return "unknown";
     }
 
-    private String summarize(Exception e) {
-        String s = e.toString();
-        if (s.length() > 180) return s.substring(0, 180) + "…";
-        return s;
+    private String summarize(Exception exception) {
+        String summary = exception.toString();
+        if (summary.length() > 180) return summary.substring(0, 180) + "…";
+        return summary;
     }
     
-    private boolean isRateLimit(Throwable t) {
-        if (t instanceof RateLimitException) return true;
-        String m = t.getMessage();
-        return m != null && (m.contains("Rate limit") || m.contains("429"));
+    private boolean isRateLimit(Throwable throwable) {
+        if (throwable instanceof RateLimitException) return true;
+        String message = throwable.getMessage();
+        return message != null && (message.contains("Rate limit") || message.contains("429"));
     }
     
-    private boolean isRetryablePrimaryFailure(Throwable t) {
+    private boolean isRetryablePrimaryFailure(Throwable throwable) {
         // Treat common transient failures as retryable to enable fast fallback
-        return isRateLimit(t)
-                || t instanceof java.util.concurrent.TimeoutException
-                || t instanceof InterruptedException
-                || (t.getMessage() != null && t.getMessage().toLowerCase().contains("sleep interrupted"))
-                || t.toString().contains("401")
-                || t.toString().contains("403");
+        return isRateLimit(throwable)
+                || throwable instanceof java.util.concurrent.TimeoutException
+                || throwable instanceof InterruptedException
+                || (throwable.getMessage() != null && throwable.getMessage().toLowerCase().contains("sleep interrupted"))
+                || throwable.toString().contains("401")
+                || throwable.toString().contains("403");
     }
     
     private boolean isPrimaryInBackoff() {

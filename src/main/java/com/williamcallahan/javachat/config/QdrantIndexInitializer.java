@@ -1,28 +1,37 @@
 package com.williamcallahan.javachat.config;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
+/**
+ * Initializes Qdrant payload indexes on startup to accelerate lookups.
+ */
 @org.springframework.context.annotation.Profile("!test")
 @Component
 public class QdrantIndexInitializer {
     private static final Logger log = LoggerFactory.getLogger(QdrantIndexInitializer.class);
+    private static final int CONNECT_TIMEOUT_SECONDS = 15;
+    private static final int READ_TIMEOUT_SECONDS = 30;
+    private static final int QDRANT_REST_PORT = 6333;
+    private static final int QDRANT_GRPC_PORT = 6334;
+    private static final int DOCKER_GRPC_PORT = 8086;
+    private static final int DOCKER_REST_PORT = 8087;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -40,7 +49,7 @@ public class QdrantIndexInitializer {
     @Value("${spring.ai.vectorstore.qdrant.collection-name}")
     private String collection;
 
-    private final AppProperties appProperties;
+    private final boolean ensurePayloadIndexes;
 
     /**
      * Build candidate REST base URLs for Qdrant.
@@ -54,12 +63,12 @@ public class QdrantIndexInitializer {
             bases.add("https://" + host); // Cloud REST via 443
         } else {
             // Always try the REST default first
-            bases.add("http://" + host + ":6333");
+            bases.add("http://" + host + ":" + QDRANT_REST_PORT);
             // If user provided gRPC port, also try the mapped REST port
-            if (port == 6334) {
-                bases.add("http://" + host + ":6334"); // last resort if someone exposed REST there
-            } else if (port == 8086) {
-                bases.add("http://" + host + ":8087"); // docker-compose mapping in this repo
+            if (port == QDRANT_GRPC_PORT) {
+                bases.add("http://" + host + ":" + QDRANT_GRPC_PORT); // last resort if someone exposed REST there
+            } else if (port == DOCKER_GRPC_PORT) {
+                bases.add("http://" + host + ":" + DOCKER_REST_PORT); // docker-compose mapping in this repo
             }
             // Finally, try whatever port was configured explicitly
             bases.add("http://" + host + ":" + port);
@@ -67,13 +76,21 @@ public class QdrantIndexInitializer {
         return bases;
     }
 
+    /**
+     * Creates a Qdrant index initializer with configuration defaults.
+     *
+     * @param appProperties application configuration
+     */
     public QdrantIndexInitializer(AppProperties appProperties) {
-        this.appProperties = appProperties;
+        this.ensurePayloadIndexes = appProperties.getQdrant().isEnsurePayloadIndexes();
     }
 
+    /**
+     * Ensures key payload indexes exist after application startup.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void ensurePayloadIndexes() {
-        if (!appProperties.getQdrant().isEnsurePayloadIndexes()) {
+        if (!ensurePayloadIndexes) {
             log.info("[QDRANT] Skipping payload index ensure (app.qdrant.ensure-payload-indexes=false)");
             return;
         }
@@ -88,10 +105,9 @@ public class QdrantIndexInitializer {
 
     private void createPayloadIndex(String field, String schema) {
         // Create RestTemplate with longer timeouts for Qdrant Cloud
-        // Using connectTimeout and readTimeout (new API since Spring Boot 3.4)
         RestTemplate rt = new RestTemplateBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .readTimeout(Duration.ofSeconds(30))
+                .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
                 .build();
         
         // Add connection management
@@ -106,10 +122,7 @@ public class QdrantIndexInitializer {
         if (apiKey != null && !apiKey.isBlank()) {
             headers.set("api-key", apiKey);
         }
-        Map<String, Object> body = Map.of(
-                "field_name", field,
-                "field_schema", schema
-        );
+        PayloadIndexRequest body = new PayloadIndexRequest(field, schema);
 
         // Qdrant payload index endpoint (official API)
         String[] pathCandidates = new String[] {
@@ -122,20 +135,27 @@ public class QdrantIndexInitializer {
                 String url = base + path;
                 try {
                     // Use PUT for Qdrant payload index creation (official API)
-                    ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
-                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT {} (status={})",
-                            field, schema, url, resp.getStatusCode());
+                    ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers),
+                        String.class);
+                    log.info("[QDRANT] Ensured payload index '{}' (schema={}) via PUT urlId={} (status={})",
+                            field, schema, Integer.toHexString(Objects.hashCode(url)), resp.getStatusCode());
                     return;
                 } catch (Exception putEx) {
                     lastError = putEx;
-                    log.debug("[QDRANT] PUT failed for index '{}': {}", field, putEx.getMessage());
+                    log.debug("[QDRANT] PUT failed for index '{}' (exceptionType={})", field,
+                        putEx.getClass().getName());
                     // Continue to next URL candidate if available
                 }
             }
         }
         // If we reach here, all attempts failed; log once at INFO to avoid noisy warnings.
-        log.info("[QDRANT] Could not ensure payload index '{}' (schema={}). Last error: {}", field, schema,
-                lastError != null ? lastError.getMessage() : "unknown");
+        log.info("[QDRANT] Could not ensure payload index '{}' (schema={}). Last error type: {}", field, schema,
+                lastError != null ? lastError.getClass().getName() : "unknown");
+    }
+
+    private record PayloadIndexRequest(
+        @JsonProperty("field_name") String fieldName,
+        @JsonProperty("field_schema") String fieldSchema
+    ) {
     }
 }
-

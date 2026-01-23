@@ -65,3 +65,8 @@ logs/
 BOOT-INF/
 META-INF/
 classpath.txt
+
+### PMD/SpotBugs artifacts ###
+category/
+findbugsfilter.xsd
+messages.xml

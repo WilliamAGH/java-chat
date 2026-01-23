@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.service.GracefulEmbeddingModel;
 import com.williamcallahan.javachat.service.LocalEmbeddingModel;
 import com.williamcallahan.javachat.service.LocalHashingEmbeddingModel;
 import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingModel;
+import java.util.Objects;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,7 +26,25 @@ import org.slf4j.LoggerFactory;
 @Configuration
 public class EmbeddingFallbackConfig {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingFallbackConfig.class);
+    private static final int DEFAULT_EMBEDDING_DIMENSIONS = 4096;
     
+    /**
+     * Creates a local embedding model with remote and hash-based fallbacks.
+     *
+     * @param localUrl local embedding server URL
+     * @param localModel local embedding model name
+     * @param dimensions embedding dimensions for local model
+     * @param useHashFallback whether to fallback to hash embeddings
+     * @param remoteUrl remote OpenAI-compatible server URL
+     * @param remoteApiKey API key for remote embedding provider
+     * @param remoteModel remote embedding model name
+     * @param remoteDims remote embedding dimensions
+     * @param openaiApiKey OpenAI API key
+     * @param openaiBaseUrl OpenAI base URL
+     * @param openaiModel OpenAI embedding model name
+     * @param restTemplateBuilder RestTemplate builder
+     * @return embedding model with fallbacks
+     */
     @Bean
     @Primary
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "true", matchIfMissing = false)
@@ -53,7 +72,8 @@ public class EmbeddingFallbackConfig {
         // Secondary: Prefer remote OpenAI-compatible provider; else OpenAI direct if key present
         EmbeddingModel secondaryModel = null;
         if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
-            log.info("[EMBEDDING] Configured remote OpenAI-compatible embedding fallback at {}", redactUrl(remoteUrl));
+            log.info("[EMBEDDING] Configured remote OpenAI-compatible embedding fallback (urlId={})",
+                Integer.toHexString(Objects.hashCode(remoteUrl)));
             secondaryModel = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
                     remoteDims > 0 ? remoteDims : dimensions, restTemplateBuilder);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
@@ -70,6 +90,20 @@ public class EmbeddingFallbackConfig {
         return new GracefulEmbeddingModel(primaryModel, secondaryModel, hashingModel, useHashFallback);
     }
     
+    /**
+     * Creates a remote embedding model with hash-based fallback when local embeddings are disabled.
+     *
+     * @param remoteUrl remote OpenAI-compatible server URL
+     * @param remoteApiKey API key for remote embedding provider
+     * @param remoteModel remote embedding model name
+     * @param remoteDims remote embedding dimensions
+     * @param openaiApiKey OpenAI API key
+     * @param openaiBaseUrl OpenAI base URL
+     * @param openaiModel OpenAI embedding model name
+     * @param useHashFallback whether to fallback to hash embeddings
+     * @param restTemplateBuilder RestTemplate builder
+     * @return embedding model with fallbacks
+     */
     @Bean
     @Primary
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "false", matchIfMissing = true)
@@ -93,16 +127,17 @@ public class EmbeddingFallbackConfig {
         // Primary: Prefer remote provider; else OpenAI direct
         EmbeddingModel primary = null;
         if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
-            log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider at {}", redactUrl(remoteUrl));
+            log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider (urlId={})",
+                Integer.toHexString(Objects.hashCode(remoteUrl)));
             primary = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
-                    remoteDims > 0 ? remoteDims : 4096, restTemplateBuilder);
+                    remoteDims > 0 ? remoteDims : DEFAULT_EMBEDDING_DIMENSIONS, restTemplateBuilder);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Using OpenAI embeddings as primary provider");
             primary = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
-                    4096, restTemplateBuilder);
+                    DEFAULT_EMBEDDING_DIMENSIONS, restTemplateBuilder);
         }
 
-        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(4096);
+        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(DEFAULT_EMBEDDING_DIMENSIONS);
 
         if (primary != null) {
             return new GracefulEmbeddingModel(primary, hashingModel, useHashFallback);
@@ -123,7 +158,7 @@ public class EmbeddingFallbackConfig {
         
         @Override
         public int dimensions() {
-            return 4096; // Match Qdrant collection dimensions
+            return DEFAULT_EMBEDDING_DIMENSIONS;
         }
         
         @Override
@@ -132,15 +167,4 @@ public class EmbeddingFallbackConfig {
         }
     }
 
-    private String redactUrl(String url) {
-        if (url == null) return "";
-        try {
-            java.net.URI uri = java.net.URI.create(url);
-            String host = uri.getScheme() + "://" + uri.getHost();
-            if (uri.getPort() > 0) host += ":" + uri.getPort();
-            return host;
-        } catch (Exception e) {
-            return url;
-        }
-    }
 }
