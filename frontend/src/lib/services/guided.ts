@@ -76,6 +76,7 @@ export async function streamGuidedChat(
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
   const { onChunk, onStatus, onError } = callbacks
+  let errorNotified = false
 
   try {
     await streamSse(
@@ -85,6 +86,7 @@ export async function streamGuidedChat(
         onText: onChunk,
         onStatus,
         onError: (streamError) => {
+          errorNotified = true
           onError?.(new Error(streamError.message))
         }
       },
@@ -93,7 +95,9 @@ export async function streamGuidedChat(
   } catch (error) {
     // Re-throw after invoking callback to maintain dual error propagation
     if (error instanceof Error) {
-      onError?.(error)
+      if (!errorNotified) {
+        onError?.(error)
+      }
     }
     throw error
   }
