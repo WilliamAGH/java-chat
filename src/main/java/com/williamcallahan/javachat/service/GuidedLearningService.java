@@ -301,15 +301,15 @@ To run this program, follow these steps:
             Citation citation = citations.get(docIndex);
             String url = citation.getUrl();
             if (url == null || !url.toLowerCase(Locale.ROOT).endsWith(".pdf")) continue;
-            Object chunkIndexValue = document.getMetadata().get("chunkIndex");
+            Object chunkIndexMetadata = document.getMetadata().get("chunkIndex");
             int chunkIndex = -1;
             try {
-                if (chunkIndexValue != null) {
-                    chunkIndex = Integer.parseInt(String.valueOf(chunkIndexValue));
+                if (chunkIndexMetadata != null) {
+                    chunkIndex = Integer.parseInt(String.valueOf(chunkIndexMetadata));
                 }
             } catch (NumberFormatException chunkIndexParseException) {
                 logger.debug("Failed to parse chunkIndex from metadata: {}",
-                    sanitizeForLogText(String.valueOf(chunkIndexValue)));
+                    sanitizeForLogText(String.valueOf(chunkIndexMetadata)));
             }
             int totalChunks = totalChunksForUrl(url);
             if (pages > 0 && chunkIndex >= 0 && totalChunks > 0) {
