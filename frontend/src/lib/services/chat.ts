@@ -129,6 +129,11 @@ export async function streamChat(
 
       if (done) {
         streamCompletedNormally = true
+        // Flush any remaining bytes from the TextDecoder (handles multi-byte chars split across chunks)
+        const remaining = decoder.decode()
+        if (remaining) {
+          buffer += remaining
+        }
         // Commit any remaining buffered line before flushing event data
         if (buffer.length > 0) {
           eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer
