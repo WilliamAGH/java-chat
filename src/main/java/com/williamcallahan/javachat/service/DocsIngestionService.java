@@ -350,18 +350,17 @@ public class DocsIngestionService {
     private String extractTitleFromMetadata(String metadata, String fileName) {
         // Simple heuristic: try to find a Title in metadata (case-insensitive), otherwise use filename
         if (metadata != null && !metadata.isBlank()) {
-            String m = metadata;
             // Normalize line endings
-            m = m.replace("\r\n", "\n");
+            String normalizedMetadata = metadata.replace("\r\n", "\n");
             // Case-insensitive search for "Title:"
-            String lower = m.toLowerCase(Locale.ROOT);
-            String key = "title:";
-            int startIdx = lower.indexOf(key);
-            if (startIdx >= 0) {
-                int start = startIdx + key.length();
-                int end = m.indexOf('\n', start);
-                if (end == -1) end = m.length();
-                return m.substring(start, end).trim();
+            String lowerMetadata = normalizedMetadata.toLowerCase(Locale.ROOT);
+            String titleKey = "title:";
+            int titleKeyIndex = lowerMetadata.indexOf(titleKey);
+            if (titleKeyIndex >= 0) {
+                int valueStart = titleKeyIndex + titleKey.length();
+                int valueEnd = normalizedMetadata.indexOf('\n', valueStart);
+                if (valueEnd == -1) valueEnd = normalizedMetadata.length();
+                return normalizedMetadata.substring(valueStart, valueEnd).trim();
             }
         }
         // Fallback to using the filename, removing extension

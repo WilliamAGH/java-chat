@@ -79,7 +79,7 @@ public class LocalSearchService {
             }
 
             List<SearchHit> searchHits = scores.entrySet().stream()
-                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+                .sorted(Map.Entry.<Path, Double>comparingByValue().reversed())
                 .limit(topK)
                 .map(scoreEntry -> toSearchHit(scoreEntry.getKey(), scoreEntry.getValue()))
                 .flatMap(Optional::stream)

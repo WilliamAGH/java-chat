@@ -372,22 +372,24 @@ public class RetrievalService {
      */
     private String normalizeCitationUrl(String url) {
         if (url == null || url.isBlank()) return url;
-        String u = url.trim();
-        if (u.startsWith("http://") || u.startsWith("https://")) {
-            return canonicalizeHttpDocUrl(u);
+        String trimmedUrl = url.trim();
+        if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
+            return canonicalizeHttpDocUrl(trimmedUrl);
         }
 
         // Map book PDFs to public PDFs even if not file:// (defensive)
-        String pathForBookMapping = u.startsWith("file://") ? u.substring("file://".length()) : u;
+        String pathForBookMapping = trimmedUrl.startsWith("file://")
+            ? trimmedUrl.substring("file://".length())
+            : trimmedUrl;
         Optional<String> publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(pathForBookMapping);
         if (publicPdf.isPresent()) {
             return publicPdf.get();
         }
 
         // Only handle file:// mirrors beyond this point
-        if (!u.startsWith("file://")) return u;
+        if (!trimmedUrl.startsWith("file://")) return trimmedUrl;
 
-        String localPath = u.substring("file://".length());
+        String localPath = trimmedUrl.substring("file://".length());
         // Try embedded host reconstruction first
         Optional<String> embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(localPath);
         if (embedded.isPresent()) {
