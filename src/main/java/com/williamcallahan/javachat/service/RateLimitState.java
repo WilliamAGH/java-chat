@@ -20,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Persistent rate limit state manager that survives application restarts.
@@ -41,16 +43,7 @@ public class RateLimitState {
      * Creates persistent rate limit state storage using the provided ObjectMapper configuration when available.
      */
     public RateLimitState(ObjectMapper objectMapper) {
-        if (objectMapper != null) {
-            this.objectMapper = objectMapper.copy();
-        } else {
-            ObjectMapper fallback = new ObjectMapper();
-            // Register JavaTimeModule to handle Java time types
-            fallback.registerModule(new JavaTimeModule());
-            // Configure to write timestamps as ISO-8601 strings instead of numbers
-            fallback.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-            this.objectMapper = fallback;
-        }
+        this.objectMapper = objectMapper.copy();
     }
 
     /**
@@ -94,12 +87,12 @@ public class RateLimitState {
         }
 
         state.rateLimitedUntil = resetTime;
-        state.consecutiveFailures++;
+        int failures = state.consecutiveFailures.incrementAndGet();
         state.lastFailure = Instant.now();
 
         // Implement exponential backoff for repeated failures
-        if (state.consecutiveFailures > 1) {
-            Duration additionalBackoff = Duration.ofHours((long) Math.pow(2, state.consecutiveFailures - 1));
+        if (failures > 1) {
+            Duration additionalBackoff = Duration.ofHours((long) Math.pow(2, failures - 1));
             Duration maxBackoff = Duration.ofDays(7); // Never back off more than a week
 
             if (additionalBackoff.compareTo(maxBackoff) > 0) {
@@ -119,9 +112,9 @@ public class RateLimitState {
      */
     public void recordSuccess(String provider) {
         ProviderState state = providerStates.computeIfAbsent(provider, providerKey -> new ProviderState());
-        state.consecutiveFailures = 0;
+        state.consecutiveFailures.set(0);
         state.lastSuccess = Instant.now();
-        state.totalSuccesses++;
+        state.totalSuccesses.incrementAndGet();
     }
 
     /**
@@ -140,7 +133,7 @@ public class RateLimitState {
         // Clear rate limit if it has expired
         if (state.rateLimitedUntil != null && Instant.now().isAfter(state.rateLimitedUntil)) {
             state.rateLimitedUntil = null;
-            state.consecutiveFailures = 0;
+            state.consecutiveFailures.set(0);
             safeSaveState();
         }
 
@@ -300,12 +293,12 @@ public class RateLimitState {
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderState {
-        private Instant rateLimitedUntil;
-        private Instant lastSuccess;
-        private Instant lastFailure;
-        private int consecutiveFailures;
-        private long totalSuccesses;
-        private long totalFailures;
+        private volatile Instant rateLimitedUntil;
+        private volatile Instant lastSuccess;
+        private volatile Instant lastFailure;
+        private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
+        private final AtomicLong totalSuccesses = new AtomicLong(0);
+        private final AtomicLong totalFailures = new AtomicLong(0);
 
         /**
          * Returns the timestamp when the provider becomes available again.
@@ -353,42 +346,42 @@ public class RateLimitState {
          * Returns the current consecutive failure count.
          */
         public int getConsecutiveFailures() {
-            return consecutiveFailures;
+            return consecutiveFailures.get();
         }
 
         /**
          * Sets the current consecutive failure count.
          */
         public void setConsecutiveFailures(int consecutiveFailures) {
-            this.consecutiveFailures = consecutiveFailures;
+            this.consecutiveFailures.set(consecutiveFailures);
         }
 
         /**
          * Returns the total number of successful calls recorded.
          */
         public long getTotalSuccesses() {
-            return totalSuccesses;
+            return totalSuccesses.get();
         }
 
         /**
          * Sets the total number of successful calls recorded.
          */
         public void setTotalSuccesses(long totalSuccesses) {
-            this.totalSuccesses = totalSuccesses;
+            this.totalSuccesses.set(totalSuccesses);
         }
 
         /**
          * Returns the total number of failed calls recorded.
          */
         public long getTotalFailures() {
-            return totalFailures;
+            return totalFailures.get();
         }
 
         /**
          * Sets the total number of failed calls recorded.
          */
         public void setTotalFailures(long totalFailures) {
-            this.totalFailures = totalFailures;
+            this.totalFailures.set(totalFailures);
         }
     }
 }
