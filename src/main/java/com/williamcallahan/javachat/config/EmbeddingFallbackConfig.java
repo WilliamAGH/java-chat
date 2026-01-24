@@ -74,11 +74,11 @@ public class EmbeddingFallbackConfig {
             log.info("[EMBEDDING] Configured remote OpenAI-compatible embedding fallback (urlId={})",
                 Integer.toHexString(Objects.hashCode(remoteUrl)));
             secondaryModel = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
-                    remoteDims > 0 ? remoteDims : dimensions, restTemplateBuilder);
+                    remoteDims > 0 ? remoteDims : dimensions);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Configured OpenAI embedding fallback");
             secondaryModel = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
-                    dimensions, restTemplateBuilder);
+                    dimensions);
         } else {
             log.info("[EMBEDDING] No remote/OpenAI embedding fallback configured");
         }
@@ -101,7 +101,6 @@ public class EmbeddingFallbackConfig {
      * @param openaiBaseUrl OpenAI base URL
      * @param openaiModel OpenAI embedding model name
      * @param useHashFallback whether to fallback to hash embeddings
-     * @param restTemplateBuilder RestTemplate builder
      * @return embedding model with fallbacks
      */
     @Bean
@@ -118,8 +117,7 @@ public class EmbeddingFallbackConfig {
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
             @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
-            @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback,
-            RestTemplateBuilder restTemplateBuilder) {
+            @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback) {
         
         log.info("[EMBEDDING] Configuring remote/OpenAI embeddings with fallback strategies");
 
@@ -129,11 +127,11 @@ public class EmbeddingFallbackConfig {
             log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider (urlId={})",
                 Integer.toHexString(Objects.hashCode(remoteUrl)));
             primary = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
-                    remoteDims > 0 ? remoteDims : embeddingDimensions, restTemplateBuilder);
+                    remoteDims > 0 ? remoteDims : embeddingDimensions);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Using OpenAI embeddings as primary provider");
             primary = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
-                    embeddingDimensions, restTemplateBuilder);
+                    embeddingDimensions);
         }
 
         LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(embeddingDimensions);

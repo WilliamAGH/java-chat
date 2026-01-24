@@ -1,4 +1,4 @@
-package com.williamcallahan.javachat.service.markdown;
+package com.williamcallahan.javachat.domain.markdown;
 
 import java.time.LocalDateTime;
 import java.util.Objects;
