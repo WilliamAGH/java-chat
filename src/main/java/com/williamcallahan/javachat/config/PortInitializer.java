@@ -6,7 +6,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 
-import java.util.Locale;
 
 /**
  * Ensures a usable server port is selected before Spring Boot starts.
@@ -31,16 +30,14 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         // Disable port manipulation entirely when running under the 'test' profile
         for (String activeProfileName : environment.getActiveProfiles()) {
-            String normalizedProfile = activeProfileName == null
-                ? ""
-                : activeProfileName.trim().toLowerCase(Locale.ROOT);
+            String normalizedProfile = normalizeAsciiLower(activeProfileName == null ? "" : activeProfileName.trim());
             if (PROFILE_TEST.equals(normalizedProfile)) {
                 System.err.println("[startup] PortInitializer disabled under 'test' profile");
                 return;
             }
         }
         String activeEnv = System.getenv(ENV_ACTIVE_PROFILE);
-        if (activeEnv != null && activeEnv.toLowerCase(Locale.ROOT).contains(PROFILE_TEST)) {
+        if (activeEnv != null && normalizeAsciiLower(activeEnv).contains(PROFILE_TEST)) {
             System.err.println("[startup] PortInitializer disabled via SPRING_PROFILES_ACTIVE=test");
             return;
         }
@@ -91,6 +88,22 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
         } catch (NumberFormatException ignored) {
             return def;
         }
+    }
+
+    private static String normalizeAsciiLower(String inputText) {
+        if (inputText == null) {
+            return "";
+        }
+        StringBuilder normalized = new StringBuilder(inputText.length());
+        for (int index = 0; index < inputText.length(); index++) {
+            char current = inputText.charAt(index);
+            if (current >= 'A' && current <= 'Z') {
+                normalized.append((char) (current + ('a' - 'A')));
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
     }
 
     /**
