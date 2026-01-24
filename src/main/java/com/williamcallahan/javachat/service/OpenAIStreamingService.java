@@ -9,7 +9,6 @@ import com.openai.models.ChatModel;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.slf4j.Logger;
@@ -101,7 +100,6 @@ public class OpenAIStreamingService {
             this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
             if (!this.isAvailable) {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
-                this.isAvailable = false;
             }
         } catch (RuntimeException exception) {
             log.error("Failed to initialize OpenAI client (exception type: {})",
@@ -192,6 +190,12 @@ public class OpenAIStreamingService {
         final String truncatedPrompt = truncatePromptForModel(prompt);
         return Mono.defer(() -> {
             OpenAIClient blockingClient = selectClientForBlocking();
+            if (blockingClient == null) {
+                log.error("No OpenAI-compatible client is configured or available for completion. "
+                        + "Check API credentials and configuration.");
+                return Mono.error(new IllegalStateException(
+                        "No OpenAI-compatible client is configured or available for completion."));
+            }
             ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
             try {
                 log.info("[LLM] Complete started");
@@ -236,38 +240,99 @@ public class OpenAIStreamingService {
 
     /**
      * Applies reasoning_effort="minimal" for GPT-5 prompts.
+     * Supports both Java enums and OpenAI SDK's Kotlin sealed classes.
+     *
+     * @throws IllegalStateException if the SDK method exists but MINIMAL value cannot be resolved
      */
     private void applyReasoningEffort(ChatCompletionCreateParams.Builder builder) {
         Method reasoningMethod = findReasoningEffortMethod(builder);
-        if (reasoningMethod != null) {
-            try {
-                Class<?> parameterType = reasoningMethod.getParameterTypes()[0];
-                if (!parameterType.isEnum()) {
-                    throw new IllegalStateException("Unsupported reasoningEffort parameter type: " + parameterType.getName());
-                }
-                Class<? extends Enum> enumType = parameterType.asSubclass(Enum.class);
-                Object minimal = Enum.valueOf(enumType, "MINIMAL");
-                reasoningMethod.invoke(builder, minimal);
-                log.info("[LLM] reasoning_effort=MINIMAL (SDK enum)");
-                return;
-            } catch (ReflectiveOperationException | IllegalArgumentException exception) {
-                throw new IllegalStateException("Failed to apply reasoning_effort via SDK enum", exception);
-            }
+        if (reasoningMethod == null) {
+            // No SDK method available - use body property as primary approach
+            builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
+            log.info("[LLM] reasoning_effort set via additional body property (no SDK method)");
+            return;
         }
 
-        // Chat Completions supports only top-level "reasoning_effort"
-        // Do NOT send a nested "reasoning" object on this endpoint.
-        builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
-        log.info("[LLM] reasoning_effort set via additional body property");
+        // SDK method exists - must succeed or fail fast
+        try {
+            Class<?> parameterType = reasoningMethod.getParameterTypes()[0];
+            Object minimal = resolveMinimalReasoningEffort(parameterType);
+            reasoningMethod.invoke(builder, minimal);
+            log.info("[LLM] reasoning_effort=MINIMAL (SDK type: {})", parameterType.getSimpleName());
+        } catch (ReflectiveOperationException | IllegalArgumentException exception) {
+            throw new IllegalStateException("SDK reasoningEffort method exists but invocation failed", exception);
+        }
     }
 
+    /**
+     * Resolves the MINIMAL reasoning effort value for the given parameter type.
+     * Handles OpenAI SDK Kotlin sealed classes (static field) and Java enums (fallback).
+     *
+     * <p>Resolution order:
+     * <ol>
+     *   <li>Static MINIMAL field (OpenAI SDK Kotlin companion object)</li>
+     *   <li>Enum constant named MINIMAL (Java enum fallback)</li>
+     * </ol>
+     *
+     * @throws IllegalStateException if MINIMAL constant cannot be found via either mechanism
+     */
+    private Object resolveMinimalReasoningEffort(Class<?> parameterType) throws ReflectiveOperationException {
+        // Try static MINIMAL field first (works for OpenAI SDK Kotlin sealed classes)
+        try {
+            java.lang.reflect.Field minimalField = parameterType.getField("MINIMAL");
+            Object minimal = minimalField.get(null);
+            log.debug("[LLM] Resolved MINIMAL from static field on {}", parameterType.getSimpleName());
+            return minimal;
+        } catch (NoSuchFieldException noStaticField) {
+            // Static field not found - expected for non-Kotlin types; fall through to enum check
+            log.info("[LLM] No static MINIMAL field on {} (trying enum fallback)", parameterType.getSimpleName());
+        }
+
+        // Java enum: look up MINIMAL constant by name
+        if (parameterType.isEnum()) {
+            for (Object constant : parameterType.getEnumConstants()) {
+                if (constant instanceof Enum<?> enumConstant && "MINIMAL".equals(enumConstant.name())) {
+                    log.debug("[LLM] Resolved MINIMAL from enum constant on {}", parameterType.getSimpleName());
+                    return constant;
+                }
+            }
+            // Enum exists but has no MINIMAL constant - fail fast with clear error
+            throw new IllegalStateException(
+                "Enum type " + parameterType.getName() + " has no MINIMAL constant; "
+                + "available: " + java.util.Arrays.toString(parameterType.getEnumConstants()));
+        }
+
+        // Neither static field nor enum - fail fast with specific error
+        throw new IllegalStateException(
+            "Unsupported reasoningEffort type: " + parameterType.getName()
+            + " (no static MINIMAL field found and type is not an enum)");
+    }
+
+    /**
+     * Finds the reasoningEffort setter method that accepts a ReasoningEffort (not Optional).
+     * The SDK has two overloads; we need the one accepting the raw type for direct invocation.
+     */
     private Method findReasoningEffortMethod(ChatCompletionCreateParams.Builder builder) {
+        Method candidate = null;
         for (Method method : builder.getClass().getMethods()) {
             if ("reasoningEffort".equals(method.getName()) && method.getParameterCount() == 1) {
-                return method;
+                Class<?> paramType = method.getParameterTypes()[0];
+                // Skip the Optional<ReasoningEffort> overload
+                if (java.util.Optional.class.isAssignableFrom(paramType)) {
+                    continue;
+                }
+                // Skip JsonField<ReasoningEffort> overload
+                if (paramType.getName().contains("JsonField")) {
+                    continue;
+                }
+                candidate = method;
+                // Prefer the non-wrapper overload (ReasoningEffort directly)
+                if (!paramType.getName().contains("Optional")) {
+                    return method;
+                }
             }
         }
-        return null;
+        return candidate;
     }
     
     
