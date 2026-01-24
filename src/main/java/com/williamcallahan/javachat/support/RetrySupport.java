@@ -56,6 +56,9 @@ public final class RetrySupport {
             int maxAttempts,
             Duration initialBackoff) {
         
+        if (maxAttempts < 1) {
+            throw new IllegalArgumentException("maxAttempts must be at least 1");
+        }
         RuntimeException lastException = null;
         Duration currentBackoff = initialBackoff;
         

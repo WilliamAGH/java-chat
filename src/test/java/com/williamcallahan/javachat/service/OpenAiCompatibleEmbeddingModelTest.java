@@ -42,20 +42,20 @@ class OpenAiCompatibleEmbeddingModelTest {
 
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
-        OpenAiCompatibleEmbeddingModel model = new OpenAiCompatibleEmbeddingModel(
+        try (OpenAiCompatibleEmbeddingModel model = new OpenAiCompatibleEmbeddingModel(
             client,
             "text-embedding-3-small",
             2
-        );
+        )) {
+            EmbeddingResponse embeddingResponse = model.call(new EmbeddingRequest(List.of("a", "b"), null));
 
-        EmbeddingResponse embeddingResponse = model.call(new EmbeddingRequest(List.of("a", "b"), null));
+            assertEquals(2, embeddingResponse.getResults().size());
+            assertEquals(0.25f, embeddingResponse.getResults().get(0).getOutput()[0]);
+            assertEquals(-0.5f, embeddingResponse.getResults().get(0).getOutput()[1]);
+            assertEquals(0.0f, embeddingResponse.getResults().get(1).getOutput()[0]);
+            assertEquals(1.0f, embeddingResponse.getResults().get(1).getOutput()[1]);
 
-        assertEquals(2, embeddingResponse.getResults().size());
-        assertEquals(0.25f, embeddingResponse.getResults().get(0).getOutput()[0]);
-        assertEquals(-0.5f, embeddingResponse.getResults().get(0).getOutput()[1]);
-        assertEquals(0.0f, embeddingResponse.getResults().get(1).getOutput()[0]);
-        assertEquals(1.0f, embeddingResponse.getResults().get(1).getOutput()[1]);
-
-        verify(embeddingService).create(any(), any(RequestOptions.class));
+            verify(embeddingService).create(any(), any(RequestOptions.class));
+        }
     }
 }
