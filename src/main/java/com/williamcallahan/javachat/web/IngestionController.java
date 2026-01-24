@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.io.IOException;
-import java.util.Map;
 
 /**
  * Exposes ingestion endpoints for crawling remote docs and ingesting local directories.
@@ -42,7 +41,7 @@ public class IngestionController extends BaseController {
      * Starts an ingestion run that crawls and ingests up to the requested number of pages.
      */
     @PostMapping
-    public ResponseEntity<Map<String, Object>> ingest(
+    public ResponseEntity<? extends ApiResponse> ingest(
             @RequestParam(name = "maxPages", defaultValue = "100") 
             @Min(value = 1, message = "maxPages must be at least 1")
             @Max(value = MAX_ALLOWED_PAGES, message = "maxPages cannot exceed " + MAX_ALLOWED_PAGES)
@@ -68,16 +67,13 @@ public class IngestionController extends BaseController {
      * Ingests documents from a local directory, primarily for offline or development workflows.
      */
     @PostMapping("/local")
-    public ResponseEntity<Map<String, Object>> ingestLocal(
+    public ResponseEntity<? extends ApiResponse> ingestLocal(
             @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000")
             @Min(1) @Max(1000000) int maxFiles) {
         try {
             int processed = docsIngestionService.ingestLocalDirectory(directory, maxFiles);
-            return createSuccessResponse(Map.of(
-                    "processed", processed,
-                    "dir", directory
-            ));
+            return ResponseEntity.ok(IngestionLocalResponse.success(processed, directory));
         } catch (IllegalArgumentException illegalArgumentException) {
             return handleValidationException(illegalArgumentException);
         } catch (IOException ioException) {
@@ -94,7 +90,7 @@ public class IngestionController extends BaseController {
      * Returns a standardized validation error response for invalid ingestion request parameters.
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> handleValidationException(IllegalArgumentException validationException) {
+    public ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);
     }
 }

@@ -15,8 +15,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.ModelAndView;
 
-import java.util.Map;
-
 /**
  * Custom error controller that provides beautiful error pages for the Java Chat application.
  * Handles both HTML page requests and API JSON error responses.
@@ -96,7 +94,7 @@ public class CustomErrorController implements ErrorController {
     /**
      * Handles API error responses with JSON format.
      */
-    private ResponseEntity<Map<String, Object>> handleApiError(int statusCode, String message, Exception exception) {
+    private ResponseEntity<ApiErrorResponse> handleApiError(int statusCode, String message, Exception exception) {
         HttpStatus httpStatus = HttpStatus.resolve(statusCode);
         if (httpStatus == null) {
             httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
