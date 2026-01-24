@@ -22,7 +22,7 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     private static final String RANGE_SEPARATOR = "-";
 
     /**
-     * Resolves the port range, picks a free port, and injects it into the environment.
+     * Resolves the port range, selects a preferred port, and injects it into the environment.
      *
      * @param environment the Spring environment to update
      * @param application the Spring Boot application
