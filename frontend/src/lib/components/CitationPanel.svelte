@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fetchCitations, type Citation } from '../services/chat'
+  import type { Citation } from '../services/chat'
 
   /** Citation type for styling and icon selection. */
   type CitationType = 'pdf' | 'api-doc' | 'repo' | 'external' | 'local' | 'unknown'
@@ -84,22 +84,29 @@
   }
 
   interface Props {
-    /** The user query to fetch citations for. */
-    query: string
+    /** Pre-fetched citations from the SSE stream (eliminates separate API call). */
+    citations: Citation[]
     /** Whether to show the panel (controls visibility without unmounting). */
     visible?: boolean
   }
 
-  let { query, visible = true }: Props = $props()
+  let { citations, visible = true }: Props = $props()
 
-  let citations = $state<Citation[]>([])
-  let hasFetched = $state(false)
-  let fetchError = $state<string | null>(null)
   let isExpanded = $state(false)
-  let pendingRequestId = $state(0)
 
   /** Unique ID for ARIA association between trigger and list (avoids duplicate IDs on page). */
   const citationListId = `citation-list-${Math.random().toString(36).slice(2, 9)}`
+
+  /** Deduplicated citations for display. */
+  let uniqueCitations = $derived(() => {
+    const seen = new Set<string>()
+    return citations.filter((citation) => {
+      const key = citation.url?.toLowerCase() ?? ''
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  })
 
   /**
    * Extracts display-friendly domain or filename from URL.
