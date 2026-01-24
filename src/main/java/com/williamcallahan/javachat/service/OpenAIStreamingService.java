@@ -43,6 +43,7 @@ public class OpenAIStreamingService {
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int MAX_COMPLETION_TOKENS = 4000;
     private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
+    private static final String GPT_5_MODEL_PREFIX = "gpt-5.2";
 
     /** Safe token budget for GPT-5.2 input (8K limit). */
     private static final int MAX_TOKENS_GPT5_INPUT = 7000;
@@ -128,7 +129,10 @@ public class OpenAIStreamingService {
             }
         } catch (RuntimeException initializationException) {
             log.error("Failed to initialize OpenAI client", initializationException);
-            this.isAvailable = false;
+            this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
+            if (!this.isAvailable) {
+                log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
+            }
         }
     }
 
@@ -347,11 +351,11 @@ public class OpenAIStreamingService {
 
     private String normalizedModelId() {
         String rawModelId = model == null ? "" : model.trim();
-        return rawModelId.isEmpty() ? "gpt-5.2" : AsciiTextNormalizer.toLowerAscii(rawModelId);
+        return rawModelId.isEmpty() ? GPT_5_MODEL_PREFIX : AsciiTextNormalizer.toLowerAscii(rawModelId);
     }
 
     private boolean isGpt5Family(String modelId) {
-        return modelId != null && modelId.startsWith("gpt-5.2");
+        return modelId != null && modelId.startsWith(GPT_5_MODEL_PREFIX);
     }
 
     private ReasoningEffort resolveReasoningEffort(String normalizedModelId) {
