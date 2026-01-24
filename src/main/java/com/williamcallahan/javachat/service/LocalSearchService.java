@@ -100,7 +100,8 @@ public class LocalSearchService {
             String text = Files.readString(textPath, StandardCharsets.UTF_8);
             Path fileNamePath = textPath.getFileName();
             if (fileNamePath == null) {
-                log.warn("Skipping chunk with null filename (root path): {}", textPath);
+                int pathToken = Objects.hashCode(textPath);
+                log.warn("Skipping chunk with null filename (root path) pathToken={}", pathToken);
                 return Optional.empty();
             }
             String fileName = fileNamePath.toString();

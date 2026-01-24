@@ -136,8 +136,8 @@ public class RerankerService {
         for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
             Document document = docs.get(docIndex);
             Map<String, Object> metadata = document.getMetadata();
-            Object titleValue = metadata == null ? null : metadata.get("title");
-            Object urlValue = metadata == null ? null : metadata.get("url");
+            Object titleValue = metadata.get("title");
+            Object urlValue = metadata.get("url");
             String title = titleValue == null ? "" : String.valueOf(titleValue);
             String url = urlValue == null ? "" : String.valueOf(urlValue);
             String text = document.getText();

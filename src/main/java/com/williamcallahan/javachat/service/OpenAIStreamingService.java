@@ -9,7 +9,9 @@ import com.openai.models.ChatModel;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,10 +21,8 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Method;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * OpenAI Java SDK-based streaming service that provides clean, reliable streaming
@@ -283,7 +283,7 @@ public class OpenAIStreamingService {
         final int MAX_CHARS_GPT5_INPUT = 28_000; // ~7k tokens, under 8k input limit
         final int MAX_CHARS_DEFAULT = 400_000;   // generous for high-context models
 
-        String modelId = model == null ? "" : model.toLowerCase(Locale.ROOT);
+        String modelId = AsciiTextNormalizer.toLowerAscii(model == null ? "" : model);
         int limit = ("gpt-5".equals(modelId) || "gpt-5-chat".equals(modelId))
             ? MAX_CHARS_GPT5_INPUT
             : MAX_CHARS_DEFAULT;
@@ -353,7 +353,7 @@ public class OpenAIStreamingService {
         return isRateLimit(throwable)
                 || throwable instanceof java.util.concurrent.TimeoutException
                 || throwable instanceof InterruptedException
-                || (throwable.getMessage() != null && throwable.getMessage().toLowerCase(Locale.ROOT).contains("sleep interrupted"))
+                || (throwable.getMessage() != null && AsciiTextNormalizer.toLowerAscii(throwable.getMessage()).contains("sleep interrupted"))
                 || throwable.toString().contains("401")
                 || throwable.toString().contains("403");
     }
@@ -368,4 +368,5 @@ public class OpenAIStreamingService {
         long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
         log.warn("Temporarily disabling primary provider for {}s", seconds);
     }
+
 }

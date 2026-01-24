@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service.markdown;
 
 import com.vladsch.flexmark.ast.HtmlBlock;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.vladsch.flexmark.ast.Text;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.ast.NodeVisitor;
@@ -10,7 +11,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -126,7 +126,7 @@ public class EnrichmentProcessor {
          * @return typed Enrichment object or null if type is unknown
          */
         private MarkdownEnrichment createEnrichment(String type, String content, int pos) {
-            return switch (type.toLowerCase(Locale.ROOT)) {
+            return switch (AsciiTextNormalizer.toLowerAscii(type)) {
                 case "hint" -> Hint.create(content, pos);
                 case "warning" -> Warning.create(content, pos);
                 case "background" -> Background.create(content, pos);

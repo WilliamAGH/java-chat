@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -47,25 +48,12 @@ public class GuidedTOCProvider {
      */
     public Optional<GuidedLesson> findBySlug(String slug) {
         if (slug == null || slug.isBlank()) return Optional.empty();
-        String normalizedSlug = normalizeAsciiLower(slug);
+        String normalizedSlug = AsciiTextNormalizer.toLowerAscii(slug);
         return getTOC().stream()
             .filter(lesson -> {
                 String lessonSlug = lesson.getSlug();
-                return lessonSlug != null && normalizedSlug.equals(normalizeAsciiLower(lessonSlug));
+                return lessonSlug != null && normalizedSlug.equals(AsciiTextNormalizer.toLowerAscii(lessonSlug));
             })
             .findFirst();
-    }
-
-    private String normalizeAsciiLower(String inputText) {
-        StringBuilder normalized = new StringBuilder(inputText.length());
-        for (int index = 0; index < inputText.length(); index++) {
-            char current = inputText.charAt(index);
-            if (current >= 'A' && current <= 'Z') {
-                normalized.append((char) (current + ('a' - 'A')));
-            } else {
-                normalized.append(current);
-            }
-        }
-        return normalized.toString();
     }
 }

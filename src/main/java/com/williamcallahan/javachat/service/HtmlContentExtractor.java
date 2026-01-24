@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -179,9 +180,9 @@ public class HtmlContentExtractor {
      * Check if element is likely navigation.
      */
     private boolean isNavigationElement(Element element) {
-        String className = normalizeAsciiLower(element.className());
-        String id = normalizeAsciiLower(element.id());
-        String text = normalizeAsciiLower(element.text());
+        String className = AsciiTextNormalizer.toLowerAscii(element.className());
+        String id = AsciiTextNormalizer.toLowerAscii(element.id());
+        String text = AsciiTextNormalizer.toLowerAscii(element.text());
         
         return className.contains("nav") || 
                className.contains("menu") ||
@@ -194,16 +195,17 @@ public class HtmlContentExtractor {
                text.startsWith("hide") ||
                text.startsWith("show");
     }
+
     
     /**
      * Check if text contains excessive noise.
      */
     private boolean containsExcessiveNoise(String text) {
         int noiseCount = 0;
-        String lowerText = normalizeAsciiLower(text);
+        String lowerText = AsciiTextNormalizer.toLowerAscii(text);
         
         for (String noise : NOISE_PATTERNS) {
-            if (lowerText.contains(normalizeAsciiLower(noise))) {
+            if (lowerText.contains(AsciiTextNormalizer.toLowerAscii(noise))) {
                 noiseCount++;
             }
         }
@@ -229,9 +231,9 @@ public class HtmlContentExtractor {
             }
             
             // Skip lines that are pure noise
-            String trimmedLower = normalizeAsciiLower(trimmed);
+            String trimmedLower = AsciiTextNormalizer.toLowerAscii(trimmed);
             boolean isNoise = NOISE_PATTERNS.stream()
-                .anyMatch(noise -> trimmedLower.equals(normalizeAsciiLower(noise)));
+                .anyMatch(noise -> trimmedLower.equals(AsciiTextNormalizer.toLowerAscii(noise)));
             
             if (!isNoise) {
                 // Also skip very short lines that are likely navigation
@@ -307,18 +309,5 @@ public class HtmlContentExtractor {
         }
         
         return filterNoise(result);
-    }
-
-    private static String normalizeAsciiLower(String inputText) {
-        StringBuilder normalized = new StringBuilder(inputText.length());
-        for (int index = 0; index < inputText.length(); index++) {
-            char current = inputText.charAt(index);
-            if (current >= 'A' && current <= 'Z') {
-                normalized.append((char) (current + ('a' - 'A')));
-            } else {
-                normalized.append(current);
-            }
-        }
-        return normalized.toString();
     }
 }

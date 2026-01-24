@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.vladsch.flexmark.util.ast.Node;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -9,7 +10,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.nodes.TextNode;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,7 +57,7 @@ class EnrichmentPlaceholderizer {
             if (rawToken == null) {
                 return Optional.empty();
             }
-            String normalized = rawToken.trim().toLowerCase(Locale.ROOT);
+            String normalized = AsciiTextNormalizer.toLowerAscii(rawToken.trim());
             for (EnrichmentKind kind : EnrichmentKind.values()) {
                 if (kind.token.equals(normalized)) {
                     return Optional.of(kind);
@@ -65,6 +65,7 @@ class EnrichmentPlaceholderizer {
             }
             return Optional.empty();
         }
+
     }
 
     EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer) {
