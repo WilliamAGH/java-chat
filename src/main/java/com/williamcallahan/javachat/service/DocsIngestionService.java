@@ -356,7 +356,7 @@ public class DocsIngestionService {
             // Normalize line endings
             String normalizedMetadata = metadata.replace("\r\n", "\n");
             // Case-insensitive search for "Title:"
-            String lowerMetadata = normalizedMetadata.toLowerCase(Locale.ROOT);
+            String lowerMetadata = normalizeAsciiLower(normalizedMetadata);
             String titleKey = "title:";
             int titleKeyIndex = lowerMetadata.indexOf(titleKey);
             if (titleKeyIndex >= 0) {
@@ -399,5 +399,18 @@ public class DocsIngestionService {
             }
         }
         return "";
+    }
+
+    private static String normalizeAsciiLower(String inputText) {
+        StringBuilder normalized = new StringBuilder(inputText.length());
+        for (int index = 0; index < inputText.length(); index++) {
+            char current = inputText.charAt(index);
+            if (current >= 'A' && current <= 'Z') {
+                normalized.append((char) (current + ('a' - 'A')));
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
     }
 }

@@ -47,7 +47,7 @@ export DOCS_DIR="$PROJECT_ROOT/data/docs/books"
 # Build the application
 echo -e "${YELLOW}Building application...${NC}"
 cd "$PROJECT_ROOT"
-./mvnw -DskipTests clean package > /dev/null 2>&1
+./gradlew clean build -x test --no-daemon > /dev/null 2>&1
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Application built successfully${NC}"
@@ -58,7 +58,7 @@ fi
 
 # Run the document processor
 echo -e "${YELLOW}Processing PDF document...${NC}"
-java -cp target/java-chat-0.0.1-SNAPSHOT.jar \
+java -cp build/libs/java-chat-0.0.1-SNAPSHOT.jar \
     -Dspring.profiles.active=default \
     com.williamcallahan.javachat.cli.DocumentProcessor
 

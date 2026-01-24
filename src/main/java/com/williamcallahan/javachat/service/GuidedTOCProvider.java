@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -48,12 +47,25 @@ public class GuidedTOCProvider {
      */
     public Optional<GuidedLesson> findBySlug(String slug) {
         if (slug == null || slug.isBlank()) return Optional.empty();
-        String normalizedSlug = slug.toLowerCase(Locale.ROOT);
+        String normalizedSlug = normalizeAsciiLower(slug);
         return getTOC().stream()
             .filter(lesson -> {
                 String lessonSlug = lesson.getSlug();
-                return lessonSlug != null && normalizedSlug.equals(lessonSlug.toLowerCase(Locale.ROOT));
+                return lessonSlug != null && normalizedSlug.equals(normalizeAsciiLower(lessonSlug));
             })
             .findFirst();
+    }
+
+    private String normalizeAsciiLower(String inputText) {
+        StringBuilder normalized = new StringBuilder(inputText.length());
+        for (int index = 0; index < inputText.length(); index++) {
+            char current = inputText.charAt(index);
+            if (current >= 'A' && current <= 'Z') {
+                normalized.append((char) (current + ('a' - 'A')));
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
     }
 }

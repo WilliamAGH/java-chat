@@ -31,27 +31,19 @@ public class ProcessingLogger {
      */
     @Around("@annotation(org.springframework.web.bind.annotation.PostMapping) && " +
             "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))")
-    public Object logEmbeddingGeneration(ProceedingJoinPoint joinPoint) {
+    public Object logEmbeddingGeneration(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Starting", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
+        Object embeddingOutcome = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
 
-            PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms",
-                requestToken, duration);
+        PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms",
+            requestToken, duration);
 
-            return result;
-        } catch (RuntimeException runtimeException) {
-            throw runtimeException;
-        } catch (Error fatalError) {
-            throw fatalError;
-        } catch (Throwable throwable) {
-            throw new IllegalStateException("Embedding generation failed", throwable);
-        }
+        return embeddingOutcome;
     }
 
     /**
@@ -73,18 +65,10 @@ public class ProcessingLogger {
      * The ChunkProcessingService processes thousands of documents on startup
      */
     // @Around("execution(* com.williamcallahan.javachat.service.ChunkProcessingService.process*(..))")
-    public Object logDocumentParsing(ProceedingJoinPoint joinPoint) {
+    public Object logDocumentParsing(ProceedingJoinPoint joinPoint) throws Throwable {
         // This method is disabled to prevent flooding logs during document processing
         // Uncomment the @Around annotation to re-enable if needed for debugging
-        try {
-            return joinPoint.proceed();
-        } catch (RuntimeException runtimeException) {
-            throw runtimeException;
-        } catch (Error fatalError) {
-            throw fatalError;
-        } catch (Throwable throwable) {
-            throw new IllegalStateException("Document parsing failed", throwable);
-        }
+        return joinPoint.proceed();
     }
     
     /**

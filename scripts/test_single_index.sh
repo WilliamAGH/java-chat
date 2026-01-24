@@ -127,9 +127,9 @@ echo -e "───────────────────────�
 cd "$PROJECT_ROOT"
 
 # Build if needed
-if [ ! -f "target/java-chat-0.0.1-SNAPSHOT.jar" ] || [ "pom.xml" -nt "target/java-chat-0.0.1-SNAPSHOT.jar" ]; then
+if [ ! -f "build/libs/java-chat-0.0.1-SNAPSHOT.jar" ] || [ "build.gradle.kts" -nt "build/libs/java-chat-0.0.1-SNAPSHOT.jar" ]; then
     echo -e "Building application..."
-    ./mvnw -DskipTests clean package > /dev/null 2>&1
+    ./gradlew clean build -x test --no-daemon > /dev/null 2>&1
     echo -e "✅ Build complete"
 fi
 
@@ -147,7 +147,7 @@ JAVA_OPTS="$JAVA_OPTS -Dlogging.level.INDEXING=INFO"
 JAVA_OPTS="$JAVA_OPTS -Dlogging.level.EMBEDDING=INFO"
 
 # Start the app with test directory
-java $JAVA_OPTS -jar target/java-chat-0.0.1-SNAPSHOT.jar \
+java $JAVA_OPTS -jar build/libs/java-chat-0.0.1-SNAPSHOT.jar \
     --server.port=8090 \
     > "$TEST_LOG" 2>&1 &
 
