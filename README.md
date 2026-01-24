@@ -315,7 +315,7 @@ curl -X POST "http://localhost:8085/api/ingest/local?path=data/docs&maxFiles=100
 
 ## Retrieval & quality
 
-- Chunking: ~900 tokens with 150 overlap (GPT-5.2-compatible segmentation).
+- Chunking: ~900 tokens with 150 overlap (CL100K_BASE tokenizer via JTokkit).
 - Vector search: Qdrant similarity. Next steps: enable hybrid (BM25 + vector) and MMR diversity.
 - Re-ranker: planned BGE reranker (DJL) or LLM rerank for top-k. Citations pinned to top-3 by score.
 
