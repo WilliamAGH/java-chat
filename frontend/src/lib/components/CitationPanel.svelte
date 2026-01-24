@@ -98,6 +98,9 @@
   let isExpanded = $state(false)
   let pendingRequestId = $state(0)
 
+  /** Unique ID for ARIA association between trigger and list (avoids duplicate IDs on page). */
+  const citationListId = `citation-list-${Math.random().toString(36).slice(2, 9)}`
+
   /**
    * Extracts display-friendly domain or filename from URL.
    */
@@ -213,7 +216,7 @@
       class:citation-trigger--expanded={isExpanded}
       onclick={toggleExpand}
       aria-expanded={isExpanded}
-      aria-controls="citation-list"
+      aria-controls={citationListId}
     >
       <svg class="citation-trigger-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm3.5 1a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Zm-3 3a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Zm-3 3a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Z"/>
@@ -225,7 +228,7 @@
     </button>
 
     {#if isExpanded}
-      <ul id="citation-list" class="citation-list" role="list">
+      <ul id={citationListId} class="citation-list" role="list">
         {#each citations as citation (citation.url)}
           {@const citationType = getCitationType(citation.url)}
           {@const displaySource = getDisplaySource(citation.url)}
