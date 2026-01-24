@@ -1,87 +1,11 @@
 <script lang="ts">
   import type { Citation } from '../services/chat'
-
-  /** Citation type for styling and icon selection. */
-  type CitationType = 'pdf' | 'api-doc' | 'repo' | 'external' | 'local' | 'unknown'
-
-  /** URL protocol and path constants. */
-  const URL_SCHEME_HTTP = 'http://'
-  const URL_SCHEME_HTTPS = 'https://'
-  const LOCAL_PATH_PREFIX = '/'
-  const ANCHOR_SEPARATOR = '#'
-  const PDF_EXTENSION = '.pdf'
-  const FALLBACK_LINK_TARGET = '#'
-  const FALLBACK_SOURCE_LABEL = 'Source'
-
-  /** Domain patterns that indicate API documentation sources. */
-  const API_DOC_PATTERNS = ['docs.oracle.com', 'javadoc', '/api/', '/docs/api/'] as const
-
-  /** Domain patterns that indicate repository sources. */
-  const REPO_PATTERNS = ['github.com', 'gitlab.com', 'bitbucket.org'] as const
-
-  /** Checks if URL is HTTP/HTTPS. */
-  function isHttpUrl(url: string): boolean {
-    return url.startsWith(URL_SCHEME_HTTP) || url.startsWith(URL_SCHEME_HTTPS)
-  }
-
-  /** Checks if URL contains any of the given patterns. */
-  function matchesAnyPattern(url: string, patterns: readonly string[]): boolean {
-    return patterns.some(pattern => url.includes(pattern))
-  }
-
-  /** Safe URL schemes for citation links. Rejects javascript:, data:, vbscript:, etc. */
-  const SAFE_URL_SCHEMES = ['http:', 'https:'] as const
-
-  /**
-   * Validates that a URL uses a safe scheme (http/https) or is a relative path.
-   * Returns the URL if safe, or the fallback value for dangerous schemes.
-   */
-  function sanitizeUrlScheme(url: string): string {
-    if (!url) return FALLBACK_LINK_TARGET
-    const trimmedUrl = url.trim()
-
-    // Allow relative paths (start with / but not //)
-    if (trimmedUrl.startsWith(LOCAL_PATH_PREFIX) && !trimmedUrl.startsWith('//')) {
-      return trimmedUrl
-    }
-
-    // Check for safe schemes
-    try {
-      const parsedUrl = new URL(trimmedUrl)
-      const scheme = parsedUrl.protocol.toLowerCase()
-      if (SAFE_URL_SCHEMES.some(safe => scheme === safe)) {
-        return trimmedUrl
-      }
-    } catch {
-      // URL parsing failed - might be a relative path or malformed
-      // Only allow if it doesn't look like a dangerous scheme
-      const lowerUrl = trimmedUrl.toLowerCase()
-      if (lowerUrl.includes(':') && !isHttpUrl(lowerUrl)) {
-        return FALLBACK_LINK_TARGET
-      }
-      return trimmedUrl
-    }
-
-    // Dangerous scheme detected
-    return FALLBACK_LINK_TARGET
-  }
-
-  /**
-   * Determines citation type from URL for icon and styling.
-   */
-  function getCitationType(url: string): CitationType {
-    if (!url) return 'unknown'
-    const lowerUrl = url.toLowerCase()
-
-    if (lowerUrl.endsWith(PDF_EXTENSION)) return 'pdf'
-    if (isHttpUrl(lowerUrl)) {
-      if (matchesAnyPattern(lowerUrl, API_DOC_PATTERNS)) return 'api-doc'
-      if (matchesAnyPattern(lowerUrl, REPO_PATTERNS)) return 'repo'
-      return 'external'
-    }
-    if (lowerUrl.startsWith(LOCAL_PATH_PREFIX)) return 'local'
-    return 'unknown'
-  }
+  import {
+    getCitationType,
+    getDisplaySource,
+    buildFullUrl,
+    deduplicateCitations
+  } from '../utils/url'
 
   interface Props {
     /** Pre-fetched citations from the SSE stream (eliminates separate API call). */
@@ -97,125 +21,23 @@
   /** Unique ID for ARIA association between trigger and list (avoids duplicate IDs on page). */
   const citationListId = `citation-list-${Math.random().toString(36).slice(2, 9)}`
 
-  /** Deduplicated citations for display. */
-  let uniqueCitations = $derived(() => {
-    const seen = new Set<string>()
-    return citations.filter((citation) => {
-      const key = citation.url?.toLowerCase() ?? ''
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  })
+  /** Deduplicated citations for display, with defensive validation. */
+  let uniqueCitations = $derived(deduplicateCitations(citations))
 
   /**
-   * Extracts display-friendly domain or filename from URL.
+   * Builds the full citation URL including anchor fragment.
+   * Delegates to shared utility for sanitization.
    */
-  function getDisplaySource(url: string): string {
-    if (!url) return FALLBACK_SOURCE_LABEL
-
-    const lowerUrl = url.toLowerCase()
-
-    // PDF filenames
-    if (lowerUrl.endsWith(PDF_EXTENSION)) {
-      const segments = url.split(LOCAL_PATH_PREFIX)
-      const filename = segments[segments.length - 1]
-      const cleanName = filename
-        .replace(/\.pdf$/i, '')
-        .replace(/[-_]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      return cleanName || 'PDF Document'
-    }
-
-    // HTTP URLs
-    if (isHttpUrl(url)) {
-      try {
-        const urlObj = new URL(url)
-        return urlObj.hostname.replace(/^www\./, '')
-      } catch {
-        return FALLBACK_SOURCE_LABEL
-      }
-    }
-
-    // Local paths
-    if (url.startsWith(LOCAL_PATH_PREFIX)) {
-      const segments = url.split(LOCAL_PATH_PREFIX)
-      return segments[segments.length - 1] || 'Local Resource'
-    }
-
-    return FALLBACK_SOURCE_LABEL
-  }
-
-  /**
-   * Builds the full URL including anchor fragment if present.
-   * Sanitizes the URL scheme to prevent XSS via javascript:, data:, etc.
-   */
-  function buildFullUrl(citation: Citation): string {
-    if (!citation.url) return FALLBACK_LINK_TARGET
-
-    const safeUrl = sanitizeUrlScheme(citation.url)
-    if (safeUrl === FALLBACK_LINK_TARGET) return FALLBACK_LINK_TARGET
-
-    if (citation.anchor && !safeUrl.includes(ANCHOR_SEPARATOR)) {
-      return `${safeUrl}${ANCHOR_SEPARATOR}${citation.anchor}`
-    }
-    return safeUrl
+  function buildCitationUrl(citation: Citation): string {
+    return buildFullUrl(citation.url, citation.anchor)
   }
 
   function toggleExpand() {
     isExpanded = !isExpanded
   }
-
-  // Fetch citations when query changes, with request tracking to prevent race conditions
-  $effect(() => {
-    const currentQuery = query
-    if (!currentQuery || !currentQuery.trim()) {
-      citations = []
-      hasFetched = false
-      fetchError = null
-      isExpanded = false
-      return
-    }
-
-    // Increment request ID to track this specific request
-    const requestId = ++pendingRequestId
-    hasFetched = false
-    fetchError = null
-    isExpanded = false
-
-    fetchCitations(currentQuery)
-      .then((result) => {
-        // Ignore stale responses from superseded requests
-        if (requestId !== pendingRequestId) return
-
-        // Deduplicate by URL
-        const seen = new Set<string>()
-        citations = result.filter((citation) => {
-          const key = citation.url?.toLowerCase() ?? ''
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-      })
-      .catch((error: unknown) => {
-        // Ignore errors from superseded requests
-        if (requestId !== pendingRequestId) return
-
-        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch citations'
-        fetchError = errorMessage
-        citations = []
-      })
-      .finally(() => {
-        // Only mark as fetched if this is still the current request
-        if (requestId === pendingRequestId) {
-          hasFetched = true
-        }
-      })
-  })
 </script>
 
-{#if visible && hasFetched && !fetchError && citations.length > 0}
+{#if visible && uniqueCitations.length > 0}
   <div class="citation-disclosure">
     <button
       type="button"
@@ -228,7 +50,7 @@
       <svg class="citation-trigger-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm3.5 1a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Zm-3 3a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Zm-3 3a.5.5 0 0 0-.5.5v.5a.5.5 0 0 0 .5.5h.5a.5.5 0 0 0 .5-.5v-.5a.5.5 0 0 0-.5-.5h-.5Zm3 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2Z"/>
       </svg>
-      <span class="citation-trigger-text">{citations.length} source{citations.length !== 1 ? 's' : ''}</span>
+      <span class="citation-trigger-text">{uniqueCitations.length} source{uniqueCitations.length !== 1 ? 's' : ''}</span>
       <svg class="citation-trigger-chevron" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path fill-rule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/>
       </svg>
@@ -236,12 +58,12 @@
 
     {#if isExpanded}
       <ul id={citationListId} class="citation-list" role="list">
-        {#each citations as citation (citation.url)}
+        {#each uniqueCitations as citation (citation.url)}
           {@const citationType = getCitationType(citation.url)}
           {@const displaySource = getDisplaySource(citation.url)}
           <li class="citation-item" data-type={citationType}>
             <a
-              href={buildFullUrl(citation)}
+              href={buildCitationUrl(citation)}
               target="_blank"
               rel="noopener noreferrer"
               class="citation-link"

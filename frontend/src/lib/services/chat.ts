@@ -12,15 +12,6 @@ export interface Citation {
   snippet?: string
 }
 
-export interface Enrichment {
-  packageName?: string
-  jdkVersion?: string
-  resource?: string
-  hints?: string[]
-  reminders?: string[]
-  background?: string[]
-}
-
 export interface StreamStatus {
   message: string
   details?: string
@@ -34,7 +25,18 @@ export interface StreamError {
 export interface StreamChatOptions {
   onStatus?: (status: StreamStatus) => void
   onError?: (error: StreamError) => void
+  onCitations?: (citations: Citation[]) => void
 }
+
+/** Result type for citation fetches - distinguishes empty results from errors. */
+export type CitationFetchResult =
+  | { success: true; citations: Citation[] }
+  | { success: false; error: string }
+
+/** SSE event types emitted by the chat stream endpoint. */
+const SSE_EVENT_STATUS = 'status'
+const SSE_EVENT_ERROR = 'error'
+const SSE_EVENT_CITATION = 'citation'
 
 /**
  * Stream chat response from the backend using Server-Sent Events
@@ -78,14 +80,23 @@ export async function streamChat(
   /**
    * Attempts JSON parsing only when content looks like JSON.
    * Returns parsed object or null for plain text content.
-   * Throws SyntaxError for malformed JSON (starts with '{' or '[' but invalid).
+   * Logs parse errors for debugging without interrupting stream processing.
    */
   function tryParseJson<T>(content: string): T | null {
     const trimmed = content.trim()
     if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
       return null
     }
-    return JSON.parse(trimmed) as T
+    try {
+      return JSON.parse(trimmed) as T
+    } catch (parseError) {
+      // Log for debugging but don't throw - allows graceful fallback to raw text
+      console.warn('[chat.ts] JSON parse failed for content that looked like JSON:', {
+        preview: trimmed.slice(0, 100),
+        error: parseError instanceof Error ? parseError.message : String(parseError)
+      })
+      return null
+    }
   }
 
   const flushEvent = () => {
@@ -100,19 +111,34 @@ export async function streamChat(
     hasEventData = false
     currentEventType = null
 
-    if (eventType === 'status') {
+    if (eventType === SSE_EVENT_STATUS) {
       const parsed = tryParseJson<StreamStatus>(rawEventData)
       options.onStatus?.(parsed ?? { message: rawEventData })
       return
     }
 
-    if (eventType === 'error') {
+    if (eventType === SSE_EVENT_ERROR) {
       const parsed = tryParseJson<StreamError>(rawEventData)
       const streamError = parsed ?? { message: rawEventData }
       options.onError?.(streamError)
       const error = new Error(streamError.message)
       ;(error as Error & { details?: string }).details = streamError.details
       throw error
+    }
+
+    if (eventType === SSE_EVENT_CITATION) {
+      const parsed = tryParseJson<Citation[]>(rawEventData)
+      if (parsed && Array.isArray(parsed)) {
+        // Filter to only well-formed citations with required url property
+        const validCitations = parsed.filter(
+          (citation): citation is Citation =>
+            citation !== null &&
+            typeof citation === 'object' &&
+            typeof citation.url === 'string'
+        )
+        options.onCitations?.(validCitations)
+      }
+      return
     }
 
     // Default and "text" events - extract text from JSON wrapper if present
@@ -202,27 +228,20 @@ export async function streamChat(
 }
 
 /**
- * Fetch citations for a query
+ * Fetch citations for a query.
+ * Used by LearnView to fetch lesson-level citations separately from the chat stream.
+ * Returns a Result type to distinguish between empty results and fetch failures.
  */
-export async function fetchCitations(query: string): Promise<Citation[]> {
+export async function fetchCitations(query: string): Promise<CitationFetchResult> {
   try {
     const response = await fetch(`/api/chat/citations?q=${encodeURIComponent(query)}`)
-    if (!response.ok) return []
-    return await response.json()
-  } catch {
-    return []
-  }
-}
-
-/**
- * Fetch enrichment data for a query
- */
-export async function fetchEnrichment(query: string): Promise<Enrichment | null> {
-  try {
-    const response = await fetch(`/api/chat/enrich?q=${encodeURIComponent(query)}`)
-    if (!response.ok) return null
-    return await response.json()
-  } catch {
-    return null
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` }
+    }
+    const citations: Citation[] = await response.json()
+    return { success: true, citations }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
+    return { success: false, error: errorMessage }
   }
 }

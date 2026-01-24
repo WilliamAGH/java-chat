@@ -57,6 +57,8 @@ public class ChatController extends BaseController {
     private static final String SSE_EVENT_STATUS = "status";
     /** SSE event type for primary text chunks. */
     private static final String SSE_EVENT_TEXT = "text";
+    /** SSE event type for inline citations derived from RAG documents. */
+    private static final String SSE_EVENT_CITATION = "citation";
     /** SSE comment content for heartbeats. */
     private static final String SSE_COMMENT_KEEPALIVE = "keepalive";
 
@@ -218,7 +220,22 @@ public class ChatController extends BaseController {
                             .data(jsonSerialize(new ChunkMessage(chunk)))
                             .build());
 
-            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats))
+            // Emit citations inline at stream end - eliminates separate /citations API call and UI flicker
+            List<Citation> citations;
+            try {
+                citations = retrievalService.toCitations(promptOutcome.documents());
+            } catch (Exception citationError) {
+                PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations: {}",
+                        requestToken, citationError.getMessage());
+                citations = List.of();
+            }
+            Flux<ServerSentEvent<String>> citationEvent = Flux.just(
+                    ServerSentEvent.<String>builder()
+                            .event(SSE_EVENT_CITATION)
+                            .data(jsonSerialize(citations))
+                            .build());
+
+            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent)
                     .doOnComplete(() -> {
                         chatMemory.addAssistant(sessionId, fullResponse.toString());
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);

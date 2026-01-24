@@ -229,7 +229,10 @@ public class ChatService {
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
 
-        return new ChatPromptOutcome(buildPromptFromMessages(messages), retrievalOutcome.notices());
+        return new ChatPromptOutcome(
+                buildPromptFromMessages(messages),
+                retrievalOutcome.notices(),
+                retrievalOutcome.documents());
     }
 
     /**
@@ -292,17 +295,22 @@ public class ChatService {
     }
 
     /**
-     * Captures the prompt and any retrieval notices for UI diagnostics.
+     * Captures the prompt, retrieval notices, and source documents for UI diagnostics and citations.
      *
      * @param prompt generated prompt
      * @param notices retrieval notices to surface to clients
+     * @param documents source documents used for RAG context (for inline citation emission)
      */
-    public record ChatPromptOutcome(String prompt, List<RetrievalService.RetrievalNotice> notices) {
+    public record ChatPromptOutcome(
+            String prompt,
+            List<RetrievalService.RetrievalNotice> notices,
+            List<Document> documents) {
         public ChatPromptOutcome {
             if (prompt == null) {
                 throw new IllegalArgumentException("Prompt cannot be null");
             }
             notices = notices == null ? List.of() : List.copyOf(notices);
+            documents = documents == null ? List.of() : List.copyOf(documents);
         }
     }
 }
