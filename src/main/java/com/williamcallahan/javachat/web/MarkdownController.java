@@ -77,15 +77,15 @@ public class MarkdownController {
                 "enrichments", processed.enrichments().size()
             ));
             
-        } catch (Exception renderException) {
-            logger.error("Error rendering markdown", renderException);
+        } catch (RuntimeException renderException) {
+            logger.error("Error rendering markdown (exception type: {})",
+                renderException.getClass().getSimpleName(), renderException);
             return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to render markdown",
-                "message", renderException.getMessage()
+                "error", "Failed to render markdown"
             ));
         }
     }
-    
+
     /**
      * Renders markdown text to HTML for a real-time preview. This endpoint does *not* use caching,
      * ensuring the latest content is always rendered.
@@ -123,11 +123,11 @@ public class MarkdownController {
                 "cached", false
             ));
             
-        } catch (Exception previewException) {
-            logger.error("Error rendering preview markdown", previewException);
+        } catch (RuntimeException previewException) {
+            logger.error("Error rendering preview markdown (exception type: {})",
+                previewException.getClass().getSimpleName(), previewException);
             return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to render preview",
-                "message", previewException.getMessage()
+                "error", "Failed to render preview"
             ));
         }
     }
@@ -151,8 +151,9 @@ public class MarkdownController {
                 "hitRate", String.format("%.2f%%", stats.hitRate() * 100)
             ));
             
-        } catch (Exception statsException) {
-            logger.error("Error getting cache stats", statsException);
+        } catch (RuntimeException statsException) {
+            logger.error("Error getting cache stats (exception type: {})",
+                statsException.getClass().getSimpleName(), statsException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to get cache stats"
             ));
@@ -175,8 +176,9 @@ public class MarkdownController {
                 "message", "Cache cleared successfully"
             ));
             
-        } catch (Exception clearException) {
-            logger.error("Error clearing cache", clearException);
+        } catch (RuntimeException clearException) {
+            logger.error("Error clearing cache (exception type: {})",
+                clearException.getClass().getSimpleName(), clearException);
             return ResponseEntity.status(500).body(Map.of(
                 "status", "error",
                 "message", "Failed to clear cache"
@@ -224,11 +226,11 @@ public class MarkdownController {
                 "isClean", processed.isClean()
             ));
             
-        } catch (Exception structuredException) {
-            logger.error("Error rendering structured markdown", structuredException);
+        } catch (RuntimeException structuredException) {
+            logger.error("Error rendering structured markdown (exception type: {})",
+                structuredException.getClass().getSimpleName(), structuredException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render structured markdown",
-                "message", structuredException.getMessage(),
                 "source", "unified-service"
             ));
         }
