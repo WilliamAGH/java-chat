@@ -222,8 +222,8 @@ public class RetrievalService {
         }
 
         if (!docs.isEmpty()) {
-            Map<String, Object> metadata = docs.get(0).getMetadata();
-            int metadataSize = metadata.size();
+            Map<String, ?> metadata = docs.get(0).getMetadata();
+            int metadataSize = metadata == null ? 0 : metadata.size();
             String docText = Optional.ofNullable(docs.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
             log.info("First doc metadata size: {}", metadataSize);
@@ -265,7 +265,7 @@ public class RetrievalService {
 
         // Create new document with truncated content, preserving all original metadata
         // and adding truncation-specific metadata
-        Map<String, Object> truncationMetadata = Map.of(
+        Map<String, ?> truncationMetadata = Map.of(
             "truncated", true,
             "originalLength", content.length()
         );
@@ -289,9 +289,9 @@ public class RetrievalService {
             if (sourceDoc == null) {
                 continue;
             }
-            Map<String, Object> metadata = Optional.ofNullable(sourceDoc.getMetadata()).orElse(Map.of());
-            String rawUrl = String.valueOf(metadata.getOrDefault(METADATA_URL, ""));
-            String title = String.valueOf(metadata.getOrDefault(METADATA_TITLE, ""));
+            Map<String, ?> metadata = sourceDoc.getMetadata();
+            String rawUrl = stringMetadataValue(metadata, METADATA_URL);
+            String title = stringMetadataValue(metadata, METADATA_TITLE);
             String url = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             // Refine Javadoc URLs to nested type pages where the chunk references them
             url =
@@ -300,7 +300,7 @@ public class RetrievalService {
                     sourceDoc.getText()
                 );
             // Append member anchors (methods/constructors) when confidently derivable
-            String pkg = String.valueOf(metadata.getOrDefault(METADATA_PACKAGE, ""));
+            String pkg = stringMetadataValue(metadata, METADATA_PACKAGE);
             url =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
                     url,
@@ -327,6 +327,14 @@ public class RetrievalService {
             );
         }
         return citations;
+    }
+
+    private static String stringMetadataValue(Map<String, ?> metadata, String key) {
+        if (metadata == null || metadata.isEmpty()) {
+            return "";
+        }
+        Object value = metadata.get(key);
+        return value == null ? "" : String.valueOf(value);
     }
 
     /**

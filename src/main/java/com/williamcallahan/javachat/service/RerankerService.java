@@ -1,8 +1,10 @@
 package com.williamcallahan.javachat.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -131,11 +133,9 @@ public class RerankerService {
 
         for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
             Document document = docs.get(docIndex);
-            Map<String, Object> metadata = document.getMetadata();
-            Object titleValue = metadata.get("title");
-            Object urlValue = metadata.get("url");
-            String title = titleValue == null ? "" : String.valueOf(titleValue);
-            String url = urlValue == null ? "" : String.valueOf(urlValue);
+            Map<String, ?> metadata = document.getMetadata();
+            String title = metadata == null ? "" : String.valueOf(metadata.get("title") != null ? metadata.get("title") : "");
+            String url = metadata == null ? "" : String.valueOf(metadata.get("url") != null ? metadata.get("url") : "");
             String text = document.getText();
 	            prompt
 	                .append("[")
@@ -159,47 +159,106 @@ public class RerankerService {
         String response,
         List<Document> docs
     ) throws JsonProcessingException {
-        String json = extractJsonFromResponse(response);
-        JsonNode root = mapper.readTree(json);
-
         List<Document> reordered = new ArrayList<>();
-        if (root.has("order") && root.get("order").isArray()) {
-            for (JsonNode orderNode : root.get("order")) {
-                int documentIndex = orderNode.asInt();
-                if (documentIndex >= 0 && documentIndex < docs.size()) {
-                    reordered.add(docs.get(documentIndex));
-                }
+        RerankOrderResponse orderResponse = parseRerankOrderResponse(response);
+        if (orderResponse == null || orderResponse.order() == null) {
+            return reordered;
+        }
+        for (Integer documentIndex : orderResponse.order()) {
+            if (documentIndex == null) {
+                continue;
+            }
+            if (documentIndex >= 0 && documentIndex < docs.size()) {
+                reordered.add(docs.get(documentIndex));
             }
         }
         return reordered;
     }
 
     /**
-     * Extract JSON from LLM response, handling markdown code blocks.
+     * Extracts a JSON object from the LLM response, preferring fenced blocks when present.
      */
-    private String extractJsonFromResponse(String response) {
-        String json = response;
+    private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
+        String jsonObject = extractFirstJsonObject(response);
+        if (jsonObject == null || jsonObject.isBlank()) {
+            return null;
+        }
+        try {
+            return mapper.readerFor(RerankOrderResponse.class).readValue(jsonObject);
+        } catch (IOException ioException) {
+            throw new JsonProcessingException("Failed to parse rerank JSON payload", ioException) {};
+        }
+    }
 
-        // Extract from markdown code block if present
-        if (json.contains("```")) {
-            int start = json.indexOf("```");
-            if (start >= 0) {
-                start = json.indexOf("\n", start) + 1;
-                int end = json.indexOf("```", start);
-                if (end > start) {
-                    json = json.substring(start, end).trim();
+    private String extractFirstJsonObject(String response) {
+        if (response == null || response.isBlank()) {
+            return "";
+        }
+        String fencedCandidate = extractFirstFencedBlock(response);
+        String candidate = fencedCandidate.isEmpty() ? response : fencedCandidate;
+        return findFirstJsonObject(candidate);
+    }
+
+    private String extractFirstFencedBlock(String text) {
+        int fenceStartIndex = text.indexOf("```");
+        if (fenceStartIndex < 0) {
+            return "";
+        }
+        int fenceLineBreakIndex = text.indexOf('\n', fenceStartIndex + 3);
+        if (fenceLineBreakIndex < 0) {
+            return "";
+        }
+        int fenceEndIndex = text.indexOf("```", fenceLineBreakIndex + 1);
+        if (fenceEndIndex < 0) {
+            return "";
+        }
+        return text.substring(fenceLineBreakIndex + 1, fenceEndIndex).trim();
+    }
+
+    private String findFirstJsonObject(String text) {
+        int firstBraceIndex = text.indexOf('{');
+        if (firstBraceIndex < 0) {
+            return "";
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int braceDepth = 0;
+        for (int index = firstBraceIndex; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (character == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (character == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (character == '"') {
+                inString = true;
+                continue;
+            }
+
+            if (character == '{') {
+                braceDepth++;
+            } else if (character == '}') {
+                braceDepth--;
+                if (braceDepth == 0) {
+                    return text.substring(firstBraceIndex, index + 1).trim();
                 }
             }
         }
-
-        // Handle response starting with backticks or "json" prefix
-        json = json.replaceAll("^`+|`+$", "").trim();
-        if (json.startsWith("json")) {
-            json = json.substring(4).trim();
-        }
-
-        return json;
+        return text.substring(firstBraceIndex).trim();
     }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record RerankOrderResponse(@JsonProperty("order") List<Integer> order) {}
 
     /**
      * Limit document list to returnK elements.

@@ -34,8 +34,7 @@ public class DocumentFactory {
             String packageName,
             String hash) {
 
-        // Create standardized metadata map
-        Map<String, Object> metadata = Map.of(
+        Map<String, ?> metadata = Map.of(
             "url", url,
             "title", title,
             "chunkIndex", chunkIndex,
@@ -59,7 +58,7 @@ public class DocumentFactory {
      * @return A properly configured Spring AI Document
      */
     public org.springframework.ai.document.Document createLocalDocument(String text, String url) {
-        Map<String, Object> metadata = Map.of(
+        Map<String, ?> metadata = Map.of(
             "url", url,
             "title", "Local Doc"
         );
@@ -82,8 +81,8 @@ public class DocumentFactory {
      */
     public org.springframework.ai.document.Document createWithPreservedMetadata(
             String newText,
-            Map<String, Object> existingMetadata,
-            Map<String, Object> additionalMetadata) {
+            Map<String, ?> existingMetadata,
+            Map<String, ?> additionalMetadata) {
 
         Objects.requireNonNull(newText, "newText must not be null");
         Objects.requireNonNull(existingMetadata, "existingMetadata must not be null; use Map.of() for empty");

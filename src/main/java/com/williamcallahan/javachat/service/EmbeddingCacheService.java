@@ -44,7 +44,7 @@ public class EmbeddingCacheService {
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
     /** In-memory cache for fast lookup of computed embeddings */
-    private final Map<String, CachedEmbedding> memoryCache = new ConcurrentHashMap<>();
+    private final Map<String, EmbeddingCacheEntry> memoryCache = new ConcurrentHashMap<>();
     private final AtomicInteger cacheHits = new AtomicInteger(0);
     private final AtomicInteger cacheMisses = new AtomicInteger(0);
 	private final AtomicInteger embeddingsSinceLastSave = new AtomicInteger(0);
@@ -147,88 +147,6 @@ public class EmbeddingCacheService {
     }
     
     /**
-     * Represents a cached embedding with its content and metadata
-     */
-	public static class CachedEmbedding {
-        private String id;
-        private String content;
-        private float[] embedding;
-        private Map<String, Object> metadata;
-        private LocalDateTime createdAt;
-        private boolean uploaded;
-	        
-	        /**
-	         * Creates an empty cached embedding for deserialization.
-	         */
-        public CachedEmbedding() {}
-	        
-	        /**
-	         * Creates a cached embedding with content, vector output, and optional metadata.
-	         */
-        public CachedEmbedding(String id, String content, float[] embedding, Map<String, Object> metadata) {
-            this.id = id;
-            this.content = content;
-            this.embedding = embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
-            this.metadata = metadata == null ? new HashMap<>() : new HashMap<>(metadata);
-            this.createdAt = LocalDateTime.now();
-            this.uploaded = false;
-        }
-
-        public String getId() {
-            return id;
-        }
-
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        public String getContent() {
-            return content;
-        }
-
-        public void setContent(String content) {
-            this.content = content;
-        }
-
-        public float[] getEmbedding() {
-            return embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
-        }
-
-        public void setEmbedding(float[] embedding) {
-            this.embedding = embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
-        }
-
-        public Map<String, Object> getMetadata() {
-            return metadata == null ? Map.of() : Map.copyOf(metadata);
-        }
-
-        public void setMetadata(Map<String, Object> metadata) {
-            this.metadata = metadata == null ? new HashMap<>() : new HashMap<>(metadata);
-        }
-
-        public LocalDateTime getCreatedAt() {
-            return createdAt;
-        }
-
-        public void setCreatedAt(LocalDateTime createdAt) {
-            this.createdAt = createdAt;
-        }
-
-        public boolean isUploaded() {
-            return uploaded;
-        }
-
-        public void setUploaded(boolean uploaded) {
-            this.uploaded = uploaded;
-        }
-        
-        /** Converts to Spring AI Document */
-        public Document toDocument() {
-            return new Document(content, metadata == null ? new HashMap<>() : new HashMap<>(metadata));
-        }
-    }
-    
-    /**
      * Gets embeddings from cache or computes them if not cached
      * @param documents List of documents to get embeddings for
      * @return List of embedding vectors
@@ -241,7 +159,7 @@ public class EmbeddingCacheService {
         for (int documentIndex = 0; documentIndex < documents.size(); documentIndex++) {
             Document sourceDocument = documents.get(documentIndex);
             String cacheKey = generateCacheKey(sourceDocument);
-            CachedEmbedding cachedEmbedding = memoryCache.get(cacheKey);
+            EmbeddingCacheEntry cachedEmbedding = memoryCache.get(cacheKey);
             
             if (cachedEmbedding != null) {
                 embeddings.add(cachedEmbedding.getEmbedding());
@@ -274,11 +192,11 @@ public class EmbeddingCacheService {
                 int originalIndex = indexMapping.get(computedIndex);
                 embeddings.set(originalIndex, embeddingVector);
                 
-                CachedEmbedding cachedEmbedding = new CachedEmbedding(
+                EmbeddingCacheEntry cachedEmbedding = new EmbeddingCacheEntry(
                     UUID.randomUUID().toString(),
                     sourceDocument.getText(),
                     embeddingVector,
-                    sourceDocument.getMetadata()
+                    EmbeddingCacheMetadata.fromDocument(sourceDocument)
                 );
                 
                 String cacheKey = generateCacheKey(sourceDocument);
@@ -342,7 +260,7 @@ public class EmbeddingCacheService {
      * @return Number of successfully uploaded embeddings
      */
     public int uploadPendingToVectorStore(int batchSize) {
-        List<CachedEmbedding> pendingEmbeddings = memoryCache.values().stream()
+        List<EmbeddingCacheEntry> pendingEmbeddings = memoryCache.values().stream()
             .filter(cachedEmbedding -> !cachedEmbedding.isUploaded())
             .collect(Collectors.toList());
         
@@ -357,16 +275,16 @@ public class EmbeddingCacheService {
         int uploadedCount = 0;
         for (int batchStartIndex = 0; batchStartIndex < pendingEmbeddings.size(); batchStartIndex += batchSize) {
             int batchEndIndex = Math.min(batchStartIndex + batchSize, pendingEmbeddings.size());
-            List<CachedEmbedding> batch = pendingEmbeddings.subList(batchStartIndex, batchEndIndex);
+            List<EmbeddingCacheEntry> batch = pendingEmbeddings.subList(batchStartIndex, batchEndIndex);
             
             List<Document> documents = batch.stream()
-                .map(CachedEmbedding::toDocument)
+                .map(EmbeddingCacheEntry::toDocument)
                 .collect(Collectors.toList());
             
             try {
                 vectorStore.add(documents);
                 
-                for (CachedEmbedding cachedEmbedding : batch) {
+                for (EmbeddingCacheEntry cachedEmbedding : batch) {
                     cachedEmbedding.setUploaded(true);
                 }
                 
@@ -408,7 +326,7 @@ public class EmbeddingCacheService {
     public CacheStats getCacheStats() {
         return new CacheStats(
             memoryCache.size(),
-            memoryCache.values().stream().filter(CachedEmbedding::isUploaded).count(),
+            memoryCache.values().stream().filter(EmbeddingCacheEntry::isUploaded).count(),
             memoryCache.values().stream().filter(cachedEmbedding -> !cachedEmbedding.isUploaded()).count(),
             cacheHits.get(),
             cacheMisses.get(),
@@ -466,14 +384,14 @@ public class EmbeddingCacheService {
         if (doc == null) {
             throw new IllegalArgumentException("Document is required");
         }
-        return generateCacheKey(doc.getText(), doc.getMetadata());
+        return generateCacheKey(doc.getText(), EmbeddingCacheMetadata.fromDocument(doc));
     }
     
-    private String generateCacheKey(String content, Map<String, ?> metadata) {
+    private String generateCacheKey(String content, EmbeddingCacheMetadata metadata) {
         StringBuilder key = new StringBuilder();
         String safeContent = content == null ? "" : content;
         key.append(safeContent.hashCode());
-        if (metadata != null && !metadata.isEmpty()) {
+        if (metadata != null && !metadata.equals(EmbeddingCacheMetadata.empty())) {
             key.append("_").append(metadata.hashCode());
         }
         return key.toString();
@@ -485,16 +403,16 @@ public class EmbeddingCacheService {
         try (InputStream fileInputStream = Files.newInputStream(importPath);
              GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream)) {
 
-            List<CachedEmbedding> importedEmbeddings = cacheMapper.readValue(
+            List<EmbeddingCacheEntry> importedEmbeddings = cacheMapper.readValue(
                 gzipInputStream,
-                new TypeReference<List<CachedEmbedding>>() {}
+                new TypeReference<List<EmbeddingCacheEntry>>() {}
             );
 
             if (importedEmbeddings == null) {
                 throw new IOException("Unexpected cache format; expected a list of embeddings");
             }
 
-            for (CachedEmbedding cachedEmbedding : importedEmbeddings) {
+            for (EmbeddingCacheEntry cachedEmbedding : importedEmbeddings) {
                 String cacheKey = generateCacheKey(cachedEmbedding.getContent(), cachedEmbedding.getMetadata());
                 memoryCache.put(cacheKey, cachedEmbedding);
             }
