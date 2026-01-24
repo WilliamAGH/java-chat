@@ -96,10 +96,11 @@
         import('highlight.js/lib/languages/json'),
         import('highlight.js/lib/languages/bash')
       ]).then(([hljs, java, xml, json, bash]) => {
-        hljs.default.registerLanguage('java', java.default)
-        hljs.default.registerLanguage('xml', xml.default)
-        hljs.default.registerLanguage('json', json.default)
-        hljs.default.registerLanguage('bash', bash.default)
+        // Guard registration to avoid repeated re-registration (registerLanguage is not idempotent)
+        if (!hljs.default.getLanguage('java')) hljs.default.registerLanguage('java', java.default)
+        if (!hljs.default.getLanguage('xml')) hljs.default.registerLanguage('xml', xml.default)
+        if (!hljs.default.getLanguage('json')) hljs.default.registerLanguage('json', json.default)
+        if (!hljs.default.getLanguage('bash')) hljs.default.registerLanguage('bash', bash.default)
         contentEl?.querySelectorAll('pre code').forEach((block) => {
           hljs.default.highlightElement(block as HTMLElement)
         })
@@ -108,7 +109,9 @@
   })
 
   function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text)
+    navigator.clipboard.writeText(text).catch((copyError) => {
+      console.warn('Copy to clipboard failed:', copyError)
+    })
   }
 
   // Compute animation delay reactively
