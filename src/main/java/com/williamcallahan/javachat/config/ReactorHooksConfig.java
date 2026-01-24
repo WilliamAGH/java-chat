@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.config;
 
-import com.openai.errors.OpenAIIoException;
-import com.openai.errors.RateLimitException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
@@ -42,10 +40,6 @@ public class ReactorHooksConfig {
     }
 
     private boolean isExpectedCancellationError(Throwable error) {
-        // OpenAI SDK wraps IO errors including interruptions
-        if (error instanceof OpenAIIoException || error instanceof RateLimitException) {
-            return true;
-        }
         // Direct interruption exceptions
         if (error instanceof InterruptedException || error instanceof InterruptedIOException) {
             return true;
