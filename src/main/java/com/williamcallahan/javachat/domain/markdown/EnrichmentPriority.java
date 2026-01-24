@@ -1,4 +1,4 @@
-package com.williamcallahan.javachat.service.markdown;
+package com.williamcallahan.javachat.domain.markdown;
 
 /**
  * Priority levels for enrichment rendering order.

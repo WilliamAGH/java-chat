@@ -57,8 +57,7 @@ public class MarkdownController {
      *                    "content": "Your **markdown** text here."
      *                  }
      *                }</pre>
-     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
-     *         <pre>{@code {"html": "<p>...", "source": "server", "cached": true|false}}</pre>
+     * @return A {@link ResponseEntity} containing the rendered markdown outcome.
      */
     @PostMapping(value = "/render", 
                  consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -104,8 +103,7 @@ public class MarkdownController {
      *                    "content": "Your **markdown** text here."
      *                  }
      *                }</pre>
-     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
-     *         <pre>{@code {"html": "<p>...", "source": "preview", "cached": false}}</pre>
+     * @return A {@link ResponseEntity} containing the rendered markdown outcome.
      */
     @PostMapping(value = "/preview",
                  consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -143,7 +141,7 @@ public class MarkdownController {
      * Retrieves statistics about the server-side markdown render cache.
      * Provides metrics like hit count, miss count, size, and hit rate.
      *
-     * @return A {@link ResponseEntity} with a {@link Map} containing cache statistics.
+     * @return A {@link ResponseEntity} with cache statistics.
      */
     @GetMapping("/cache/stats")
     public ResponseEntity<MarkdownCacheStatsResponse> getCacheStats() {
