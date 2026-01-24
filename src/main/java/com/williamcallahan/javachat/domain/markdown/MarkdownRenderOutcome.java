@@ -9,16 +9,16 @@ public record MarkdownRenderOutcome(
     String html,
     String source,
     boolean cached,
-    int citationCount,
-    int enrichmentCount
+    int citations,
+    int enrichments
 ) implements MarkdownRenderResponse {
     public MarkdownRenderOutcome {
         Objects.requireNonNull(html, "Rendered HTML cannot be null");
         Objects.requireNonNull(source, "Render source cannot be null");
-        if (citationCount < 0) {
+        if (citations < 0) {
             throw new IllegalArgumentException("Citation count must be non-negative");
         }
-        if (enrichmentCount < 0) {
+        if (enrichments < 0) {
             throw new IllegalArgumentException("Enrichment count must be non-negative");
         }
     }

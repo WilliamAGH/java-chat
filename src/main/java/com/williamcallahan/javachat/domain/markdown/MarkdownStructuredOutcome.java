@@ -18,7 +18,7 @@ public record MarkdownStructuredOutcome(
     long processingTimeMs,
     String source,
     int structuredElementCount,
-    boolean clean
+    boolean isClean
 ) implements MarkdownStructuredResponse {
     public MarkdownStructuredOutcome {
         Objects.requireNonNull(html, "Rendered HTML cannot be null");
