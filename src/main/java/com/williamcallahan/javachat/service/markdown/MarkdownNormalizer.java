@@ -17,49 +17,54 @@ final class MarkdownNormalizer {
         int fenceLength = 0;
         for (int cursor = 0; cursor < markdownText.length();) {
             boolean isStartOfLine = cursor == 0 || markdownText.charAt(cursor - 1) == '\n';
-            if (isStartOfLine) {
-                FenceMarker marker = scanFenceMarker(markdownText, cursor);
-                if (marker != null) {
-                    if (!inFence) {
-                        if (normalizedBuilder.length() > 0) {
-                            char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
-                            if (previousChar != '\n') {
-                                normalizedBuilder.append('\n').append('\n');
-                            }
-                        }
-                        inFence = true;
-                        fenceChar = marker.character();
-                        fenceLength = marker.length();
-                        appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
-                        cursor += marker.length();
-                        while (cursor < markdownText.length()) {
-                            char languageChar = markdownText.charAt(cursor);
-                            if (Character.isLetterOrDigit(languageChar) || languageChar == '-' || languageChar == '_') {
-                                normalizedBuilder.append(languageChar);
-                                cursor++;
-                            } else {
-                                break;
-                            }
-                        }
-                        if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
-                            normalizedBuilder.append('\n');
-                        }
-                        continue;
-                    }
-                    if (marker.character() == fenceChar && marker.length() >= fenceLength) {
-                        if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
-                            normalizedBuilder.append('\n');
-                        }
-                        appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
-                        cursor += marker.length();
-                        inFence = false;
-                        fenceChar = 0;
-                        fenceLength = 0;
-                        if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+            FenceMarker marker = scanFenceMarker(markdownText, cursor);
+            if (marker != null) {
+                if (!inFence) {
+                    // Repair malformed "attached" fences like "Here:```java" by forcing the fence
+                    // onto its own line, which is required for standard markdown parsing.
+                    if (normalizedBuilder.length() > 0) {
+                        char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
+                        if (previousChar != '\n') {
                             normalizedBuilder.append('\n').append('\n');
+                        } else if (normalizedBuilder.length() > 1 && normalizedBuilder.charAt(normalizedBuilder.length() - 2) != '\n') {
+                            normalizedBuilder.append('\n');
                         }
-                        continue;
                     }
+
+                    inFence = true;
+                    fenceChar = marker.character();
+                    fenceLength = marker.length();
+                    appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
+                    cursor += marker.length();
+                    while (cursor < markdownText.length()) {
+                        char languageChar = markdownText.charAt(cursor);
+                        if (Character.isLetterOrDigit(languageChar) || languageChar == '-' || languageChar == '_') {
+                            normalizedBuilder.append(languageChar);
+                            cursor++;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                        normalizedBuilder.append('\n');
+                    }
+                    continue;
+                }
+
+                // Only close fences when they're properly on their own line.
+                if (isStartOfLine && marker.character() == fenceChar && marker.length() >= fenceLength) {
+                    if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
+                        normalizedBuilder.append('\n');
+                    }
+                    appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
+                    cursor += marker.length();
+                    inFence = false;
+                    fenceChar = 0;
+                    fenceLength = 0;
+                    if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                        normalizedBuilder.append('\n').append('\n');
+                    }
+                    continue;
                 }
             }
             normalizedBuilder.append(markdownText.charAt(cursor));

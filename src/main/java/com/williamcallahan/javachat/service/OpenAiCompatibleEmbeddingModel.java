@@ -91,7 +91,7 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
 	        try {
                 EmbeddingCreateParams params = EmbeddingCreateParams.builder()
                     .model(modelName)
-                    .input(instructions)
+                    .inputOfArrayOfStrings(instructions)
                     .build();
                 RequestOptions requestOptions = RequestOptions.builder()
                     .timeout(embeddingTimeout())
