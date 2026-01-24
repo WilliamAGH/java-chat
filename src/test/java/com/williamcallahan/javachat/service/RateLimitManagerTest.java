@@ -26,7 +26,7 @@ class RateLimitManagerTest {
 
         manager.recordRateLimitFromOpenAiServiceException(RateLimitManager.ApiProvider.OPENAI, exception);
 
-        verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("24h"));
+        verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
 
     @Test
@@ -43,7 +43,6 @@ class RateLimitManagerTest {
 
         manager.recordRateLimitFromOpenAiServiceException(RateLimitManager.ApiProvider.OPENAI, exception);
 
-        verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("24h"));
+        verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
 }
-
