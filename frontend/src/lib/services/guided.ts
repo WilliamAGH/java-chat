@@ -45,45 +45,37 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
   return response.json()
 }
 
-/** Citation from guided learning context. */
-export interface GuidedCitation {
-  url: string
-  title: string
-  anchor?: string
-  snippet?: string
-}
-
-/** Result type for citation fetches - distinguishes empty results from errors. */
-export type CitationFetchResult =
-  | { success: true; citations: GuidedCitation[] }
-  | { success: false; error: string }
-
-/**
- * Fetch citations for a guided lesson.
- * Returns a Result type to distinguish between empty results and fetch failures.
- */
-export async function fetchGuidedCitations(slug: string): Promise<CitationFetchResult> {
-  try {
-    const response = await fetch(`/api/guided/citations?slug=${encodeURIComponent(slug)}`)
-    if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` }
-    }
-    const citations: GuidedCitation[] = await response.json()
-    return { success: true, citations }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
-    return { success: false, error: errorMessage }
-  }
-}
-
 /** Callbacks for guided chat streaming with explicit error handling. */
 export interface GuidedStreamCallbacks {
   onChunk: (chunk: string) => void
   onError?: (error: Error) => void
 }
 
+/** Error response structure from SSE error events. */
+interface StreamError {
+  message: string
+  details?: string
+}
+
+/**
+ * Attempts JSON parsing only when content looks like JSON.
+ * Returns parsed object or null for plain text content.
+ */
+function tryParseJson<T>(content: string): T | null {
+  const trimmed = content.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return null
+  }
+  try {
+    return JSON.parse(trimmed) as T
+  } catch {
+    return null
+  }
+}
+
 /**
  * Stream a chat response within the guided lesson context.
+ * Uses the same JSON-wrapped SSE format as the main chat for consistent whitespace handling.
  * Errors are propagated via both the onError callback and thrown promise rejection.
  */
 export async function streamGuidedChat(
@@ -121,7 +113,42 @@ export async function streamGuidedChat(
 
   const decoder = new TextDecoder()
   let buffer = ''
+  let eventBuffer = ''
+  let hasEventData = false
+  let currentEventType: string | null = null
   let streamCompletedNormally = false
+
+  const flushEvent = () => {
+    if (!hasEventData) {
+      currentEventType = null
+      return
+    }
+
+    const eventType = currentEventType?.trim().toLowerCase() ?? ''
+    const rawEventData = eventBuffer
+    eventBuffer = ''
+    hasEventData = false
+    currentEventType = null
+
+    // Handle error events
+    if (eventType === 'error') {
+      const parsed = tryParseJson<StreamError>(rawEventData)
+      const streamError = parsed ?? { message: rawEventData }
+      const error = new Error(streamError.message)
+      onError?.(error)
+      throw error
+    }
+
+    // Default and "text" events - extract text from JSON wrapper
+    const parsed = tryParseJson<{ text?: string }>(rawEventData)
+    // Validate parsed structure before extracting - fall back to raw if structure unexpected
+    const textContent = (parsed !== null && typeof parsed === 'object' && 'text' in parsed && typeof parsed.text === 'string')
+      ? parsed.text
+      : rawEventData
+    if (textContent !== '') {
+      onChunk(textContent)
+    }
+  }
 
   try {
     while (true) {
@@ -129,6 +156,13 @@ export async function streamGuidedChat(
 
       if (done) {
         streamCompletedNormally = true
+        // Commit any remaining buffered line before flushing event data
+        if (buffer.length > 0) {
+          eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer
+          hasEventData = true
+          buffer = ''
+        }
+        flushEvent()
         break
       }
 
@@ -148,25 +182,29 @@ export async function streamGuidedChat(
           continue
         }
 
+        // Track event type
+        if (line.startsWith('event:')) {
+          currentEventType = line.startsWith('event: ') ? line.slice(7) : line.slice(6)
+          continue
+        }
+
+        // Accumulate data within current SSE event
         if (line.startsWith('data:')) {
-          const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+          const eventPayload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
 
           // Skip [DONE] token
-          if (payload === '[DONE]') {
+          if (eventPayload === '[DONE]') {
             continue
           }
 
-          // Check for error markers from server
-          if (payload.startsWith('[ERROR]')) {
-            const serverError = new Error(payload.slice(8).trim())
-            onError?.(serverError)
-            throw serverError
+          if (hasEventData) {
+            eventBuffer += '\n'
           }
-
-          // Emit text content
-          if (payload) {
-            onChunk(payload)
-          }
+          eventBuffer += eventPayload
+          hasEventData = true
+        } else if (line.trim() === '') {
+          // Blank line marks end of SSE event - commit accumulated data
+          flushEvent()
         }
       }
     }
