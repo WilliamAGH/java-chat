@@ -68,6 +68,10 @@
         <Bug pattern="EI_EXPOSE_REP2"/>
         <Class name="com.williamcallahan.javachat.web.TooltipController"/>
     </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedLearningService"/>
+    </Match>
 
     <!--
         Public-facing REST controllers are intentionally open and do not use Spring Security annotations.
