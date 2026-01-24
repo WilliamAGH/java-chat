@@ -30,7 +30,7 @@ public class ChatService {
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
     private final MarkdownService markdownService;
-    @Value("${app.llm.temperature}")
+    @Value("${app.llm.temperature:0.7}")
     private double temperature;
 
     /**

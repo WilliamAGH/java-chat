@@ -113,15 +113,13 @@ public class EmbeddingFallbackConfig {
             @Value("${app.remote-embedding.api-key:}") String remoteApiKey,
             @Value("${app.remote-embedding.model:text-embedding-3-small}") String remoteModel,
             @Value("${app.remote-embedding.dimensions:4096}") int remoteDims,
-            @Value("${app.embeddings.dimensions}") int embeddingDimensions,
+            @Value("${app.embeddings.dimensions:1536}") int embeddingDimensions,
             // OpenAI direct
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
             @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
             @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback,
             RestTemplateBuilder restTemplateBuilder) {
-        
-        log.info("[EMBEDDING] Configuring OpenAI embedding with fallback strategies");
         
         log.info("[EMBEDDING] Configuring remote/OpenAI embeddings with fallback strategies");
 
