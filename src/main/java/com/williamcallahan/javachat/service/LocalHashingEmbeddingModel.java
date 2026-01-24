@@ -27,8 +27,12 @@ public class LocalHashingEmbeddingModel implements EmbeddingModel {
      * Creates a hashing-based embedding model with a fixed dimension size.
      *
      * @param dimensions embedding vector dimensions
+     * @throws IllegalArgumentException if dimensions is not positive
      */
     public LocalHashingEmbeddingModel(int dimensions) {
+        if (dimensions <= 0) {
+            throw new IllegalArgumentException("dimensions must be positive, got: " + dimensions);
+        }
         this.dimensions = dimensions;
     }
 
