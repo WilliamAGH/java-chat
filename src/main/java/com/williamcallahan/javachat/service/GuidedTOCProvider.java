@@ -23,12 +23,13 @@ public class GuidedTOCProvider {
     private static final Logger log = LoggerFactory.getLogger(GuidedTOCProvider.class);
     private final ObjectMapper mapper = new ObjectMapper();
     private volatile List<GuidedLesson> cache = Collections.emptyList();
+    private volatile boolean tocLoaded = false;
 
     /**
      * Returns the lesson table of contents, loading it lazily from the classpath on first access.
      */
     public synchronized List<GuidedLesson> getTOC() {
-        if (!cache.isEmpty()) return cache;
+        if (tocLoaded) return cache;
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
@@ -39,6 +40,8 @@ public class GuidedTOCProvider {
         } catch (IOException exception) {
             log.warn("Failed to load guided TOC (exceptionType={})", exception.getClass().getName());
             cache = Collections.emptyList();
+        } finally {
+            tocLoaded = true;
         }
         return cache;
     }
