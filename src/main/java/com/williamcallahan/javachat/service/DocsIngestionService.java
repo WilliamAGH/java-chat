@@ -138,8 +138,10 @@ public class DocsIngestionService {
 
                         // Mark hashes as ingested (cached) after successful caching
                         for (org.springframework.ai.document.Document aiDoc : documents) {
-                            String hash = aiDoc.getMetadata().get("hash").toString();
-                            localStore.markHashIngested(hash);
+                            Object hashMetadata = aiDoc.getMetadata().get("hash");
+                            if (hashMetadata != null) {
+                                localStore.markHashIngested(hashMetadata.toString());
+                            }
                         }
                     } catch (RuntimeException cacheException) {
                         INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally", cacheException);
@@ -155,8 +157,10 @@ public class DocsIngestionService {
                         
                         // Mark hashes as ingested ONLY after successful addition
                         for (org.springframework.ai.document.Document aiDoc : documents) {
-                            String hash = aiDoc.getMetadata().get("hash").toString();
-                            localStore.markHashIngested(hash);
+                            Object hashMetadata = aiDoc.getMetadata().get("hash");
+                            if (hashMetadata != null) {
+                                localStore.markHashIngested(hashMetadata.toString());
+                            }
                         }
                     } catch (RuntimeException qdrantException) {
                         INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant", qdrantException);
@@ -301,6 +305,7 @@ public class DocsIngestionService {
         
         try {
             long startTime = System.currentTimeMillis();
+            boolean qdrantWriteSucceeded = false;
             
             if (localOnlyMode) {
                 // Local-only mode: compute and cache embeddings
@@ -316,8 +321,9 @@ public class DocsIngestionService {
                         "Qdrant upload"
                     );
                     long duration = System.currentTimeMillis() - startTime;
-                    INDEXING_LOG.info("[INDEXING] \u2713 Added {} vectors to Qdrant in {}ms ({})",
+                    INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
                         documents.size(), duration, progressTracker.formatPercent());
+                    qdrantWriteSucceeded = true;
                 } catch (RuntimeException qdrantError) {
                     // Retry exhausted or non-transient error - check if we should fallback
                     if (com.williamcallahan.javachat.support.RetrievalErrorClassifier
@@ -327,8 +333,9 @@ public class DocsIngestionService {
                             qdrantError.getClass().getSimpleName());
                         embeddingCache.getOrComputeEmbeddings(documents);
                         long duration = System.currentTimeMillis() - startTime;
-                        INDEXING_LOG.info("[INDEXING] \u2713 Cached {} vectors locally (fallback) in {}ms ({})",
+                        INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
                             documents.size(), duration, progressTracker.formatPercent());
+                        // qdrantWriteSucceeded remains false - don't mark as ingested
                     } else {
                         // Non-transient error (programming error, invalid data) - rethrow to fail fast
                         INDEXING_LOG.error("[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
@@ -340,18 +347,24 @@ public class DocsIngestionService {
             
             // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
             long totalDuration = System.currentTimeMillis() - fileStartMillis;
-            String destination = localOnlyMode ? "cache" : "Qdrant";
+            String destination = localOnlyMode ? "cache" : (qdrantWriteSucceeded ? "Qdrant" : "cache (fallback)");
             INDEXING_LOG.info("[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
                 documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
             
-            // Mark hashes as processed after successful addition/caching
-            for (org.springframework.ai.document.Document aiDoc : documents) {
-                String hash = aiDoc.getMetadata().get("hash").toString();
-                try {
-                    localStore.markHashIngested(hash);
-                } catch (IOException hashMarkException) {
-                    log.warn("Failed to mark hash as ingested (exception type: {})",
-                        hashMarkException.getClass().getSimpleName());
+            // Mark hashes as processed only after confirmed Qdrant write (or in local-only mode)
+            // Don't mark when we fell back to cache in upload mode - allows future re-upload
+            if (localOnlyMode || qdrantWriteSucceeded) {
+                for (org.springframework.ai.document.Document aiDoc : documents) {
+                    Object hashMetadata = aiDoc.getMetadata().get("hash");
+                    if (hashMetadata == null) {
+                        continue;
+                    }
+                    try {
+                        localStore.markHashIngested(hashMetadata.toString());
+                    } catch (IOException hashMarkException) {
+                        log.warn("Failed to mark hash as ingested (exception type: {})",
+                            hashMarkException.getClass().getSimpleName());
+                    }
                 }
             }
             
