@@ -99,7 +99,7 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install
 
-frontend-build: ## Build frontend for production
+frontend-build: frontend-install ## Build frontend for production
 	cd frontend && npm run build
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
