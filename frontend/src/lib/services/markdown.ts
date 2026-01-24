@@ -122,13 +122,16 @@ function processServerHtml(html: string): string {
 }
 
 /**
- * Client-side markdown rendering fallback with sanitization
+ * Client-side markdown rendering fallback with sanitization.
+ * Used during streaming for faster rendering (avoids server round-trip).
  */
 function clientRenderMarkdown(content: string): string {
   // Configure marked for safe, consistent output
+  // breaks: true converts single newlines to <br> tags, preventing
+  // LLM output from collapsing into a single paragraph blob
   marked.setOptions({
     gfm: true,
-    breaks: false
+    breaks: true
   })
 
   // Render markdown and sanitize to prevent XSS
