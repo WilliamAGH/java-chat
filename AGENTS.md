@@ -59,8 +59,8 @@ alwaysApply: true
 - TS3 Assert observable behavior: test response shapes/outcomes, not internal invocations or string comparisons.
 - TS4 Refactor-resilient: unchanged behavior = passing tests regardless of internal restructuring.
 - TS5 Naming: integration tests end with `IT`; unit tests end with `Test`.
-- VR1 Build: `make build` or `mvn clean compile`; expect success.
-- VR2 Tests: `make test` or `mvn test`; targeted runs use `-Dtest=...`.
+- VR1 Build: `make build` or `./gradlew build`; expect success.
+- VR2 Tests: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
 - VR3 Runtime: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
 - TL1 Standard commands: `make run`, `make dev`, `make test`, `make build`, `make compose-up`, `make compose-down`.
 - TL2 Docker: `docker compose up -d` for Qdrant vector store.

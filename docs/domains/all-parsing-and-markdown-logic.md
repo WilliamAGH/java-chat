@@ -435,7 +435,7 @@ Client Fallback:
 
 #### Key Configuration Files
 - `application.properties` - Basic settings
-- `pom.xml` - Flexmark dependencies
+- `build.gradle.kts` - Flexmark dependencies
 - `UnifiedMarkdownService` constructor - Flexmark options
 
 #### Environment Variables
