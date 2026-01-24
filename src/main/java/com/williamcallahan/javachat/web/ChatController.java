@@ -22,6 +22,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -68,8 +69,7 @@ public class ChatController extends BaseController {
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final ObjectMapper objectMapper;
-    // Deprecated stream processor removed from active use; unified AST processing handles markdown.
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
     private String localEmbeddingServerUrl;
@@ -82,22 +82,25 @@ public class ChatController extends BaseController {
 	     *
 	     * @param chatService chat orchestration service
 	     * @param chatMemory conversation memory service
-     * @param openAIStreamingService streaming LLM client
+	     * @param openAIStreamingService streaming LLM client
 	     * @param retrievalService retrieval service for diagnostics
 	     * @param objectMapper JSON mapper for safe SSE serialization
+	     * @param restTemplateBuilder builder for creating the RestTemplate
 	     * @param exceptionBuilder shared exception response builder
 	     */
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
-                         OpenAIStreamingService openAIStreamingService,
-                         RetrievalService retrievalService,
-                         ObjectMapper objectMapper,
-                         ExceptionResponseBuilder exceptionBuilder) {
+	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
+	                         OpenAIStreamingService openAIStreamingService,
+	                         RetrievalService retrievalService,
+	                         ObjectMapper objectMapper,
+	                         RestTemplateBuilder restTemplateBuilder,
+	                         ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.objectMapper = objectMapper;
+        this.restTemplate = restTemplateBuilder.build();
     }
 
     /**
