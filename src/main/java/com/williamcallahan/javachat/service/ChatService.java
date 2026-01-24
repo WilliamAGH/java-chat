@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -21,7 +22,6 @@ import java.util.Objects;
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
-    private static final double TEMPERATURE = 0.7;
     private static final int RAG_LIMIT_GPT5 = 3;
     private static final int RAG_TOKEN_LIMIT_GPT5 = 600;
     
@@ -30,6 +30,8 @@ public class ChatService {
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
     private final MarkdownService markdownService;
+    @Value("${app.llm.temperature}")
+    private double temperature;
 
     /**
      * Creates the chat service with streaming, retrieval, and markdown dependencies.
@@ -92,7 +94,7 @@ public class ChatService {
             return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
         }
 
-        return openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
+        return openAIStreamingService.streamResponse(fullPrompt, temperature)
                 .onErrorResume(streamingException -> {
                     logger.error("Streaming failed", streamingException);
                     return Flux.error(streamingException);
@@ -140,7 +142,7 @@ public class ChatService {
 
         String fullPrompt = buildPromptFromMessages(messages);
 
-        return openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
+        return openAIStreamingService.streamResponse(fullPrompt, temperature)
                 .onErrorResume(exception -> {
                     logger.error("Streaming failed", exception);
                     return Flux.error(exception);

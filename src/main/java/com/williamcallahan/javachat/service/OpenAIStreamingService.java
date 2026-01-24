@@ -39,8 +39,6 @@ public class OpenAIStreamingService {
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int TRUNCATION_SCAN_WINDOW = 2000;
     private static final int MAX_COMPLETION_TOKENS = 4000;
-    private static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
-    
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
     private volatile boolean isAvailable = false;
@@ -63,12 +61,24 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_API_KEY:}")
     private String openaiApiKey;
     
+    @Value("${OPENAI_BASE_URL:https://api.openai.com/v1}")
+    private String openaiBaseUrl;
+
     @Value("${OPENAI_MODEL:gpt-5}")
     private String model;
     
-    @Value("${GITHUB_MODELS_BASE_URL:https://models.github.ai/inference/v1}")
+    @Value("${GITHUB_MODELS_BASE_URL:https://models.github.ai/inference}")
     private String githubModelsBaseUrl;
     
+    @Value("${OPENAI_REASONING_EFFORT:}")
+    private String reasoningEffortSetting;
+
+    @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
+    private long streamingRequestTimeoutSeconds;
+
+    @Value("${OPENAI_STREAMING_READ_TIMEOUT_SECONDS:75}")
+    private long streamingReadTimeoutSeconds;
+
     @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}")
     private long primaryBackoffSeconds;
     
@@ -87,12 +97,19 @@ public class OpenAIStreamingService {
             }
             if (openaiApiKey != null && !openaiApiKey.isBlank()) {
                 log.info("Initializing OpenAI client with OpenAI API (fallback)");
-                this.clientSecondary = createClient(openaiApiKey, OPENAI_BASE_URL);
+                this.clientSecondary = createClient(openaiApiKey, openaiBaseUrl);
                 log.info("OpenAI client initialized successfully with OpenAI API");
             }
             this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
             if (!this.isAvailable) {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
+            } else {
+                log.info(
+                    "OpenAI streaming available (model={}, primary={}, secondary={})",
+                    model,
+                    clientPrimary != null,
+                    clientSecondary != null
+                );
             }
         } catch (RuntimeException exception) {
             log.error("Failed to initialize OpenAI client (exception type: {})",
@@ -104,7 +121,7 @@ public class OpenAIStreamingService {
     private OpenAIClient createClient(String apiKey, String baseUrl) {
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
-                .baseUrl(baseUrl)
+                .baseUrl(normalizeBaseUrl(baseUrl))
                 .build();
     }
     
@@ -137,7 +154,10 @@ public class OpenAIStreamingService {
             // Disable internal retries for streaming to allow application-level failover
             OpenAIClient client = streamingClient.withOptions(options -> options
                     .maxRetries(0)
-                    .timeout(Timeout.builder().request(java.time.Duration.ZERO).build()));
+                    .timeout(Timeout.builder()
+                        .request(java.time.Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
+                        .read(java.time.Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
+                        .build()));
 
             return Flux.using(
                 () -> client.chat().completions().createStreaming(params),
@@ -209,6 +229,7 @@ public class OpenAIStreamingService {
     private ChatCompletionCreateParams buildChatParams(String prompt, double temperature) {
         String normalizedModelId = normalizedModelId();
         boolean gpt5Family = isGpt5Family(normalizedModelId);
+        boolean reasoningModel = gpt5Family || normalizedModelId.startsWith("o");
 
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .addUserMessage(prompt)
@@ -219,9 +240,11 @@ public class OpenAIStreamingService {
             builder.maxCompletionTokens(MAX_COMPLETION_TOKENS);
             log.debug("Using GPT-5 configuration (no regression)");
 
-            // Set reasoning_effort=minimal
-            builder.reasoningEffort(ReasoningEffort.MINIMAL);
-        } else if (Double.isFinite(temperature)) {
+            ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
+            if (effort != null) {
+                builder.reasoningEffort(effort);
+            }
+        } else if (!reasoningModel && Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
 
@@ -271,6 +294,21 @@ public class OpenAIStreamingService {
 
     private boolean isGpt5Family(String modelId) {
         return modelId != null && modelId.startsWith("gpt-5");
+    }
+
+    private ReasoningEffort resolveReasoningEffort(String normalizedModelId) {
+        if (reasoningEffortSetting == null || reasoningEffortSetting.isBlank()) {
+            return null;
+        }
+        return ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+    }
+
+    private String normalizeBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return baseUrl;
+        }
+        String trimmed = baseUrl.trim();
+        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
     }
     
     /**

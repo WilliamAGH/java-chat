@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 @Configuration
 public class EmbeddingFallbackConfig {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingFallbackConfig.class);
-    private static final int DEFAULT_EMBEDDING_DIMENSIONS = 4096;
     
     /**
      * Creates a local embedding model with remote and hash-based fallbacks.
@@ -60,7 +59,7 @@ public class EmbeddingFallbackConfig {
             @Value("${app.remote-embedding.dimensions:4096}") int remoteDims,
             // OpenAI direct fallback (optional)
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
-            @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com/v1}") String openaiBaseUrl,
+            @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
             RestTemplateBuilder restTemplateBuilder) {
         
@@ -97,6 +96,7 @@ public class EmbeddingFallbackConfig {
      * @param remoteApiKey API key for remote embedding provider
      * @param remoteModel remote embedding model name
      * @param remoteDims remote embedding dimensions
+     * @param embeddingDimensions embedding dimensions matching the active model
      * @param openaiApiKey OpenAI API key
      * @param openaiBaseUrl OpenAI base URL
      * @param openaiModel OpenAI embedding model name
@@ -113,9 +113,10 @@ public class EmbeddingFallbackConfig {
             @Value("${app.remote-embedding.api-key:}") String remoteApiKey,
             @Value("${app.remote-embedding.model:text-embedding-3-small}") String remoteModel,
             @Value("${app.remote-embedding.dimensions:4096}") int remoteDims,
+            @Value("${app.embeddings.dimensions}") int embeddingDimensions,
             // OpenAI direct
             @Value("${spring.ai.openai.embedding.api-key:}") String openaiApiKey,
-            @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com/v1}") String openaiBaseUrl,
+            @Value("${spring.ai.openai.embedding.base-url:https://api.openai.com}") String openaiBaseUrl,
             @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String openaiModel,
             @Value("${app.local-embedding.use-hash-when-disabled:false}") boolean useHashFallback,
             RestTemplateBuilder restTemplateBuilder) {
@@ -130,27 +131,33 @@ public class EmbeddingFallbackConfig {
             log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider (urlId={})",
                 Integer.toHexString(Objects.hashCode(remoteUrl)));
             primary = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
-                    remoteDims > 0 ? remoteDims : DEFAULT_EMBEDDING_DIMENSIONS, restTemplateBuilder);
+                    remoteDims > 0 ? remoteDims : embeddingDimensions, restTemplateBuilder);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Using OpenAI embeddings as primary provider");
             primary = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
-                    DEFAULT_EMBEDDING_DIMENSIONS, restTemplateBuilder);
+                    embeddingDimensions, restTemplateBuilder);
         }
 
-        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(DEFAULT_EMBEDDING_DIMENSIONS);
+        LocalHashingEmbeddingModel hashingModel = new LocalHashingEmbeddingModel(embeddingDimensions);
 
         if (primary != null) {
             return new GracefulEmbeddingModel(primary, hashingModel, useHashFallback);
         }
 
         log.warn("[EMBEDDING] No remote/OpenAI embedding configured. Falling back to hash-only mode.");
-        return useHashFallback ? hashingModel : new NoOpEmbeddingModel();
+        return useHashFallback ? hashingModel : new NoOpEmbeddingModel(embeddingDimensions);
     }
     
     /**
      * No-op embedding model that always throws exceptions to trigger keyword search fallback
      */
     private static class NoOpEmbeddingModel implements EmbeddingModel {
+        private final int embeddingDimensions;
+
+        private NoOpEmbeddingModel(int embeddingDimensions) {
+            this.embeddingDimensions = embeddingDimensions;
+        }
+
         @Override
         public org.springframework.ai.embedding.EmbeddingResponse call(org.springframework.ai.embedding.EmbeddingRequest request) {
             throw new GracefulEmbeddingModel.EmbeddingServiceUnavailableException("No embedding service configured");
@@ -158,7 +165,7 @@ public class EmbeddingFallbackConfig {
         
         @Override
         public int dimensions() {
-            return DEFAULT_EMBEDDING_DIMENSIONS;
+            return embeddingDimensions;
         }
         
         @Override

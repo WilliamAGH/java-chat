@@ -24,7 +24,6 @@ import java.util.Map;
 public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
     
-    private static final int DEFAULT_EMBEDDING_DIMENSIONS = 4096;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
 
@@ -59,15 +58,18 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
 	 * @param dimensionsHint expected embedding dimensions (used as a hint)
 	 * @param restTemplateBuilder RestTemplate builder for HTTP calls
 	 */
-	public OpenAiCompatibleEmbeddingModel(String baseUrl,
-	                                      String apiKey,
-	                                      String modelName,
-	                                      int dimensionsHint,
-	                                      RestTemplateBuilder restTemplateBuilder) {
+    public OpenAiCompatibleEmbeddingModel(String baseUrl,
+                                          String apiKey,
+                                          String modelName,
+                                          int dimensionsHint,
+                                          RestTemplateBuilder restTemplateBuilder) {
+        if (dimensionsHint <= 0) {
+            throw new IllegalArgumentException("Embedding dimensions must be positive");
+        }
         this.baseUrl = baseUrl != null && baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.modelName = modelName;
-        this.dimensionsHint = dimensionsHint > 0 ? dimensionsHint : DEFAULT_EMBEDDING_DIMENSIONS;
+        this.dimensionsHint = dimensionsHint;
         this.restTemplate = restTemplateBuilder
             .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
             .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
@@ -159,76 +161,6 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
             embeddings.add(new Embedding(vector, i));
         }
         return embeddings;
-    }
-
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("Remote embedding base URL is not configured");
-        }
-
-        // Build endpoint robustly. Support users passing either a base (e.g., https://api.openai.com)
-        // or a full path including /v1/embeddings. Avoid double-appending.
-        String endpoint = baseUrl;
-        // Strip trailing slash for normalization
-        if (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
-        if (!endpoint.endsWith("/v1/embeddings")) {
-            if (endpoint.endsWith("/v1")) {
-                endpoint = endpoint + "/embeddings";
-            } else if (!endpoint.contains("/v1/embeddings")) {
-                endpoint = endpoint + "/v1/embeddings";
-            }
-        }
-        
-        List<String> instructions = request.getInstructions();
-        EmbeddingRequestPayload payload = new EmbeddingRequestPayload(modelName, instructions);
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Authorization", "Bearer " + apiKey);
-
-        HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(payload, headers);
-
-        try {
-            Object rawResponse = restTemplate.postForObject(endpoint, entity, Object.class);
-            if (rawResponse == null) {
-                throw new EmbeddingApiResponseException("Remote embedding response was null");
-            }
-
-            Map<?, ?> responseMap = requireMap(rawResponse, "response");
-            Object responsePayload = responseMap.get("data");
-            if (!(responsePayload instanceof List<?> responseEntries) || responseEntries.isEmpty()) {
-                throw new EmbeddingApiResponseException("Remote embedding response missing 'data' entries");
-            }
-
-            List<Embedding> embeddings = new ArrayList<>();
-            for (int i = 0; i < responseEntries.size(); i++) {
-                Object entryObj = responseEntries.get(i);
-                Map<?, ?> entryMap = requireMap(entryObj, "data[" + i + "]");
-                Object embeddingPayload = entryMap.get("embedding");
-
-                if (!(embeddingPayload instanceof List<?> embeddingEntries) || embeddingEntries.isEmpty()) {
-                    throw new EmbeddingApiResponseException("Remote embedding response missing embedding values");
-                }
-
-                float[] vector = new float[embeddingEntries.size()];
-                for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
-                    Object numericEntry = embeddingEntries.get(vectorIndex);
-                    if (!(numericEntry instanceof Number numberValue)) {
-                        throw new EmbeddingApiResponseException("Non-numeric embedding value at index " + vectorIndex);
-                    }
-                    vector[vectorIndex] = numberValue.floatValue();
-                }
-                embeddings.add(new Embedding(vector, i));
-            }
-            
-            return new EmbeddingResponse(embeddings);
-
-        } catch (EmbeddingApiResponseException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            log.warn("[EMBEDDING] Remote embedding call failed (exception type: {})",
-                exception.getClass().getSimpleName());
-            throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
-        }
     }
 
     /**
