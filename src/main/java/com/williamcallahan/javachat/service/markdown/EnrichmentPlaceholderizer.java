@@ -8,6 +8,8 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.TextNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,13 @@ import java.util.UUID;
  * Extracts inline enrichment markers and replaces them with HTML placeholders.
  */
 class EnrichmentPlaceholderizer {
+    
+    private static final Logger logger = LoggerFactory.getLogger(EnrichmentPlaceholderizer.class);
+    
+    private static final String MARKER_START = "{{";
+    private static final String MARKER_END = "}}";
+    private static final String PLACEHOLDER_PREFIX = "ENRICHMENT_";
+    
     private final Parser parser;
     private final HtmlRenderer renderer;
 
@@ -73,6 +82,13 @@ class EnrichmentPlaceholderizer {
         this.renderer = renderer;
     }
 
+    private record EnrichmentContext(
+        String markdown,
+        List<MarkdownEnrichment> enrichments,
+        Map<String, String> placeholders,
+        StringBuilder outputBuilder
+    ) {}
+
     String extractAndPlaceholderizeEnrichments(
         String markdown,
         List<MarkdownEnrichment> enrichments,
@@ -83,36 +99,51 @@ class EnrichmentPlaceholderizer {
         }
 
         StringBuilder outputBuilder = new StringBuilder(markdown.length() + 64);
+        EnrichmentContext context = new EnrichmentContext(markdown, enrichments, placeholders, outputBuilder);
+        
         int cursor = 0;
-        boolean inFence = false;
         int absolutePosition = 0; // running position for enrichment creation
+        
+        // Fence state
+        boolean inFence = false;
+        char fenceChar = 0;
+        int fenceLength = 0;
 
         while (cursor < markdown.length()) {
-            // Toggle code fence state and copy fence blocks verbatim
-            if (cursor + 2 < markdown.length()
-                && markdown.charAt(cursor) == '`'
-                && markdown.charAt(cursor + 1) == '`'
-                && markdown.charAt(cursor + 2) == '`') {
-                inFence = !inFence;
-                outputBuilder.append("```");
-                cursor += 3;
-                absolutePosition += 3;
-                // Copy optional language token and the rest of the line
-                while (cursor < markdown.length()) {
-                    char currentChar = markdown.charAt(cursor);
-                    outputBuilder.append(currentChar);
-                    cursor++;
-                    absolutePosition++;
-                    if (currentChar == '\n') break;
+            // Check for code fence start/end
+            // A fence is start-of-line (or after newline) sequence of >=3 backticks or tildes
+            boolean isStartOfLine = (cursor == 0) || (markdown.charAt(cursor - 1) == '\n');
+            
+            if (isStartOfLine) {
+                FenceMarker marker = scanFenceMarker(markdown, cursor);
+                if (marker != null) {
+                    if (!inFence) {
+                        // Start of new fence
+                        inFence = true;
+                        fenceChar = marker.character;
+                        fenceLength = marker.length;
+                    } else {
+                        // Check if this closes the current fence
+                        // Must match char and be >= length
+                        if (marker.character == fenceChar && marker.length >= fenceLength) {
+                            inFence = false;
+                            fenceChar = 0;
+                            fenceLength = 0;
+                        }
+                    }
+                    
+                    // Copy the fence marker and advance
+                    for (int i = 0; i < marker.length; i++) {
+                        outputBuilder.append(markdown.charAt(cursor + i));
+                    }
+                    cursor += marker.length;
+                    absolutePosition += marker.length;
+                    continue;
                 }
-                continue;
             }
 
             // Detect enrichment start only when not inside code fences
-            if (!inFence
-                && cursor + 1 < markdown.length()
-                && markdown.charAt(cursor) == '{'
-                && markdown.charAt(cursor + 1) == '{') {
+            if (!inFence && startsWith(markdown, cursor, MARKER_START)) {
                 int typeStartIndex = cursor + 2;
                 // skip spaces
                 while (typeStartIndex < markdown.length()
@@ -126,6 +157,7 @@ class EnrichmentPlaceholderizer {
                     typeEndIndex++;
                 }
                 String type = markdown.substring(typeStartIndex, Math.min(typeEndIndex, markdown.length()));
+                
                 // skip spaces
                 int cursorAfterType = typeEndIndex;
                 while (cursorAfterType < markdown.length()
@@ -134,32 +166,26 @@ class EnrichmentPlaceholderizer {
                 }
                 boolean hasColon = (cursorAfterType < markdown.length() && markdown.charAt(cursorAfterType) == ':');
                 Optional<EnrichmentKind> enrichmentKind = EnrichmentKind.fromToken(type);
+                
                 if (hasColon && enrichmentKind.isPresent()) {
                     int contentStartIndex = cursorAfterType + 1;
                     if (contentStartIndex < markdown.length() && markdown.charAt(contentStartIndex) == ' ') {
                         contentStartIndex++;
                     }
                     EnrichmentProcessingResult processingResult = processEnrichment(
-                        markdown,
+                        context,
                         cursor,
                         contentStartIndex,
                         enrichmentKind.get(),
-                        absolutePosition,
-                        enrichments,
-                        placeholders,
-                        outputBuilder
+                        absolutePosition
                     );
+                    
                     if (processingResult != null) {
                         cursor = processingResult.nextIndex();
                         absolutePosition = processingResult.nextAbsolutePosition();
                         continue;
                     }
-
-                    // No closing found: treat as plain text
-                    outputBuilder.append(markdown.charAt(cursor));
-                    cursor++;
-                    absolutePosition++;
-                    continue;
+                    // No closing found: treat as plain text, fall through
                 }
             }
 
@@ -170,6 +196,28 @@ class EnrichmentPlaceholderizer {
         }
 
         return outputBuilder.toString();
+    }
+    
+    private record FenceMarker(char character, int length) {}
+    
+    private FenceMarker scanFenceMarker(String text, int index) {
+        if (index >= text.length()) return null;
+        char startChar = text.charAt(index);
+        if (startChar != '`' && startChar != '~') return null;
+        
+        int length = 0;
+        while (index + length < text.length() && text.charAt(index + length) == startChar) {
+            length++;
+        }
+        
+        if (length >= 3) {
+            return new FenceMarker(startChar, length);
+        }
+        return null;
+    }
+    
+    private boolean startsWith(String text, int index, String prefix) {
+        return text.startsWith(prefix, index);
     }
 
     private String buildEnrichmentHtmlUnified(EnrichmentKind kind, String content) {
@@ -223,6 +271,7 @@ class EnrichmentPlaceholderizer {
             convertNewlinesToBreaks(parsedDocument.body(), false);
             return parsedDocument.body().html();
         } catch (RuntimeException processingFailure) {
+            logger.error("Failed to process enrichment fragment", processingFailure);
             return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
         }
     }
@@ -294,20 +343,33 @@ class EnrichmentPlaceholderizer {
 
     private int findEnrichmentEndIndex(String markdown, int startIndex) {
         int scanIndex = startIndex;
-        boolean innerFence = false;
+        boolean inFence = false;
+        char fenceChar = 0;
+        int fenceLength = 0;
+        
         while (scanIndex < markdown.length()) {
-            if (scanIndex + 2 < markdown.length()
-                && markdown.charAt(scanIndex) == '`'
-                && markdown.charAt(scanIndex + 1) == '`'
-                && markdown.charAt(scanIndex + 2) == '`') {
-                innerFence = !innerFence;
-                scanIndex += 3;
-                continue;
+            // Check for fence start/end inside enrichment content
+            boolean isStartOfLine = (scanIndex == startIndex) || (markdown.charAt(scanIndex - 1) == '\n');
+            
+            if (isStartOfLine) {
+                 FenceMarker marker = scanFenceMarker(markdown, scanIndex);
+                 if (marker != null) {
+                     if (!inFence) {
+                         inFence = true;
+                         fenceChar = marker.character;
+                         fenceLength = marker.length;
+                     } else if (marker.character == fenceChar && marker.length >= fenceLength) {
+                         inFence = false;
+                         fenceChar = 0;
+                         fenceLength = 0;
+                     }
+                     // Skip the fence marker
+                     scanIndex += marker.length;
+                     continue;
+                 }
             }
-            if (!innerFence
-                && scanIndex + 1 < markdown.length()
-                && markdown.charAt(scanIndex) == '}'
-                && markdown.charAt(scanIndex + 1) == '}') {
+            
+            if (!inFence && startsWith(markdown, scanIndex, MARKER_END)) {
                 return scanIndex;
             }
             scanIndex++;
@@ -326,33 +388,31 @@ class EnrichmentPlaceholderizer {
     }
 
     private EnrichmentProcessingResult processEnrichment(
-        String markdown,
+        EnrichmentContext context,
         int openingIndex,
         int contentStartIndex,
         EnrichmentKind kind,
-        int absolutePosition,
-        List<MarkdownEnrichment> enrichments,
-        Map<String, String> placeholders,
-        StringBuilder outputBuilder
+        int absolutePosition
     ) {
-        int closingIndex = findEnrichmentEndIndex(markdown, contentStartIndex);
+        int closingIndex = findEnrichmentEndIndex(context.markdown, contentStartIndex);
         if (closingIndex == -1) {
             return null;
         }
 
-        String content = markdown.substring(contentStartIndex, closingIndex).trim();
+        String content = context.markdown.substring(contentStartIndex, closingIndex).trim();
+        int consumedLength = (closingIndex + 2) - openingIndex;
+
         if (content.isEmpty()) {
-            int consumedLength = (closingIndex + 2) - openingIndex;
             return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
         }
 
         MarkdownEnrichment enrichment = createEnrichment(kind, content, absolutePosition);
-        enrichments.add(enrichment);
-        String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
-        placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, content));
-        outputBuilder.append(placeholderId);
+        context.enrichments.add(enrichment);
+        
+        String placeholderId = PLACEHOLDER_PREFIX + UUID.randomUUID().toString().replace("-", "");
+        context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, content));
+        context.outputBuilder.append(placeholderId);
 
-        int consumedLength = (closingIndex + 2 - openingIndex);
         return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
     }
 

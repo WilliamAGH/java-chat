@@ -97,19 +97,25 @@ public class DocsIngestionService {
             String url = queue.poll();
             if (!visited.add(url)) continue;
             if (!url.startsWith(rootUrl)) continue;
-            Document doc = Jsoup.connect(url).timeout((int) Duration.ofSeconds(30).toMillis()).get();
+            org.jsoup.Connection.Response response = Jsoup.connect(url)
+                .timeout((int) Duration.ofSeconds(30).toMillis())
+                .maxBodySize(0)
+                .execute();
+            String rawHtml = Optional.ofNullable(response.body()).orElse("");
+            CrawlPageSnapshot pageSnapshot = prepareCrawlPageSnapshot(url, rawHtml);
+            Document doc = pageSnapshot.document();
             String title = Optional.ofNullable(doc.title()).orElse("");
             // Use improved content extraction for cleaner text
-            String bodyText = url.contains("/api/") ? 
-                htmlExtractor.extractJavaApiContent(doc) : 
-                htmlExtractor.extractCleanContent(doc);
+            Document extractionDoc = doc.clone();
+            String bodyText = url.contains("/api/") ?
+                htmlExtractor.extractJavaApiContent(extractionDoc) :
+                htmlExtractor.extractCleanContent(extractionDoc);
             String packageName = extractPackage(url, bodyText);
 
             // Persist raw HTML snapshot
-            localStore.saveHtml(url, doc.outerHtml());
+            localStore.saveHtml(url, pageSnapshot.rawHtml());
 
-            for (Element anchorElement : doc.select("a[href]")) {
-                String href = anchorElement.attr("abs:href");
+            for (String href : pageSnapshot.discoveredLinks()) {
                 if (href.startsWith(rootUrl) && !visited.contains(href)) {
                     queue.add(href);
                 }
@@ -404,5 +410,41 @@ public class DocsIngestionService {
             }
         }
         return "";
+    }
+
+    static CrawlPageSnapshot prepareCrawlPageSnapshot(String url, String rawHtml) {
+        Document document = Jsoup.parse(rawHtml, url);
+        java.util.List<String> discoveredLinks = new java.util.ArrayList<>();
+        for (Element anchorElement : document.select("a[href]")) {
+            String href = anchorElement.attr("abs:href");
+            if (!href.isBlank()) {
+                discoveredLinks.add(href);
+            }
+        }
+        return new CrawlPageSnapshot(document, rawHtml, java.util.List.copyOf(discoveredLinks));
+    }
+
+    static final class CrawlPageSnapshot {
+        private final Document document;
+        private final String rawHtml;
+        private final java.util.List<String> discoveredLinks;
+
+        private CrawlPageSnapshot(Document document, String rawHtml, java.util.List<String> discoveredLinks) {
+            this.document = document;
+            this.rawHtml = rawHtml;
+            this.discoveredLinks = discoveredLinks;
+        }
+
+        Document document() {
+            return document;
+        }
+
+        String rawHtml() {
+            return rawHtml;
+        }
+
+        java.util.List<String> discoveredLinks() {
+            return discoveredLinks;
+        }
     }
 }

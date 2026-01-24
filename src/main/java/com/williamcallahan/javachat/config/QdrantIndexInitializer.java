@@ -49,6 +49,7 @@ public class QdrantIndexInitializer {
     private String collection;
 
     private final boolean ensurePayloadIndexes;
+    private final RestTemplateBuilder restTemplateBuilder;
 
     /**
      * Build candidate REST base URLs for Qdrant.
@@ -79,9 +80,11 @@ public class QdrantIndexInitializer {
      * Creates a Qdrant index initializer with configuration defaults.
      *
      * @param appProperties application configuration
+     * @param restTemplateBuilder shared RestTemplate builder for HTTP configuration
      */
-    public QdrantIndexInitializer(AppProperties appProperties) {
+    public QdrantIndexInitializer(AppProperties appProperties, RestTemplateBuilder restTemplateBuilder) {
         this.ensurePayloadIndexes = appProperties.getQdrant().isEnsurePayloadIndexes();
+        this.restTemplateBuilder = restTemplateBuilder;
     }
 
     /**
@@ -106,7 +109,7 @@ public class QdrantIndexInitializer {
 
     private void createPayloadIndex(String field, String schema) {
         // Create RestTemplate with longer timeouts for Qdrant Cloud
-        RestTemplate rt = new RestTemplateBuilder()
+        RestTemplate rt = restTemplateBuilder
                 .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
                 .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
                 .build();

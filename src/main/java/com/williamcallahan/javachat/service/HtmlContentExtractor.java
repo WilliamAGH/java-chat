@@ -142,7 +142,8 @@ public class HtmlContentExtractor {
                         }
                     }
                     case "pre", "code" -> {
-                        sb.append("\n```\n").append(text).append("\n```\n");
+                        String rawCode = child.wholeText();
+                        sb.append("\n```\n").append(rawCode).append("\n```\n");
                     }
                     case "ul", "ol" -> {
                         child.select("li").forEach(li -> 
@@ -243,11 +244,57 @@ public class HtmlContentExtractor {
             }
         }
         
-        // Clean up excessive whitespace
-        return cleaned.toString()
-            .replaceAll("\n{3,}", "\n\n")  // Max 2 consecutive newlines
-            .replaceAll(" {2,}", " ")       // Collapse multiple spaces
-            .trim();
+        // Clean up excessive whitespace without disturbing code fences
+        return normalizeWhitespaceOutsideCodeFences(cleaned.toString()).trim();
+    }
+
+    private String normalizeWhitespaceOutsideCodeFences(String text) {
+        StringBuilder normalized = new StringBuilder(text.length());
+        boolean inFence = false;
+        int newlineRun = 0;
+        int index = 0;
+        while (index < text.length()) {
+            if (index + 2 < text.length()
+                && text.charAt(index) == '`'
+                && text.charAt(index + 1) == '`'
+                && text.charAt(index + 2) == '`') {
+                normalized.append("```");
+                index += 3;
+                inFence = !inFence;
+                newlineRun = 0;
+                continue;
+            }
+
+            char character = text.charAt(index);
+            if (!inFence) {
+                if (character == '\n') {
+                    newlineRun++;
+                    if (newlineRun <= 2) {
+                        normalized.append(character);
+                    }
+                    index++;
+                    continue;
+                }
+                newlineRun = 0;
+                if (character == ' ') {
+                    if (normalized.length() == 0) {
+                        normalized.append(character);
+                        index++;
+                        continue;
+                    }
+                    char previous = normalized.charAt(normalized.length() - 1);
+                    if (previous == ' ' || previous == '\n') {
+                        index++;
+                        continue;
+                    }
+                }
+            }
+
+            newlineRun = 0;
+            normalized.append(character);
+            index++;
+        }
+        return normalized.toString();
     }
     
     /**

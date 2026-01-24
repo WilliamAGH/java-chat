@@ -157,6 +157,7 @@ public class SeoController {
         if (cachedIndexDocument == null) {
             // Jsoup.parse(File, charset) is better but we have a Resource which might be in a JAR
             cachedIndexDocument = Jsoup.parse(indexHtml.getInputStream(), StandardCharsets.UTF_8.name(), "/");
+            cachedIndexDocument.outputSettings().prettyPrint(false);
         }
         return cachedIndexDocument.clone();
     }
