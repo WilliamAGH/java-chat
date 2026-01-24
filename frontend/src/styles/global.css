@@ -316,3 +316,90 @@ pre code {
 .hljs-built_in { color: #c9a04a; }
 .hljs-attr { color: #c45d3a; }
 .hljs-meta { color: var(--color-text-muted); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ENRICHMENT CARDS - Hint, Warning, Background, Example, Reminder
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.inline-enrichment {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid;
+}
+
+.inline-enrichment-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-weight: 500;
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.inline-enrichment-header svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.enrichment-text {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.enrichment-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* Hint - Warm amber/gold */
+.inline-enrichment.hint {
+  background: rgba(201, 160, 74, 0.08);
+  border-color: var(--color-warning);
+}
+
+.inline-enrichment.hint .inline-enrichment-header {
+  color: var(--color-warning);
+}
+
+/* Warning - Alert red */
+.inline-enrichment.warning {
+  background: rgba(196, 93, 93, 0.08);
+  border-color: var(--color-error);
+}
+
+.inline-enrichment.warning .inline-enrichment-header {
+  color: var(--color-error);
+}
+
+/* Background - Muted blue/info */
+.inline-enrichment.background {
+  background: rgba(93, 138, 196, 0.08);
+  border-color: var(--color-info);
+}
+
+.inline-enrichment.background .inline-enrichment-header {
+  color: var(--color-info);
+}
+
+/* Example - Accent terracotta */
+.inline-enrichment.example {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+}
+
+.inline-enrichment.example .inline-enrichment-header {
+  color: var(--color-accent);
+}
+
+/* Reminder - Success green */
+.inline-enrichment.reminder {
+  background: rgba(93, 155, 93, 0.08);
+  border-color: var(--color-success);
+}
+
+.inline-enrichment.reminder .inline-enrichment-header {
+  color: var(--color-success);
+}

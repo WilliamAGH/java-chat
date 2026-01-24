@@ -8,103 +8,53 @@
     isStreaming?: boolean
   }
 
-  /**
-   * Debounce delay during streaming to batch rapid content updates.
-   * 80ms balances responsiveness with avoiding excessive re-renders -
-   * fast enough to feel real-time, slow enough to batch 2-3 chunks.
-   */
-  const STREAMING_RENDER_DEBOUNCE_MS = 80
-
-  /** Encapsulates render lifecycle: sequencing, timing, and abort control. */
-  interface RenderControl {
-    sequence: number
-    timer: ReturnType<typeof setTimeout> | null
-    abort: AbortController | null
-  }
-
   let { message, index, isStreaming = false }: Props = $props()
 
-  let renderedContent = $state('')
-  let renderError = $state<string | null>(null)
   let contentEl: HTMLElement | null = $state(null)
-  let renderControl = $state<RenderControl>({ sequence: 0, timer: null, abort: null })
+  let highlightTimer: ReturnType<typeof setTimeout> | null = null
 
-  function cancelPendingRender(): void {
-    if (renderControl.timer) {
-      clearTimeout(renderControl.timer)
-    }
-    if (renderControl.abort) {
-      renderControl.abort.abort()
-    }
-    renderControl = { ...renderControl, timer: null, abort: null }
-  }
+  // Render markdown synchronously - no server calls, no async complexity
+  let renderedContent = $derived(
+    message.role === 'assistant' && message.content
+      ? renderMarkdown(message.content)
+      : ''
+  )
 
-  // Render markdown when content changes
-  $effect(() => {
-    if (message.role !== 'assistant') {
-      renderedContent = ''
-      renderError = null
-      return
-    }
-
-    const nextContent = message.content ?? ''
-    const nextSequence = renderControl.sequence + 1
-    cancelPendingRender()
-    renderControl = { ...renderControl, sequence: nextSequence }
-
-    if (!nextContent) {
-      renderedContent = ''
-      renderError = null
-      return
-    }
-
-    const delayMs = isStreaming ? STREAMING_RENDER_DEBOUNCE_MS : 0
-    const timer = setTimeout(() => {
-      const controller = new AbortController()
-      renderControl = { ...renderControl, abort: controller }
-      renderMarkdown(nextContent, {
-        preferClient: isStreaming,
-        signal: controller.signal
-      })
-        .then(html => {
-          if (controller.signal.aborted || nextSequence !== renderControl.sequence) {
-            return
-          }
-          renderedContent = html
-          renderError = null
-        })
-        .catch(problem => {
-          if (controller.signal.aborted || nextSequence !== renderControl.sequence) {
-            return
-          }
-          console.error('Markdown rendering failed:', problem)
-          renderError = 'Markdown rendering unavailable'
-        })
-    }, delayMs)
-    renderControl = { ...renderControl, timer }
-
-    return cancelPendingRender
-  })
-
-  // Highlight code blocks after render - use core + java only for smaller bundle
+  // Highlight code blocks after render - debounced to avoid flicker during streaming
   $effect(() => {
     if (renderedContent && contentEl) {
-      Promise.all([
-        import('highlight.js/lib/core'),
-        import('highlight.js/lib/languages/java'),
-        import('highlight.js/lib/languages/xml'),
-        import('highlight.js/lib/languages/json'),
-        import('highlight.js/lib/languages/bash')
-      ]).then(([hljs, java, xml, json, bash]) => {
-        // Guard registration to avoid repeated re-registration (registerLanguage is not idempotent)
-        if (!hljs.default.getLanguage('java')) hljs.default.registerLanguage('java', java.default)
-        if (!hljs.default.getLanguage('xml')) hljs.default.registerLanguage('xml', xml.default)
-        if (!hljs.default.getLanguage('json')) hljs.default.registerLanguage('json', json.default)
-        if (!hljs.default.getLanguage('bash')) hljs.default.registerLanguage('bash', bash.default)
-        contentEl?.querySelectorAll('pre code').forEach((block) => {
-          hljs.default.highlightElement(block as HTMLElement)
+      // Clear any pending highlight
+      if (highlightTimer) {
+        clearTimeout(highlightTimer)
+      }
+
+      // During streaming, delay highlighting to batch updates
+      // After streaming completes, highlight immediately
+      const delay = isStreaming ? 300 : 0
+
+      highlightTimer = setTimeout(() => {
+        Promise.all([
+          import('highlight.js/lib/core'),
+          import('highlight.js/lib/languages/java'),
+          import('highlight.js/lib/languages/xml'),
+          import('highlight.js/lib/languages/json'),
+          import('highlight.js/lib/languages/bash')
+        ]).then(([hljs, java, xml, json, bash]) => {
+          if (!hljs.default.getLanguage('java')) hljs.default.registerLanguage('java', java.default)
+          if (!hljs.default.getLanguage('xml')) hljs.default.registerLanguage('xml', xml.default)
+          if (!hljs.default.getLanguage('json')) hljs.default.registerLanguage('json', json.default)
+          if (!hljs.default.getLanguage('bash')) hljs.default.registerLanguage('bash', bash.default)
+          contentEl?.querySelectorAll('pre code:not(.hljs)').forEach((block) => {
+            hljs.default.highlightElement(block as HTMLElement)
+          })
         })
-      })
+      }, delay)
+    }
+
+    return () => {
+      if (highlightTimer) {
+        clearTimeout(highlightTimer)
+      }
     }
   })
 
@@ -114,7 +64,6 @@
     })
   }
 
-  // Compute animation delay reactively
   let animationDelay = $derived(`${Math.min(index * 50, 200)}ms`)
 </script>
 
@@ -139,10 +88,7 @@
       <p class="user-text">{message.content}</p>
     {:else}
       <div class="assistant-content" bind:this={contentEl}>
-        {#if renderError}
-          <p class="render-error">{renderError}</p>
-          <p>{message.content}</p>
-        {:else if renderedContent}
+        {#if renderedContent}
           {@html renderedContent}
         {:else}
           <p>{message.content}</p>
@@ -339,16 +285,6 @@
     border: none;
     font-size: inherit;
     color: var(--color-text-primary);
-  }
-
-  /* Render error notice */
-  .render-error {
-    font-size: var(--text-sm);
-    color: var(--color-error);
-    background: rgba(196, 93, 93, 0.1);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-3);
   }
 
   /* Streaming cursor */
