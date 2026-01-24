@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.service.markdown.MarkdownProcessingException;
 import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
@@ -69,7 +70,7 @@ public class MarkdownService {
         try {
             ProcessedMarkdown processedMarkdown = unifiedService.process(markdownText);
             return processedMarkdown.html();
-        } catch (Exception processingFailure) {
+        } catch (MarkdownProcessingException processingFailure) {
             logger.error("Error processing markdown", processingFailure);
             return escapeHtml(markdownText).replace("\n", "<br />\n");
         }
