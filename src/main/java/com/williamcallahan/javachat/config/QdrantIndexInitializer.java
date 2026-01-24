@@ -120,9 +120,9 @@ public class QdrantIndexInitializer {
             return;
         }
         try {
-            createPayloadIndex("url", "keyword");
-            createPayloadIndex("hash", "keyword");
-            createPayloadIndex("chunkIndex", "integer");
+            createPayloadIndex("url", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("hash", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("chunkIndex", SCHEMA_TYPE_INTEGER);
         } catch (RuntimeException indexCreationException) {
             log.warn("Unable to ensure Qdrant payload indexes (exception type: {})",
                 indexCreationException.getClass().getSimpleName());
