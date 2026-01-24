@@ -15,14 +15,14 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void isRetryablePrimaryFailureTreatsSdkIoAsRetryable() throws Exception {
-        OpenAIStreamingService service = new OpenAIStreamingService(null);
+        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
         boolean retryable = invokeIsRetryablePrimaryFailure(service, new OpenAIIoException("io"));
         assertTrue(retryable);
     }
 
     @Test
     void isRetryablePrimaryFailureTreats401AsRetryableForPrimaryFailover() throws Exception {
-        OpenAIStreamingService service = new OpenAIStreamingService(null);
+        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
         Headers headers = Headers.builder().build();
         UnauthorizedException unauthorized = UnauthorizedException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, unauthorized);
@@ -31,7 +31,7 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void isRetryablePrimaryFailureTreats429AsRetryable() throws Exception {
-        OpenAIStreamingService service = new OpenAIStreamingService(null);
+        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
         Headers headers = Headers.builder().build();
         RateLimitException rateLimit = RateLimitException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, rateLimit);
@@ -40,7 +40,7 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void isRetryablePrimaryFailureDoesNotTreatGenericRuntimeAsRetryable() throws Exception {
-        OpenAIStreamingService service = new OpenAIStreamingService(null);
+        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
         boolean retryable = invokeIsRetryablePrimaryFailure(service, new IllegalArgumentException("no"));
         assertFalse(retryable);
     }

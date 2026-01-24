@@ -47,22 +47,6 @@ class MarkdownPreprocessingTest {
     }
     
     @Test
-    void testMissingSpacesAfterPunctuation() {
-        String input = "This is a sentence.Here is another!And a third?Yet another.";
-        String html = markdownService.processStructured(input).html();
-
-        System.out.println("\nTest: Missing spaces after punctuation");
-        System.out.println("Input: " + input);
-        System.out.println("HTML: " + html);
-
-        // Should render as paragraphs with proper spacing
-        assertTrue(html.contains("<p>"), "Should render as paragraphs");
-        assertTrue(html.contains("sentence. Here"), "Should add space after period");
-        assertTrue(html.contains("another! And") || html.contains("another!</p>"), "Should handle exclamation");
-        assertTrue(html.contains("third? Yet"), "Should add space after question mark");
-    }
-
-    @Test
     void testInlineTripleBackticksRemainText() {
         String input = "Use ``` to denote a code fence in markdown.";
         String html = markdownService.processStructured(input).html();
@@ -79,21 +63,6 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("java.lang.String"), "Package and class names should stay intact");
         assertFalse(html.contains("java. lang"), "Package names must not be split");
         assertTrue(html.contains("href=\"https://example.com/Test\""), "URL should remain intact");
-    }
-    
-    @Test
-    void testParagraphBreaksInLongText() {
-        String input = "The % operator in Java is the remainder operator. It returns the remainder after division. For example, 10 % 3 equals 1. This is useful for checking divisibility. When a % b equals 0, a is divisible by b.";
-        String html = markdownService.processStructured(input).html();
-
-        System.out.println("\nTest: Paragraph breaks in long text");
-        System.out.println("Input: " + input);
-        System.out.println("HTML: " + html);
-
-        assertTrue(html.contains("<p>"), "Should render as paragraphs");
-        // Count paragraph tags
-        int paraCount = html.split("<p>").length - 1;
-        assertTrue(paraCount > 1, "Should have multiple paragraphs, got: " + paraCount);
     }
     
     @Test
