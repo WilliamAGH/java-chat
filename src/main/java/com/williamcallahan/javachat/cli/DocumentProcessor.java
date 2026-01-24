@@ -210,7 +210,9 @@ public class DocumentProcessor {
 
         final long startMillis = System.currentTimeMillis();
         try {
-            final int processed = ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
+            final DocsIngestionService.LocalIngestionOutcome outcome =
+                ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
+            final int processed = outcome.processedCount();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
 
@@ -219,6 +221,9 @@ public class DocumentProcessor {
                 if (LOGGER.isInfoEnabled()) {
                     LOGGER.info(LOG_DUPLICATES_SKIPPED, duplicates);
                 }
+            }
+            if (!outcome.failures().isEmpty() && LOGGER.isWarnEnabled()) {
+                LOGGER.warn("Ingestion completed with {} file failures", outcome.failures().size());
             }
             return new ProcessingOutcome.Success(processed, duplicates);
 

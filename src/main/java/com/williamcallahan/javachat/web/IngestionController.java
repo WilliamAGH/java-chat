@@ -72,8 +72,13 @@ public class IngestionController extends BaseController {
             @RequestParam(name = "maxFiles", defaultValue = "50000")
             @Min(1) @Max(1000000) int maxFiles) {
         try {
-            int processed = docsIngestionService.ingestLocalDirectory(directory, maxFiles);
-            return ResponseEntity.ok(IngestionLocalResponse.success(processed, directory));
+            DocsIngestionService.LocalIngestionOutcome outcome =
+                docsIngestionService.ingestLocalDirectory(directory, maxFiles);
+            return ResponseEntity.ok(IngestionLocalResponse.success(
+                outcome.processedCount(),
+                directory,
+                outcome.failures()
+            ));
         } catch (IllegalArgumentException illegalArgumentException) {
             return handleValidationException(illegalArgumentException);
         } catch (IOException ioException) {

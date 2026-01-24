@@ -172,9 +172,9 @@ public class DocsIngestionService {
     /**
      * Ingest HTML files from a local directory mirror (e.g., data/docs/**) into the VectorStore.
      * Scans recursively for .html/.htm files, extracts text, chunks, and upserts with citation metadata.
-     * Returns the number of files processed (not chunks).
+     * Returns processing outcomes including per-file failures.
      */
-    public int ingestLocalDirectory(String rootDir, int maxFiles) throws IOException {
+    public LocalIngestionOutcome ingestLocalDirectory(String rootDir, int maxFiles) throws IOException {
         if (rootDir == null || rootDir.isBlank()) {
             throw new IllegalArgumentException("Local docs directory is required");
         }
@@ -191,6 +191,7 @@ public class DocsIngestionService {
             throw new IllegalArgumentException("Local docs directory does not exist: " + rootDir);
         }
         final int[] processed = {0};
+        List<LocalIngestionFailure> failures = new ArrayList<>();
         try (Stream<Path> paths = Files.walk(root)) {
             Iterator<Path> pathIterator = paths
                     .filter(pathCandidate -> !Files.isDirectory(pathCandidate))
@@ -200,12 +201,15 @@ public class DocsIngestionService {
                 Path file = pathIterator.next();
                 if (file.getFileName() == null) continue;
                 
-                if (processLocalFile(file)) {
+                LocalFileProcessingOutcome outcome = processLocalFile(file);
+                if (outcome.processed()) {
                     processed[0]++;
+                } else if (outcome.failure() != null) {
+                    failures.add(outcome.failure());
                 }
             }
         }
-        return processed[0];
+        return new LocalIngestionOutcome(processed[0], failures);
     }
 
     private boolean isIngestableFile(Path path) {
@@ -217,11 +221,12 @@ public class DocsIngestionService {
         return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
     }
 
-    private boolean processLocalFile(Path file) {
+    private LocalFileProcessingOutcome processLocalFile(Path file) {
         long fileStartMillis = System.currentTimeMillis();
         Path fileNamePath = file.getFileName();
         if (fileNamePath == null) {
-            return false;
+            return new LocalFileProcessingOutcome(false,
+                new LocalIngestionFailure(file.toString(), "filename", "Missing filename"));
         }
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
         String title;
@@ -245,7 +250,8 @@ public class DocsIngestionService {
             } catch (IOException pdfExtractionException) {
                 log.error("Failed to extract PDF content (exception type: {})",
                     pdfExtractionException.getClass().getSimpleName());
-                return false;
+                return new LocalFileProcessingOutcome(false,
+                    failure(file, "pdf-extraction", pdfExtractionException));
             }
         } else {
             // Process HTML file
@@ -259,7 +265,8 @@ public class DocsIngestionService {
                 packageName = extractPackage(url, bodyText);
             } catch (IOException htmlReadException) {
                 log.error("Failed to read HTML file (exception type: {})", htmlReadException.getClass().getSimpleName());
-                return false;
+                return new LocalFileProcessingOutcome(false,
+                    failure(file, "html-read", htmlReadException));
             }
         }
 
@@ -273,19 +280,23 @@ public class DocsIngestionService {
             }
         } catch (IOException chunkingException) {
             log.error("Chunking failed (exception type: {})", chunkingException.getClass().getSimpleName());
-            return false;
+            return new LocalFileProcessingOutcome(false,
+                failure(file, "chunking", chunkingException));
         }
 
         // Add documents to vector store or cache
         if (!documents.isEmpty()) {
-            return processDocuments(documents, fileStartMillis);
+            return processDocuments(file, documents, fileStartMillis);
         } else {
             INDEXING_LOG.debug("[INDEXING] Skipping empty document");
-            return false;
+            return new LocalFileProcessingOutcome(false,
+                new LocalIngestionFailure(file.toString(), "empty-document", "No chunks generated"));
         }
     }
 
-    private boolean processDocuments(List<org.springframework.ai.document.Document> documents, long fileStartMillis) {
+    private LocalFileProcessingOutcome processDocuments(Path file,
+                                                       List<org.springframework.ai.document.Document> documents,
+                                                       long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
         
         try {
@@ -344,13 +355,24 @@ public class DocsIngestionService {
                 }
             }
             
-            return true;
+            return new LocalFileProcessingOutcome(true, null);
         } catch (RuntimeException indexingException) {
             String operation = localOnlyMode ? "cache" : "index";
             INDEXING_LOG.error("[INDEXING] ✗ Failed to {} file (exception type: {})",
                 operation, indexingException.getClass().getSimpleName());
-            return false;
+            return new LocalFileProcessingOutcome(false,
+                failure(file, operation, indexingException));
         }
+    }
+
+    private LocalIngestionFailure failure(Path file, String phase, Exception exception) {
+        String details = exception.getMessage();
+        if (details == null || details.isBlank()) {
+            details = exception.getClass().getSimpleName();
+        } else {
+            details = exception.getClass().getSimpleName() + ": " + details;
+        }
+        return new LocalIngestionFailure(file.toString(), phase, details);
     }
 
     private String mapLocalPathToUrl(final Path file) {
@@ -457,5 +479,42 @@ public class DocsIngestionService {
         java.util.List<String> discoveredLinks() {
             return discoveredLinks;
         }
+    }
+
+    /**
+     * Represents a local ingestion failure with file and phase context.
+     *
+     * @param filePath absolute file path
+     * @param phase ingestion phase that failed
+     * @param details failure details for diagnostics
+     */
+    public record LocalIngestionFailure(String filePath, String phase, String details) {
+        public LocalIngestionFailure {
+            if (filePath == null || filePath.isBlank()) {
+                throw new IllegalArgumentException("File path is required");
+            }
+            if (phase == null || phase.isBlank()) {
+                throw new IllegalArgumentException("Failure phase is required");
+            }
+            details = details == null ? "" : details;
+        }
+    }
+
+    /**
+     * Captures processed count and per-file failures for local ingestion runs.
+     *
+     * @param processedCount number of successfully processed files
+     * @param failures per-file failures encountered during ingestion
+     */
+    public record LocalIngestionOutcome(int processedCount, List<LocalIngestionFailure> failures) {
+        public LocalIngestionOutcome {
+            if (processedCount < 0) {
+                throw new IllegalArgumentException("Processed count must be non-negative");
+            }
+            failures = failures == null ? List.of() : List.copyOf(failures);
+        }
+    }
+
+    private record LocalFileProcessingOutcome(boolean processed, LocalIngestionFailure failure) {
     }
 }
