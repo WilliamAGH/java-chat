@@ -10,6 +10,8 @@
   let currentStreamingContent = $state('')
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
+  let streamStatusMessage = $state<string | null>(null)
+  let streamStatusDetails = $state<string | null>(null)
 
   const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
@@ -46,6 +48,8 @@
     // Start streaming
     isStreaming = true
     currentStreamingContent = ''
+    streamStatusMessage = null
+    streamStatusDetails = null
 
     try {
       await streamChat(
@@ -54,6 +58,16 @@
         (chunk) => {
           currentStreamingContent += chunk
           scrollToBottom()
+        },
+        {
+          onStatus: (status) => {
+            streamStatusMessage = status.message
+            streamStatusDetails = status.details ?? null
+          },
+          onError: (streamError) => {
+            streamStatusMessage = streamError.message
+            streamStatusDetails = streamError.details ?? null
+          }
         }
       )
 
@@ -65,15 +79,18 @@
       }]
     } catch (error) {
       console.error('Stream error:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
       messages = [...messages, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: errorMessage,
         timestamp: Date.now(),
         isError: true
       }]
     } finally {
       isStreaming = false
       currentStreamingContent = ''
+      streamStatusMessage = null
+      streamStatusDetails = null
       await scrollToBottom()
     }
   }
@@ -115,6 +132,14 @@
                 <span class="dot"></span>
                 <span class="dot"></span>
               </div>
+              {#if streamStatusMessage}
+                <div class="stream-status">
+                  <p class="stream-status-title">{streamStatusMessage}</p>
+                  {#if streamStatusDetails}
+                    <p class="stream-status-details">{streamStatusDetails}</p>
+                  {/if}
+                </div>
+              {/if}
             </div>
           {/if}
         </div>
@@ -154,6 +179,9 @@
   /* Loading indicator */
   .loading-indicator {
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
     justify-content: flex-start;
     padding-left: var(--space-4);
   }
@@ -178,6 +206,22 @@
   .dot:nth-child(1) { animation-delay: -0.32s; }
   .dot:nth-child(2) { animation-delay: -0.16s; }
   .dot:nth-child(3) { animation-delay: 0s; }
+
+  .stream-status {
+    padding: 0 var(--space-2);
+  }
+
+  .stream-status-title {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .stream-status-details {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
 
   @keyframes bounce {
     0%, 80%, 100% {
