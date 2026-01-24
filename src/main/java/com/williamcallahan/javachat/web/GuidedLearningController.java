@@ -40,10 +40,13 @@ public class GuidedLearningController extends BaseController {
     /** Heartbeat interval to keep SSE connections alive. */
     private static final int HEARTBEAT_INTERVAL_SECONDS = 20;
 
+    /** Buffer capacity for backpressure handling in streaming responses. */
+    private static final int STREAM_BACKPRESSURE_BUFFER_SIZE = 512;
+
     /** SSE event type for text chunks. */
     private static final String SSE_EVENT_TEXT = "text";
-    /** SSE event type for error notifications. */
-    private static final String SSE_EVENT_ERROR = "error";
+    /** SSE event type for error/status notifications (aligns with allowed taxonomy). */
+    private static final String SSE_EVENT_STATUS = "status";
     /** SSE comment for keepalive heartbeats. */
     private static final String SSE_COMMENT_KEEPALIVE = "keepalive";
 
@@ -75,13 +78,13 @@ public class GuidedLearningController extends BaseController {
     private record ErrorMessage(String message, String details) {}
 
     /**
-     * Serializes an object to JSON, throwing RuntimeException on failure.
+     * Serializes an object to JSON, throwing IllegalStateException on failure.
      */
-    private String jsonSerialize(Object value) {
+    private String jsonSerialize(Object payload) {
         try {
-            return objectMapper.writeValueAsString(value);
+            return objectMapper.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize SSE data", e);
+            throw new IllegalStateException("Failed to serialize SSE data", e);
         }
     }
 
@@ -97,7 +100,7 @@ public class GuidedLearningController extends BaseController {
             json = "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
         }
         return Flux.just(ServerSentEvent.<String>builder()
-            .event(SSE_EVENT_ERROR)
+            .event(SSE_EVENT_STATUS)
             .data(json)
             .build());
     }
@@ -244,7 +247,7 @@ public class GuidedLearningController extends BaseController {
             Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
                     .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .doOnNext(chunk -> fullResponse.append(chunk))
-                    .onBackpressureBuffer()
+                    .onBackpressureBuffer(STREAM_BACKPRESSURE_BUFFER_SIZE)
                     .share();
 
             // Heartbeats terminate when data stream completes
