@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -198,7 +197,7 @@ public final class DocsSourceRegistry {
         Optional<String> publicPdfUrl = Optional.empty();
         if (localPath != null) {
             final String normalizedPath = localPath.replace('\\', '/');
-            if (normalizedPath.toLowerCase(Locale.ROOT).endsWith(PDF_EXTENSION)) {
+            if (normalizeAsciiLower(normalizedPath).endsWith(PDF_EXTENSION)) {
                 final int markerIndex = normalizedPath.indexOf(LOCAL_DOCS_BOOKS);
                 if (markerIndex >= 0) {
                     final String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
@@ -212,5 +211,18 @@ public final class DocsSourceRegistry {
             }
         }
         return publicPdfUrl;
+    }
+
+    private static String normalizeAsciiLower(String inputText) {
+        StringBuilder normalized = new StringBuilder(inputText.length());
+        for (int index = 0; index < inputText.length(); index++) {
+            char current = inputText.charAt(index);
+            if (current >= 'A' && current <= 'Z') {
+                normalized.append((char) (current + ('a' - 'A')));
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
     }
 }
