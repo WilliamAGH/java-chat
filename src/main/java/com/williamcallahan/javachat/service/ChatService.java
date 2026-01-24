@@ -98,9 +98,9 @@ public class ChatService {
         }
 
         return openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
-                .onErrorResume(ex -> {
-                    logger.error("Streaming failed", ex);
-                    return Flux.error(ex);
+                .onErrorResume(streamingException -> {
+                    logger.error("Streaming failed", streamingException);
+                    return Flux.error(streamingException);
                 });
     }
 

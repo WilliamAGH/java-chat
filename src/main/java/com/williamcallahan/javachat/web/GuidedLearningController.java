@@ -227,7 +227,7 @@ public class GuidedLearningController extends BaseController {
                     .map(tick -> "");
 
             return Flux.merge(dataStream, heartbeats)
-                    .filter(s -> s != null && !s.isEmpty())  // Filter out empty heartbeat strings
+                    .filter(event -> event != null && !event.isEmpty())  // Filter out empty heartbeat strings
                     .doOnComplete(() -> {
                         // Store processed HTML for consistency with Chat
                         var processed = markdownService.processStructured(fullResponse.toString());
