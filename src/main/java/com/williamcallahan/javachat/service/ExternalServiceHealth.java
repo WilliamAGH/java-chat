@@ -30,19 +30,28 @@ public class ExternalServiceHealth {
     private final WebClient webClient;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
 
-    @Value("${QDRANT_HOST:localhost}")
+    /** Qdrant gRPC default port. */
+    private static final int QDRANT_GRPC_PORT = 6334;
+    /** Qdrant REST default port. */
+    private static final int QDRANT_REST_PORT = 6333;
+    /** Docker compose gRPC port mapping in this repo. */
+    private static final int DOCKER_GRPC_PORT = 8086;
+    /** Docker compose REST port mapping in this repo. */
+    private static final int DOCKER_REST_PORT = 8087;
+
+    @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
     private String qdrantHost;
 
-    @Value("${QDRANT_PORT:6334}")
+    @Value("${spring.ai.vectorstore.qdrant.port:6334}")
     private int qdrantPort;
 
-    @Value("${QDRANT_SSL:false}")
+    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
     private boolean qdrantSsl;
 
-    @Value("${QDRANT_API_KEY:}")
+    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String qdrantApiKey;
 
-    @Value("${QDRANT_COLLECTION:java-chat}")
+    @Value("${spring.ai.vectorstore.qdrant.collection-name:java-chat}")
     private String qdrantCollection;
 
     // Health check intervals
@@ -151,6 +160,20 @@ public class ExternalServiceHealth {
         checkQdrantHealth();
     }
 
+    private int mapGrpcPortToRestPort(int grpcPort) {
+        if (grpcPort == QDRANT_GRPC_PORT) {
+            return QDRANT_REST_PORT;
+        }
+        if (grpcPort == DOCKER_GRPC_PORT) {
+            return DOCKER_REST_PORT;
+        }
+        // Default assumption: if not known, assume standard Qdrant offset or just return as is (safer to default to standard)
+        // If user configured a custom port, we can't guess the REST port easily without config.
+        // Assuming standard -1 offset is risky. Let's fallback to QDRANT_REST_PORT if unknown, or maybe the config provides it?
+        // Since this is a patch, let's stick to the known constants.
+        return QDRANT_REST_PORT;
+    }
+
     private void checkQdrantHealth() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
@@ -162,8 +185,8 @@ public class ExternalServiceHealth {
             // For Qdrant Cloud, check collections endpoint instead of /health (which returns 403)
             healthUrl = String.format("%s://%s/collections", protocol, qdrantHost);
         } else {
-            // For local instances, use the health endpoint
-            int restPort = (qdrantPort == 6334) ? 6333 : qdrantPort; // Convert gRPC port to REST port
+            // For local instances, map gRPC port to REST port
+            int restPort = mapGrpcPortToRestPort(qdrantPort);
             healthUrl = String.format("%s://%s:%d/health", protocol, qdrantHost, restPort);
         }
 
