@@ -160,8 +160,8 @@ public class EmbeddingCacheService {
         public CachedEmbedding(String id, String content, float[] embedding, Map<String, Object> metadata) {
             this.id = id;
             this.content = content;
-            this.embedding = embedding;
-            this.metadata = metadata != null ? metadata : new HashMap<>();
+            this.embedding = embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
+            this.metadata = metadata == null ? new HashMap<>() : new HashMap<>(metadata);
             this.createdAt = LocalDateTime.now();
             this.uploaded = false;
         }
@@ -183,19 +183,19 @@ public class EmbeddingCacheService {
         }
 
         public float[] getEmbedding() {
-            return embedding;
+            return embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
         }
 
         public void setEmbedding(float[] embedding) {
-            this.embedding = embedding;
+            this.embedding = embedding == null ? null : java.util.Arrays.copyOf(embedding, embedding.length);
         }
 
         public Map<String, Object> getMetadata() {
-            return metadata;
+            return metadata == null ? Map.of() : Map.copyOf(metadata);
         }
 
         public void setMetadata(Map<String, Object> metadata) {
-            this.metadata = metadata != null ? metadata : new HashMap<>();
+            this.metadata = metadata == null ? new HashMap<>() : new HashMap<>(metadata);
         }
 
         public LocalDateTime getCreatedAt() {
@@ -216,7 +216,7 @@ public class EmbeddingCacheService {
         
         /** Converts to Spring AI Document */
         public Document toDocument() {
-            return new Document(content, metadata != null ? metadata : new HashMap<>());
+            return new Document(content, metadata == null ? new HashMap<>() : new HashMap<>(metadata));
         }
     }
     
