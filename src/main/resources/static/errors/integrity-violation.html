@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>integrity-violation - API Error Reference</title>
+    <link rel="stylesheet" href="/theme.css">
+    <link rel="icon" href="/favicon.ico">
+    <style>
+        .container { max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem; }
+        .back-link { display: inline-flex; align-items: center; gap: 0.5rem; color: hsl(var(--surface-muted-foreground)); text-decoration: none; font-size: 0.85rem; margin-bottom: 2rem; }
+        .back-link:hover { color: hsl(var(--surface-foreground)); }
+        .header { margin-bottom: 2rem; }
+        .error-type { font-family: "SFMono-Regular", Consolas, monospace; font-size: 1.75rem; font-weight: 600; color: hsl(var(--surface-foreground)); margin: 0 0 0.5rem; }
+        .status-badge { display: inline-flex; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; font-family: "SFMono-Regular", Consolas, monospace; margin-bottom: 1rem; }
+        .status-4xx { background: rgba(251, 191, 36, 0.15); color: rgb(180, 83, 9); }
+        @media (prefers-color-scheme: dark) { .status-4xx { background: rgba(251, 191, 36, 0.2); color: rgb(253, 224, 71); } }
+        .description { color: hsl(var(--surface-muted-foreground)); font-size: 1.1rem; line-height: 1.6; margin: 0; }
+        .section { margin-top: 2.5rem; }
+        .section-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: hsl(var(--surface-muted-foreground)); margin: 0 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid hsl(var(--surface-border)); }
+        .content { color: hsl(var(--surface-foreground)); line-height: 1.7; }
+        .content p { margin: 0 0 1rem; }
+        .content ul { margin: 0 0 1rem; padding-left: 1.5rem; }
+        .content li { margin-bottom: 0.5rem; }
+        pre { background: hsl(var(--surface-muted)); border: 1px solid hsl(var(--surface-border)); border-radius: var(--surface-radius-md); padding: 1rem 1.25rem; overflow-x: auto; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem; line-height: 1.5; }
+        .footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid hsl(var(--surface-border)); font-size: 0.85rem; color: hsl(var(--surface-muted-foreground)); }
+        .footer a { color: hsl(var(--surface-foreground)); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/errors/" class="back-link">&larr; All Errors</a>
+        <header class="header">
+            <span class="status-badge status-4xx">409 Conflict</span>
+            <h1 class="error-type">integrity-violation</h1>
+            <p class="description">A database integrity constraint was violated.</p>
+        </header>
+        <section class="section">
+            <h2 class="section-title">Common Causes</h2>
+            <div class="content">
+                <ul>
+                    <li>Foreign key references a non-existent record</li>
+                    <li>Check constraint failed (value out of allowed range)</li>
+                    <li>Not-null constraint on a required field</li>
+                    <li>Attempting to delete a record with dependent references</li>
+                </ul>
+            </div>
+        </section>
+        <section class="section">
+            <h2 class="section-title">Resolution</h2>
+            <div class="content">
+                <p>Ensure all referenced records exist before creating relationships. When deleting, remove dependent records first or use cascade operations where appropriate.</p>
+            </div>
+        </section>
+        <footer class="footer">
+            <a href="/errors/">Error Reference</a> &middot;
+            <a href="/swagger-ui/">API Documentation</a>
+        </footer>
+    </div>
+</body>
+</html>
