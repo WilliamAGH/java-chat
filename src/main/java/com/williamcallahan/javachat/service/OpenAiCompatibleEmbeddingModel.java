@@ -173,6 +173,9 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     }
 
     private Map<?, ?> requireMap(Object candidate, String description) {
+        if (candidate == null) {
+            throw new EmbeddingApiResponseException("Expected map for " + description + ", got null");
+        }
         if (candidate instanceof Map<?, ?> mappedResponse) {
             return mappedResponse;
         }
