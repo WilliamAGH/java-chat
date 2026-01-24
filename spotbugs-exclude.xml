@@ -56,4 +56,70 @@
         <Bug pattern="EI_EXPOSE_REP2"/>
         <Class name="com.williamcallahan.javachat.web.TooltipController"/>
     </Match>
+
+    <!--
+        Public-facing REST controllers are intentionally open and do not use Spring Security annotations.
+        Suppress SPRING_ENDPOINT for the web package to avoid false positives.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.web\\..*"/>
+    </Match>
+
+    <!--
+        Case-insensitive comparisons are used only for parsing or display convenience.
+        Suppress IMPROPER_UNICODE where normalization is non-security-critical.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.ApiKeyLoggingConfig"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.DocsSourceRegistry"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.PortInitializer"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedTOCProvider"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.HtmlContentExtractor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentPlaceholderizer$EnrichmentKind"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentProcessor$EnrichmentVisitor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.SiteUrlResolver"/>
+    </Match>
+
+    <!--
+        ErrorTestController intentionally throws exceptions to validate error handling paths.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.web.ErrorTestController"/>
+    </Match>
 </FindBugsFilter>
