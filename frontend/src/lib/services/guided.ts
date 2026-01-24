@@ -1,3 +1,15 @@
+/**
+ * Guided learning service for lesson navigation and streaming.
+ *
+ * @see {@link ./sse.ts} for SSE stream parsing implementation
+ * @see {@link ./stream-types.ts} for shared type definitions
+ */
+
+import { streamSse } from './sse'
+import type { StreamStatus } from './stream-types'
+
+export type { StreamStatus }
+
 /** Lesson metadata from the guided learning TOC. */
 export interface GuidedLesson {
   slug: string
@@ -10,6 +22,13 @@ export interface GuidedLesson {
 export interface LessonContentResponse {
   markdown: string
   cached: boolean
+}
+
+/** Callbacks for guided chat streaming with explicit error handling. */
+export interface GuidedStreamCallbacks {
+  onChunk: (chunk: string) => void
+  onStatus?: (status: StreamStatus) => void
+  onError?: (error: Error) => void
 }
 
 /**
@@ -45,47 +64,6 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
   return response.json()
 }
 
-/** Status message structure from SSE status events. */
-export interface StreamStatus {
-  message: string
-  details?: string
-}
-
-/** Error response structure from SSE error events. */
-interface StreamError {
-  message: string
-  details?: string
-}
-
-/** Callbacks for guided chat streaming with explicit error handling. */
-export interface GuidedStreamCallbacks {
-  onChunk: (chunk: string) => void
-  onStatus?: (status: StreamStatus) => void
-  onError?: (error: Error) => void
-}
-
-/**
- * Attempts JSON parsing only when content looks like JSON.
- * Returns parsed object or null for plain text content.
- * Logs parse errors for debugging without interrupting stream processing.
- */
-function tryParseJson<T>(content: string): T | null {
-  const trimmed = content.trim()
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-    return null
-  }
-  try {
-    return JSON.parse(trimmed) as T
-  } catch (parseError) {
-    // Log for debugging but don't throw - allows graceful fallback to raw text
-    console.warn('[guided.ts] JSON parse failed for content that looked like JSON:', {
-      preview: trimmed.slice(0, 100),
-      error: parseError instanceof Error ? parseError.message : String(parseError)
-    })
-    return null
-  }
-}
-
 /**
  * Stream a chat response within the guided lesson context.
  * Uses the same JSON-wrapped SSE format as the main chat for consistent whitespace handling.
@@ -99,149 +77,24 @@ export async function streamGuidedChat(
 ): Promise<void> {
   const { onChunk, onStatus, onError } = callbacks
 
-  const response = await fetch('/api/guided/stream', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      sessionId,
-      slug,
-      latest: message
-    })
-  })
-
-  if (!response.ok) {
-    const httpError = new Error(`HTTP ${response.status}: ${response.statusText}`)
-    onError?.(httpError)
-    throw httpError
-  }
-
-  const reader = response.body?.getReader()
-  if (!reader) {
-    const bodyError = new Error('No response body')
-    onError?.(bodyError)
-    throw bodyError
-  }
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let eventBuffer = ''
-  let hasEventData = false
-  let currentEventType: string | null = null
-  let streamCompletedNormally = false
-
-  const flushEvent = () => {
-    if (!hasEventData) {
-      currentEventType = null
-      return
-    }
-
-    const eventType = currentEventType?.trim().toLowerCase() ?? ''
-    const rawEventData = eventBuffer
-    eventBuffer = ''
-    hasEventData = false
-    currentEventType = null
-
-    // Handle status events (retrieval progress, etc.)
-    if (eventType === 'status') {
-      const parsed = tryParseJson<StreamStatus>(rawEventData)
-      onStatus?.(parsed ?? { message: rawEventData })
-      return
-    }
-
-    // Handle error events
-    if (eventType === 'error') {
-      const parsed = tryParseJson<StreamError>(rawEventData)
-      const streamError = parsed ?? { message: rawEventData }
-      const error = new Error(streamError.message)
-      onError?.(error)
-      throw error
-    }
-
-    // Default and "text" events - extract text from JSON wrapper
-    const parsed = tryParseJson<{ text?: string }>(rawEventData)
-    // Validate parsed structure before extracting - fall back to raw if structure unexpected
-    const textContent = (parsed !== null && typeof parsed === 'object' && 'text' in parsed && typeof parsed.text === 'string')
-      ? parsed.text
-      : rawEventData
-    if (textContent !== '') {
-      onChunk(textContent)
-    }
-  }
-
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-
-      if (done) {
-        streamCompletedNormally = true
-        // Flush any remaining bytes from the TextDecoder (handles multi-byte chars split across chunks)
-        const remaining = decoder.decode()
-        if (remaining) {
-          buffer += remaining
+    await streamSse(
+      '/api/guided/stream',
+      { sessionId, slug, latest: message },
+      {
+        onText: onChunk,
+        onStatus,
+        onError: (streamError) => {
+          onError?.(new Error(streamError.message))
         }
-        // Commit any remaining buffered line before flushing event data
-        if (buffer.length > 0) {
-          eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer
-          hasEventData = true
-          buffer = ''
-        }
-        flushEvent()
-        break
-      }
-
-      const chunk = decoder.decode(value, { stream: true })
-      buffer += chunk
-      const lines = buffer.split('\n')
-      buffer = lines[lines.length - 1]
-
-      for (let lineIndex = 0; lineIndex < lines.length - 1; lineIndex++) {
-        let line = lines[lineIndex]
-        if (line.endsWith('\r')) {
-          line = line.slice(0, -1)
-        }
-
-        // Skip SSE comments (keepalive heartbeats)
-        if (line.startsWith(':')) {
-          continue
-        }
-
-        // Track event type
-        if (line.startsWith('event:')) {
-          currentEventType = line.startsWith('event: ') ? line.slice(7) : line.slice(6)
-          continue
-        }
-
-        // Accumulate data within current SSE event
-        if (line.startsWith('data:')) {
-          const eventPayload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
-
-          // Skip [DONE] token
-          if (eventPayload === '[DONE]') {
-            continue
-          }
-
-          if (hasEventData) {
-            eventBuffer += '\n'
-          }
-          eventBuffer += eventPayload
-          hasEventData = true
-        } else if (line.trim() === '') {
-          // Blank line marks end of SSE event - commit accumulated data
-          flushEvent()
-        }
-      }
+      },
+      'guided.ts'
+    )
+  } catch (error) {
+    // Re-throw after invoking callback to maintain dual error propagation
+    if (error instanceof Error) {
+      onError?.(error)
     }
-  } finally {
-    // Cancel reader on abnormal exit to prevent dangling connections
-    if (!streamCompletedNormally) {
-      try {
-        await reader.cancel()
-      } catch {
-        // Ignore cancel errors - stream may already be closed
-      }
-    }
-    reader.releaseLock()
+    throw error
   }
 }

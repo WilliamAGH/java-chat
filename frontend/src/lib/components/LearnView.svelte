@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tick } from 'svelte'
   import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
   import { fetchCitations, type Citation } from '../services/chat'
   import { renderMarkdown } from '../services/markdown'
@@ -9,6 +8,7 @@
   import ThinkingIndicator from './ThinkingIndicator.svelte'
   import { sanitizeUrl, deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
+  import { isNearBottom, scrollToBottom } from '../utils/scroll'
 
   // TOC state
   let lessons = $state<GuidedLesson[]>([])
@@ -148,27 +148,22 @@
 
   function toggleChatDrawer(): void {
     isChatDrawerOpen = !isChatDrawerOpen
+    // Reset auto-scroll when switching between desktop/drawer views
+    shouldAutoScroll = true
   }
 
   function closeChatDrawer(): void {
     isChatDrawerOpen = false
+    // Reset auto-scroll to ensure desktop view scrolls properly
+    shouldAutoScroll = true
   }
 
   function checkAutoScroll(): void {
-    if (!messagesContainer) return
-    const threshold = 100
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer
-    shouldAutoScroll = scrollHeight - scrollTop - clientHeight < threshold
+    shouldAutoScroll = isNearBottom(messagesContainer)
   }
 
-  async function scrollToBottom(): Promise<void> {
-    await tick()
-    if (messagesContainer && shouldAutoScroll) {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-      })
-    }
+  async function doScrollToBottom(): Promise<void> {
+    await scrollToBottom(messagesContainer, shouldAutoScroll)
   }
 
   async function handleSend(message: string): Promise<void> {
@@ -184,7 +179,7 @@
     }]
 
     shouldAutoScroll = true
-    await scrollToBottom()
+    await doScrollToBottom()
 
     isStreaming = true
     currentStreamingContent = ''
@@ -197,7 +192,7 @@
           // Guard: ignore chunks if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
           currentStreamingContent += chunk
-          scrollToBottom()
+          doScrollToBottom()
         },
         onStatus: (status) => {
           // Guard: ignore status if user navigated away
@@ -233,7 +228,7 @@
         currentStreamingContent = ''
         streamStatusMessage = ''
         streamStatusDetails = ''
-        await scrollToBottom()
+        await doScrollToBottom()
       }
     }
   }

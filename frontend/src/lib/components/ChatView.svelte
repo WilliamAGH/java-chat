@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { tick } from 'svelte'
   import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
   import WelcomeScreen from './WelcomeScreen.svelte'
   import CitationPanel from './CitationPanel.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
   import { streamChat, type ChatMessage, type Citation } from '../services/chat'
+  import { isNearBottom, scrollToBottom } from '../utils/scroll'
 
   /** Extended message type that includes inline citations from the stream. */
   interface MessageWithCitations extends ChatMessage {
@@ -54,20 +54,11 @@
   }
 
   function checkAutoScroll() {
-    if (!messagesContainer) return
-    const threshold = 100
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer
-    shouldAutoScroll = scrollHeight - scrollTop - clientHeight < threshold
+    shouldAutoScroll = isNearBottom(messagesContainer)
   }
 
-  async function scrollToBottom() {
-    await tick()
-    if (messagesContainer && shouldAutoScroll) {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-      })
-    }
+  async function doScrollToBottom() {
+    await scrollToBottom(messagesContainer, shouldAutoScroll)
   }
 
   async function handleSend(message: string): Promise<void> {
@@ -83,7 +74,7 @@
     }]
 
     shouldAutoScroll = true
-    await scrollToBottom()
+    await doScrollToBottom()
 
     // Start streaming - clear any persisting status immediately
     isStreaming = true
@@ -97,7 +88,7 @@
         userQuery,
         (chunk) => {
           currentStreamingContent += chunk
-          scrollToBottom()
+          doScrollToBottom()
         },
         {
           onStatus: (status) => {
@@ -134,7 +125,7 @@
       currentStreamingContent = ''
       clearStatusWithDelay() // Delayed clear so users can read final status
       pendingCitations = []
-      await scrollToBottom()
+      await doScrollToBottom()
     }
   }
 
