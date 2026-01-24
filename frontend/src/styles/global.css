@@ -149,14 +149,24 @@ body {
   color: var(--color-text-primary);
   background-color: var(--color-bg-primary);
   min-height: 100vh;
-  min-height: 100dvh;
+}
+
+@supports (min-height: 100dvh) {
+  body {
+    min-height: 100dvh;
+  }
 }
 
 #app {
   min-height: 100vh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+@supports (min-height: 100dvh) {
+  #app {
+    min-height: 100dvh;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
