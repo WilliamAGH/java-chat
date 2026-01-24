@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -110,6 +111,32 @@ public class ChatController extends BaseController {
         }
     }
 
+    /**
+     * Creates a Flux containing a single SSE error event with safe JSON serialization.
+     */
+    private Flux<ServerSentEvent<String>> sseError(String message, String details) {
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(new ErrorMessage(message, details));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize SSE error: {}", message, e);
+            json = "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
+        }
+        return Flux.just(ServerSentEvent.<String>builder()
+            .event(SSE_EVENT_ERROR)
+            .data(json)
+            .build());
+    }
+
+    /**
+     * Normalizes the role from a chat turn for consistent comparison/display.
+     */
+    private String normalizeRole(ChatTurn turn) {
+        return turn.getRole() == null
+            ? ""
+            : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
+    }
+
 
     /**
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
@@ -198,34 +225,13 @@ public class ChatController extends BaseController {
                             ? describeException(exception)
                             : error.toString();
                         PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
-                        
-                        String errorJson;
-                        try {
-                            errorJson = objectMapper.writeValueAsString(new ErrorMessage(errorDetail, diagnostics));
-                        } catch (JsonProcessingException e) {
-                            log.error("Failed to serialize error message", e);
-                            errorJson = "{\"message\":\"Critical error during serialization\",\"details\":\"See server logs\"}";
-                        }
-                        
-                        return Flux.just(ServerSentEvent.<String>builder()
-                            .event(SSE_EVENT_ERROR)
-                            .data(errorJson)
-                            .build());
+                        return sseError(errorDetail, diagnostics);
                     });
 
         } else {
             // Service unavailable - send structured error event so client can handle appropriately
             PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-            String unavailableJson;
-            try {
-                unavailableJson = objectMapper.writeValueAsString(new ErrorMessage("Streaming service unavailable", "OpenAI streaming service is not ready"));
-            } catch (JsonProcessingException e) {
-                unavailableJson = "{\"message\":\"Service unavailable\"}";
-            }
-            return Flux.just(ServerSentEvent.<String>builder()
-                .event(SSE_EVENT_ERROR)
-                .data(unavailableJson)
-                .build());
+            return sseError("Streaming service unavailable", "OpenAI streaming service is not ready");
         }
     }
 
@@ -283,10 +289,7 @@ public class ChatController extends BaseController {
         var turns = chatMemory.getTurns(sessionId);
         for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
             var turn = turns.get(turnIndex);
-            String normalizedRole = turn.getRole() == null
-                ? ""
-                : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
-            if ("assistant".equals(normalizedRole)) {
+            if ("assistant".equals(normalizeRole(turn))) {
                 return ResponseEntity.ok(turn.getText());
             }
         }
@@ -310,10 +313,7 @@ public class ChatController extends BaseController {
         }
         StringBuilder formatted = new StringBuilder();
         for (var turn : turns) {
-            String normalizedRole = turn.getRole() == null
-                ? ""
-                : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
-            String role = "user".equals(normalizedRole) ? "User" : "Assistant";
+            String role = "user".equals(normalizeRole(turn)) ? "User" : "Assistant";
             formatted.append("### ").append(role).append("\n\n").append(turn.getText()).append("\n\n");
         }
         return ResponseEntity.ok(formatted.toString());
