@@ -5,6 +5,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
+import org.aspectj.lang.annotation.After;
 import org.aspectj.lang.annotation.AfterReturning;
 import org.aspectj.lang.annotation.AfterThrowing;
 import org.slf4j.Logger;
@@ -217,8 +218,13 @@ public class ProcessingLogger {
         PIPELINE_LOG.info("[{}] ============================================", requestToken);
         PIPELINE_LOG.info("[{}] PIPELINE COMPLETE - All steps processed", requestToken);
         PIPELINE_LOG.info("[{}] ============================================", requestToken);
-        
-        // Clear the request ID for this thread
+    }
+
+    /**
+     * Ensure cleanup of ThreadLocal always happens.
+     */
+    @After("execution(* com.williamcallahan.javachat.web.ChatController.stream(..))")
+    public void cleanupRequest() {
         REQUEST_ID.remove();
     }
 }
