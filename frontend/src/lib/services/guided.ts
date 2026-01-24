@@ -45,10 +45,10 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
   return response.json()
 }
 
-/** Callbacks for guided chat streaming with explicit error handling. */
-export interface GuidedStreamCallbacks {
-  onChunk: (chunk: string) => void
-  onError?: (error: Error) => void
+/** Status message structure from SSE status events. */
+export interface StreamStatus {
+  message: string
+  details?: string
 }
 
 /** Error response structure from SSE error events. */
@@ -57,9 +57,17 @@ interface StreamError {
   details?: string
 }
 
+/** Callbacks for guided chat streaming with explicit error handling. */
+export interface GuidedStreamCallbacks {
+  onChunk: (chunk: string) => void
+  onStatus?: (status: StreamStatus) => void
+  onError?: (error: Error) => void
+}
+
 /**
  * Attempts JSON parsing only when content looks like JSON.
  * Returns parsed object or null for plain text content.
+ * Logs parse errors for debugging without interrupting stream processing.
  */
 function tryParseJson<T>(content: string): T | null {
   const trimmed = content.trim()
@@ -68,7 +76,12 @@ function tryParseJson<T>(content: string): T | null {
   }
   try {
     return JSON.parse(trimmed) as T
-  } catch {
+  } catch (parseError) {
+    // Log for debugging but don't throw - allows graceful fallback to raw text
+    console.warn('[guided.ts] JSON parse failed for content that looked like JSON:', {
+      preview: trimmed.slice(0, 100),
+      error: parseError instanceof Error ? parseError.message : String(parseError)
+    })
     return null
   }
 }
@@ -84,7 +97,7 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
-  const { onChunk, onError } = callbacks
+  const { onChunk, onStatus, onError } = callbacks
 
   const response = await fetch('/api/guided/stream', {
     method: 'POST',
@@ -129,6 +142,13 @@ export async function streamGuidedChat(
     eventBuffer = ''
     hasEventData = false
     currentEventType = null
+
+    // Handle status events (retrieval progress, etc.)
+    if (eventType === 'status') {
+      const parsed = tryParseJson<StreamStatus>(rawEventData)
+      onStatus?.(parsed ?? { message: rawEventData })
+      return
+    }
 
     // Handle error events
     if (eventType === 'error') {
