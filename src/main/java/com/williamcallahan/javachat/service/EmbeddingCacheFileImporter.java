@@ -106,6 +106,9 @@ final class EmbeddingCacheFileImporter {
             objectInputStream.setObjectInputFilter(LEGACY_CACHE_INPUT_FILTER);
 
             Object deserialized = objectInputStream.readObject();
+            if (deserialized == null) {
+                throw new IOException("Unexpected legacy cache format; deserialized payload is null");
+            }
             if (!(deserialized instanceof List<?> legacyList)) {
                 throw new IOException("Unexpected legacy cache format; expected a List but got: "
                     + deserialized.getClass().getName());

@@ -302,11 +302,13 @@ public class DocsIngestionService {
                                                        List<org.springframework.ai.document.Document> documents,
                                                        long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
-        
+
+        // Track non-transient errors that should abort the run rather than continue with next file
+        boolean shouldFailFast = false;
         try {
             long startTime = System.currentTimeMillis();
             boolean qdrantWriteSucceeded = false;
-            
+
             if (localOnlyMode) {
                 // Local-only mode: compute and cache embeddings
                 embeddingCache.getOrComputeEmbeddings(documents);
@@ -340,6 +342,7 @@ public class DocsIngestionService {
                         // Non-transient error (programming error, invalid data) - rethrow to fail fast
                         INDEXING_LOG.error("[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
                             qdrantError.getClass().getSimpleName());
+                        shouldFailFast = true;
                         throw qdrantError;
                     }
                 }
@@ -370,6 +373,10 @@ public class DocsIngestionService {
             
             return new LocalFileProcessingOutcome(true, null);
         } catch (RuntimeException indexingException) {
+            // Let non-transient errors propagate to abort the run
+            if (shouldFailFast) {
+                throw indexingException;
+            }
             String operation = localOnlyMode ? "cache" : "index";
             INDEXING_LOG.error("[INDEXING] ✗ Failed to {} file (exception type: {})",
                 operation, indexingException.getClass().getSimpleName());

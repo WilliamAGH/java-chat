@@ -49,16 +49,22 @@ public class Chunker {
     /**
      * Truncates text to keep only the last maxTokens.
      * Useful for context window management.
+     *
+     * @param text the text to truncate (null-safe)
+     * @param maxTokens the maximum number of tokens to retain
+     * @return the truncated text containing only the last maxTokens, or empty string if text is null/empty
      */
     public String keepLastTokens(String text, int maxTokens) {
-        if (text == null || text.isEmpty()) return text;
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
         IntArrayList tokens = encoding.encode(text);
         if (tokens.size() <= maxTokens) {
             return text;
         }
         IntArrayList lastTokens = new IntArrayList();
-        for (int i = tokens.size() - maxTokens; i < tokens.size(); i++) {
-            lastTokens.add(tokens.get(i));
+        for (int tokenOffset = tokens.size() - maxTokens; tokenOffset < tokens.size(); tokenOffset++) {
+            lastTokens.add(tokens.get(tokenOffset));
         }
         return encoding.decode(lastTokens);
     }
