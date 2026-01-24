@@ -145,6 +145,9 @@ public class OpenAIStreamingService {
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(normalizeBaseUrl(baseUrl))
+                // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
+                // Retries cause InterruptedException when Reactor cancels a sleeping retry.
+                .maxRetries(0)
                 .build();
     }
     
