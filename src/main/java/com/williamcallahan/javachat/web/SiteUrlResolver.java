@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 public class SiteUrlResolver {
 
     private static final String SCHEME_HTTPS = "https";
+    private static final String DEFAULT_HOST = "localhost";
     private static final int DEFAULT_HTTPS_PORT = 443;
     private static final int DEFAULT_HTTP_PORT = 80;
     private static final String SCHEME_SEPARATOR = "://";
@@ -28,7 +29,7 @@ public class SiteUrlResolver {
      */
     public String resolvePublicBaseUrl(HttpServletRequest request) {
         String scheme = request.getScheme();
-        String host = request.getServerName();
+        String host = sanitizeHost(request.getServerName());
         int port = request.getServerPort();
         boolean defaultPort = isDefaultPort(scheme, port);
         String authority = defaultPort ? host : host + PORT_SEPARATOR + port;
@@ -36,10 +37,28 @@ public class SiteUrlResolver {
     }
 
     private static boolean isDefaultPort(String scheme, int port) {
-        String normalizedScheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
+        String normalizedScheme = AsciiTextNormalizer.toLowerAscii(scheme == null ? "" : scheme);
         if (SCHEME_HTTPS.equals(normalizedScheme)) {
             return port == DEFAULT_HTTPS_PORT;
         }
         return port == DEFAULT_HTTP_PORT;
+    }
+
+    private static String sanitizeHost(String host) {
+        if (host == null || host.isBlank()) {
+            return DEFAULT_HOST;
+        }
+        String trimmedHost = host.trim();
+        for (int charIndex = 0; charIndex < trimmedHost.length(); charIndex++) {
+            char currentChar = trimmedHost.charAt(charIndex);
+            if (Character.isLetterOrDigit(currentChar)) {
+                continue;
+            }
+            if (currentChar == '.' || currentChar == '-' || currentChar == ':' || currentChar == '[' || currentChar == ']') {
+                continue;
+            }
+            return DEFAULT_HOST;
+        }
+        return trimmedHost;
     }
 }

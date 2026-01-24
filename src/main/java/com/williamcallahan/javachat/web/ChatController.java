@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import org.springframework.ai.document.Document;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
@@ -26,7 +28,6 @@ import org.springframework.http.codec.ServerSentEvent;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -36,6 +37,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @RestController
 @RequestMapping("/api/chat")
 @PermitAll
+@PreAuthorize("permitAll()")
 public class ChatController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
@@ -220,7 +222,7 @@ public class ChatController extends BaseController {
             var turn = turns.get(turnIndex);
             String normalizedRole = turn.getRole() == null
                 ? ""
-                : turn.getRole().trim().toLowerCase(Locale.ROOT);
+                : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
             if ("assistant".equals(normalizedRole)) {
                 return ResponseEntity.ok(turn.getText());
             }
@@ -247,7 +249,7 @@ public class ChatController extends BaseController {
         for (var turn : turns) {
             String normalizedRole = turn.getRole() == null
                 ? ""
-                : turn.getRole().trim().toLowerCase(Locale.ROOT);
+                : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
             String role = "user".equals(normalizedRole) ? "User" : "Assistant";
             formatted.append("### ").append(role).append("\n\n").append(turn.getText()).append("\n\n");
         }
