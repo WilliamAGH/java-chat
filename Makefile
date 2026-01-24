@@ -2,6 +2,7 @@ SHELL := /bin/bash
 
 APP_NAME := java-chat
 GRADLEW := ./gradlew
+QDRANT_COMPOSE_FILE := docker-compose-qdrant.yml
 
 # Terminal colors for output prefixing
 RED    := \033[0;31m
@@ -106,16 +107,16 @@ compose-up: ## Start local Qdrant via Docker Compose (detached)
 	  PIDS=$$(lsof -ti tcp:$$p || true); \
 	  if [ -n "$$PIDS" ]; then echo "Freeing port $$p by killing: $$PIDS" >&2; kill -9 $$PIDS || true; sleep 1; fi; \
 	done; \
-	docker compose up -d
+	docker compose -f $(QDRANT_COMPOSE_FILE) up -d
 
 compose-down: ## Stop Docker Compose services
-	docker compose down
+	docker compose -f $(QDRANT_COMPOSE_FILE) down
 
 compose-logs: ## Tail logs for Docker Compose services
-	docker compose logs -f
+	docker compose -f $(QDRANT_COMPOSE_FILE) logs -f
 
 compose-ps: ## List Docker Compose services
-	docker compose ps
+	docker compose -f $(QDRANT_COMPOSE_FILE) ps
 
 health: ## Check app health endpoint
 	curl -sS http://localhost:$${PORT:-8085}/actuator/health
@@ -141,4 +142,3 @@ full-pipeline: ## Complete pipeline: fetch docs, process, and upload to Qdrant
 	@./scripts/process_all_to_qdrant.sh
 	@echo ""
 	@echo "✅ Full pipeline complete!"
-
