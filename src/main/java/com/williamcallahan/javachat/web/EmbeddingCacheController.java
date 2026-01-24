@@ -59,9 +59,12 @@ public class EmbeddingCacheController {
             ));
         } catch (IOException snapshotFailure) {
             log.error("Failed to save snapshot", snapshotFailure);
+            String errorMessage = snapshotFailure.getMessage() != null
+                ? snapshotFailure.getMessage()
+                : snapshotFailure.getClass().getSimpleName();
             return ResponseEntity.internalServerError().body(new SnapshotResponse(
                 false,
-                snapshotFailure.getMessage(),
+                errorMessage,
                 null
             ));
         }
@@ -109,9 +112,12 @@ public class EmbeddingCacheController {
             ));
         } catch (IOException exportFailure) {
             log.error("Failed to export cache", exportFailure);
+            String errorMessage = exportFailure.getMessage() != null
+                ? exportFailure.getMessage()
+                : exportFailure.getClass().getSimpleName();
             return ResponseEntity.internalServerError().body(new ExportResponse(
                 false,
-                exportFailure.getMessage(),
+                errorMessage,
                 filename,
                 null
             ));
@@ -136,11 +142,14 @@ public class EmbeddingCacheController {
                 filename,
                 embeddingCacheService.getCacheStats()
             ));
-        } catch (Exception importFailure) {
+        } catch (IOException importFailure) {
             log.error("Failed to import cache", importFailure);
+            String errorMessage = importFailure.getMessage() != null
+                ? importFailure.getMessage()
+                : importFailure.getClass().getSimpleName();
             return ResponseEntity.internalServerError().body(new ImportResponse(
                 false,
-                importFailure.getMessage(),
+                errorMessage,
                 filename,
                 null
             ));

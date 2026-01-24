@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import com.openai.errors.OpenAIIoException;
+import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -20,6 +22,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 import org.springframework.http.codec.ServerSentEvent;
@@ -195,10 +198,11 @@ public class ChatController extends BaseController {
                     })
                     .onErrorResume(error -> {
                         // Log and send error event to client - errors must be communicated, not silently dropped
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
+                        String errorDetail = buildUserFacingErrorMessage(error);
+                        PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
                         return Flux.just(ServerSentEvent.<String>builder()
                             .event(SSE_EVENT_ERROR)
-                            .data("Streaming error: " + error.getClass().getSimpleName())
+                            .data(errorDetail)
                             .build());
                     });
 
@@ -317,9 +321,10 @@ public class ChatController extends BaseController {
             String healthUrl = localEmbeddingServerUrl + "/v1/models";
             restTemplate.getForEntity(healthUrl, String.class);
             return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(localEmbeddingServerUrl));
-        } catch (Exception healthCheckError) {
+        } catch (RestClientException httpError) {
+            log.debug("Embedding server health check failed", httpError);
             return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
-                localEmbeddingServerUrl, healthCheckError.getClass().getSimpleName()));
+                localEmbeddingServerUrl, "UNREACHABLE: " + httpError.getClass().getSimpleName()));
         }
     }
     
@@ -339,14 +344,41 @@ public class ChatController extends BaseController {
             return ResponseEntity.badRequest().build();
         }
 
-        try {
-            ProcessedMarkdown processed = unifiedMarkdownService.process(text);
-            PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments",
-                             processed.citations().size(), processed.enrichments().size());
-            return ResponseEntity.ok(processed);
-        } catch (Exception processingError) {
-            log.error("Error processing structured markdown", processingError);
-            return ResponseEntity.internalServerError().build();
+        ProcessedMarkdown processed = unifiedMarkdownService.process(text);
+        PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments",
+                         processed.citations().size(), processed.enrichments().size());
+        return ResponseEntity.ok(processed);
+    }
+
+    /**
+     * Builds a user-facing error message with provider context when possible.
+     * Rate limit and IO errors include enough detail for users to understand which service failed.
+     */
+    private String buildUserFacingErrorMessage(Throwable error) {
+        if (error instanceof RateLimitException rateLimitError) {
+            // Extract provider from the exception message or headers if possible
+            String message = rateLimitError.getMessage();
+            if (message != null && message.contains("429")) {
+                return "Rate limit reached - LLM provider returned 429. Please wait before retrying.";
+            }
+            return "Rate limit reached - " + error.getClass().getSimpleName();
         }
+
+        if (error instanceof OpenAIIoException ioError) {
+            Throwable cause = ioError.getCause();
+            if (cause != null && cause.getMessage() != null
+                    && cause.getMessage().toLowerCase().contains("interrupt")) {
+                return "Request cancelled - LLM provider did not respond in time";
+            }
+            return "LLM provider connection failed - " + error.getClass().getSimpleName();
+        }
+
+        if (error instanceof IllegalStateException && error.getMessage() != null
+                && error.getMessage().contains("providers unavailable")) {
+            return error.getMessage();
+        }
+
+        // Default: include exception type for debugging
+        return "Streaming error: " + error.getClass().getSimpleName();
     }
 }
