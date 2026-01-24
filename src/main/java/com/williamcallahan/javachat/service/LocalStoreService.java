@@ -77,7 +77,9 @@ public class LocalStoreService {
      * Stores a parsed chunk payload for later local search and attribution.
      */
     public void saveChunkText(String url, int index, String text, String hash) throws IOException {
-        String shortHash = hash.substring(0, HASH_PREFIX_LENGTH);
+        String shortHash = hash.length() >= HASH_PREFIX_LENGTH 
+            ? hash.substring(0, HASH_PREFIX_LENGTH) 
+            : hash;
         Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + shortHash + ".txt");
         ensureParentDirectoryExists(chunkFilePath);
         Files.writeString(chunkFilePath, text, StandardCharsets.UTF_8);
