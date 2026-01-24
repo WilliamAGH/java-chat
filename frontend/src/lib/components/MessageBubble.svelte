@@ -29,8 +29,8 @@
       }
 
       // During streaming, delay highlighting to batch updates
-      // After streaming completes, highlight immediately
-      const delay = isStreaming ? 300 : 0
+      // After streaming completes, use a small settling delay to avoid flicker
+      const delay = isStreaming ? 300 : 50
 
       highlightTimer = setTimeout(() => {
         Promise.all([
@@ -93,9 +93,7 @@
         {:else}
           <p>{message.content}</p>
         {/if}
-        {#if isStreaming}
-          <span class="cursor"></span>
-        {/if}
+        <span class="cursor" class:visible={isStreaming}></span>
       </div>
     {/if}
 
@@ -288,7 +286,7 @@
     color: var(--color-text-primary);
   }
 
-  /* Streaming cursor */
+  /* Streaming cursor - always present, visibility controlled by class */
   .cursor {
     display: inline-block;
     width: 2px;
@@ -296,6 +294,12 @@
     background: var(--color-accent);
     margin-left: 2px;
     vertical-align: text-bottom;
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+  }
+
+  .cursor.visible {
+    opacity: 1;
     animation: typing-cursor 0.8s ease-in-out infinite;
   }
 
