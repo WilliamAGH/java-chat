@@ -14,9 +14,6 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 /**
- * Reorders retrieved documents by relevance using an LLM-based reranking prompt with caching and fast timeouts.
- */
-/**
  * Reorders retrieved documents using an LLM-driven relevance ranking.
  */
 @Service
@@ -28,9 +25,6 @@ public class RerankerService {
 	    private final OpenAIStreamingService openAIStreamingService;
 	    private final ObjectMapper mapper = new ObjectMapper();
 
-	    /**
-	     * Creates a reranker backed by the streaming service for low-latency LLM completion calls.
-	     */
     /**
      * Creates a reranker backed by the streaming LLM client.
      *
