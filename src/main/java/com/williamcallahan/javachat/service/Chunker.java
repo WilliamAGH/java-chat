@@ -45,5 +45,22 @@ public class Chunker {
         }
         return chunks;
     }
+
+    /**
+     * Truncates text to keep only the last maxTokens.
+     * Useful for context window management.
+     */
+    public String keepLastTokens(String text, int maxTokens) {
+        if (text == null || text.isEmpty()) return text;
+        IntArrayList tokens = encoding.encode(text);
+        if (tokens.size() <= maxTokens) {
+            return text;
+        }
+        IntArrayList lastTokens = new IntArrayList();
+        for (int i = tokens.size() - maxTokens; i < tokens.size(); i++) {
+            lastTokens.add(tokens.get(i));
+        }
+        return encoding.decode(lastTokens);
+    }
 }
 
