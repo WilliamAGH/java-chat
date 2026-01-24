@@ -383,28 +383,40 @@ public class OpenAIStreamingService {
     }
 
     private OpenAIClient selectClientForStreaming() {
-        // Prefer OpenAI when available (more reliable)
-        if (rateLimitManager != null && clientSecondary != null
-                && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
-            return clientSecondary;
+        // Prefer OpenAI when available (more reliable, shorter rate limit windows)
+        if (clientSecondary != null) {
+            if (rateLimitManager == null
+                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.OPENAI.getName());
+                return clientSecondary;
+            }
         }
 
         // Try GitHub Models if not in backoff and not rate limited
-        boolean githubOk = clientPrimary != null && !isPrimaryInBackoff();
-        if (rateLimitManager != null && clientPrimary != null) {
-            githubOk = githubOk && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS);
-        }
-        if (githubOk) {
-            return clientPrimary;
+        if (clientPrimary != null && !isPrimaryInBackoff()) {
+            if (rateLimitManager == null
+                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS)) {
+                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
+                return clientPrimary;
+            }
         }
 
-        // Fall back to OpenAI if available (even without rate limit check - let API decide)
-        if (clientSecondary != null && rateLimitManager == null) {
+        // All providers marked as rate limited - try OpenAI anyway (short rate limit windows).
+        // Let the API decide if we're actually still rate limited.
+        if (clientSecondary != null) {
+            log.warn("[{}] All providers marked as rate limited; attempting OpenAI anyway "
+                    + "(typical rate limits are 1-60 seconds)", RateLimitManager.ApiProvider.OPENAI.getName());
             return clientSecondary;
         }
 
-        // Both providers rate limited - return null to fail fast rather than waste API calls
-        log.warn("All LLM providers are rate limited; no client available");
+        // OpenAI not configured - try GitHub Models as last resort
+        if (clientPrimary != null) {
+            log.warn("[{}] All providers marked as rate limited; attempting GitHub Models as last resort",
+                    RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
+            return clientPrimary;
+        }
+
+        log.error("No LLM clients configured - check OPENAI_API_KEY and GITHUB_TOKEN environment variables");
         return null;
     }
 

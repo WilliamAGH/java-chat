@@ -55,7 +55,9 @@ public class RateLimitManager {
      * Describes supported LLM providers and their typical rate-limit characteristics.
      */
     public enum ApiProvider {
-        OPENAI("openai", 500, "24h"),
+        /** OpenAI has short rate limit windows (typically seconds to minutes). */
+        OPENAI("openai", 500, "1m"),
+        /** GitHub Models has strict daily limits with 24-hour reset windows. */
         GITHUB_MODELS("github_models", 150, "24h"),
         LOCAL("local", Integer.MAX_VALUE, null);
 
