@@ -306,17 +306,17 @@ class MarkdownServiceTest {
     @Test
     @DisplayName("Pre-normalization ensures attached fences get separated and closed")
     void testPreNormalizeFences() {
-        String md = "Here:```javaimport java.util.*;\nclass X{}"; // missing closing fence, attached info
-        String html = markdownService.processStructured(md).html();
+        String markdown = "Here:```javaimport java.util.*;\nclass X{}"; // missing closing fence, attached info
+        String html = markdownService.processStructured(markdown).html();
         assertTrue(html.contains("<pre>") && html.contains("<code"), "Should render a code block despite malformed fence");
     }
 
     @Test
     @DisplayName("Example enrichment renders fenced code with language class")
     void testExampleCardRendersCode() {
-        String md = "{{example:```java\npublic class A{}\n```}}";
-        String html = markdownService.processStructured(md).html();
-        System.out.println("[DEBUG testExampleCardRendersCode] Input: " + md);
+        String markdown = "{{example:```java\npublic class A{}\n```}}";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testExampleCardRendersCode] Input: " + markdown);
         System.out.println("[DEBUG testExampleCardRendersCode] HTML:\n" + html);
         assertTrue(html.contains("inline-enrichment example"), "Example card should render");
         assertTrue(html.contains("<code class=\"language-java\">"), "Code block should have language class");
@@ -326,12 +326,30 @@ class MarkdownServiceTest {
     @Test
     @DisplayName("Enrichment markers inside code blocks are not transformed")
     void testEnrichmentInsideCodeNotRendered() {
-        String md = "```java\n// {{warning:do not render}}\nSystem.out.println(\"ok\");\n```";
-        String html = markdownService.processStructured(md).html();
-        System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] Input: " + md);
+        String markdown = "```java\n// {{warning:do not render}}\nSystem.out.println(\"ok\");\n```";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] Input: " + markdown);
         System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] HTML:\n" + html);
         // Ensure we still have a code block and the marker text remains (not replaced by card)
         assertTrue(html.contains("<pre>"), "Code block should render");
         assertTrue(html.contains("{{warning:do not render}}") || html.contains("warning:do not render"), "Marker should remain as text inside code");
+    }
+
+    @Test
+    @DisplayName("Inline code markers are not transformed into enrichment cards")
+    void testInlineCodeMarkerNotRendered() {
+        String markdown = "Inline marker: `{{hint: no-card}}` should stay code.";
+        String html = markdownService.processStructured(markdown).html();
+        assertFalse(html.contains("inline-enrichment"), "Inline code should not generate enrichment cards");
+        assertTrue(html.contains("<code>{{hint: no-card}}</code>"), "Inline code should preserve marker text");
+    }
+
+    @Test
+    @DisplayName("Indented code preserves bracketed citations")
+    void testIndentedCodePreservesBracketedCitations() {
+        String markdown = "    int total = 0; // [1]";
+        String html = markdownService.processStructured(markdown).html();
+        assertTrue(html.contains("<pre>"), "Indented code should render as a code block");
+        assertTrue(html.contains("[1]"), "Bracketed citations should remain inside code");
     }
 }

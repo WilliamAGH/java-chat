@@ -32,6 +32,9 @@ class EnrichmentPlaceholderizer {
     private static final String MARKER_START = "{{";
     private static final String MARKER_END = "}}";
     private static final String PLACEHOLDER_PREFIX = "ENRICHMENT_";
+    private static final int FENCE_MIN_LENGTH = 3;
+    private static final char BACKTICK = '`';
+    private static final char TILDE = '~';
     
     private final Parser parser;
     private final HtmlRenderer renderer;
@@ -114,6 +117,8 @@ class EnrichmentPlaceholderizer {
         boolean inFence = false;
         char fenceChar = 0;
         int fenceLength = 0;
+        boolean inInlineCode = false;
+        int inlineBacktickLength = 0;
 
         while (cursor < markdown.length()) {
             // Check for code fence start/end
@@ -139,8 +144,8 @@ class EnrichmentPlaceholderizer {
                     }
                     
                     // Copy the fence marker and advance
-                    for (int i = 0; i < marker.length; i++) {
-                        outputBuilder.append(markdown.charAt(cursor + i));
+                    for (int offset = 0; offset < marker.length; offset++) {
+                        outputBuilder.append(markdown.charAt(cursor + offset));
                     }
                     cursor += marker.length;
                     absolutePosition += marker.length;
@@ -148,8 +153,36 @@ class EnrichmentPlaceholderizer {
                 }
             }
 
-            // Detect enrichment start only when not inside code fences
-            if (!inFence && startsWith(markdown, cursor, MARKER_START)) {
+            // Track inline code spans (backticks) outside fenced code
+            if (!inFence) {
+                BacktickRun backtickRun = scanBacktickRun(markdown, cursor);
+                if (backtickRun != null) {
+                    if (!inInlineCode && !hasClosingBacktickRun(markdown, cursor, backtickRun.length)) {
+                        for (int offset = 0; offset < backtickRun.length; offset++) {
+                            outputBuilder.append(markdown.charAt(cursor + offset));
+                        }
+                        cursor += backtickRun.length;
+                        absolutePosition += backtickRun.length;
+                        continue;
+                    }
+                    if (!inInlineCode) {
+                        inInlineCode = true;
+                        inlineBacktickLength = backtickRun.length;
+                    } else if (backtickRun.length == inlineBacktickLength) {
+                        inInlineCode = false;
+                        inlineBacktickLength = 0;
+                    }
+                    for (int offset = 0; offset < backtickRun.length; offset++) {
+                        outputBuilder.append(markdown.charAt(cursor + offset));
+                    }
+                    cursor += backtickRun.length;
+                    absolutePosition += backtickRun.length;
+                    continue;
+                }
+            }
+
+            // Detect enrichment start only when not inside code fences or inline code
+            if (!inFence && !inInlineCode && startsWith(markdown, cursor, MARKER_START)) {
                 int typeStartIndex = cursor + 2;
                 // skip spaces
                 while (typeStartIndex < markdown.length()
@@ -205,21 +238,56 @@ class EnrichmentPlaceholderizer {
     }
     
     private record FenceMarker(char character, int length) {}
+    private record BacktickRun(int length) {}
     
     private FenceMarker scanFenceMarker(String text, int index) {
         if (index >= text.length()) return null;
         char startChar = text.charAt(index);
-        if (startChar != '`' && startChar != '~') return null;
+        if (startChar != BACKTICK && startChar != TILDE) return null;
         
         int length = 0;
         while (index + length < text.length() && text.charAt(index + length) == startChar) {
             length++;
         }
         
-        if (length >= 3) {
+        if (length >= FENCE_MIN_LENGTH) {
             return new FenceMarker(startChar, length);
         }
         return null;
+    }
+
+    private BacktickRun scanBacktickRun(String text, int index) {
+        if (index < 0 || index >= text.length()) {
+            return null;
+        }
+        if (text.charAt(index) != BACKTICK) {
+            return null;
+        }
+        int length = 0;
+        while (index + length < text.length() && text.charAt(index + length) == BACKTICK) {
+            length++;
+        }
+        return new BacktickRun(length);
+    }
+
+    private boolean hasClosingBacktickRun(String text, int startIndex, int runLength) {
+        int scanIndex = startIndex + runLength;
+        while (scanIndex < text.length()) {
+            int nextBacktickIndex = text.indexOf(BACKTICK, scanIndex);
+            if (nextBacktickIndex < 0) {
+                return false;
+            }
+            int matchLength = 0;
+            while (nextBacktickIndex + matchLength < text.length()
+                && text.charAt(nextBacktickIndex + matchLength) == BACKTICK) {
+                matchLength++;
+            }
+            if (matchLength == runLength) {
+                return true;
+            }
+            scanIndex = nextBacktickIndex + matchLength;
+        }
+        return false;
     }
     
     private boolean startsWith(String text, int index, String prefix) {
@@ -352,6 +420,8 @@ class EnrichmentPlaceholderizer {
         boolean inFence = false;
         char fenceChar = 0;
         int fenceLength = 0;
+        boolean inInlineCode = false;
+        int inlineBacktickLength = 0;
         
         while (scanIndex < markdown.length()) {
             // Check for fence start/end inside enrichment content
@@ -374,8 +444,27 @@ class EnrichmentPlaceholderizer {
                      continue;
                  }
             }
-            
-            if (!inFence && startsWith(markdown, scanIndex, MARKER_END)) {
+
+            if (!inFence) {
+                BacktickRun backtickRun = scanBacktickRun(markdown, scanIndex);
+                if (backtickRun != null) {
+                    if (!inInlineCode && !hasClosingBacktickRun(markdown, scanIndex, backtickRun.length)) {
+                        scanIndex += backtickRun.length;
+                        continue;
+                    }
+                    if (!inInlineCode) {
+                        inInlineCode = true;
+                        inlineBacktickLength = backtickRun.length;
+                    } else if (backtickRun.length == inlineBacktickLength) {
+                        inInlineCode = false;
+                        inlineBacktickLength = 0;
+                    }
+                    scanIndex += backtickRun.length;
+                    continue;
+                }
+            }
+
+            if (!inFence && !inInlineCode && startsWith(markdown, scanIndex, MARKER_END)) {
                 return scanIndex;
             }
             scanIndex++;

@@ -33,10 +33,10 @@ class EnrichmentPlaceholderizerTest {
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
         Map<String, String> placeholders = new HashMap<>();
 
-        String result = placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+        String processedMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
 
-        assertFalse(result.contains("ENRICHMENT_"), "Enrichment should not be processed inside tilde fence");
-        assertTrue(result.contains("{{hint:"), "Original text should be preserved");
+        assertFalse(processedMarkdown.contains("ENRICHMENT_"), "Enrichment should not be processed inside tilde fence");
+        assertTrue(processedMarkdown.contains("{{hint:"), "Original text should be preserved");
     }
 
     @Test
@@ -45,9 +45,21 @@ class EnrichmentPlaceholderizerTest {
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
         Map<String, String> placeholders = new HashMap<>();
 
-        String result = placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+        String processedMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
 
-        assertTrue(result.contains("ENRICHMENT_"), "Enrichment should be processed");
-        assertFalse(result.contains("{{hint:"), "Original text should be replaced");
+        assertTrue(processedMarkdown.contains("ENRICHMENT_"), "Enrichment should be processed");
+        assertFalse(processedMarkdown.contains("{{hint:"), "Original text should be replaced");
+    }
+
+    @Test
+    void shouldIgnoreEnrichmentInsideInlineCode() {
+        String markdown = "Use `{{hint: inline}}` to show markers.";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String processedMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+
+        assertFalse(processedMarkdown.contains("ENRICHMENT_"), "Inline code should not be placeholderized");
+        assertTrue(processedMarkdown.contains("`{{hint: inline}}`"), "Inline code markers should remain intact");
     }
 }

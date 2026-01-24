@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
-import com.williamcallahan.javachat.service.markdown.MarkdownProcessingException;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,99 +37,4 @@ public class MarkdownService {
         return unifiedService.process(markdownText);
     }
 
-    /**
-     * Legacy markdown rendering path retained for API compatibility.
-     *
-     * @param markdownText the markdown text to render
-     * @return HTML-rendered markdown
-     * @deprecated Use {@link #processStructured(String)} instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public String render(String markdownText) {
-        return renderStructuredHtml(markdownText);
-    }
-
-    /**
-     * Legacy markdown rendering path for previews retained for API compatibility.
-     *
-     * @param markdownText the markdown text to render
-     * @return HTML-rendered markdown
-     * @deprecated Use {@link #processStructured(String)} instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public String renderPreview(String markdownText) {
-        return renderStructuredHtml(markdownText);
-    }
-
-    private String renderStructuredHtml(String markdownText) {
-        if (markdownText == null || markdownText.isEmpty()) {
-            return "";
-        }
-
-        try {
-            ProcessedMarkdown processedMarkdown = unifiedService.process(markdownText);
-            return processedMarkdown.html();
-        } catch (MarkdownProcessingException processingFailure) {
-            logger.error("Error processing markdown", processingFailure);
-            return escapeHtml(markdownText).replace("\n", "<br />\n");
-        }
-    }
-
-    /**
-     * Get cache statistics for monitoring.
-     *
-     * @return cache statistics
-     * @deprecated Use {@link UnifiedMarkdownService#getCacheStats()} instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public CacheStats getCacheStats() {
-        UnifiedMarkdownService.CacheStats unifiedStats = unifiedService.getCacheStats();
-        return new CacheStats(
-            unifiedStats.hitCount(),
-            unifiedStats.missCount(),
-            unifiedStats.evictionCount(),
-            unifiedStats.size()
-        );
-    }
-
-    /**
-     * Clear the render cache.
-     *
-     * @deprecated Use {@link UnifiedMarkdownService#clearCache()} instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public void clearCache() {
-        unifiedService.clearCache();
-        logger.info("Markdown render cache cleared");
-    }
-
-    /**
-     * Cache statistics record.
-     */
-	    public record CacheStats(
-	        long hitCount,
-	        long missCount,
-	        long evictionCount,
-	        long size
-	    ) {
-	        /**
-	         * Computes the cache hit rate as a fraction between 0.0 and 1.0.
-	         */
-	        public double hitRate() {
-	            long total = hitCount + missCount;
-	            return total == 0 ? 0.0 : (double) hitCount / total;
-	        }
-	    }
-
-    private String escapeHtml(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;");
-    }
 }

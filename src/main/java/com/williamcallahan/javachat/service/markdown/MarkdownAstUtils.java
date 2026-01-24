@@ -13,6 +13,7 @@ final class MarkdownAstUtils {
             // Skip code blocks/spans and links entirely
             if (childNode instanceof com.vladsch.flexmark.ast.Code) continue;
             if (childNode instanceof com.vladsch.flexmark.ast.FencedCodeBlock) continue;
+            if (childNode instanceof com.vladsch.flexmark.ast.IndentedCodeBlock) continue;
             if (childNode instanceof com.vladsch.flexmark.ast.Link) {
                 stripInlineCitationMarkers(childNode);
                 continue;

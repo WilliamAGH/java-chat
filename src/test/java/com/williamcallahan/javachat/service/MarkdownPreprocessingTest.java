@@ -63,6 +63,15 @@ class MarkdownPreprocessingTest {
     }
 
     @Test
+    void testInlineTripleBackticksRemainText() {
+        String input = "Use ``` to denote a code fence in markdown.";
+        String html = markdownService.processStructured(input).html();
+
+        assertFalse(html.contains("<pre>"), "Inline triple backticks should not open a fenced block");
+        assertTrue(html.contains("```"), "Inline triple backticks should remain visible as text");
+    }
+
+    @Test
     void testSentenceSpacingAvoidsUrlsAndPackages() {
         String input = "Refer to java.lang.String and https://example.com/Test. NextSentence starts here.";
         String html = markdownService.processStructured(input).html();
