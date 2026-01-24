@@ -13,7 +13,6 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.nodes.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -234,59 +233,6 @@ class EnrichmentPlaceholderizer {
         Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
         parsedDocument.outputSettings().prettyPrint(false);
         return parsedDocument.body().html();
-    }
-
-    private static void convertNewlinesToBreaks(org.jsoup.nodes.Node rootNode, boolean inCodeOrPre) {
-        if (rootNode == null) {
-            return;
-        }
-
-        boolean nextInCodeOrPre = inCodeOrPre;
-        if (rootNode instanceof Element elementNode) {
-            String tagName = elementNode.tagName();
-            if ("pre".equals(tagName) || "code".equals(tagName)) {
-                nextInCodeOrPre = true;
-            }
-        }
-
-        if (rootNode instanceof TextNode textNode && !nextInCodeOrPre) {
-            String originalText = textNode.getWholeText();
-            if (originalText.indexOf('\n') >= 0) {
-                java.util.List<String> segments = splitOnNewlines(originalText);
-                for (int segmentIndex = 0; segmentIndex < segments.size(); segmentIndex++) {
-                    String segmentText = segments.get(segmentIndex);
-                    if (!segmentText.isEmpty()) {
-                        textNode.before(new TextNode(segmentText));
-                    }
-                    if (segmentIndex + 1 < segments.size()) {
-                        textNode.before(new Element("br"));
-                    }
-                }
-                textNode.remove();
-                return;
-            }
-        }
-
-        for (int childIndex = 0; childIndex < rootNode.childNodeSize(); childIndex++) {
-            org.jsoup.nodes.Node childNode = rootNode.childNode(childIndex);
-            convertNewlinesToBreaks(childNode, nextInCodeOrPre);
-        }
-    }
-
-    private static java.util.List<String> splitOnNewlines(String text) {
-        java.util.List<String> segments = new java.util.ArrayList<>();
-        StringBuilder segmentBuilder = new StringBuilder();
-        for (int textIndex = 0; textIndex < text.length(); textIndex++) {
-            char character = text.charAt(textIndex);
-            if (character == '\n') {
-                segments.add(segmentBuilder.toString());
-                segmentBuilder.setLength(0);
-                continue;
-            }
-            segmentBuilder.append(character);
-        }
-        segments.add(segmentBuilder.toString());
-        return segments;
     }
 
     /**

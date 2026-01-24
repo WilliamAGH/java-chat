@@ -291,11 +291,9 @@ class MarkdownServiceTest {
         assertTrue(html.contains("inline-enrichment hint"), "Hint card should render");
         // Header title
         assertTrue(normalizedHtml.contains("helpful hints"), "Card header should show Helpful Hints");
-        // Paragraphized with <br> - allow for newline after <br /> tag
+        // Verify soft break rendered as <br> between lines (jsoup may normalize <br /> to <br>)
         assertTrue(
-            html.contains("<p>Line A<br>Line B</p>") ||
-            html.contains("<p>Line A<br />Line B</p>") ||
-            html.contains("<p>Line A<br />\nLine B</p>"),
+            containsSoftBreakBetween(html, "Line A", "Line B"),
             "Line breaks preserved in card. HTML: " + html.replace("\n", "\\n"));
     }
 
@@ -434,5 +432,23 @@ class MarkdownServiceTest {
                 lastWasNewline = false;
             }
         }
+    }
+
+    /**
+     * Checks if HTML contains a soft break between two text segments.
+     * Accepts variants: {@code <br>}, {@code <br />}, with optional trailing whitespace.
+     */
+    private boolean containsSoftBreakBetween(String html, String before, String after) {
+        // Pattern: before + <br> or <br /> + optional whitespace/newline + after
+        int beforeIndex = html.indexOf(before);
+        if (beforeIndex == -1) {
+            return false;
+        }
+        int searchStart = beforeIndex + before.length();
+        String remainder = html.substring(searchStart);
+
+        // Check for <br> or <br /> followed by optional whitespace then "after"
+        // Use (?s) for dotall mode so .* matches across newlines
+        return remainder.matches("(?s)^<br\\s*/?>\\s*" + java.util.regex.Pattern.quote(after) + ".*");
     }
 }
