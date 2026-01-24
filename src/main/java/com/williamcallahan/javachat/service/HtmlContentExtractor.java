@@ -258,16 +258,16 @@ public class HtmlContentExtractor {
         
         // Class/Interface name and description
         Elements classHeaders = doc.select(".header h1, .header h2, .title");
-        classHeaders.forEach(h -> content.append(h.text()).append("\n\n"));
+        classHeaders.forEach(header -> content.append(header.text()).append("\n\n"));
         
         // Package info
         Elements packageInfo = doc.select(".subTitle, .package");
-        packageInfo.forEach(p -> content.append("Package: ").append(p.text()).append("\n"));
+        packageInfo.forEach(pkgElement -> content.append("Package: ").append(pkgElement.text()).append("\n"));
         
         // Main description
         Elements descriptions = doc.select(".description, .block");
-        descriptions.forEach(d -> {
-            String text = d.text();
+        descriptions.forEach(descElement -> {
+            String text = descElement.text();
             if (!containsExcessiveNoise(text)) {
                 content.append("\n").append(text).append("\n");
             }
@@ -277,15 +277,15 @@ public class HtmlContentExtractor {
         Elements methodSummaries = doc.select(".summary .memberSummary");
         if (!methodSummaries.isEmpty()) {
             content.append("\n\nMethod Summary:\n");
-            methodSummaries.forEach(m -> content.append("• ").append(m.text()).append("\n"));
+            methodSummaries.forEach(methodSummary -> content.append("• ").append(methodSummary.text()).append("\n"));
         }
         
         // Method details
         Elements methodDetails = doc.select(".details .memberDetails");
         if (!methodDetails.isEmpty()) {
             content.append("\n\nMethod Details:\n");
-            methodDetails.forEach(m -> {
-                String text = m.text();
+            methodDetails.forEach(methodDetail -> {
+                String text = methodDetail.text();
                 if (!containsExcessiveNoise(text)) {
                     content.append(text).append("\n\n");
                 }

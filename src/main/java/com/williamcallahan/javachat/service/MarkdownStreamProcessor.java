@@ -91,7 +91,7 @@ public class MarkdownStreamProcessor {
             
             // Apply markdown processing to complete content
             String formatted = formatContent(content);
-            logger.debug("Flushed buffer with {} characters, state: {}", content.length(), currentState);
+            logger.debug("Flushed buffer with {} characters", content.length());
             
             return Optional.of(formatted);
         }

@@ -50,6 +50,8 @@ public class OpenAIStreamingService {
     
     /**
      * Creates a streaming service that can consult rate limit state when selecting an active provider.
+     *
+     * @param rateLimitManager rate limit state tracker
      */
     public OpenAIStreamingService(RateLimitManager rateLimitManager) {
         this.rateLimitManager = rateLimitManager;

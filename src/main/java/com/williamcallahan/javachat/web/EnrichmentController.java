@@ -39,7 +39,7 @@ public class EnrichmentController {
     @GetMapping("/api/enrich")
     public Enrichment enrich(@RequestParam("q") String query) {
         var docs = retrievalService.retrieve(query);
-        List<String> snippets = docs.stream().map(d -> d.getText()).limit(6).collect(Collectors.toList());
+        List<String> snippets = docs.stream().map(doc -> doc.getText()).limit(6).collect(Collectors.toList());
         return sanitize(enrichmentService.enrich(query, jdkVersion, snippets));
     }
 

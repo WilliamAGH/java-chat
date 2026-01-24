@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,14 +133,14 @@ public class RerankerService {
         );
 	        prompt.append("Query: ").append(query).append("\n\n");
 
-	        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
-	            Document document = docs.get(docIndex);
-	            var metadata = document.getMetadata();
-	            Object titleValue = metadata.get("title");
-	            Object urlValue = metadata.get("url");
-	            String title = titleValue == null ? "" : String.valueOf(titleValue);
-	            String url = urlValue == null ? "" : String.valueOf(urlValue);
-	            String text = document.getText();
+        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
+            Document document = docs.get(docIndex);
+            Map<String, Object> metadata = document.getMetadata();
+            Object titleValue = metadata == null ? null : metadata.get("title");
+            Object urlValue = metadata == null ? null : metadata.get("url");
+            String title = titleValue == null ? "" : String.valueOf(titleValue);
+            String url = urlValue == null ? "" : String.valueOf(urlValue);
+            String text = document.getText();
 	            prompt
 	                .append("[")
 	                .append(docIndex)

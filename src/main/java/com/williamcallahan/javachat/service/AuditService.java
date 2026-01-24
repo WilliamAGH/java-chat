@@ -100,7 +100,11 @@ public class AuditService {
 
         Set<String> expectedHashes = new LinkedHashSet<>();
         for (Path parsedFile : parsedFiles) {
-            String fileName = parsedFile.getFileName().toString();
+            Path fileNamePath = parsedFile.getFileName();
+            if (fileNamePath == null) {
+                continue;
+            }
+            String fileName = fileNamePath.toString();
             Matcher matcher = chunkPattern.matcher(fileName);
             if (!matcher.matches()) {
                 continue;

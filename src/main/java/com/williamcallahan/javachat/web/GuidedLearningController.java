@@ -105,8 +105,8 @@ public class GuidedLearningController extends BaseController {
     private java.util.List<String> trimFilter(java.util.List<String> in) {
         if (in == null) return java.util.List.of();
         return in.stream()
-                .map(s -> s == null ? "" : s.trim())
-                .filter(s -> s.length() > 0)
+                .map(item -> item == null ? "" : item.trim())
+                .filter(item -> item.length() > 0)
                 .toList();
     }
 

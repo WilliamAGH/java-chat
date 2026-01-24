@@ -77,6 +77,9 @@ public class RetrievalService {
      * Retrieves documents for a query using vector search and reranking, falling back to local search on failure.
      */
     public List<Document> retrieve(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
         // Extract version filter patterns if query mentions a specific Java version
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
 
@@ -113,7 +116,7 @@ public class RetrievalService {
         );
         // DIAGNOSTIC: Log top reranked doc preview (truncated)
         if (!reranked.isEmpty()) {
-            String topText = reranked.get(0).getText();
+            String topText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
             int previewLength = Math.min(DIAGNOSTIC_PREVIEW_LENGTH, topText.length());
             log.info("[DIAG] RAG top doc (post-rerank) previewLength={}", previewLength);
         }
@@ -225,7 +228,7 @@ public class RetrievalService {
         if (!docs.isEmpty()) {
             Map<String, Object> metadata = docs.get(0).getMetadata();
             int metadataSize = metadata.size();
-            String docText = docs.get(0).getText();
+            String docText = Optional.ofNullable(docs.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
             log.info("First doc metadata size: {}", metadataSize);
             log.info("First doc content preview length: {}", previewLength);
@@ -282,8 +285,14 @@ public class RetrievalService {
      * Builds citations from retrieved documents by normalizing source URLs and trimming snippets for UI display.
      */
     public List<Citation> toCitations(List<Document> docs) {
+        if (docs == null || docs.isEmpty()) {
+            return List.of();
+        }
         List<Citation> citations = new ArrayList<>();
         for (Document sourceDoc : docs) {
+            if (sourceDoc == null) {
+                continue;
+            }
             Map<String, Object> metadata = Optional.ofNullable(sourceDoc.getMetadata()).orElse(Map.of());
             String rawUrl = String.valueOf(metadata.getOrDefault("url", ""));
             String title = String.valueOf(metadata.getOrDefault("title", ""));
@@ -306,10 +315,7 @@ public class RetrievalService {
             if (url.startsWith("http://") || url.startsWith("https://")) {
                 url = canonicalizeHttpDocUrl(url);
             }
-            String snippet = sourceDoc.getText();
-            if (snippet == null) {
-                snippet = "";
-            }
+            String snippet = Optional.ofNullable(sourceDoc.getText()).orElse("");
 
             // For book sources, we now link to public /pdfs path (handled by normalizeCitationUrl)
 

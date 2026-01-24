@@ -77,7 +77,7 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         if (primaryAvailable || shouldRetryPrimary()) {
             try {
                 EmbeddingResponse response = primaryModel.call(request);
-                if (response != null && !response.getResults().isEmpty()) {
+                if (!response.getResults().isEmpty()) {
                     if (!primaryAvailable) {
                         log.info(
                             "[EMBEDDING] Primary embedding service recovered"
@@ -104,7 +104,7 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
             try {
                 log.info("[EMBEDDING] Attempting secondary embedding service");
                 EmbeddingResponse response = secondaryModel.call(request);
-                if (response != null && !response.getResults().isEmpty()) {
+                if (!response.getResults().isEmpty()) {
                     if (!secondaryAvailable) {
                         log.info(
                             "[EMBEDDING] Secondary embedding service recovered"

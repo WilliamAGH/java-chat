@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -29,19 +28,24 @@ public class ChatService {
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
-    
-    @Autowired
-    private MarkdownService markdownService;
+    private final MarkdownService markdownService;
 
     /**
-     * Creates the chat service with streaming and retrieval dependencies.
+     * Creates the chat service with streaming, retrieval, and markdown dependencies.
+     *
+     * @param openAIStreamingService LLM streaming service
+     * @param retrievalService RAG retrieval service
+     * @param systemPromptConfig system prompt configuration
+     * @param markdownService markdown processing service
      */
     public ChatService(OpenAIStreamingService openAIStreamingService,
                        RetrievalService retrievalService,
-                       SystemPromptConfig systemPromptConfig) {
+                       SystemPromptConfig systemPromptConfig,
+                       MarkdownService markdownService) {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
+        this.markdownService = markdownService;
     }
 
     /**
