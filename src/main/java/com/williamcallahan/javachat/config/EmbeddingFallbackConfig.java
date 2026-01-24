@@ -92,11 +92,11 @@ public class EmbeddingFallbackConfig {
     /**
      * Creates a remote embedding model with hash-based fallback when local embeddings are disabled.
      *
+     * @param appProperties application configuration for embedding dimensions
      * @param remoteUrl remote OpenAI-compatible server URL
      * @param remoteApiKey API key for remote embedding provider
      * @param remoteModel remote embedding model name
      * @param remoteDims remote embedding dimensions
-     * @param embeddingDimensions embedding dimensions matching the active model
      * @param openaiApiKey OpenAI API key
      * @param openaiBaseUrl OpenAI base URL
      * @param openaiModel OpenAI embedding model name
