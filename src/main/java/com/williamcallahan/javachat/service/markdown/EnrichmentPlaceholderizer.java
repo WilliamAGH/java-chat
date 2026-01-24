@@ -172,23 +172,30 @@ class EnrichmentPlaceholderizer {
     }
 
     private String buildEnrichmentHtmlUnified(EnrichmentKind kind, String content) {
-        StringBuilder htmlBuilder = new StringBuilder();
-        String kindToken = escapeHtml(kind.token());
-        htmlBuilder.append("<div class=\"inline-enrichment ").append(kindToken)
-            .append("\" data-enrichment-type=\"").append(kindToken).append("\">\n");
-        htmlBuilder.append("<div class=\"inline-enrichment-header\">");
-        htmlBuilder.append(kind.iconHtml());
-        htmlBuilder.append("<span>").append(escapeHtml(kind.title())).append("</span>");
-        htmlBuilder.append("</div>\n");
-        htmlBuilder.append("<div class=\"enrichment-text\">\n");
+        Document document = Jsoup.parseBodyFragment("");
+        document.outputSettings().prettyPrint(false);
 
-        // Parse the enrichment content through the same AST pipeline for consistent lists/code
+        Element container = document.body().appendElement("div");
+        container.addClass("inline-enrichment");
+        container.addClass(kind.token());
+        container.attr("data-enrichment-type", kind.token());
+
+        Element header = container.appendElement("div").addClass("inline-enrichment-header");
+        Document iconFragment = Jsoup.parseBodyFragment(kind.iconHtml());
+        for (org.jsoup.nodes.Node iconNode : iconFragment.body().childNodesCopy()) {
+            header.appendChild(iconNode);
+        }
+        header.appendElement("span").text(kind.title());
+
+        Element textContainer = container.appendElement("div").addClass("enrichment-text");
         String processedContent = processFragmentForEnrichment(content);
-        htmlBuilder.append(processedContent);
+        Document contentFragment = Jsoup.parseBodyFragment(processedContent);
+        contentFragment.outputSettings().prettyPrint(false);
+        for (org.jsoup.nodes.Node contentNode : contentFragment.body().childNodesCopy()) {
+            textContainer.appendChild(contentNode);
+        }
 
-        htmlBuilder.append("</div>\n");
-        htmlBuilder.append("</div>");
-        return htmlBuilder.toString();
+        return container.outerHtml();
     }
 
     private static String escapeHtml(String text) {

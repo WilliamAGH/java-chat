@@ -6,6 +6,7 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.AfterReturning;
+import org.aspectj.lang.annotation.AfterThrowing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -36,21 +37,27 @@ public class ProcessingLogger {
 
         PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Starting", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
-            
-            PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms", 
-                requestToken, duration);
-            
-            return result;
-        } catch (RuntimeException runtimeException) {
-            PIPELINE_LOG.error("[{}] STEP 1: EMBEDDING GENERATION - Failed (runtime exception)", requestToken);
-            throw runtimeException;
-        } catch (Error fatalError) {
-            PIPELINE_LOG.error("[{}] STEP 1: EMBEDDING GENERATION - Failed (error)", requestToken);
-            throw fatalError;
-        }
+        Object result = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
+
+        PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms",
+            requestToken, duration);
+
+        return result;
+    }
+
+    /**
+     * Logs embedding generation failures without masking the underlying exception.
+     */
+    @AfterThrowing(
+        pointcut = "@annotation(org.springframework.web.bind.annotation.PostMapping) && " +
+            "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))",
+        throwing = "exception"
+    )
+    public void logEmbeddingGenerationFailure(Throwable exception) {
+        int requestToken = Objects.hashCode(REQUEST_ID.get());
+        PIPELINE_LOG.error("[{}] STEP 1: EMBEDDING GENERATION - Failed (exception type: {})",
+            requestToken, exception.getClass().getSimpleName());
     }
     
     /**
@@ -85,26 +92,31 @@ public class ProcessingLogger {
         
         PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Starting vector search", requestToken);
         
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
-            
-            PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms", 
-                requestToken, duration);
-            
-            // Log retrieved document count if available
-            if (result instanceof java.util.List) {
-                PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
-            }
-            
-            return result;
-        } catch (RuntimeException runtimeException) {
-            PIPELINE_LOG.error("[{}] STEP 4: RAG RETRIEVAL - Failed (runtime exception)", requestToken);
-            throw runtimeException;
-        } catch (Error fatalError) {
-            PIPELINE_LOG.error("[{}] STEP 4: RAG RETRIEVAL - Failed (error)", requestToken);
-            throw fatalError;
+        Object result = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
+
+        PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms",
+            requestToken, duration);
+
+        // Log retrieved document count if available
+        if (result instanceof java.util.List) {
+            PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
         }
+
+        return result;
+    }
+
+    /**
+     * Logs RAG retrieval failures without masking the underlying exception.
+     */
+    @AfterThrowing(
+        pointcut = "execution(* com.williamcallahan.javachat.service.RetrievalService.retrieve*(..))",
+        throwing = "exception"
+    )
+    public void logRagRetrievalFailure(Throwable exception) {
+        int requestToken = Objects.hashCode(REQUEST_ID.get());
+        PIPELINE_LOG.error("[{}] STEP 4: RAG RETRIEVAL - Failed (exception type: {})",
+            requestToken, exception.getClass().getSimpleName());
     }
     
     /**
@@ -117,21 +129,26 @@ public class ProcessingLogger {
 
         PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Sending to LLM", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
-            
-            PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms", 
-                requestToken, duration);
-            
-            return result;
-        } catch (RuntimeException runtimeException) {
-            PIPELINE_LOG.error("[{}] STEP 5: LLM INTERACTION - Failed (runtime exception)", requestToken);
-            throw runtimeException;
-        } catch (Error fatalError) {
-            PIPELINE_LOG.error("[{}] STEP 5: LLM INTERACTION - Failed (error)", requestToken);
-            throw fatalError;
-        }
+        Object result = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
+
+        PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms",
+            requestToken, duration);
+
+        return result;
+    }
+
+    /**
+     * Logs LLM interaction failures without masking the underlying exception.
+     */
+    @AfterThrowing(
+        pointcut = "execution(* com.williamcallahan.javachat.service.ChatService.streamAnswer(..))",
+        throwing = "exception"
+    )
+    public void logLlmInteractionFailure(Throwable exception) {
+        int requestToken = Objects.hashCode(REQUEST_ID.get());
+        PIPELINE_LOG.error("[{}] STEP 5: LLM INTERACTION - Failed (exception type: {})",
+            requestToken, exception.getClass().getSimpleName());
     }
     
     /**

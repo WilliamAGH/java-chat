@@ -23,6 +23,10 @@ import java.util.Map;
  */
 public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
+    
+    private static final int DEFAULT_EMBEDDING_DIMENSIONS = 4096;
+    private static final int CONNECT_TIMEOUT_SECONDS = 10;
+    private static final int READ_TIMEOUT_SECONDS = 60;
 
     private final String baseUrl;           // e.g., https://api.openai.com/openai/v1 or provider base
     private final String apiKey;            // Bearer token
@@ -63,10 +67,10 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
         this.baseUrl = baseUrl != null && baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.modelName = modelName;
-        this.dimensionsHint = dimensionsHint > 0 ? dimensionsHint : 4096;
+        this.dimensionsHint = dimensionsHint > 0 ? dimensionsHint : DEFAULT_EMBEDDING_DIMENSIONS;
         this.restTemplate = restTemplateBuilder
-            .connectTimeout(java.time.Duration.ofSeconds(10))
-            .readTimeout(java.time.Duration.ofSeconds(60))
+            .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+            .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
             .build();
     }
 
