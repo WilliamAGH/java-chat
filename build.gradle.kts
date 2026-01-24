@@ -207,12 +207,9 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
 tasks.register("buildForScripts") {
     description = "Build application JAR for use in scripts (skips tests)"
     group = "build"
-    dependsOn(tasks.build)
+    dependsOn(tasks.bootJar)
     doLast {
-        val jarFile = fileTree("build/libs") {
-            include("*.jar")
-            exclude("*-plain.jar")
-        }.singleFile
+        val jarFile = tasks.bootJar.get().archiveFile.get().asFile
         println("Built JAR: ${jarFile.absolutePath}")
     }
 }
