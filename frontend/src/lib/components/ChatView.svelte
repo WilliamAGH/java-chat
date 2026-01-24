@@ -39,21 +39,29 @@
   const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
   /**
-   * Clears status messages with optional delay for readability.
-   * Cancels any pending clear to avoid race conditions.
+   * Cancels any pending status clear timer.
    */
-  function clearStatusWithDelay(immediate = false): void {
+  function cancelStatusTimer(): void {
     if (statusClearTimer) {
       clearTimeout(statusClearTimer)
       statusClearTimer = null
     }
+  }
 
-    if (immediate) {
-      streamStatusMessage = null
-      streamStatusDetails = null
-      return
-    }
+  /**
+   * Clears status messages immediately.
+   */
+  function clearStatusNow(): void {
+    cancelStatusTimer()
+    streamStatusMessage = null
+    streamStatusDetails = null
+  }
 
+  /**
+   * Clears status messages after a delay to allow users to read final status.
+   */
+  function clearStatusDelayed(): void {
+    cancelStatusTimer()
     statusClearTimer = setTimeout(() => {
       streamStatusMessage = null
       streamStatusDetails = null
@@ -69,27 +77,7 @@
     await scrollToBottom(messagesContainer, shouldAutoScroll)
   }
 
-  async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || isStreaming) return
-
-    const userQuery = message.trim()
-
-    // Add user message
-    messages = [...messages, {
-      role: 'user',
-      content: userQuery,
-      timestamp: Date.now()
-    }]
-
-    shouldAutoScroll = true
-    await doScrollToBottom()
-
-    // Start streaming - clear any persisting status immediately
-    isStreaming = true
-    currentStreamingContent = ''
-    clearStatusWithDelay(true) // Immediate clear for fresh start
-    pendingCitations = []
-
+  async function executeChatStream(userQuery: string): Promise<void> {
     try {
       await streamChat(
         sessionId,
@@ -113,7 +101,7 @@
         }
       )
 
-      // Add completed assistant message with inline citations (no separate API call needed)
+      // Add completed assistant message with inline citations
       messages = [...messages, {
         role: 'assistant',
         content: currentStreamingContent,
@@ -128,10 +116,36 @@
         timestamp: Date.now(),
         isError: true
       }]
+    }
+  }
+
+  async function handleSend(message: string): Promise<void> {
+    if (!message.trim() || isStreaming) return
+
+    const userQuery = message.trim()
+
+    // Add user message
+    messages = [...messages, {
+      role: 'user',
+      content: userQuery,
+      timestamp: Date.now()
+    }]
+
+    shouldAutoScroll = true
+    await doScrollToBottom()
+
+    // Start streaming - clear any persisting status immediately
+    isStreaming = true
+    currentStreamingContent = ''
+    clearStatusNow() // Immediate clear for fresh start
+    pendingCitations = []
+
+    try {
+      await executeChatStream(userQuery)
     } finally {
       isStreaming = false
       currentStreamingContent = ''
-      clearStatusWithDelay() // Delayed clear so users can read final status
+      clearStatusDelayed() // Delayed clear so users can read final status
       pendingCitations = []
       await doScrollToBottom()
     }
