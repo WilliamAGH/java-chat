@@ -7,7 +7,6 @@ import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import com.openai.core.http.Headers;
@@ -50,6 +49,7 @@ public class RateLimitManager {
     private final Map<String, AtomicLong> resetTimes =
         new ConcurrentHashMap<>();
     private final Environment env;
+    private final RateLimitHeaderParser headerParser;
 
     /**
      * Describes supported LLM providers and their typical rate-limit characteristics.
@@ -171,6 +171,7 @@ public class RateLimitManager {
     public RateLimitManager(RateLimitState rateLimitState, Environment env) {
         this.rateLimitState = rateLimitState;
         this.env = env;
+        this.headerParser = new RateLimitHeaderParser();
         log.info("RateLimitManager initialized with persistent state");
     }
 
@@ -331,10 +332,10 @@ public class RateLimitManager {
     private ParsedRateLimitInfo parseRateLimitHeaders(
         WebClientResponseException webError
     ) {
-        Instant resetTime = parseResetHeader(
+        Instant resetTime = headerParser.parseResetHeader(
             webError.getHeaders().getFirst("X-RateLimit-Reset")
         );
-        long retrySeconds = parseRetryAfterHeader(
+        long retrySeconds = headerParser.parseRetryAfterHeader(
             webError.getHeaders().getFirst("Retry-After")
         );
 
@@ -346,39 +347,6 @@ public class RateLimitManager {
         return new ParsedRateLimitInfo(resetTime, retrySeconds);
     }
 
-    /**
-     * Parse the X-RateLimit-Reset header (epoch seconds or ISO instant).
-     */
-    private Instant parseResetHeader(String resetHeader) {
-        if (resetHeader == null) {
-            return null;
-        }
-        try {
-            return Instant.ofEpochSecond(Long.parseLong(resetHeader));
-        } catch (NumberFormatException exception) {
-            try {
-                return Instant.parse(resetHeader);
-            } catch (DateTimeParseException parseException) {
-                log.debug("Could not parse rate limit reset header");
-                return null;
-            }
-        }
-    }
-
-    /**
-     * Parse the Retry-After header (seconds).
-     */
-    private long parseRetryAfterHeader(String retryAfter) {
-        if (retryAfter == null) {
-            return 0;
-        }
-        try {
-            return Long.parseLong(retryAfter);
-        } catch (NumberFormatException exception) {
-            log.debug("Could not parse Retry-After header");
-            return 0;
-        }
-    }
 
     /**
      * Apply rate limit when we have a specific reset time from headers.
@@ -415,26 +383,26 @@ public class RateLimitManager {
     }
 
     private long extractRetryAfter(String errorMessage) {
-        if (errorMessage == null) return 0;
+        if (errorMessage == null) {
+            return 0;
+        }
 
         if (errorMessage.contains("Please wait")) {
             String[] parts = errorMessage.split("Please wait ");
-            if (parts.length > 1) {
-                String secondsPart = parts[1].split(" seconds")[0].trim();
-                if (isDigits(secondsPart)) {
-                    return Long.parseLong(secondsPart);
-                }
+            if (parts.length <= 1) {
+                throw new IllegalArgumentException("Unable to parse retry-after from error message: " + errorMessage);
             }
+            String secondsPart = parts[1].split(" seconds")[0].trim();
+            return headerParser.parseRetryAfterHeader(secondsPart);
         }
 
         if (errorMessage.contains("retry-after")) {
             String[] parts = errorMessage.split("retry-after[: ]+");
-            if (parts.length > 1) {
-                String secondsPart = parts[1].replaceAll("[^0-9]", "");
-                if (isDigits(secondsPart)) {
-                    return Long.parseLong(secondsPart);
-                }
+            if (parts.length <= 1) {
+                throw new IllegalArgumentException("Unable to parse retry-after from error message: " + errorMessage);
             }
+            String secondsPart = parts[1].replaceAll("[^0-9]", "");
+            return headerParser.parseRetryAfterHeader(secondsPart);
         }
 
         return 0;
@@ -445,150 +413,13 @@ public class RateLimitManager {
             return new ParsedRateLimitInfo(null, 0);
         }
 
-        long retryAfterSeconds = parseRetryAfterSeconds(headers);
+        long retryAfterSeconds = headerParser.parseRetryAfterSeconds(headers);
         if (retryAfterSeconds > 0) {
             return new ParsedRateLimitInfo(null, retryAfterSeconds);
         }
 
-        Instant resetInstant = parseResetInstant(headers);
+        Instant resetInstant = headerParser.parseResetInstant(headers);
         return new ParsedRateLimitInfo(resetInstant, 0);
-    }
-
-    private long parseRetryAfterSeconds(Headers headers) {
-        String retryAfter = firstHeaderValue(headers, "Retry-After");
-        if (retryAfter == null) {
-            return 0;
-        }
-
-        String trimmed = retryAfter.trim();
-        if (isDigits(trimmed)) {
-            return Long.parseLong(trimmed);
-        }
-
-        try {
-            ZonedDateTime httpDate = ZonedDateTime.parse(trimmed, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
-            long seconds = Duration.between(Instant.now(), httpDate.toInstant()).getSeconds();
-            return Math.max(0, seconds);
-        } catch (RuntimeException parseFailed) {
-            return 0;
-        }
-    }
-
-    private Instant parseResetInstant(Headers headers) {
-        String resetSeconds = firstHeaderValue(headers, "X-RateLimit-Reset");
-        if (resetSeconds != null) {
-            Instant parsed = parseInstantSecondsFromEpoch(resetSeconds);
-            if (parsed != null) {
-                return parsed;
-            }
-        }
-
-        // OpenAI commonly returns reset windows like "1s", "2m", etc. Prefer the shortest if multiple are present.
-        long candidateSeconds = minPositive(
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-requests")),
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-tokens")),
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset")),
-            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Requests")),
-            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Tokens"))
-        );
-        if (candidateSeconds > 0) {
-            return Instant.now().plusSeconds(candidateSeconds);
-        }
-
-        return null;
-    }
-
-    private Instant parseInstantSecondsFromEpoch(String rawSeconds) {
-        if (rawSeconds == null) {
-            return null;
-        }
-        String trimmed = rawSeconds.trim();
-        if (!isDigits(trimmed)) {
-            return null;
-        }
-        try {
-            long epochSeconds = Long.parseLong(trimmed);
-            return Instant.ofEpochSecond(epochSeconds);
-        } catch (RuntimeException parseFailed) {
-            return null;
-        }
-    }
-
-    private long parseDurationSeconds(String rawDuration) {
-        if (rawDuration == null) {
-            return 0;
-        }
-        String trimmed = rawDuration.trim();
-        if (trimmed.isEmpty()) {
-            return 0;
-        }
-
-        int lastIndex = trimmed.length() - 1;
-        char lastChar = trimmed.charAt(lastIndex);
-        if (isDigits(trimmed)) {
-            return Long.parseLong(trimmed);
-        }
-
-        if (lastChar == 's') {
-            String numberPart = trimmed.substring(0, lastIndex).trim();
-            if (isDigits(numberPart)) {
-                return Long.parseLong(numberPart);
-            }
-        }
-        if (lastChar == 'm') {
-            String numberPart = trimmed.substring(0, lastIndex).trim();
-            if (isDigits(numberPart)) {
-                return TimeUnit.MINUTES.toSeconds(Long.parseLong(numberPart));
-            }
-        }
-        if (lastChar == 'h') {
-            String numberPart = trimmed.substring(0, lastIndex).trim();
-            if (isDigits(numberPart)) {
-                return TimeUnit.HOURS.toSeconds(Long.parseLong(numberPart));
-            }
-        }
-        if (trimmed.endsWith("ms")) {
-            String numberPart = trimmed.substring(0, trimmed.length() - 2).trim();
-            if (isDigits(numberPart)) {
-                long millis = Long.parseLong(numberPart);
-                return Math.max(1, TimeUnit.MILLISECONDS.toSeconds(millis));
-            }
-        }
-
-        return 0;
-    }
-
-    private long minPositive(long... candidates) {
-        long min = 0;
-        for (long candidate : candidates) {
-            if (candidate <= 0) {
-                continue;
-            }
-            if (min == 0 || candidate < min) {
-                min = candidate;
-            }
-        }
-        return min;
-    }
-
-    private String firstHeaderValue(Headers headers, String name) {
-        if (headers == null || name == null || name.isBlank()) {
-            return null;
-        }
-        if (!headers.names().contains(name)) {
-            // `Headers` is case-insensitive, but the Set may not contain exactly matching names.
-            for (String headerName : headers.names()) {
-                if (headerName != null && headerName.equalsIgnoreCase(name)) {
-                    return firstHeaderValue(headers, headerName);
-                }
-            }
-            return null;
-        }
-        var values = headers.values(name);
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
-        return values.get(0);
     }
 
     private void recordRateLimitInternal(ApiProvider provider, Instant resetTime, long retryAfterSeconds) {
@@ -608,17 +439,6 @@ public class RateLimitManager {
                 provider.getName(), resetTime, retryAfterSeconds);
     }
 
-    private boolean isDigits(String candidate) {
-        if (candidate == null || candidate.isBlank()) {
-            return false;
-        }
-        for (int index = 0; index < candidate.length(); index++) {
-            if (!Character.isDigit(candidate.charAt(index))) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     /**
      * Selects the highest-priority configured provider that is currently available.
