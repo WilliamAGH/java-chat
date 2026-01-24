@@ -63,9 +63,14 @@ public class RateLimitState {
         // Be defensive during shutdown so failures here never take down the app with NoClassDefFoundError
         try {
             safeSaveState();
-        } catch (Throwable throwable) {
-            // Avoid logging frameworks during teardown if classloading is unstable
-            System.err.println("[RateLimitState] Failed to save state on shutdown: " + throwable);
+        } catch (Exception shutdownException) {
+            // Use stderr during teardown - logging framework may be partially unloaded
+            System.err.println("[RateLimitState] Failed to save state on shutdown: "
+                + shutdownException.getClass().getName() + ": " + shutdownException.getMessage());
+        } catch (NoClassDefFoundError classLoadError) {
+            // Explicitly handle classloading issues during shutdown (expected in some JVM teardown scenarios)
+            System.err.println("[RateLimitState] Classloader issue during shutdown (expected): "
+                + classLoadError.getMessage());
         }
         scheduler.shutdown();
     }
@@ -98,11 +103,12 @@ public class RateLimitState {
             }
 
             state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
-            log.warn("Provider has consecutive failures. Extended backoff.");
+            log.warn("[{}] Consecutive failures (count={}). Extended backoff until {}",
+                    provider, failures, state.rateLimitedUntil);
         }
 
         safeSaveState();
-        log.info("Provider rate limited.");
+        log.info("[{}] Rate limited until {}", provider, state.rateLimitedUntil);
     }
 
     /**
@@ -194,7 +200,7 @@ public class RateLimitState {
                     for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
                         if (!isAvailable(entry.getKey())) {
                             Duration remaining = getRemainingWaitTime(entry.getKey());
-                            log.warn("Provider is rate limited for {} more", formatDuration(remaining));
+                            log.warn("[{}] Rate limited for {} more", entry.getKey(), formatDuration(remaining));
                         }
                     }
                 }

@@ -116,9 +116,8 @@ public class OpenAIStreamingService {
                     clientSecondary != null
                 );
             }
-        } catch (RuntimeException exception) {
-            log.error("Failed to initialize OpenAI client (exception type: {})",
-                exception.getClass().getSimpleName());
+        } catch (RuntimeException initializationException) {
+            log.error("Failed to initialize OpenAI client", initializationException);
             this.isAvailable = false;
         }
     }
@@ -136,8 +135,8 @@ public class OpenAIStreamingService {
         try {
             client.close();
             log.debug("Closed OpenAI client ({})", clientName);
-        } catch (RuntimeException exception) {
-            log.warn("Failed to close OpenAI client ({}; exceptionType={})", clientName, exception.getClass().getName());
+        } catch (RuntimeException closeException) {
+            log.warn("Failed to close OpenAI client ({})", clientName, closeException);
         }
     }
 
@@ -167,15 +166,15 @@ public class OpenAIStreamingService {
             OpenAIClient streamingClient = selectClientForStreaming();
             
             if (streamingClient == null) {
-                String error = "No OpenAI-compatible client is configured or available for streaming. Check API credentials and configuration.";
-                log.error(error);
+                String error = "All LLM providers unavailable - check rate limits and API credentials";
+                log.error("[LLM] {}", error);
                 return Flux.<String>error(new IllegalStateException(error));
             }
             
-            log.info("[LLM] Streaming started");
             RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
                     ? RateLimitManager.ApiProvider.GITHUB_MODELS
                     : RateLimitManager.ApiProvider.OPENAI;
+            log.info("[LLM] [{}] Streaming started", activeProvider.getName());
             
             RequestOptions requestOptions = RequestOptions.builder()
                 .timeout(streamingTimeout())
@@ -189,13 +188,14 @@ public class OpenAIStreamingService {
                     .concatMap(choice -> Mono.justOrEmpty(choice.delta().content()))
             )
             .doOnComplete(() -> {
-                log.debug("Stream completed successfully");
+                log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
                 if (rateLimitManager != null) {
                     rateLimitManager.recordSuccess(activeProvider);
                 }
             })
             .doOnError(exception -> {
-                log.error("[LLM] Streaming failed (exception type: {})", exception.getClass().getSimpleName());
+                log.error("[LLM] [{}] Streaming failed: {}",
+                        activeProvider.getName(), exception.getMessage(), exception);
                 if (rateLimitManager != null) {
                     recordProviderFailure(activeProvider, exception);
                 }
@@ -215,37 +215,37 @@ public class OpenAIStreamingService {
         return Mono.defer(() -> {
             OpenAIClient blockingClient = selectClientForBlocking();
             if (blockingClient == null) {
-                log.error("No OpenAI-compatible client is configured or available for completion. "
-                        + "Check API credentials and configuration.");
-                return Mono.error(new IllegalStateException(
-                        "No OpenAI-compatible client is configured or available for completion."));
+                String error = "All LLM providers unavailable - check rate limits and API credentials";
+                log.error("[LLM] {}", error);
+                return Mono.error(new IllegalStateException(error));
             }
+            RateLimitManager.ApiProvider activeProvider = isPrimaryClient(blockingClient)
+                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                    : RateLimitManager.ApiProvider.OPENAI;
             ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
             try {
-                log.info("[LLM] Complete started");
+                log.info("[LLM] [{}] Complete started", activeProvider.getName());
                 RequestOptions requestOptions = RequestOptions.builder()
                     .timeout(completeTimeout())
                     .build();
                 ChatCompletion completion = blockingClient.chat().completions().create(params, requestOptions);
                 if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(isPrimaryClient(blockingClient)
-                            ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                            : RateLimitManager.ApiProvider.OPENAI);
+                    rateLimitManager.recordSuccess(activeProvider);
                 }
+                log.debug("[LLM] [{}] Complete succeeded", activeProvider.getName());
                 String response = completion.choices().stream()
                         .findFirst()
                         .flatMap(choice -> choice.message().content())
                         .orElse("");
                 return Mono.just(response);
-            } catch (RuntimeException primaryException) {
+            } catch (RuntimeException completionException) {
+                log.error("[LLM] [{}] Complete failed: {}",
+                        activeProvider.getName(), completionException.getMessage(), completionException);
                 if (rateLimitManager != null) {
-                    RateLimitManager.ApiProvider activeProvider = isPrimaryClient(blockingClient)
-                        ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                        : RateLimitManager.ApiProvider.OPENAI;
-                    recordProviderFailure(activeProvider, primaryException);
+                    recordProviderFailure(activeProvider, completionException);
                 }
-                maybeBackoffPrimary(blockingClient, primaryException);
-                return Mono.error(primaryException);
+                maybeBackoffPrimary(blockingClient, completionException);
+                return Mono.error(completionException);
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -383,22 +383,29 @@ public class OpenAIStreamingService {
     }
 
     private OpenAIClient selectClientForStreaming() {
-        // Fast-fail preference for the day: if manager says OpenAI is available, use it directly
-        if (rateLimitManager != null && clientSecondary != null && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+        // Prefer OpenAI when available (more reliable)
+        if (rateLimitManager != null && clientSecondary != null
+                && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
             return clientSecondary;
         }
 
+        // Try GitHub Models if not in backoff and not rate limited
         boolean githubOk = clientPrimary != null && !isPrimaryInBackoff();
         if (rateLimitManager != null && clientPrimary != null) {
             githubOk = githubOk && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS);
         }
-        if (githubOk) return clientPrimary;
-        if (clientSecondary != null) {
-            if (rateLimitManager == null || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
-                return clientSecondary;
-            }
+        if (githubOk) {
+            return clientPrimary;
         }
-        return clientPrimary; // may be null; upstream will handle availability
+
+        // Fall back to OpenAI if available (even without rate limit check - let API decide)
+        if (clientSecondary != null && rateLimitManager == null) {
+            return clientSecondary;
+        }
+
+        // Both providers rate limited - return null to fail fast rather than waste API calls
+        log.warn("All LLM providers are rate limited; no client available");
+        return null;
     }
 
     private OpenAIClient selectClientForBlocking() {
@@ -445,7 +452,8 @@ public class OpenAIStreamingService {
         long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
         this.primaryBackoffUntilEpochMs = until;
         long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
-        log.warn("Temporarily disabling primary provider for {}s", seconds);
+        log.warn("[{}] Temporarily disabled for {}s due to failure",
+                RateLimitManager.ApiProvider.GITHUB_MODELS.getName(), seconds);
     }
 
 }

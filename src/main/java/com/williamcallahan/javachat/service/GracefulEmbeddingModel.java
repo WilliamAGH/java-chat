@@ -86,11 +86,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     }
                     return response;
                 }
-            } catch (Exception exception) {
-                log.warn(
-                    "[EMBEDDING] Primary embedding service failed (exception type: {})",
-                    exception.getClass().getSimpleName()
-                );
+            } catch (Exception primaryException) {
+                log.warn("[EMBEDDING] Primary embedding service failed", primaryException);
                 primaryAvailable = false;
                 lastPrimaryCheck = System.currentTimeMillis();
             }
@@ -113,11 +110,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     }
                     return response;
                 }
-            } catch (Exception exception) {
-                log.warn(
-                    "[EMBEDDING] Secondary embedding service failed (exception type: {})",
-                    exception.getClass().getSimpleName()
-                );
+            } catch (Exception secondaryException) {
+                log.warn("[EMBEDDING] Secondary embedding service failed", secondaryException);
                 secondaryAvailable = false;
                 lastSecondaryCheck = System.currentTimeMillis();
             }
@@ -130,11 +124,8 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
                     "[EMBEDDING] Using hash-based fallback embeddings (limited semantic meaning)"
                 );
                 return hashingModel.call(request);
-            } catch (Exception exception) {
-                log.error(
-                    "[EMBEDDING] Hash-based fallback failed (exception type: {})",
-                    exception.getClass().getSimpleName()
-                );
+            } catch (Exception hashFallbackException) {
+                log.error("[EMBEDDING] Hash-based fallback failed", hashFallbackException);
             }
         }
 
@@ -169,22 +160,16 @@ public class GracefulEmbeddingModel implements EmbeddingModel {
         if (primaryModel != null) {
             try {
                 return primaryModel.dimensions();
-            } catch (Exception exception) {
-                log.debug(
-                    "[EMBEDDING] Could not get dimensions from primary model (exception type: {})",
-                    exception.getClass().getSimpleName()
-                );
+            } catch (Exception primaryDimException) {
+                log.debug("[EMBEDDING] Could not get dimensions from primary model", primaryDimException);
             }
         }
 
         if (secondaryModel != null) {
             try {
                 return secondaryModel.dimensions();
-            } catch (Exception exception) {
-                log.debug(
-                    "[EMBEDDING] Could not get dimensions from secondary model (exception type: {})",
-                    exception.getClass().getSimpleName()
-                );
+            } catch (Exception secondaryDimException) {
+                log.debug("[EMBEDDING] Could not get dimensions from secondary model", secondaryDimException);
             }
         }
 

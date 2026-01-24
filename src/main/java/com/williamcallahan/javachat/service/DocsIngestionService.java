@@ -135,15 +135,15 @@ public class DocsIngestionService {
                         embeddingCache.getOrComputeEmbeddings(documents);
                         INDEXING_LOG.info("[INDEXING] ✓ Successfully cached {} documents locally ({})",
                             documents.size(), progressTracker.formatPercent());
-                        
+
                         // Mark hashes as ingested (cached) after successful caching
                         for (org.springframework.ai.document.Document aiDoc : documents) {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
                         }
                     } catch (RuntimeException cacheException) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally (exception type: {})",
-                            cacheException.getClass().getSimpleName());
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally", cacheException);
+                        throw new IOException("Failed to cache documents locally", cacheException);
                     }
                 } else {
                     // Upload mode: send to Qdrant
@@ -159,8 +159,7 @@ public class DocsIngestionService {
                             localStore.markHashIngested(hash);
                         }
                     } catch (RuntimeException qdrantException) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant (exception type: {})",
-                            qdrantException.getClass().getSimpleName());
+                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant", qdrantException);
                         throw new IOException("Failed to add documents to Qdrant", qdrantException);
                     }
                 }

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -58,12 +59,13 @@ public class RerankerService {
         log.debug("Reranking {} documents", docs.size());
 
         try {
-            String response = callLlmForReranking(query, docs);
-            if (response == null || response.isBlank()) {
+            Optional<String> responseOpt = callLlmForReranking(query, docs);
+            if (responseOpt.isEmpty() || responseOpt.get().isBlank()) {
+                log.debug("LLM reranking unavailable or returned empty; using original order");
                 return limitDocs(docs, returnK);
             }
 
-            List<Document> reordered = parseRerankResponse(response, docs);
+            List<Document> reordered = parseRerankResponse(responseOpt.get(), docs);
             if (reordered.isEmpty()) {
                 log.warn(
                     "Reranking produced empty results, falling back to original order"
@@ -73,26 +75,27 @@ public class RerankerService {
 
             log.debug("Successfully reranked {} documents", reordered.size());
             return limitDocs(reordered, returnK);
-        } catch (JsonProcessingException exception) {
-            log.error("Reranking failed to parse response; using original document order", exception);
+        } catch (JsonProcessingException jsonException) {
+            log.error("Reranking failed to parse response; using original document order", jsonException);
             return limitDocs(docs, returnK);
-        } catch (RuntimeException exception) {
-            log.error("Reranking failed; using original document order", exception);
+        } catch (RuntimeException unexpectedException) {
+            log.error("Reranking failed; using original document order", unexpectedException);
             return limitDocs(docs, returnK);
         }
     }
 
     /**
-     * Call the LLM service to get reranking order.
-     * Returns null if service unavailable or times out.
+     * Calls LLM service to get reranking order.
+     *
+     * @return reranking response, or empty if service unavailable or times out
      */
-    private String callLlmForReranking(String query, List<Document> docs) {
+    private Optional<String> callLlmForReranking(String query, List<Document> docs) {
         if (
             openAIStreamingService == null ||
             !openAIStreamingService.isAvailable()
         ) {
             log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
-            return null;
+            return Optional.empty();
         }
 
         String prompt = buildRerankPrompt(query, docs);
@@ -101,15 +104,11 @@ public class RerankerService {
         return openAIStreamingService
             .complete(prompt, 0.0)
             .timeout(java.time.Duration.ofSeconds(4))
-            .onErrorResume(error -> {
-                log.debug(
-                    "Reranker LLM call short-circuited (exception type: {})",
-                    error.getClass().getSimpleName()
-                );
-                return reactor.core.publisher.Mono.empty();
-            })
-            .blockOptional()
-            .orElse(null);
+            .doOnError(timeoutOrApiError ->
+                log.debug("Reranker LLM call timed out or failed; falling back to original order",
+                    timeoutOrApiError))
+            .onErrorResume(timeoutOrApiError -> reactor.core.publisher.Mono.empty())
+            .blockOptional();
     }
 
     /**
