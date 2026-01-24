@@ -77,6 +77,10 @@ public class GuidedLearningController extends BaseController {
     private record ChunkMessage(String text) {}
     private record ErrorMessage(String message, String details) {}
 
+    /** Fallback JSON payload when SSE error serialization fails. */
+    private static final String SSE_ERROR_FALLBACK_JSON =
+        "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
+
     /**
      * Serializes an object to JSON, throwing IllegalStateException on failure.
      */
@@ -97,7 +101,7 @@ public class GuidedLearningController extends BaseController {
             json = objectMapper.writeValueAsString(new ErrorMessage(message, details));
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize SSE error: {}", message, e);
-            json = "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
+            json = SSE_ERROR_FALLBACK_JSON;
         }
         return Flux.just(ServerSentEvent.<String>builder()
             .event(SSE_EVENT_STATUS)
