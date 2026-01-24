@@ -45,6 +45,13 @@ public class GuidedLearningService {
     // Public server path of the Think Java book (as mapped by DocsSourceRegistry)
     private static final String THINK_JAVA_PDF_PATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
 
+    /** System guidance for Think Java-grounded responses with learning aid markers. */
+    private static final String THINK_JAVA_GUIDANCE =
+        "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
+        "Use ONLY content grounded in this book for factual claims. " +
+        "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
+        "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
+
     private final String jdkVersion;
 
     /**
@@ -114,12 +121,7 @@ public class GuidedLearningService {
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
-                "Use ONLY content grounded in this book for factual claims. " +
-                "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-                "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
-
-        return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
+        return chatService.streamAnswerWithContext(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
     }
     
     /**
@@ -132,13 +134,8 @@ public class GuidedLearningService {
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
-                "Use ONLY content grounded in this book for factual claims. " +
-                "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-                "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
-
         // Build the complete prompt using ChatService's prompt building logic
-        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
+        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
     }
 
     /**
