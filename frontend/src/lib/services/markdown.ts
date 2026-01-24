@@ -68,7 +68,9 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
         return token.raw
       }
 
-      // Render inner content as markdown (without enrichment extension to avoid recursion)
+      // Render inner content as markdown
+      // The content needs whitespace preserved - marked.parse handles this correctly
+      // but we need to ensure the content isn't pre-processed incorrectly
       const innerHtml = marked.parse(enrichmentToken.content, { async: false }) as string
 
       return `<div class="inline-enrichment ${enrichmentToken.kind}" data-enrichment-type="${enrichmentToken.kind}">

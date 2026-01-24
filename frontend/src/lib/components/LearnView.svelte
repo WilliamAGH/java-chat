@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
-  import { fetchCitations } from '../services/chat'
+  import { fetchCitations, type Citation } from '../services/chat'
   import { renderMarkdown } from '../services/markdown'
   import type { ChatMessage } from '../services/chat'
   import MessageBubble from './MessageBubble.svelte'
@@ -24,6 +24,10 @@
   let lessonError = $state<string | null>(null)
   let loadingLesson = $state(false)
 
+  // Lesson-level citations (sources for the lesson topic)
+  let lessonCitations = $state<Citation[]>([])
+  let lessonCitationsError = $state<string | null>(null)
+  let lessonCitationsLoaded = $state(false)
 
   // Chat state
   let messages = $state<MessageWithQuery[]>([])
@@ -67,19 +71,34 @@
     loadingLesson = true
     lessonMarkdown = ''
     lessonError = null
+    lessonCitations = []
+    lessonCitationsError = null
+    lessonCitationsLoaded = false
     messages = []
 
     try {
       const response = await fetchLessonContent(lesson.slug)
       lessonMarkdown = response.markdown
 
-      // Fetch citations for the lesson topic (non-blocking, errors logged for visibility)
+      // Fetch citations for the lesson topic (non-blocking, with error visibility)
       fetchCitations(lesson.title)
+        .then((citations) => {
+          // Deduplicate by URL
+          const seen = new Set<string>()
+          lessonCitations = citations.filter((citation) => {
+            const key = citation.url?.toLowerCase() ?? ''
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+        })
         .catch((citationError: unknown) => {
-          const errorMessage = citationError instanceof Error
+          lessonCitationsError = citationError instanceof Error
             ? citationError.message
-            : 'Unknown error'
-          console.warn(`Failed to load lesson citations for "${lesson.title}":`, errorMessage)
+            : 'Failed to load sources'
+        })
+        .finally(() => {
+          lessonCitationsLoaded = true
         })
     } catch (error) {
       lessonError = error instanceof Error ? error.message : 'Failed to load lesson'
@@ -93,6 +112,9 @@
     selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
+    lessonCitations = []
+    lessonCitationsError = null
+    lessonCitationsLoaded = false
     messages = []
   }
 
@@ -282,6 +304,31 @@
             <div class="lesson-content" bind:this={lessonContentEl}>
               {@html renderedLesson}
             </div>
+
+            <!-- Lesson-level citations -->
+            {#if lessonCitationsLoaded && lessonCitationsError}
+              <div class="lesson-citations lesson-citations--error">
+                <span class="lesson-citations-error">Unable to load lesson sources</span>
+              </div>
+            {:else if lessonCitationsLoaded && lessonCitations.length > 0}
+              <div class="lesson-citations">
+                <div class="lesson-citations-header">
+                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd"/>
+                  </svg>
+                  <span>Lesson Sources ({lessonCitations.length})</span>
+                </div>
+                <ul class="lesson-citations-list">
+                  {#each lessonCitations as citation (citation.url)}
+                    <li>
+                      <a href={citation.url} target="_blank" rel="noopener noreferrer">
+                        {citation.title || citation.url}
+                      </a>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
           {/if}
         </div>
 
@@ -664,6 +711,79 @@
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
     font-style: italic;
     color: var(--color-text-secondary);
+  }
+
+  /* Lesson-level Citations */
+  .lesson-citations {
+    max-width: 720px;
+    margin: var(--space-8) auto 0;
+    padding: var(--space-4);
+    background: var(--color-surface-subtle);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  .lesson-citations--error {
+    padding: var(--space-3);
+  }
+
+  .lesson-citations-error {
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+    font-style: italic;
+  }
+
+  .lesson-citations-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--color-border-subtle);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-secondary);
+  }
+
+  .lesson-citations-header svg {
+    width: 16px;
+    height: 16px;
+    color: var(--color-accent);
+  }
+
+  .lesson-citations-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .lesson-citations-list li {
+    margin: 0;
+  }
+
+  .lesson-citations-list a {
+    display: block;
+    padding: var(--space-2);
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  .lesson-citations-list a:hover {
+    background: var(--color-bg-secondary);
+    border-color: var(--color-accent-muted);
   }
 
   /* Chat Panel */
