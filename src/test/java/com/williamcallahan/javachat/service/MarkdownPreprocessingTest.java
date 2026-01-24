@@ -61,6 +61,16 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("another! And") || html.contains("another!</p>"), "Should handle exclamation");
         assertTrue(html.contains("third? Yet"), "Should add space after question mark");
     }
+
+    @Test
+    void testSentenceSpacingAvoidsUrlsAndPackages() {
+        String input = "Refer to java.lang.String and https://example.com/Test. NextSentence starts here.";
+        String html = markdownService.processStructured(input).html();
+
+        assertTrue(html.contains("java.lang.String"), "Package and class names should stay intact");
+        assertFalse(html.contains("java. lang"), "Package names must not be split");
+        assertTrue(html.contains("href=\"https://example.com/Test\""), "URL should remain intact");
+    }
     
     @Test
     void testParagraphBreaksInLongText() {
@@ -105,6 +115,17 @@ class MarkdownPreprocessingTest {
         int theIdx = html.indexOf("The", codeClose + 1);
         int restIdx = html.indexOf("result is 1.", codeClose + 1);
         assertTrue(theIdx > codeClose && restIdx > codeClose, "Prose must appear after the closed code block");
+    }
+
+    @Test
+    void testTildeFencePreserved() {
+        String input = "~~~\n- not a list\n{{warning:still code}}\n~~~\nAfter fence.";
+        String html = markdownService.processStructured(input).html();
+
+        assertTrue(html.contains("<pre>"), "Tilde fences should render as code blocks");
+        assertTrue(html.contains("- not a list"), "Fence content should remain intact");
+        assertTrue(html.contains("{{warning:still code}}"), "Markers inside fences should not render as cards");
+        assertTrue(html.contains("After fence."), "Prose after fence should render");
     }
     
     @Test

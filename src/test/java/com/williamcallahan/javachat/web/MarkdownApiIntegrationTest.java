@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.domain.markdown.MarkdownRenderRequest;
 import com.williamcallahan.javachat.service.MarkdownService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,8 +11,6 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,10 +25,13 @@ class MarkdownApiIntegrationTest {
     @Autowired
     org.springframework.test.web.servlet.MockMvc mvc;
 
+    @Autowired
+    ObjectMapper objectMapper;
+
     @Test
     void closingFenceProseIsOutsideCode_viaApi() throws Exception {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
-        String payload = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("text", input));
+        String payload = objectMapper.writeValueAsString(MarkdownRenderRequest.create(input));
         String html = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/__test/markdown")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -62,13 +65,15 @@ class MarkdownApiIntegrationTest {
         /**
          * Renders structured markdown HTML for API test coverage.
          *
-         * @param body request payload containing markdown text
+         * @param renderRequest request payload containing markdown text
          * @return rendered HTML string
          */
         @PostMapping("/__test/markdown")
-        public String render(@RequestBody Map<String, String> body) {
-            String text = body.getOrDefault("text", "");
-            return markdownService.processStructured(text).html();
+        public String render(@RequestBody MarkdownRenderRequest renderRequest) {
+            if (renderRequest.isBlank()) {
+                return "";
+            }
+            return markdownService.processStructured(renderRequest.content()).html();
         }
     }
 }
