@@ -365,14 +365,37 @@ public class DocsIngestionService {
         }
     }
 
+    /**
+     * Constructs a failure record with exception-specific diagnostic context.
+     *
+     * @param file the file that failed processing
+     * @param phase the processing phase where failure occurred
+     * @param exception the exception that caused the failure
+     * @return failure record with detailed diagnostics
+     */
     private LocalIngestionFailure failure(Path file, String phase, Exception exception) {
-        String details = exception.getMessage();
-        if (details == null || details.isBlank()) {
-            details = exception.getClass().getSimpleName();
-        } else {
-            details = exception.getClass().getSimpleName() + ": " + details;
+        StringBuilder details = new StringBuilder();
+        details.append(exception.getClass().getSimpleName());
+
+        String message = exception.getMessage();
+        if (message != null && !message.isBlank()) {
+            details.append(": ").append(message);
         }
-        return new LocalIngestionFailure(file.toString(), phase, details);
+
+        // Add exception-specific diagnostic context
+        if (exception instanceof java.io.FileNotFoundException) {
+            details.append(" [file not found or inaccessible]");
+        } else if (exception instanceof java.nio.file.AccessDeniedException) {
+            details.append(" [permission denied]");
+        } else if (exception instanceof java.nio.charset.MalformedInputException) {
+            details.append(" [file encoding issue - not valid UTF-8]");
+        } else if (exception.getCause() != null) {
+            details.append(" [caused by: ")
+                   .append(exception.getCause().getClass().getSimpleName())
+                   .append("]");
+        }
+
+        return new LocalIngestionFailure(file.toString(), phase, details.toString());
     }
 
     private String mapLocalPathToUrl(final Path file) {
@@ -515,6 +538,20 @@ public class DocsIngestionService {
         }
     }
 
+    /**
+     * Internal result of processing a single local file.
+     *
+     * @param processed true if file was successfully processed
+     * @param failure failure details when processing failed, must be non-null if processed is false
+     */
     private record LocalFileProcessingOutcome(boolean processed, LocalIngestionFailure failure) {
+        LocalFileProcessingOutcome {
+            if (!processed && failure == null) {
+                throw new IllegalStateException("Failure details required when file processing fails");
+            }
+            if (processed && failure != null) {
+                throw new IllegalStateException("Success outcome must not include failure details");
+            }
+        }
     }
 }
