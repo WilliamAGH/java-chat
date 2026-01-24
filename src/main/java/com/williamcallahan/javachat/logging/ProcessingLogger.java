@@ -86,32 +86,24 @@ public class ProcessingLogger {
      * Log RAG retrieval
      */
     @Around("execution(* com.williamcallahan.javachat.service.RetrievalService.retrieve*(..))")
-    public Object logRAGRetrieval(ProceedingJoinPoint joinPoint) {
+    public Object logRAGRetrieval(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
         
         PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Starting vector search", requestToken);
         
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
+        Object retrievalOutcome = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
 
-            PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms",
-                requestToken, duration);
+        PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms",
+            requestToken, duration);
 
-            // Log retrieved document count if available
-            if (result instanceof java.util.List) {
-                PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
-            }
-
-            return result;
-        } catch (RuntimeException runtimeException) {
-            throw runtimeException;
-        } catch (Error fatalError) {
-            throw fatalError;
-        } catch (Throwable throwable) {
-            throw new IllegalStateException("RAG retrieval failed", throwable);
+        // Log retrieved document count if available
+        if (retrievalOutcome instanceof java.util.List) {
+            PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
         }
+
+        return retrievalOutcome;
     }
 
     /**

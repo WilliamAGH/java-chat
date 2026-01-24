@@ -234,7 +234,7 @@ process_documents() {
     # Build the application
     log "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT"
-    ./mvnw -DskipTests clean package >> "$LOG_FILE" 2>&1
+    ./gradlew clean build -x test --no-daemon >> "$LOG_FILE" 2>&1
     
     if [ $? -eq 0 ]; then
         log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"
@@ -261,7 +261,7 @@ process_documents() {
     java -Dspring.profiles.active=cli \
          -DEMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE" \
          -DDOCS_DIR="$DOCS_ROOT" \
-         -jar target/*.jar >> "$LOG_FILE" 2>&1 &
+         -jar build/libs/*.jar >> "$LOG_FILE" 2>&1 &
     local APP_PID=$!
     
     log "${BLUE}ℹ Application started with PID: $APP_PID${NC}"
