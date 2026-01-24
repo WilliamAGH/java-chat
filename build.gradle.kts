@@ -184,3 +184,40 @@ tasks.register<Test>("integrationTest") {
     }
     shouldRunAfter(tasks.test)
 }
+
+// Custom helper tasks for scripts
+tasks.register("buildForScripts") {
+    description = "Build application JAR for use in scripts (skips tests)"
+    group = "build"
+    dependsOn(tasks.build)
+    doLast {
+        val jarFile = fileTree("build/libs") {
+            include("*.jar")
+            exclude("*-plain.jar")
+        }.singleFile
+        println("Built JAR: ${jarFile.absolutePath}")
+    }
+}
+
+tasks.register<JavaExec>("runDocumentProcessor") {
+    description = "Run DocumentProcessor CLI for batch ingestion"
+    group = "application"
+    mainClass.set("com.williamcallahan.javachat.cli.DocumentProcessor")
+    classpath = sourceSets["main"].runtimeClasspath
+    systemProperty("spring.profiles.active", "default")
+    
+    // Pass DOCS_DIR from environment or use default
+    val docsDir = System.getenv("DOCS_DIR") ?: "${project.rootDir}/data/docs"
+    systemProperty("DOCS_DIR", docsDir)
+}
+
+val bootJarPath = tasks.bootJar.get().outputs.files.singleFile.absolutePath
+
+tasks.register("printJarPath") {
+    description = "Print the path to the built boot JAR"
+    group = "help"
+    dependsOn(tasks.bootJar)
+    doLast {
+        println(bootJarPath)
+    }
+}

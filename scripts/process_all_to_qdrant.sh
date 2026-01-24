@@ -38,13 +38,18 @@ for arg in "$@"; do
     esac
 done
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Source colors from parent Makefile if available, otherwise define inline
+if [ -n "$RED" ]; then
+    # Already exported from Makefile
+    :
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m' # No Color
+fi
 
 echo "=============================================="
 echo "Document Processor"
@@ -231,10 +236,10 @@ process_documents() {
         sleep 2
     fi
     
-    # Build the application
+    # Build the application using Gradle task
     log "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT"
-    ./gradlew clean build -x test --no-daemon >> "$LOG_FILE" 2>&1
+    ./gradlew buildForScripts --quiet >> "$LOG_FILE" 2>&1
     
     if [ $? -eq 0 ]; then
         log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"

@@ -9,10 +9,17 @@ GREEN  := \033[0;32m
 YELLOW := \033[0;33m
 CYAN   := \033[0;36m
 NC     := \033[0m
+
 # Compute JAR lazily so it's resolved after the build runs
 # Use a function instead of variable to evaluate at runtime
 # Exclude -plain.jar which is the non-bootable archive
 get_jar = $(shell ls -t build/libs/*.jar 2>/dev/null | grep -v '\-plain\.jar' | head -n 1)
+
+# Export color codes and paths for use in scripts
+export RED GREEN YELLOW CYAN NC
+export PROJECT_ROOT := $(shell pwd)
+export JAR_PATH = $(call get_jar)
+
 
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)

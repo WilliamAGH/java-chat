@@ -8,14 +8,19 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+# Source colors from parent Makefile if available, otherwise define inline
+if [ -n "$RED" ]; then
+    # Already exported from Makefile
+    :
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m' # No Color
+    BOLD='\033[1m'
+fi
 
 echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${BOLD}${CYAN}           🧪 SINGLE DOCUMENT INDEXING TEST 🧪${NC}"
@@ -129,7 +134,7 @@ cd "$PROJECT_ROOT"
 # Build if needed
 if [ ! -f "build/libs/java-chat-0.0.1-SNAPSHOT.jar" ] || [ "build.gradle.kts" -nt "build/libs/java-chat-0.0.1-SNAPSHOT.jar" ]; then
     echo -e "Building application..."
-    ./gradlew clean build -x test --no-daemon > /dev/null 2>&1
+    ./gradlew buildForScripts --quiet
     echo -e "✅ Build complete"
 fi
 
