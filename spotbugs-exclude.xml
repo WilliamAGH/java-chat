@@ -1,15 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <FindBugsFilter>
     <!--
-        Exclude WebMvcConfig from SpotBugs analysis due to bug in FindSecBugs
-        CorsRegistryCORSDetector causing NPE on Spring CORS configuration.
-        See: https://github.com/find-sec-bugs/find-sec-bugs/issues
-    -->
-    <Match>
-        <Class name="com.williamcallahan.javachat.config.WebMvcConfig"/>
-    </Match>
-
-    <!--
         Error handlers must respond to any HTTP method that may trigger an error.
         CustomErrorController explicitly allows common methods to ensure consistent error rendering
         for browser requests and API clients; this is not an application endpoint intended for state changes.
@@ -20,7 +11,7 @@
         <Method name="handleError"/>
     </Match>
     <Match>
-        <Bug pattern="SPRING_ENDPOINT"/>
+        <Bug code="SECSC"/>
         <Package name="com.williamcallahan.javachat.web"/>
     </Match>
 
@@ -29,57 +20,72 @@
         but these fields are not exposed via accessors and are required for DI.
     -->
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.EmbeddingCacheService"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.MarkdownService"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.MarkdownStreamProcessor"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.web.ChatController"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.ChatService"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedLearningService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.web.MarkdownController"/>
     </Match>
     <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.web.TooltipController"/>
-    </Match>
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
-        <Class name="com.williamcallahan.javachat.service.GuidedLearningService"/>
     </Match>
 
     <!--
         Public-facing REST controllers are intentionally open and do not use Spring Security annotations.
-        Suppress SPRING_ENDPOINT for the web package to avoid false positives.
+        FindSecBugs reports these as endpoints to prompt security review; in this project the API surface is intended.
     -->
     <Match>
-        <Bug pattern="SPRING_ENDPOINT"/>
+        <Bug code="SECSC"/>
         <Class name="~com\\.williamcallahan\\.javachat\\.web\\..*"/>
+    </Match>
+
+    <!--
+        SpotBugs can report redundant null checks for implicit receiver null checks (bytecode-level NPE checks)
+        when nullability annotations indicate a value is non-null. These are noise and not actionable.
+    -->
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.EnrichmentController"/>
+        <Method name="enrich"/>
+    </Match>
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+        <Method name="enrich"/>
     </Match>
 
     <!--
