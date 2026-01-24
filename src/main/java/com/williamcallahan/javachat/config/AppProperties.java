@@ -30,6 +30,8 @@ public class AppProperties {
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
     private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
+    private static final String EMBEDDINGS_KEY = "app.embeddings";
+    private static final String LLM_KEY = "app.llm";
 
     /**
      * Default base URL for SEO endpoints when no explicit public base URL is configured.
@@ -46,6 +48,8 @@ public class AppProperties {
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
     private CorsConfig cors = new CorsConfig();
+    private Embeddings embeddings = new Embeddings();
+    private Llm llm = new Llm();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
     /**
@@ -63,6 +67,8 @@ public class AppProperties {
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY);
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+        requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
+        requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
 
@@ -170,231 +176,81 @@ public class AppProperties {
         return message.replace("\r", "").replace("\n", "");
     }
 
-    /**
-     * Returns retrieval augmentation configuration.
-     *
-     * @return retrieval augmentation configuration
-     */
-    public RetrievalAugmentationConfig getRag() {
-        return copyRagConfig(rag);
-    }
+    public RetrievalAugmentationConfig getRag() { return rag; }
+    public void setRag(RetrievalAugmentationConfig rag) { this.rag = requireConfiguredSection(rag, RAG_KEY); }
 
-    /**
-     * Sets retrieval augmentation configuration.
-     *
-     * @param rag retrieval augmentation configuration
-     */
-    public void setRag(final RetrievalAugmentationConfig rag) {
-        this.rag = requireConfiguredSection(rag, RAG_KEY);
-    }
+    public LocalEmbedding getLocalEmbedding() { return localEmbedding; }
+    public void setLocalEmbedding(LocalEmbedding localEmbedding) { this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY); }
 
-    /**
-     * Returns local embedding configuration.
-     *
-     * @return local embedding configuration
-     */
-    public LocalEmbedding getLocalEmbedding() {
-        return copyLocalEmbedding(localEmbedding);
-    }
+    public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
+    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY); }
 
-    /**
-     * Sets local embedding configuration.
-     *
-     * @param localEmbedding local embedding configuration
-     */
-    public void setLocalEmbedding(final LocalEmbedding localEmbedding) {
-        this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY);
-    }
+    public DocumentationConfig getDocs() { return docs; }
+    public void setDocs(DocumentationConfig docs) { this.docs = requireConfiguredSection(docs, DOCS_KEY); }
 
-    /**
-     * Returns remote embedding configuration.
-     *
-     * @return remote embedding configuration
-     */
-    public RemoteEmbedding getRemoteEmbedding() {
-        return copyRemoteEmbedding(remoteEmbedding);
-    }
+    public Diagnostics getDiagnostics() { return diagnostics; }
+    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY); }
 
-    /**
-     * Sets remote embedding configuration.
-     *
-     * @param remoteEmbedding remote embedding configuration
-     */
-    public void setRemoteEmbedding(final RemoteEmbedding remoteEmbedding) {
-        this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY);
-    }
+    public Qdrant getQdrant() { return qdrant; }
+    public void setQdrant(Qdrant qdrant) { this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY); }
 
-    /**
-     * Returns documentation configuration.
-     *
-     * @return documentation configuration
-     */
-    public DocumentationConfig getDocs() {
-        return copyDocumentationConfig(docs);
-    }
+    public CorsConfig getCors() { return cors; }
+    public void setCors(CorsConfig cors) { this.cors = requireConfiguredSection(cors, CORS_KEY); }
 
-    /**
-     * Sets documentation configuration.
-     *
-     * @param docs documentation configuration
-     */
-    public void setDocs(final DocumentationConfig docs) {
-        this.docs = requireConfiguredSection(docs, DOCS_KEY);
-    }
+    public Embeddings getEmbeddings() { return embeddings; }
+    public void setEmbeddings(Embeddings embeddings) { this.embeddings = requireConfiguredSection(embeddings, EMBEDDINGS_KEY); }
 
-    /**
-     * Returns diagnostics configuration.
-     *
-     * @return diagnostics configuration
-     */
-    public Diagnostics getDiagnostics() {
-        return copyDiagnostics(diagnostics);
-    }
+    public Llm getLlm() { return llm; }
+    public void setLlm(Llm llm) { this.llm = requireConfiguredSection(llm, LLM_KEY); }
 
-    /**
-     * Sets diagnostics configuration.
-     *
-     * @param diagnostics diagnostics configuration
-     */
-    public void setDiagnostics(final Diagnostics diagnostics) {
-        this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY);
-    }
-
-    /**
-     * Returns Qdrant configuration.
-     *
-     * @return Qdrant configuration
-     */
-    public Qdrant getQdrant() {
-        return copyQdrant(qdrant);
-    }
-
-    /**
-     * Sets Qdrant configuration.
-     *
-     * @param qdrant Qdrant configuration
-     */
-    public void setQdrant(final Qdrant qdrant) {
-        this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY);
-    }
-
-    /**
-     * Returns CORS configuration.
-     *
-     * @return CORS configuration
-     */
-    public CorsConfig getCors() {
-        return copyCorsConfig(cors);
-    }
-
-    /**
-     * Sets CORS configuration.
-     *
-     * @param cors CORS configuration
-     */
-    public void setCors(final CorsConfig cors) {
-        this.cors = requireConfiguredSection(cors, CORS_KEY);
-    }
-
-    private static <T> T requireConfiguredSection(final T section, final String sectionKey) {
+    private static <T> T requireConfiguredSection(T section, String sectionKey) {
         if (section == null) {
             throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
         }
         return section;
     }
 
-    private static RetrievalAugmentationConfig copyRagConfig(final RetrievalAugmentationConfig sourceConfig) {
-        final RetrievalAugmentationConfig copy = new RetrievalAugmentationConfig();
-        copy.setSearchTopK(sourceConfig.getSearchTopK());
-        copy.setSearchReturnK(sourceConfig.getSearchReturnK());
-        copy.setChunkMaxTokens(sourceConfig.getChunkMaxTokens());
-        copy.setChunkOverlapTokens(sourceConfig.getChunkOverlapTokens());
-        copy.setSearchCitations(sourceConfig.getSearchCitations());
-        copy.setSearchMmrLambda(sourceConfig.getSearchMmrLambda());
-        return copy;
-    }
-
-    private static LocalEmbedding copyLocalEmbedding(final LocalEmbedding sourceConfig) {
-        final LocalEmbedding copy = new LocalEmbedding();
-        copy.setEnabled(sourceConfig.isEnabled());
-        copy.setServerUrl(sourceConfig.getServerUrl());
-        copy.setModel(sourceConfig.getModel());
-        copy.setDimensions(sourceConfig.getDimensions());
-        copy.setUseHashWhenDisabled(sourceConfig.isUseHashWhenDisabled());
-        return copy;
-    }
-
-    private static RemoteEmbedding copyRemoteEmbedding(final RemoteEmbedding sourceConfig) {
-        final RemoteEmbedding copy = new RemoteEmbedding();
-        copy.setServerUrl(sourceConfig.getServerUrl());
-        copy.setModel(sourceConfig.getModel());
-        copy.setApiKey(sourceConfig.getApiKey());
-        copy.setDimensions(sourceConfig.getDimensions());
-        return copy;
-    }
-
-    private static DocumentationConfig copyDocumentationConfig(final DocumentationConfig sourceConfig) {
-        final DocumentationConfig copy = new DocumentationConfig();
-        copy.setRootUrl(sourceConfig.getRootUrl());
-        copy.setJdkVersion(sourceConfig.getJdkVersion());
-        copy.setSnapshotDir(sourceConfig.getSnapshotDir());
-        copy.setParsedDir(sourceConfig.getParsedDir());
-        copy.setIndexDir(sourceConfig.getIndexDir());
-        return copy;
-    }
-
-    private static Diagnostics copyDiagnostics(final Diagnostics sourceConfig) {
-        final Diagnostics copy = new Diagnostics();
-        copy.setStreamChunkLogging(sourceConfig.isStreamChunkLogging());
-        copy.setStreamChunkSample(sourceConfig.getStreamChunkSample());
-        return copy;
-    }
-
-    private static Qdrant copyQdrant(final Qdrant sourceConfig) {
-        final Qdrant copy = new Qdrant();
-        copy.setEnsurePayloadIndexes(sourceConfig.isEnsurePayloadIndexes());
-        return copy;
-    }
-
-    private static CorsConfig copyCorsConfig(final CorsConfig sourceConfig) {
-        final CorsConfig copy = new CorsConfig();
-        copy.setAllowedOrigins(sourceConfig.getAllowedOrigins());
-        copy.setAllowedMethods(sourceConfig.getAllowedMethods());
-        copy.setAllowedHeaders(sourceConfig.getAllowedHeaders());
-        copy.setAllowCredentials(sourceConfig.isAllowCredentials());
-        copy.setMaxAgeSeconds(sourceConfig.getMaxAgeSeconds());
-        return copy;
-    }
-
-    /**
-     * Qdrant configuration.
-     */
+    /** Qdrant vector store settings. */
     public static class Qdrant {
+        private boolean ensurePayloadIndexes = true;
+        public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
+        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
+    }
 
-        private boolean payloadIndexing = true;
+    /** Embedding vector configuration. */
+    public static class Embeddings {
+        private int dimensions = 1536;
+        private String cacheDir = "./data/embeddings-cache";
+        public int getDimensions() { return dimensions; }
+        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
+        public String getCacheDir() { return cacheDir; }
+        public void setCacheDir(String cacheDir) { this.cacheDir = cacheDir; }
 
-        /**
-         * Creates Qdrant configuration.
-         */
-        public Qdrant() {
+        Embeddings validateConfiguration() {
+            if (dimensions <= 0) {
+                throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
+            }
+            return this;
         }
+    }
 
-        /**
-         * Returns whether payload indexes are ensured.
-         *
-         * @return whether payload indexes are ensured
-         */
-        public boolean isEnsurePayloadIndexes() {
-            return payloadIndexing;
-        }
+    /** LLM generation parameters. */
+    public static class Llm {
+        private static final double MIN_TEMPERATURE = 0.0;
+        private static final double MAX_TEMPERATURE = 2.0;
 
-        /**
-         * Sets whether payload indexes are ensured.
-         *
-         * @param payloadIndexing whether payload indexes are ensured
-         */
-        public void setEnsurePayloadIndexes(final boolean payloadIndexing) {
-            this.payloadIndexing = payloadIndexing;
+        private double temperature = 0.7;
+        public double getTemperature() { return temperature; }
+        public void setTemperature(double temperature) { this.temperature = temperature; }
+
+        Llm validateConfiguration() {
+            if (temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
+                throw new IllegalArgumentException(
+                    String.format(Locale.ROOT,
+                        "app.llm.temperature must be in range [%.1f, %.1f], got: %.2f",
+                        MIN_TEMPERATURE, MAX_TEMPERATURE, temperature));
+            }
+            return this;
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
@@ -8,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -30,8 +30,7 @@ public class ChatService {
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
     private final MarkdownService markdownService;
-    @Value("${app.llm.temperature:0.7}")
-    private double temperature;
+    private final double temperature;
 
     /**
      * Creates the chat service with streaming, retrieval, and markdown dependencies.
@@ -40,15 +39,18 @@ public class ChatService {
      * @param retrievalService RAG retrieval service
      * @param systemPromptConfig system prompt configuration
      * @param markdownService markdown processing service
+     * @param appProperties application configuration
      */
     public ChatService(OpenAIStreamingService openAIStreamingService,
                        RetrievalService retrievalService,
                        SystemPromptConfig systemPromptConfig,
-                       MarkdownService markdownService) {
+                       MarkdownService markdownService,
+                       AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
         this.markdownService = markdownService;
+        this.temperature = appProperties.getLlm().getTemperature();
     }
 
     /**

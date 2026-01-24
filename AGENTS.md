@@ -99,3 +99,4 @@ alwaysApply: true
 - SRC3 Inspect `~/.gradle/caches/` for dependency code in Gradle projects; verify actual implementation rather than assuming.
 - DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
 - DI1 Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean to ensure consistent configuration.
+- SB1 Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`; never use `META-INF/additional-spring-configuration-metadata.json` as a band-aid for `@Value` usage.
