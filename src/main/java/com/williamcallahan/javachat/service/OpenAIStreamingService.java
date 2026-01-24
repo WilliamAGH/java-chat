@@ -178,12 +178,12 @@ public class OpenAIStreamingService {
                 .timeout(streamingTimeout())
                 .build();
 
-            return Flux.using(
+            // StreamResponse implements AutoCloseable; use 2-arg Flux.using() for automatic cleanup
+            return Flux.<String, StreamResponse<ChatCompletionChunk>>using(
                 () -> streamingClient.chat().completions().createStreaming(params, requestOptions),
                 responseStream -> Flux.fromStream(responseStream.stream())
                     .flatMap(chunk -> Flux.fromIterable(chunk.choices()))
-                    .flatMap(choice -> Mono.justOrEmpty(choice.delta().content())),
-                (StreamResponse<ChatCompletionChunk> responseStream) -> responseStream.close()
+                    .flatMap(choice -> Mono.justOrEmpty(choice.delta().content()))
             )
             .doOnComplete(() -> {
                 log.debug("Stream completed successfully");
