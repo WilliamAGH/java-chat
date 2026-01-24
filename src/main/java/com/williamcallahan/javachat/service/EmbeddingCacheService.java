@@ -455,6 +455,9 @@ public class EmbeddingCacheService {
     }
     
     private String generateCacheKey(Document doc) {
+        if (doc == null) {
+            throw new IllegalArgumentException("Document is required");
+        }
         return generateCacheKey(doc.getText(), doc.getMetadata());
     }
     

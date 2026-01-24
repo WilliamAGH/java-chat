@@ -311,7 +311,8 @@ To run this program, follow these steps:
                     chunkIndex = Integer.parseInt(String.valueOf(chunkIndexValue));
                 }
             } catch (NumberFormatException chunkIndexParseException) {
-                logger.debug("Failed to parse chunkIndex from metadata: {}", chunkIndexValue);
+                logger.debug("Failed to parse chunkIndex from metadata: {}",
+                    sanitizeForLogText(String.valueOf(chunkIndexValue)));
             }
             int totalChunks = totalChunksForUrl(url);
             if (pages > 0 && chunkIndex >= 0 && totalChunks > 0) {
@@ -328,7 +329,7 @@ To run this program, follow these steps:
         List<Document> filtered = new ArrayList<>();
         for (Document document : docs) {
             String url = String.valueOf(document.getMetadata().getOrDefault("url", ""));
-            if (url != null && url.contains(THINK_JAVA_PDF_PATH)) {
+            if (url.contains(THINK_JAVA_PDF_PATH)) {
                 filtered.add(document);
             }
         }
@@ -352,5 +353,12 @@ To run this program, follow these steps:
         fallbackEnrichment.setReminders(List.of());
         fallbackEnrichment.setBackground(List.of());
         return fallbackEnrichment;
+    }
+
+    private static String sanitizeForLogText(String rawText) {
+        if (rawText == null) {
+            return "";
+        }
+        return rawText.replace("\r", "\\r").replace("\n", "\\n");
     }
 }

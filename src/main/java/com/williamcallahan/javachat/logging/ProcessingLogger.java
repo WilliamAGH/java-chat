@@ -186,22 +186,27 @@ public class ProcessingLogger {
 
         PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Starting", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
+        Object result = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
 
-            if (result instanceof java.util.List) {
-                PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
-            }
-
-            return result;
-        } catch (RuntimeException runtimeException) {
-            PIPELINE_LOG.error("[{}] STEP 7: CITATION GENERATION - Failed (runtime exception)", requestToken);
-            throw runtimeException;
-        } catch (Error fatalError) {
-            PIPELINE_LOG.error("[{}] STEP 7: CITATION GENERATION - Failed (error)", requestToken);
-            throw fatalError;
+        if (result instanceof java.util.List) {
+            PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
         }
+
+        return result;
+    }
+
+    /**
+     * Logs citation generation failures without masking the underlying exception.
+     */
+    @AfterThrowing(
+        pointcut = "execution(* com.williamcallahan.javachat.service.ChatService.citationsFor(..))",
+        throwing = "exception"
+    )
+    public void logCitationGenerationFailure(Throwable exception) {
+        int requestToken = Objects.hashCode(REQUEST_ID.get());
+        PIPELINE_LOG.error("[{}] STEP 7: CITATION GENERATION - Failed (exception type: {})",
+            requestToken, exception.getClass().getSimpleName());
     }
     
     
