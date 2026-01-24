@@ -206,7 +206,11 @@ public class DocsIngestionService {
 
     private boolean processLocalFile(Path file) {
         long fileStartMillis = System.currentTimeMillis();
-        String fileName = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        Path fileNamePath = file.getFileName();
+        if (fileNamePath == null) {
+            return false;
+        }
+        String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
         String title;
         String bodyText = null;
         String url = mapLocalPathToUrl(file);
@@ -217,7 +221,7 @@ public class DocsIngestionService {
             try {
                 // Extract title from PDF metadata or filename
                 String metadata = pdfExtractor.getPdfMetadata(file);
-                title = extractTitleFromMetadata(metadata, file.getFileName().toString());
+                title = extractTitleFromMetadata(metadata, fileNamePath.toString());
                 packageName = "";
                 // For recognized book PDFs, point URL to public /pdfs path
                 final Optional<String> publicPdfUrl =
