@@ -2,12 +2,16 @@ package com.williamcallahan.javachat.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import com.openai.core.http.Headers;
+import com.openai.errors.OpenAIServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -273,6 +277,35 @@ public class RateLimitManager {
     }
 
     /**
+     * Records a rate limit using headers from the OpenAI Java SDK exception, if present.
+     *
+     * The SDK exposes response headers via {@link OpenAIServiceException#headers()}, which is more reliable than
+     * parsing exception messages.
+     *
+     * @param provider the provider that produced the rate limit
+     * @param exception OpenAI SDK service exception carrying response headers
+     */
+    public void recordRateLimitFromOpenAiServiceException(ApiProvider provider, OpenAIServiceException exception) {
+        if (provider == null || exception == null) {
+            return;
+        }
+        ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
+        if (rateLimitInfo.retryAfterSeconds > 0) {
+            recordRateLimitInternal(provider, Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds), rateLimitInfo.retryAfterSeconds);
+            return;
+        }
+
+        if (rateLimitInfo.resetTime != null) {
+            long retryAfterSeconds = Math.max(0, Duration.between(Instant.now(), rateLimitInfo.resetTime).getSeconds());
+            recordRateLimitInternal(provider, rateLimitInfo.resetTime, retryAfterSeconds);
+            return;
+        }
+
+        // Fallback: no usable headers, use error-message-based heuristics.
+        recordRateLimit(provider, exception.getMessage());
+    }
+
+    /**
      * Parse rate limit reset time from WebClientResponseException
      */
     public void recordRateLimitFromException(
@@ -405,6 +438,173 @@ public class RateLimitManager {
         }
 
         return 0;
+    }
+
+    private ParsedRateLimitInfo parseRateLimitFromHeaders(Headers headers) {
+        if (headers == null || headers.isEmpty()) {
+            return new ParsedRateLimitInfo(null, 0);
+        }
+
+        long retryAfterSeconds = parseRetryAfterSeconds(headers);
+        if (retryAfterSeconds > 0) {
+            return new ParsedRateLimitInfo(null, retryAfterSeconds);
+        }
+
+        Instant resetInstant = parseResetInstant(headers);
+        return new ParsedRateLimitInfo(resetInstant, 0);
+    }
+
+    private long parseRetryAfterSeconds(Headers headers) {
+        String retryAfter = firstHeaderValue(headers, "Retry-After");
+        if (retryAfter == null) {
+            return 0;
+        }
+
+        String trimmed = retryAfter.trim();
+        if (isDigits(trimmed)) {
+            return Long.parseLong(trimmed);
+        }
+
+        try {
+            ZonedDateTime httpDate = ZonedDateTime.parse(trimmed, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+            long seconds = Duration.between(Instant.now(), httpDate.toInstant()).getSeconds();
+            return Math.max(0, seconds);
+        } catch (RuntimeException parseFailed) {
+            return 0;
+        }
+    }
+
+    private Instant parseResetInstant(Headers headers) {
+        String resetSeconds = firstHeaderValue(headers, "X-RateLimit-Reset");
+        if (resetSeconds != null) {
+            Instant parsed = parseInstantSecondsFromEpoch(resetSeconds);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+
+        // OpenAI commonly returns reset windows like "1s", "2m", etc. Prefer the shortest if multiple are present.
+        long candidateSeconds = minPositive(
+            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-requests")),
+            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-tokens")),
+            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset")),
+            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Requests")),
+            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Tokens"))
+        );
+        if (candidateSeconds > 0) {
+            return Instant.now().plusSeconds(candidateSeconds);
+        }
+
+        return null;
+    }
+
+    private Instant parseInstantSecondsFromEpoch(String rawSeconds) {
+        if (rawSeconds == null) {
+            return null;
+        }
+        String trimmed = rawSeconds.trim();
+        if (!isDigits(trimmed)) {
+            return null;
+        }
+        try {
+            long epochSeconds = Long.parseLong(trimmed);
+            return Instant.ofEpochSecond(epochSeconds);
+        } catch (RuntimeException parseFailed) {
+            return null;
+        }
+    }
+
+    private long parseDurationSeconds(String rawDuration) {
+        if (rawDuration == null) {
+            return 0;
+        }
+        String trimmed = rawDuration.trim();
+        if (trimmed.isEmpty()) {
+            return 0;
+        }
+
+        int lastIndex = trimmed.length() - 1;
+        char lastChar = trimmed.charAt(lastIndex);
+        if (isDigits(trimmed)) {
+            return Long.parseLong(trimmed);
+        }
+
+        if (lastChar == 's') {
+            String numberPart = trimmed.substring(0, lastIndex).trim();
+            if (isDigits(numberPart)) {
+                return Long.parseLong(numberPart);
+            }
+        }
+        if (lastChar == 'm') {
+            String numberPart = trimmed.substring(0, lastIndex).trim();
+            if (isDigits(numberPart)) {
+                return TimeUnit.MINUTES.toSeconds(Long.parseLong(numberPart));
+            }
+        }
+        if (lastChar == 'h') {
+            String numberPart = trimmed.substring(0, lastIndex).trim();
+            if (isDigits(numberPart)) {
+                return TimeUnit.HOURS.toSeconds(Long.parseLong(numberPart));
+            }
+        }
+        if (trimmed.endsWith("ms")) {
+            String numberPart = trimmed.substring(0, trimmed.length() - 2).trim();
+            if (isDigits(numberPart)) {
+                long millis = Long.parseLong(numberPart);
+                return Math.max(1, TimeUnit.MILLISECONDS.toSeconds(millis));
+            }
+        }
+
+        return 0;
+    }
+
+    private long minPositive(long... candidates) {
+        long min = 0;
+        for (long candidate : candidates) {
+            if (candidate <= 0) {
+                continue;
+            }
+            if (min == 0 || candidate < min) {
+                min = candidate;
+            }
+        }
+        return min;
+    }
+
+    private String firstHeaderValue(Headers headers, String name) {
+        if (headers == null || name == null || name.isBlank()) {
+            return null;
+        }
+        if (!headers.names().contains(name)) {
+            // `Headers` is case-insensitive, but the Set may not contain exactly matching names.
+            for (String headerName : headers.names()) {
+                if (headerName != null && headerName.equalsIgnoreCase(name)) {
+                    return firstHeaderValue(headers, headerName);
+                }
+            }
+            return null;
+        }
+        var values = headers.values(name);
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return values.get(0);
+    }
+
+    private void recordRateLimitInternal(ApiProvider provider, Instant resetTime, long retryAfterSeconds) {
+        ApiEndpointState state = endpointStates.computeIfAbsent(
+            provider.getName(),
+            providerKey -> new ApiEndpointState()
+        );
+        state.recordRateLimit(retryAfterSeconds);
+
+        rateLimitState.recordRateLimit(
+            provider.getName(),
+            resetTime,
+            provider.getTypicalRateLimitWindow()
+        );
+
+        log.warn("Provider rate limited");
     }
 
     private boolean isDigits(String candidate) {
