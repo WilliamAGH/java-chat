@@ -16,6 +16,27 @@ import java.util.UUID;
 import static java.io.ObjectInputFilter.Status;
 
 final class EmbeddingCacheFileImporter {
+    /** Bytes reserved for mark/reset during format detection. */
+    private static final int FORMAT_DETECTION_MARK_LIMIT = 512;
+
+    /** Bytes read from file header for format detection. */
+    private static final int FORMAT_DETECTION_HEADER_SIZE = 64;
+
+    /** First magic byte identifying Java serialized stream (STREAM_MAGIC high byte). */
+    private static final int JAVA_SERIAL_MAGIC_BYTE_1 = 0xAC;
+
+    /** Second magic byte identifying Java serialized stream (STREAM_MAGIC low byte). */
+    private static final int JAVA_SERIAL_MAGIC_BYTE_2 = 0xED;
+
+    /** Maximum allowed object graph depth to prevent stack overflow attacks. */
+    private static final int DESERIALIZATION_MAX_DEPTH = 80;
+
+    /** Maximum allowed reference count to prevent memory exhaustion attacks. */
+    private static final long DESERIALIZATION_MAX_REFERENCES = 20_000_000L;
+
+    /** Maximum allowed array length to prevent memory exhaustion attacks. */
+    private static final long DESERIALIZATION_MAX_ARRAY_LENGTH = 50_000_000L;
+
     private final ObjectMapper cacheMapper;
 
     EmbeddingCacheFileImporter(ObjectMapper cacheMapper) {
@@ -36,11 +57,13 @@ final class EmbeddingCacheFileImporter {
     }
 
     private CacheFileFormat detectCacheFileFormat(BufferedInputStream bufferedInputStream) throws IOException {
-        bufferedInputStream.mark(512);
-        byte[] header = bufferedInputStream.readNBytes(64);
+        bufferedInputStream.mark(FORMAT_DETECTION_MARK_LIMIT);
+        byte[] header = bufferedInputStream.readNBytes(FORMAT_DETECTION_HEADER_SIZE);
         bufferedInputStream.reset();
 
-        if (header.length >= 2 && (header[0] & 0xFF) == 0xAC && (header[1] & 0xFF) == 0xED) {
+        if (header.length >= 2
+                && (header[0] & 0xFF) == JAVA_SERIAL_MAGIC_BYTE_1
+                && (header[1] & 0xFF) == JAVA_SERIAL_MAGIC_BYTE_2) {
             return CacheFileFormat.LEGACY_JAVA_SERIALIZED;
         }
 
@@ -56,18 +79,18 @@ final class EmbeddingCacheFileImporter {
         return cacheMapper.readValue(jsonStream, new TypeReference<List<EmbeddingCacheEntry>>() {});
     }
 
-    private static final ObjectInputFilter LEGACY_CACHE_INPUT_FILTER = info -> {
-        if (info.depth() > 80) {
+    private static final ObjectInputFilter LEGACY_CACHE_INPUT_FILTER = filterContext -> {
+        if (filterContext.depth() > DESERIALIZATION_MAX_DEPTH) {
             return Status.REJECTED;
         }
-        if (info.references() > 20_000_000) {
+        if (filterContext.references() > DESERIALIZATION_MAX_REFERENCES) {
             return Status.REJECTED;
         }
-        if (info.arrayLength() >= 0 && info.arrayLength() > 50_000_000) {
+        if (filterContext.arrayLength() >= 0 && filterContext.arrayLength() > DESERIALIZATION_MAX_ARRAY_LENGTH) {
             return Status.REJECTED;
         }
 
-        Class<?> serializedClass = info.serialClass();
+        Class<?> serializedClass = filterContext.serialClass();
         if (serializedClass == null) {
             return Status.UNDECIDED;
         }
