@@ -2,11 +2,16 @@ package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.springframework.ai.document.Document;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 final class EmbeddingCacheEntry {
@@ -93,10 +98,23 @@ record EmbeddingCacheMetadata(
     @JsonProperty("pageStart") Integer pageStart,
     @JsonProperty("pageEnd") Integer pageEnd,
     @JsonProperty("retrievalSource") String retrievalSource,
-    @JsonProperty("fallbackReason") String fallbackReason
+    @JsonProperty("fallbackReason") String fallbackReason,
+    @JsonProperty("additionalMetadata") Map<String, JsonNode> additionalMetadata
 ) {
+    private static final Set<String> KNOWN_KEYS = Set.of(
+        "url",
+        "title",
+        "chunkIndex",
+        "package",
+        "hash",
+        "pageStart",
+        "pageEnd",
+        "retrievalSource",
+        "fallbackReason"
+    );
+
     private static final EmbeddingCacheMetadata EMPTY = new EmbeddingCacheMetadata(
-        null, null, null, null, null, null, null, null, null
+        null, null, null, null, null, null, null, null, null, Map.of()
     );
 
     static EmbeddingCacheMetadata empty() {
@@ -120,6 +138,8 @@ record EmbeddingCacheMetadata(
         String retrievalSource = stringOrEmpty(springMetadata, "retrievalSource");
         String fallbackReason = stringOrEmpty(springMetadata, "fallbackReason");
 
+        Map<String, JsonNode> additionalMetadata = additionalMetadataFrom(springMetadata);
+
         return new EmbeddingCacheMetadata(
             blankToNull(url),
             blankToNull(title),
@@ -129,7 +149,39 @@ record EmbeddingCacheMetadata(
             pageStart,
             pageEnd,
             blankToNull(retrievalSource),
-            blankToNull(fallbackReason)
+            blankToNull(fallbackReason),
+            additionalMetadata
+        );
+    }
+
+    static EmbeddingCacheMetadata fromLegacyMetadataMap(Map<?, ?> legacyMetadata) {
+        if (legacyMetadata == null || legacyMetadata.isEmpty()) {
+            return empty();
+        }
+
+        String url = stringOrEmptyLegacy(legacyMetadata, "url");
+        String title = stringOrEmptyLegacy(legacyMetadata, "title");
+        Integer chunkIndex = coerceInteger(legacyMetadata.get("chunkIndex"));
+        String packageName = stringOrEmptyLegacy(legacyMetadata, "package");
+        String hash = stringOrEmptyLegacy(legacyMetadata, "hash");
+        Integer pageStart = coerceInteger(legacyMetadata.get("pageStart"));
+        Integer pageEnd = coerceInteger(legacyMetadata.get("pageEnd"));
+        String retrievalSource = stringOrEmptyLegacy(legacyMetadata, "retrievalSource");
+        String fallbackReason = stringOrEmptyLegacy(legacyMetadata, "fallbackReason");
+
+        Map<String, JsonNode> additionalMetadata = additionalMetadataFromLegacy(legacyMetadata);
+
+        return new EmbeddingCacheMetadata(
+            blankToNull(url),
+            blankToNull(title),
+            chunkIndex,
+            blankToNull(packageName),
+            blankToNull(hash),
+            pageStart,
+            pageEnd,
+            blankToNull(retrievalSource),
+            blankToNull(fallbackReason),
+            additionalMetadata
         );
     }
 
@@ -162,9 +214,25 @@ record EmbeddingCacheMetadata(
         if (fallbackReason != null && !fallbackReason.isBlank()) {
             document.getMetadata().put("fallbackReason", fallbackReason);
         }
+        if (additionalMetadata != null && !additionalMetadata.isEmpty()) {
+            additionalMetadata.forEach((metadataKey, metadataNode) -> {
+                if (metadataKey == null || metadataKey.isBlank() || KNOWN_KEYS.contains(metadataKey)) {
+                    return;
+                }
+                Object metadataValue = documentMetadataValue(metadataNode);
+                if (metadataValue != null) {
+                    document.getMetadata().put(metadataKey, metadataValue);
+                }
+            });
+        }
     }
 
     private static String stringOrEmpty(Map<String, ?> map, String key) {
+        Object metadataField = map.get(key);
+        return metadataField != null ? String.valueOf(metadataField) : "";
+    }
+
+    private static String stringOrEmptyLegacy(Map<?, ?> map, String key) {
         Object metadataField = map.get(key);
         return metadataField != null ? String.valueOf(metadataField) : "";
     }
@@ -181,6 +249,84 @@ record EmbeddingCacheMetadata(
             }
         }
         return null;
+    }
+
+    private static Map<String, JsonNode> additionalMetadataFrom(Map<String, ?> sourceMetadata) {
+        LinkedHashMap<String, JsonNode> additionalMetadata = new LinkedHashMap<>();
+        sourceMetadata.forEach((metadataKey, metadataField) -> {
+            if (metadataKey == null || metadataKey.isBlank() || KNOWN_KEYS.contains(metadataKey)) {
+                return;
+            }
+            JsonNode node = jsonNodeFrom(metadataField);
+            if (node != null && !node.isNull()) {
+                additionalMetadata.put(metadataKey, node);
+            }
+        });
+        return additionalMetadata.isEmpty() ? Map.of() : Map.copyOf(additionalMetadata);
+    }
+
+    private static Map<String, JsonNode> additionalMetadataFromLegacy(Map<?, ?> sourceMetadata) {
+        LinkedHashMap<String, JsonNode> additionalMetadata = new LinkedHashMap<>();
+        sourceMetadata.forEach((legacyKey, legacyValue) -> {
+            if (!(legacyKey instanceof String metadataKey) || metadataKey.isBlank() || KNOWN_KEYS.contains(metadataKey)) {
+                return;
+            }
+            JsonNode node = jsonNodeFrom(legacyValue);
+            if (node != null && !node.isNull()) {
+                additionalMetadata.put(metadataKey, node);
+            }
+        });
+        return additionalMetadata.isEmpty() ? Map.of() : Map.copyOf(additionalMetadata);
+    }
+
+    private static JsonNode jsonNodeFrom(Object metadataField) {
+        if (metadataField == null) {
+            return null;
+        }
+        if (metadataField instanceof JsonNode jsonNode) {
+            return jsonNode;
+        }
+        if (metadataField instanceof String text) {
+            return new TextNode(text);
+        }
+        if (metadataField instanceof Integer integer) {
+            return JsonNodeFactory.instance.numberNode(integer);
+        }
+        if (metadataField instanceof Long longNumber) {
+            return JsonNodeFactory.instance.numberNode(longNumber);
+        }
+        if (metadataField instanceof Double doubleNumber) {
+            return JsonNodeFactory.instance.numberNode(doubleNumber);
+        }
+        if (metadataField instanceof Float floatNumber) {
+            return JsonNodeFactory.instance.numberNode(floatNumber);
+        }
+        if (metadataField instanceof Boolean booleanValue) {
+            return JsonNodeFactory.instance.booleanNode(booleanValue);
+        }
+        return new TextNode(String.valueOf(metadataField));
+    }
+
+    private static Object documentMetadataValue(JsonNode metadataNode) {
+        if (metadataNode == null || metadataNode.isNull()) {
+            return null;
+        }
+        if (metadataNode.isTextual()) {
+            return metadataNode.textValue();
+        }
+        if (metadataNode.isBoolean()) {
+            return metadataNode.booleanValue();
+        }
+        if (metadataNode.isInt()) {
+            return metadataNode.intValue();
+        }
+        if (metadataNode.isLong()) {
+            return metadataNode.longValue();
+        }
+        if (metadataNode.isNumber()) {
+            return metadataNode.doubleValue();
+        }
+        return metadataNode.toString();
     }
 
     private static String blankToNull(String text) {

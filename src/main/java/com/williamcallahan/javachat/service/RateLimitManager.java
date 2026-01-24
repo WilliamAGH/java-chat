@@ -191,7 +191,7 @@ public class RateLimitManager {
     public boolean isProviderAvailable(ApiProvider provider) {
         // First check if provider is actually configured
         if (!isProviderConfigured(provider)) {
-            log.debug("Provider not configured; treating as unavailable");
+            log.debug("[{}] Not configured; treating as unavailable", provider.getName());
             return false;
         }
 
@@ -201,7 +201,7 @@ public class RateLimitManager {
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.debug("Provider is rate limited (persistent state)");
+                log.debug("[{}] Rate limited (persistent state)", provider.getName());
                 return false;
             }
         }
@@ -213,12 +213,12 @@ public class RateLimitManager {
         );
 
         if (!state.isAvailable()) {
-            log.debug("Provider is in circuit breaker state");
+            log.debug("[{}] In circuit breaker state", provider.getName());
             return false;
         }
 
         if (state.getRequestsToday() >= provider.dailyLimit) {
-            log.warn("Provider has reached daily limit");
+            log.warn("[{}] Reached daily limit", provider.getName());
             return false;
         }
 
@@ -237,7 +237,7 @@ public class RateLimitManager {
         state.recordSuccess();
         rateLimitState.recordSuccess(provider.getName());
 
-        log.debug("Provider request successful");
+        log.debug("[{}] Request successful", provider.getName());
     }
 
     /**
@@ -253,9 +253,7 @@ public class RateLimitManager {
             if (resetTime == null && retryAfterSeconds == 0) {
                 // GitHub typically has 24-hour rate limits
                 resetTime = Instant.now().plus(Duration.ofHours(24));
-                log.info(
-                    "GitHub Models rate limited - applying 24-hour backoff"
-                );
+                log.info("[{}] Rate limited - applying 24-hour backoff", provider.getName());
             }
         }
 
@@ -273,7 +271,7 @@ public class RateLimitManager {
             provider.getTypicalRateLimitWindow()
         );
 
-        log.warn("Provider rate limited");
+        log.warn("[{}] Rate limited (errorMessage={})", provider.getName(), errorMessage);
     }
 
     /**
@@ -604,7 +602,8 @@ public class RateLimitManager {
             provider.getTypicalRateLimitWindow()
         );
 
-        log.warn("Provider rate limited");
+        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})",
+                provider.getName(), resetTime, retryAfterSeconds);
     }
 
     private boolean isDigits(String candidate) {
@@ -630,11 +629,11 @@ public class RateLimitManager {
             ApiProvider.LOCAL,
         }) {
             if (!isProviderConfigured(provider)) {
-                log.debug("Skipping provider: not configured");
+                log.debug("[{}] Skipping: not configured", provider.getName());
                 continue;
             }
             if (isProviderAvailable(provider)) {
-                log.debug("Selected provider");
+                log.debug("[{}] Selected as best provider", provider.getName());
                 return Optional.of(provider);
             }
         }
@@ -642,18 +641,32 @@ public class RateLimitManager {
         // Log detailed status for debugging
         for (ApiProvider provider : ApiProvider.values()) {
             if (!isProviderConfigured(provider)) {
-                log.warn("Provider unavailable - missing configuration (API key/token)");
+                log.warn("[{}] Unavailable - missing configuration (API key/token)", provider.getName());
                 continue;
             }
             Duration remaining = rateLimitState.getRemainingWaitTime(
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.warn("Provider unavailable - rate limited");
+                log.warn("[{}] Unavailable - rate limited for {} more", provider.getName(), formatDuration(remaining));
             }
         }
 
         return Optional.empty();
+    }
+
+    private String formatDuration(Duration duration) {
+        long days = duration.toDays();
+        long hours = duration.toHours() % 24;
+        long minutes = duration.toMinutes() % 60;
+
+        if (days > 0) {
+            return String.format("%dd %dh %dm", days, hours, minutes);
+        } else if (hours > 0) {
+            return String.format("%dh %dm", hours, minutes);
+        } else {
+            return String.format("%dm", minutes);
+        }
     }
 
     /**

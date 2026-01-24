@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -45,6 +44,7 @@ public class EmbeddingCacheService {
     private final VectorStore vectorStore;
     /** In-memory cache for fast lookup of computed embeddings */
     private final Map<String, EmbeddingCacheEntry> memoryCache = new ConcurrentHashMap<>();
+    private final EmbeddingCacheFileImporter cacheFileImporter;
     private final AtomicInteger cacheHits = new AtomicInteger(0);
     private final AtomicInteger cacheMisses = new AtomicInteger(0);
 	private final AtomicInteger embeddingsSinceLastSave = new AtomicInteger(0);
@@ -103,6 +103,7 @@ public class EmbeddingCacheService {
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        this.cacheFileImporter = new EmbeddingCacheFileImporter(this.cacheMapper);
     }
 
 	    /**
@@ -401,12 +402,10 @@ public class EmbeddingCacheService {
         CACHE_LOG.info("Importing cached embeddings");
 
         try (InputStream fileInputStream = Files.newInputStream(importPath);
-             GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream)) {
+             GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream);
+             BufferedInputStream bufferedInputStream = new BufferedInputStream(gzipInputStream)) {
 
-            List<EmbeddingCacheEntry> importedEmbeddings = cacheMapper.readValue(
-                gzipInputStream,
-                new TypeReference<List<EmbeddingCacheEntry>>() {}
-            );
+            List<EmbeddingCacheEntry> importedEmbeddings = cacheFileImporter.read(bufferedInputStream);
 
             if (importedEmbeddings == null) {
                 throw new IOException("Unexpected cache format; expected a list of embeddings");
@@ -419,6 +418,23 @@ public class EmbeddingCacheService {
 
             CACHE_LOG.info("Successfully imported {} embeddings", importedEmbeddings.size());
         }
+    }
+
+    /**
+     * Legacy Java-serialized cache entry used only to import historical caches created before the JSON format.
+     */
+    static final class CachedEmbedding implements Serializable {
+        @Serial
+        private static final long serialVersionUID = -4408107863391743604L;
+
+        boolean uploaded;
+        String content;
+        LocalDateTime createdAt;
+        float[] embedding;
+        String id;
+        Map<?, ?> metadata;
+
+        CachedEmbedding() {}
     }
     
     private double getCacheHitRate() {
