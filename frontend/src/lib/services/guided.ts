@@ -53,16 +53,26 @@ export interface GuidedCitation {
   snippet?: string
 }
 
+/** Result type for citation fetches - distinguishes empty results from errors. */
+export type CitationFetchResult =
+  | { success: true; citations: GuidedCitation[] }
+  | { success: false; error: string }
+
 /**
  * Fetch citations for a guided lesson.
+ * Returns a Result type to distinguish between empty results and fetch failures.
  */
-export async function fetchGuidedCitations(slug: string): Promise<GuidedCitation[]> {
+export async function fetchGuidedCitations(slug: string): Promise<CitationFetchResult> {
   try {
     const response = await fetch(`/api/guided/citations?slug=${encodeURIComponent(slug)}`)
-    if (!response.ok) return []
-    return response.json()
-  } catch {
-    return []
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` }
+    }
+    const citations: GuidedCitation[] = await response.json()
+    return { success: true, citations }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
+    return { success: false, error: errorMessage }
   }
 }
 

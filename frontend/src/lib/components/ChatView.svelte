@@ -15,7 +15,6 @@
   let messages = $state<MessageWithQuery[]>([])
   let isStreaming = $state(false)
   let currentStreamingContent = $state('')
-  let currentUserQuery = $state('')
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
   let streamStatusMessage = $state<string | null>(null)
@@ -55,10 +54,9 @@
     shouldAutoScroll = true
     await scrollToBottom()
 
-    // Start streaming - track query for citations
+    // Start streaming
     isStreaming = true
     currentStreamingContent = ''
-    currentUserQuery = userQuery
     streamStatusMessage = null
     streamStatusDetails = null
 
@@ -100,7 +98,6 @@
     } finally {
       isStreaming = false
       currentStreamingContent = ''
-      currentUserQuery = ''
       streamStatusMessage = null
       streamStatusDetails = null
       await scrollToBottom()

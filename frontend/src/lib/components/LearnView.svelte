@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
-  import { fetchCitations, type Citation } from '../services/chat'
+  import { fetchCitations } from '../services/chat'
   import { renderMarkdown } from '../services/markdown'
   import type { ChatMessage } from '../services/chat'
   import MessageBubble from './MessageBubble.svelte'
@@ -24,8 +24,6 @@
   let lessonError = $state<string | null>(null)
   let loadingLesson = $state(false)
 
-  // Lesson citations (fetched after lesson loads)
-  let lessonCitations = $state<Citation[]>([])
 
   // Chat state
   let messages = $state<MessageWithQuery[]>([])
@@ -69,17 +67,20 @@
     loadingLesson = true
     lessonMarkdown = ''
     lessonError = null
-    lessonCitations = []
     messages = []
 
     try {
       const response = await fetchLessonContent(lesson.slug)
       lessonMarkdown = response.markdown
 
-      // Fetch citations for the lesson topic (non-blocking)
+      // Fetch citations for the lesson topic (non-blocking, errors logged for visibility)
       fetchCitations(lesson.title)
-        .then((citations) => { lessonCitations = citations })
-        .catch(() => { lessonCitations = [] })
+        .catch((citationError: unknown) => {
+          const errorMessage = citationError instanceof Error
+            ? citationError.message
+            : 'Unknown error'
+          console.warn(`Failed to load lesson citations for "${lesson.title}":`, errorMessage)
+        })
     } catch (error) {
       lessonError = error instanceof Error ? error.message : 'Failed to load lesson'
       lessonMarkdown = ''
@@ -92,7 +93,6 @@
     selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
-    lessonCitations = []
     messages = []
   }
 

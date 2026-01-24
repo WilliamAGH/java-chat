@@ -4,6 +4,20 @@
   /** Citation type for styling and icon selection. */
   type CitationType = 'pdf' | 'api-doc' | 'repo' | 'external' | 'local' | 'unknown'
 
+  /** URL scheme prefixes for protocol detection. */
+  const URL_SCHEME_HTTP = 'http://'
+  const URL_SCHEME_HTTPS = 'https://'
+  const LOCAL_PATH_PREFIX = '/'
+  const ANCHOR_SEPARATOR = '#'
+  const PDF_EXTENSION = '.pdf'
+  const FALLBACK_LINK_TARGET = '#'
+
+  /** Domain patterns that indicate API documentation sources. */
+  const API_DOC_PATTERNS = ['docs.oracle.com', 'javadoc', '/api/', '/docs/api/'] as const
+
+  /** Domain patterns that indicate repository sources. */
+  const REPO_PATTERNS = ['github.com', 'gitlab.com', 'bitbucket.org'] as const
+
   interface Props {
     /** The user query to fetch citations for. */
     query: string
@@ -14,34 +28,43 @@
   let { query, visible = true }: Props = $props()
 
   let citations = $state<Citation[]>([])
-  let loading = $state(false)
   let hasFetched = $state(false)
+  let fetchError = $state<string | null>(null)
+
+  /**
+   * Checks if URL matches any pattern in a list.
+   */
+  function matchesPatterns(url: string, patterns: readonly string[]): boolean {
+    return patterns.some(pattern => url.includes(pattern))
+  }
+
+  /**
+   * Checks if URL is an HTTP/HTTPS URL.
+   */
+  function isHttpUrl(url: string): boolean {
+    return url.startsWith(URL_SCHEME_HTTP) || url.startsWith(URL_SCHEME_HTTPS)
+  }
 
   /**
    * Determines citation type from URL for icon and styling.
+   * Uses pattern matching against known documentation and repository domains.
    */
   function getCitationType(url: string): CitationType {
     if (!url) return 'unknown'
 
     const lowerUrl = url.toLowerCase()
 
-    if (lowerUrl.endsWith('.pdf')) {
+    if (lowerUrl.endsWith(PDF_EXTENSION)) {
       return 'pdf'
     }
 
-    if (lowerUrl.startsWith('http://') || lowerUrl.startsWith('https://')) {
-      if (lowerUrl.includes('docs.oracle.com') || lowerUrl.includes('javadoc') ||
-          lowerUrl.includes('/api/') || lowerUrl.includes('/docs/api/')) {
-        return 'api-doc'
-      }
-      if (lowerUrl.includes('github.com') || lowerUrl.includes('gitlab.com') ||
-          lowerUrl.includes('bitbucket.org')) {
-        return 'repo'
-      }
+    if (isHttpUrl(lowerUrl)) {
+      if (matchesPatterns(lowerUrl, API_DOC_PATTERNS)) return 'api-doc'
+      if (matchesPatterns(lowerUrl, REPO_PATTERNS)) return 'repo'
       return 'external'
     }
 
-    if (lowerUrl.startsWith('/')) {
+    if (lowerUrl.startsWith(LOCAL_PATH_PREFIX)) {
       return 'local'
     }
 
@@ -49,38 +72,40 @@
   }
 
   /**
-   * Extracts a display-friendly domain or filename from URL.
+   * Extracts display-friendly domain or filename from URL.
+   * Returns a sensible fallback on parse failure.
    */
   function getDisplaySource(url: string): string {
     if (!url) return 'Source'
 
-    try {
-      // Handle PDF filenames
-      if (url.toLowerCase().endsWith('.pdf')) {
-        const segments = url.split('/')
-        const filename = segments[segments.length - 1]
-        // Clean up filename: remove extension, replace dashes/underscores
-        return filename
-          .replace(/\.pdf$/i, '')
-          .replace(/[-_]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim() || 'PDF Document'
-      }
+    const lowerUrl = url.toLowerCase()
 
-      // Handle HTTP URLs
-      if (url.startsWith('http://') || url.startsWith('https://')) {
+    // Handle PDF filenames - no URL parsing needed
+    if (lowerUrl.endsWith(PDF_EXTENSION)) {
+      const segments = url.split(LOCAL_PATH_PREFIX)
+      const filename = segments[segments.length - 1]
+      const cleanName = filename
+        .replace(/\.pdf$/i, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      return cleanName || 'PDF Document'
+    }
+
+    // Handle HTTP URLs
+    if (isHttpUrl(url)) {
+      try {
         const urlObj = new URL(url)
-        // Return clean domain
         return urlObj.hostname.replace(/^www\./, '')
+      } catch {
+        return 'Source'
       }
+    }
 
-      // Handle local paths
-      if (url.startsWith('/')) {
-        const segments = url.split('/')
-        return segments[segments.length - 1] || 'Local Resource'
-      }
-    } catch {
-      // URL parsing failed
+    // Handle local paths - no URL parsing needed
+    if (url.startsWith(LOCAL_PATH_PREFIX)) {
+      const segments = url.split(LOCAL_PATH_PREFIX)
+      return segments[segments.length - 1] || 'Local Resource'
     }
 
     return 'Source'
@@ -90,9 +115,9 @@
    * Builds the full URL including anchor fragment if present.
    */
   function buildFullUrl(citation: Citation): string {
-    if (!citation.url) return '#'
-    if (citation.anchor && !citation.url.includes('#')) {
-      return `${citation.url}#${citation.anchor}`
+    if (!citation.url) return FALLBACK_LINK_TARGET
+    if (citation.anchor && !citation.url.includes(ANCHOR_SEPARATOR)) {
+      return `${citation.url}${ANCHOR_SEPARATOR}${citation.anchor}`
     }
     return citation.url
   }
@@ -103,11 +128,12 @@
     if (!currentQuery || !currentQuery.trim()) {
       citations = []
       hasFetched = false
+      fetchError = null
       return
     }
 
-    loading = true
     hasFetched = false
+    fetchError = null
 
     fetchCitations(currentQuery)
       .then((result) => {
@@ -120,18 +146,24 @@
           return true
         })
       })
-      .catch((fetchError) => {
-        console.warn('Failed to fetch citations:', fetchError)
+      .catch((error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch citations'
+        fetchError = errorMessage
         citations = []
       })
       .finally(() => {
-        loading = false
         hasFetched = true
       })
   })
 </script>
 
-{#if visible && hasFetched && citations.length > 0}
+{#if visible && hasFetched && fetchError}
+  <aside class="citation-panel citation-panel--error" aria-label="Citation error">
+    <div class="citation-error">
+      <span class="citation-error-text">Unable to load sources</span>
+    </div>
+  </aside>
+{:else if visible && hasFetched && citations.length > 0}
   <aside class="citation-panel" aria-label="Sources">
     <div class="citation-header">
       <svg class="citation-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -143,6 +175,7 @@
     <ul class="citation-list">
       {#each citations as citation (citation.url)}
         {@const citationType = getCitationType(citation.url)}
+        {@const displaySource = getDisplaySource(citation.url)}
         <li class="citation-item" data-type={citationType}>
           <a
             href={buildFullUrl(citation)}
@@ -172,8 +205,8 @@
               {/if}
             </span>
             <span class="citation-content">
-              <span class="citation-name">{citation.title || getDisplaySource(citation.url)}</span>
-              <span class="citation-source">{getDisplaySource(citation.url)}</span>
+              <span class="citation-name">{citation.title || displaySource}</span>
+              <span class="citation-source">{displaySource}</span>
             </span>
             <svg class="citation-external" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path fill-rule="evenodd" d="M4.25 5.5a.75.75 0 0 0-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 0 0 .75-.75v-4a.75.75 0 0 1 1.5 0v4A2.25 2.25 0 0 1 12.75 17h-8.5A2.25 2.25 0 0 1 2 14.75v-8.5A2.25 2.25 0 0 1 4.25 4h5a.75.75 0 0 1 0 1.5h-5Z" clip-rule="evenodd"/>
@@ -197,6 +230,23 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);
     animation: fade-in var(--duration-normal) var(--ease-out);
+  }
+
+  .citation-panel--error {
+    border-color: var(--color-border-subtle);
+    background: var(--color-surface-subtle);
+  }
+
+  .citation-error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+  }
+
+  .citation-error-text {
+    font-style: italic;
   }
 
   @keyframes fade-in {
