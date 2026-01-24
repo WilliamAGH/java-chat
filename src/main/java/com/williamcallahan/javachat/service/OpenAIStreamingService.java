@@ -178,12 +178,12 @@ public class OpenAIStreamingService {
                 .timeout(streamingTimeout())
                 .build();
 
-            // StreamResponse implements AutoCloseable; use 2-arg Flux.using() for automatic cleanup
-            return Flux.<String, StreamResponse<ChatCompletionChunk>>using(
+            return Flux.using(
                 () -> streamingClient.chat().completions().createStreaming(params, requestOptions),
                 responseStream -> Flux.fromStream(responseStream.stream())
-                    .flatMap(chunk -> Flux.fromIterable(chunk.choices()))
-                    .flatMap(choice -> Mono.justOrEmpty(choice.delta().content()))
+                    .concatMap(chunk -> Flux.fromIterable(chunk.choices()))
+                    .concatMap(choice -> Mono.justOrEmpty(choice.delta().content())),
+                StreamResponse::close
             )
             .doOnComplete(() -> {
                 log.debug("Stream completed successfully");
@@ -262,10 +262,6 @@ public class OpenAIStreamingService {
 
     private void recordProviderFailure(RateLimitManager.ApiProvider provider, Throwable throwable) {
         if (!(throwable instanceof OpenAIServiceException serviceException)) {
-            if (throwable instanceof RateLimitException rateLimitException) {
-                rateLimitManager.recordRateLimitFromOpenAiServiceException(provider, rateLimitException);
-                return;
-            }
             if (isRetryablePrimaryFailure(throwable)) {
                 rateLimitManager.recordRateLimit(provider, throwable.getMessage());
             }
@@ -368,7 +364,12 @@ public class OpenAIStreamingService {
             return baseUrl;
         }
         String trimmed = baseUrl.trim();
-        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        String normalized = trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        if (normalized.endsWith("/inference")) {
+            // openai-java expects baseUrl to include the API version prefix, e.g. /v1.
+            return normalized + "/v1";
+        }
+        return normalized;
     }
     
     /**
