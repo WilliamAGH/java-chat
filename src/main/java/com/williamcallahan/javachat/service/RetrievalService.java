@@ -97,8 +97,8 @@ public class RetrievalService {
             .stream()
             .collect(
                 Collectors.toMap(
-                    d -> String.valueOf(d.getMetadata().get(METADATA_URL)),
-                    d -> d,
+                    doc -> String.valueOf(doc.getMetadata().get(METADATA_URL)),
+                    doc -> doc,
                     (first, dup) -> first
                 )
             )
@@ -165,8 +165,8 @@ public class RetrievalService {
             .stream()
             .collect(
                 Collectors.toMap(
-                    d -> String.valueOf(d.getMetadata().get(METADATA_URL)),
-                    d -> d,
+                    doc -> String.valueOf(doc.getMetadata().get(METADATA_URL)),
+                    doc -> doc,
                     (first, dup) -> first
                 )
             )
@@ -207,7 +207,7 @@ public class RetrievalService {
         if (versionFilter.isPresent()) {
             VersionFilterPatterns filter = versionFilter.get();
             List<Document> versionMatchedDocs = docs.stream()
-                .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get(METADATA_URL))))
+                .filter(doc -> filter.matchesUrl(String.valueOf(doc.getMetadata().get(METADATA_URL))))
                 .collect(Collectors.toList());
 
             log.info("Version filter matched {} of {} documents",

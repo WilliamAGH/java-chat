@@ -19,8 +19,6 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Method;
- 
-
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -131,45 +129,8 @@ public class OpenAIStreamingService {
                             "No OpenAI-compatible client is configured or available for streaming."));
                     return;
                 }
-                ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
-                AtomicReference<ChatCompletion> finalCompletion = new AtomicReference<>();
                 
-                RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
-                        ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                        : RateLimitManager.ApiProvider.OPENAI;
-                log.info("[LLM] Streaming started");
-                try (StreamResponse<ChatCompletionChunk> responseStream =
-                        streamingClient.chat().completions().createStreaming(params)) {
-                    
-                    responseStream.stream()
-                        .peek(accumulator::accumulate)  // Accumulate for final result
-                        .forEach(chunk -> {
-                            chunk.choices().forEach(choice -> {
-                                choice.delta().content().ifPresent(content -> {
-                                    sink.next(content);
-                                });
-                            });
-                        });
-                    
-                    // Get the complete response for any post-processing needs
-                    finalCompletion.set(accumulator.chatCompletion());
-                    log.debug("Stream completed successfully");
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(activeProvider);
-                    }
-                    sink.complete();
-                    
-                } catch (RuntimeException exception) {
-                    log.error("[LLM] Streaming failed (exception type: {})",
-                        exception.getClass().getSimpleName());
-                    if (isPrimaryClient(streamingClient) && isRetryablePrimaryFailure(exception)) {
-                        markPrimaryBackoff();
-                        if (rateLimitManager != null) {
-                            rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
-                        }
-                    }
-                    sink.error(exception);
-                }
+                executeStreamingRequest(streamingClient, params, sink);
                 
             } catch (RuntimeException exception) {
                 log.error("Error setting up OpenAI stream (exception type: {})",
@@ -180,6 +141,46 @@ public class OpenAIStreamingService {
         // Move blocking SDK stream consumption off the servlet thread.
         // Prevents thread starvation and aligns with Reactor best practices.
         .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private void executeStreamingRequest(OpenAIClient client, ChatCompletionCreateParams params, reactor.core.publisher.FluxSink<String> sink) {
+        ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
+        RateLimitManager.ApiProvider activeProvider = isPrimaryClient(client)
+                ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                : RateLimitManager.ApiProvider.OPENAI;
+        log.info("[LLM] Streaming started");
+        
+        try (StreamResponse<ChatCompletionChunk> responseStream =
+                client.chat().completions().createStreaming(params)) {
+            
+            responseStream.stream()
+                .peek(accumulator::accumulate)  // Accumulate for final result
+                .forEach(chunk -> {
+                    chunk.choices().forEach(choice -> {
+                        choice.delta().content().ifPresent(sink::next);
+                    });
+                });
+            
+            log.debug("Stream completed successfully");
+            if (rateLimitManager != null) {
+                rateLimitManager.recordSuccess(activeProvider);
+            }
+            sink.complete();
+            
+        } catch (RuntimeException exception) {
+            handleStreamingFailure(exception, client, sink);
+        }
+    }
+
+    private void handleStreamingFailure(RuntimeException exception, OpenAIClient client, reactor.core.publisher.FluxSink<String> sink) {
+        log.error("[LLM] Streaming failed (exception type: {})", exception.getClass().getSimpleName());
+        if (isPrimaryClient(client) && isRetryablePrimaryFailure(exception)) {
+            markPrimaryBackoff();
+            if (rateLimitManager != null) {
+                rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
+            }
+        }
+        sink.error(exception);
     }
     
     /**
