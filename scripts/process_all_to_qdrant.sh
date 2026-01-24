@@ -154,7 +154,8 @@ check_qdrant_connection() {
         curl_opts+=(-H "api-key: $QDRANT_API_KEY")
     fi
     
-    local response=$(curl "${curl_opts[@]}" "$url")
+    local response
+    response=$(curl "${curl_opts[@]}" "$url" || echo "000")
     
     if [ "$response" = "200" ]; then
         log "${GREEN}✓ Qdrant connection successful${NC} ($(percent_complete))"
@@ -164,7 +165,8 @@ check_qdrant_connection() {
         if [ -n "$QDRANT_API_KEY" ]; then
             info_opts+=(-H "api-key: $QDRANT_API_KEY")
         fi
-        local info=$(curl "${info_opts[@]}" "$url")
+        local info
+        info=$(curl "${info_opts[@]}" "$url" || echo "{}")
         local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
         local dimensions=$(echo "$info" | grep -o '"size":[0-9]*' | head -1 | cut -d: -f2)
         
