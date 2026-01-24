@@ -508,6 +508,7 @@ public class OpenAIStreamingService {
             return true;
         }
         if (throwable instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
             return true;
         }
         if (throwable instanceof OpenAIServiceException serviceException) {
