@@ -18,10 +18,8 @@ RUN npm ci
 # Copy source files
 COPY frontend/ .
 
-# Copy existing static assets (favicons) so they're preserved in the build output
-COPY src/main/resources/static/ ../src/main/resources/static/
-
 # Build frontend (outputs to ../src/main/resources/static/)
+# Favicons and static assets in frontend/public/ are automatically copied by Vite
 RUN npm run build
 
 # ================================
@@ -44,8 +42,10 @@ COPY src ./src/
 # Copy built frontend assets (includes favicons + Svelte build) from frontend-builder
 COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
 
-# Build the application
-RUN ./gradlew clean build -x test --no-daemon
+# Build the application and copy bootable JAR to known location
+# Gradle produces two JARs: bootable (Spring Boot) and -plain.jar (non-bootable)
+RUN ./gradlew clean build -x test --no-daemon && \
+    cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
 
 # ================================
 # RUNTIME STAGE
@@ -60,8 +60,8 @@ RUN useradd -u 1001 -m -s /bin/bash appuser
 
 WORKDIR /app
 
-# Copy the JAR from builder stage
-COPY --from=builder /app/build/libs/*.jar app.jar
+# Copy the bootable JAR from builder stage
+COPY --from=builder /app/build/app.jar app.jar
 
 # Create logs directory and set permissions
 RUN mkdir -p logs && chown -R appuser:appuser logs app.jar
