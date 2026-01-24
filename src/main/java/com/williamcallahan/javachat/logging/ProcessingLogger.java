@@ -30,8 +30,7 @@ public class ProcessingLogger {
     /**
      * Log embedding generation
      */
-    @Around("@annotation(org.springframework.web.bind.annotation.PostMapping) && " +
-            "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))")
+    @Around("execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))")
     public Object logEmbeddingGeneration(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
@@ -51,8 +50,7 @@ public class ProcessingLogger {
      * Logs embedding generation failures without masking the underlying exception.
      */
     @AfterThrowing(
-        pointcut = "@annotation(org.springframework.web.bind.annotation.PostMapping) && " +
-            "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))",
+        pointcut = "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))",
         throwing = "exception"
     )
     public void logEmbeddingGenerationFailure(Throwable exception) {
