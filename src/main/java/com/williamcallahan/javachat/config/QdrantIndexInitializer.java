@@ -4,12 +4,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -19,7 +22,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * Initializes Qdrant payload indexes on startup to accelerate lookups.
+ * Initializes Qdrant payload indexes on startup and validates collection configuration.
  */
 @org.springframework.context.annotation.Profile("!test")
 @Component
@@ -31,6 +34,11 @@ public class QdrantIndexInitializer {
     private static final int QDRANT_GRPC_PORT = 6334;
     private static final int DOCKER_GRPC_PORT = 8086;
     private static final int DOCKER_REST_PORT = 8087;
+
+    /** Qdrant schema type for keyword (string) fields. */
+    private static final String SCHEMA_TYPE_KEYWORD = "keyword";
+    /** Qdrant schema type for integer fields. */
+    private static final String SCHEMA_TYPE_INTEGER = "integer";
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -49,7 +57,8 @@ public class QdrantIndexInitializer {
     private String collection;
 
     private final boolean ensurePayloadIndexes;
-    private final RestTemplateBuilder restTemplateBuilder;
+    private final RestTemplate restTemplate;
+    private final EmbeddingModel embeddingModel;
 
     /**
      * Build candidate REST base URLs for Qdrant.
@@ -81,17 +90,31 @@ public class QdrantIndexInitializer {
      *
      * @param appProperties application configuration
      * @param restTemplateBuilder shared RestTemplate builder for HTTP configuration
+     * @param embeddingModel embedding model for dimension validation
      */
-    public QdrantIndexInitializer(AppProperties appProperties, RestTemplateBuilder restTemplateBuilder) {
+    public QdrantIndexInitializer(AppProperties appProperties, RestTemplateBuilder restTemplateBuilder,
+                                  EmbeddingModel embeddingModel) {
         this.ensurePayloadIndexes = appProperties.getQdrant().isEnsurePayloadIndexes();
-        this.restTemplateBuilder = restTemplateBuilder;
+        this.embeddingModel = embeddingModel;
+        // Build RestTemplate once and reuse for all index creation requests
+        this.restTemplate = restTemplateBuilder
+                .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
+                .additionalInterceptors((request, body, execution) -> {
+                    request.getHeaders().add("Connection", "close");
+                    return execution.execute(request, body);
+                })
+                .build();
     }
 
     /**
-     * Ensures key payload indexes exist after application startup.
+     * Ensures key payload indexes exist after application startup and validates collection dimensions.
      */
     @EventListener(ApplicationReadyEvent.class)
     public void ensurePayloadIndexes() {
+        // Validate embedding dimensions match collection configuration
+        validateCollectionDimensions();
+        
         if (!ensurePayloadIndexes) {
             log.info("[QDRANT] Skipping payload index ensure (app.qdrant.ensure-payload-indexes=false)");
             return;
@@ -107,58 +130,135 @@ public class QdrantIndexInitializer {
         }
     }
 
-    private void createPayloadIndex(String field, String schema) {
-        // Create RestTemplate with longer timeouts for Qdrant Cloud
-        RestTemplate rt = restTemplateBuilder
-                .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-                .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
-                .build();
+    /**
+     * Validates that the Qdrant collection's vector dimensions match the embedding model dimensions.
+     *
+     * <p>This prevents silent failures when switching embedding models without recreating the collection.
+     * A dimension mismatch will cause all similarity searches to fail.
+     */
+    private void validateCollectionDimensions() {
+        int expectedDimensions = embeddingModel.dimensions();
+        log.info("[QDRANT] Embedding model dimensions: {}", expectedDimensions);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (apiKey != null && !apiKey.isBlank()) {
+            headers.set("api-key", apiKey);
+        }
+
+        String collectionPath = "/collections/" + collection;
         
-        // Add connection management
-        rt.getInterceptors().add((request, body, execution) -> {
-            request.getHeaders().add("Connection", "close");
-            return execution.execute(request, body);
-        });
+        for (String base : restBaseUrls()) {
+            String url = base + collectionPath;
+            try {
+                ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers),
+                    new ParameterizedTypeReference<Map<String, Object>>() {}
+                );
+                
+                Integer collectionDimensions = extractVectorDimensions(response.getBody());
+                if (collectionDimensions != null) {
+                    if (collectionDimensions != expectedDimensions) {
+                        log.error("[QDRANT] DIMENSION MISMATCH: Collection '{}' has {} dimensions, "
+                            + "but embedding model produces {} dimensions. "
+                            + "This will cause all similarity searches to fail. "
+                            + "Recreate the collection or switch back to the original embedding model.",
+                            collection, collectionDimensions, expectedDimensions);
+                        // Log warning but don't fail startup - let the application try to run
+                        // The actual failure will happen on first search/insert
+                    } else {
+                        log.info("[QDRANT] Collection '{}' dimensions ({}) match embedding model",
+                            collection, collectionDimensions);
+                    }
+                }
+                return; // Success - we got a response
+            } catch (RuntimeException exception) {
+                log.debug("[QDRANT] Could not validate dimensions via {} ({})", 
+                    url, exception.getClass().getSimpleName());
+                // Continue to next URL candidate
+            }
+        }
         
+        log.info("[QDRANT] Could not validate collection dimensions (Qdrant may be unavailable)");
+    }
+
+    /**
+     * Extracts vector dimensions from Qdrant collection info response.
+     */
+    @SuppressWarnings("unchecked")
+    private Integer extractVectorDimensions(Map<String, Object> responseBody) {
+        if (responseBody == null) return null;
+        
+        Object result = responseBody.get("result");
+        if (!(result instanceof Map)) return null;
+        
+        Map<String, Object> resultMap = (Map<String, Object>) result;
+        Object config = resultMap.get("config");
+        if (!(config instanceof Map)) return null;
+        
+        Map<String, Object> configMap = (Map<String, Object>) config;
+        Object params = configMap.get("params");
+        if (!(params instanceof Map)) return null;
+        
+        Map<String, Object> paramsMap = (Map<String, Object>) params;
+        Object vectors = paramsMap.get("vectors");
+        
+        // Handle both named and unnamed vector configurations
+        if (vectors instanceof Map) {
+            Map<String, Object> vectorsMap = (Map<String, Object>) vectors;
+            Object size = vectorsMap.get("size");
+            if (size instanceof Number) {
+                return ((Number) size).intValue();
+            }
+        }
+        
+        return null;
+    }
+
+    private void createPayloadIndex(String field, String schemaType) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Connection", "close"); // Prevent connection reuse issues
         if (apiKey != null && !apiKey.isBlank()) {
             headers.set("api-key", apiKey);
         }
-        PayloadIndexRequest body = new PayloadIndexRequest(field, schema);
+        
+        // Qdrant API requires field_schema as an object: {"type": "keyword"} not just "keyword"
+        PayloadIndexRequest body = new PayloadIndexRequest(field, Map.of("type", schemaType));
 
         // Qdrant payload index endpoint (official API)
-        String[] pathCandidates = new String[] {
-                "/collections/" + collection + "/index"          // official Qdrant API endpoint
-        };
+        String indexPath = "/collections/" + collection + "/index";
 
         Exception lastError = null;
         for (String base : restBaseUrls()) {
-            for (String path : pathCandidates) {
-                String url = base + path;
-                try {
-                    // Use PUT for Qdrant payload index creation (official API)
-                    ResponseEntity<String> resp = rt.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers),
-                        String.class);
-                    log.info("[QDRANT] Ensured payload index (status={})", resp.getStatusCode().value());
-                    return;
-                } catch (RuntimeException putEx) {
-                    lastError = putEx;
-                    log.debug("[QDRANT] PUT failed for index (exceptionType={})",
-                        putEx.getClass().getSimpleName());
-                    // Continue to next URL candidate if available
-                }
+            String url = base + indexPath;
+            try {
+                // Use PUT for Qdrant payload index creation (official API)
+                ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.PUT, 
+                    new HttpEntity<>(body, headers), String.class);
+                log.info("[QDRANT] Ensured payload index field={} (status={})", field, resp.getStatusCode().value());
+                return;
+            } catch (RuntimeException putEx) {
+                lastError = putEx;
+                log.debug("[QDRANT] PUT failed for index field={} url={} (exceptionType={})",
+                    field, url, putEx.getClass().getSimpleName());
+                // Continue to next URL candidate if available
             }
         }
         // If we reach here, all attempts failed; log once at INFO to avoid noisy warnings.
-        log.info("[QDRANT] Could not ensure payload index. Last error type: {}",
-                lastError != null ? lastError.getClass().getSimpleName() : "unknown");
+        log.info("[QDRANT] Could not ensure payload index field={}. Last error type: {}",
+                field, lastError != null ? lastError.getClass().getSimpleName() : "unknown");
     }
 
+    /**
+     * Request body for Qdrant payload index creation.
+     * 
+     * @param fieldName the field to index
+     * @param fieldSchema schema object containing type, e.g., {"type": "keyword"}
+     */
     private record PayloadIndexRequest(
         @JsonProperty("field_name") String fieldName,
-        @JsonProperty("field_schema") String fieldSchema
+        @JsonProperty("field_schema") Map<String, String> fieldSchema
     ) {
     }
 }
