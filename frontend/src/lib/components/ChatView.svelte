@@ -25,6 +25,14 @@
   /** Timer for delayed status message clearing to allow users to read final status. */
   let statusClearTimer: ReturnType<typeof setTimeout> | null = null
 
+  $effect(() => {
+    return () => {
+      if (statusClearTimer) {
+        clearTimeout(statusClearTimer)
+      }
+    }
+  })
+
   /** Duration to keep status visible after streaming ends so users can read it. */
   const STATUS_PERSISTENCE_DURATION_MS = 800
 
