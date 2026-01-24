@@ -1,9 +1,16 @@
 package com.williamcallahan.javachat.model;
 
+import java.util.Objects;
+
 /**
  * Represents a citation with a source URL and display metadata.
  */
 public class Citation {
+    private static final String DEFAULT_URL = "";
+    private static final String DEFAULT_TITLE = "";
+    private static final String DEFAULT_ANCHOR = "";
+    private static final String DEFAULT_SNIPPET = "";
+
     private String url;
     private String title;
     private String anchor;
@@ -12,7 +19,9 @@ public class Citation {
     /**
      * Creates an empty citation.
      */
-    public Citation() {}
+    public Citation() {
+        this(DEFAULT_URL, DEFAULT_TITLE, DEFAULT_ANCHOR, DEFAULT_SNIPPET);
+    }
 
     /**
      * Creates a citation with full details.
@@ -23,10 +32,10 @@ public class Citation {
      * @param snippet excerpt used for display
      */
     public Citation(String url, String title, String anchor, String snippet) {
-        this.url = url;
-        this.title = title;
-        this.anchor = anchor;
-        this.snippet = snippet;
+        this.url = Objects.requireNonNullElse(url, DEFAULT_URL);
+        this.title = Objects.requireNonNullElse(title, DEFAULT_TITLE);
+        this.anchor = Objects.requireNonNullElse(anchor, DEFAULT_ANCHOR);
+        this.snippet = Objects.requireNonNullElse(snippet, DEFAULT_SNIPPET);
     }
 
     /**
@@ -35,7 +44,7 @@ public class Citation {
      * @return source URL
      */
     public String getUrl() {
-        return url;
+        return Objects.requireNonNullElse(url, DEFAULT_URL);
     }
 
     /**
@@ -44,7 +53,7 @@ public class Citation {
      * @param url source URL
      */
     public void setUrl(String url) {
-        this.url = url;
+        this.url = Objects.requireNonNullElse(url, DEFAULT_URL);
     }
 
     /**
@@ -53,7 +62,7 @@ public class Citation {
      * @return citation title
      */
     public String getTitle() {
-        return title;
+        return Objects.requireNonNullElse(title, DEFAULT_TITLE);
     }
 
     /**
@@ -62,7 +71,7 @@ public class Citation {
      * @param title citation title
      */
     public void setTitle(String title) {
-        this.title = title;
+        this.title = Objects.requireNonNullElse(title, DEFAULT_TITLE);
     }
 
     /**
@@ -71,7 +80,7 @@ public class Citation {
      * @return anchor fragment, if present
      */
     public String getAnchor() {
-        return anchor;
+        return Objects.requireNonNullElse(anchor, DEFAULT_ANCHOR);
     }
 
     /**
@@ -80,7 +89,7 @@ public class Citation {
      * @param anchor anchor fragment
      */
     public void setAnchor(String anchor) {
-        this.anchor = anchor;
+        this.anchor = Objects.requireNonNullElse(anchor, DEFAULT_ANCHOR);
     }
 
     /**
@@ -89,7 +98,7 @@ public class Citation {
      * @return snippet text
      */
     public String getSnippet() {
-        return snippet;
+        return Objects.requireNonNullElse(snippet, DEFAULT_SNIPPET);
     }
 
     /**
@@ -98,7 +107,7 @@ public class Citation {
      * @param snippet snippet text
      */
     public void setSnippet(String snippet) {
-        this.snippet = snippet;
+        this.snippet = Objects.requireNonNullElse(snippet, DEFAULT_SNIPPET);
     }
 }
 
