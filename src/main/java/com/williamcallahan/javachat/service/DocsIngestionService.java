@@ -175,8 +175,12 @@ public class DocsIngestionService {
         }
         Path root = Path.of(rootDir).toAbsolutePath().normalize();
         Path baseDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
-        if (!root.startsWith(baseDir)) {
-            throw new IllegalArgumentException("Local docs directory must be under " + baseDir);
+        Path rootRoot = root.getRoot();
+        Path absoluteBaseDir = rootRoot == null
+            ? baseDir
+            : rootRoot.resolve(DEFAULT_DOCS_ROOT).normalize();
+        if (!root.startsWith(baseDir) && !root.startsWith(absoluteBaseDir)) {
+            throw new IllegalArgumentException("Local docs directory must be under " + absoluteBaseDir);
         }
         if (!Files.exists(root)) {
             throw new IllegalArgumentException("Local docs directory does not exist: " + rootDir);
