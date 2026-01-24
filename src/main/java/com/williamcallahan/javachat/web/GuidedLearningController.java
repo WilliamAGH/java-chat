@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.model.Citation;
 import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.model.Enrichment;
@@ -24,6 +22,8 @@ import com.williamcallahan.javachat.service.MarkdownService;
 import java.util.*;
 import java.time.Duration;
 
+import static com.williamcallahan.javachat.web.SseConstants.*;
+
 /**
  * Exposes guided learning endpoints for lesson metadata, citations, enrichment, and streaming lesson content.
  */
@@ -37,24 +37,11 @@ public class GuidedLearningController extends BaseController {
     /** Timeout for synchronous lesson content generation operations. */
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
 
-    /** Heartbeat interval to keep SSE connections alive. */
-    private static final int HEARTBEAT_INTERVAL_SECONDS = 20;
-
-    /** Buffer capacity for backpressure handling in streaming responses. */
-    private static final int STREAM_BACKPRESSURE_BUFFER_SIZE = 512;
-
-    /** SSE event type for text chunks. */
-    private static final String SSE_EVENT_TEXT = "text";
-    /** SSE event type for error/status notifications (aligns with allowed taxonomy). */
-    private static final String SSE_EVENT_STATUS = "status";
-    /** SSE comment for keepalive heartbeats. */
-    private static final String SSE_COMMENT_KEEPALIVE = "keepalive";
-
     private final GuidedLearningService guidedService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final MarkdownService markdownService;
-    private final ObjectMapper objectMapper;
+    private final SseSupport sseSupport;
 
     /**
      * Creates the guided learning controller wired to the guided learning orchestration services.
@@ -64,49 +51,13 @@ public class GuidedLearningController extends BaseController {
                                     OpenAIStreamingService openAIStreamingService,
                                     ExceptionResponseBuilder exceptionBuilder,
                                     MarkdownService markdownService,
-                                    ObjectMapper objectMapper) {
+                                    SseSupport sseSupport) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
-        this.objectMapper = objectMapper;
-    }
-
-    // Helper records for JSON serialization (matching ChatController pattern)
-    private record ChunkMessage(String text) {}
-    private record ErrorMessage(String message, String details) {}
-
-    /** Fallback JSON payload when SSE error serialization fails. */
-    private static final String SSE_ERROR_FALLBACK_JSON =
-        "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
-
-    /**
-     * Serializes an object to JSON, throwing IllegalStateException on failure.
-     */
-    private String jsonSerialize(Object payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to serialize SSE data", e);
-        }
-    }
-
-    /**
-     * Creates a Flux containing a single SSE error event with safe JSON serialization.
-     */
-    private Flux<ServerSentEvent<String>> sseError(String message, String details) {
-        String json;
-        try {
-            json = objectMapper.writeValueAsString(new ErrorMessage(message, details));
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE error: {}", message, e);
-            json = SSE_ERROR_FALLBACK_JSON;
-        }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(SSE_EVENT_STATUS)
-            .data(json)
-            .build());
+        this.sseSupport = sseSupport;
     }
 
     /**
@@ -248,34 +199,26 @@ public class GuidedLearningController extends BaseController {
             String fullPrompt = guidedService.buildGuidedPromptWithContext(history, lessonSlug, userQuery);
 
             // Clean OpenAI streaming with shared stream to prevent duplicate API calls
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
+            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE)
                     .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .doOnNext(chunk -> fullResponse.append(chunk))
-                    .onBackpressureBuffer(STREAM_BACKPRESSURE_BUFFER_SIZE)
+                    .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
                     .share();
 
             // Heartbeats terminate when data stream completes
-            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
-                    .takeUntilOther(dataStream.ignoreElements())
-                    .map(tick -> ServerSentEvent.<String>builder().comment(SSE_COMMENT_KEEPALIVE).build());
+            Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
 
-            // Wrap chunks in JSON to preserve whitespace (matching ChatController pattern)
-            Flux<ServerSentEvent<String>> dataEvents = dataStream
-                    .map(chunk -> ServerSentEvent.<String>builder()
-                            .event(SSE_EVENT_TEXT)
-                            .data(jsonSerialize(new ChunkMessage(chunk)))
-                            .build());
+            // Wrap chunks in JSON to preserve whitespace
+            Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
             return Flux.merge(dataEvents, heartbeats)
-                    .doOnComplete(() -> {
-                        chatMemory.addAssistant(sessionId, fullResponse.toString());
-                    })
+                    .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                     .onErrorResume(error -> {
                         // SSE streams require error events rather than thrown exceptions.
                         // Log full details server-side, send sanitized message to client.
                         String errorType = error.getClass().getSimpleName();
                         log.error("Guided streaming error (exception type: {})", errorType, error);
-                        return sseError(
+                        return sseSupport.sseError(
                             "Streaming error: " + errorType,
                             "The response stream encountered an error. Please try again."
                         );
@@ -284,7 +227,7 @@ public class GuidedLearningController extends BaseController {
         } else {
             // Service unavailable - send structured error event
             log.warn("OpenAI streaming service unavailable for guided session");
-            return sseError("Service temporarily unavailable", "The streaming service is not ready");
+            return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
         }
     }
 }
