@@ -5,6 +5,7 @@ import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.EnrichmentService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,6 +18,7 @@ import java.util.stream.Collectors;
  */
 @RestController
 @PermitAll
+@PreAuthorize("permitAll()")
 public class EnrichmentController {
     private final RetrievalService retrievalService;
     private final EnrichmentService enrichmentService;
@@ -40,7 +42,8 @@ public class EnrichmentController {
     public Enrichment enrich(@RequestParam("q") String query) {
         var docs = retrievalService.retrieve(query);
         List<String> snippets = docs.stream().map(doc -> doc.getText()).limit(6).collect(Collectors.toList());
-        return sanitize(enrichmentService.enrich(query, jdkVersion, snippets));
+        Enrichment result = enrichmentService.enrich(query, jdkVersion, snippets);
+        return result == null ? Enrichment.empty() : result.sanitized();
     }
 
     // New alias for consistent naming with chat routes
@@ -51,27 +54,4 @@ public class EnrichmentController {
     public Enrichment chatEnrich(@RequestParam("q") String query) {
         return enrich(query);
     }
-
-    private Enrichment sanitize(Enrichment enrichment) {
-        if (enrichment == null) {
-            Enrichment emptyEnrichment = new Enrichment();
-            emptyEnrichment.setHints(List.of());
-            emptyEnrichment.setReminders(List.of());
-            emptyEnrichment.setBackground(List.of());
-            return emptyEnrichment;
-        }
-        enrichment.setHints(trimFilter(enrichment.getHints()));
-        enrichment.setReminders(trimFilter(enrichment.getReminders()));
-        enrichment.setBackground(trimFilter(enrichment.getBackground()));
-        return enrichment;
-    }
-
-    private List<String> trimFilter(List<String> rawEntries) {
-        if (rawEntries == null) return List.of();
-        return rawEntries.stream()
-                .map(entry -> entry == null ? "" : entry.trim())
-                .filter(entry -> !entry.isEmpty())
-                .collect(Collectors.toList());
-    }
 }
-

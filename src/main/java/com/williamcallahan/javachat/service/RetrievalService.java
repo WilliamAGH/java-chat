@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.RetrievalErrorClassifier;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
@@ -200,10 +201,6 @@ public class RetrievalService {
             .build();
 
         List<Document> docs = vectorStore.similaritySearch(searchRequest);
-        if (docs == null) {
-            log.warn("VectorStore returned null documents");
-            return List.of();
-        }
         log.info("VectorStore returned {} documents", docs.size());
 
         // Apply version-based post-filtering if version was detected
@@ -296,7 +293,7 @@ public class RetrievalService {
             Map<String, Object> metadata = Optional.ofNullable(sourceDoc.getMetadata()).orElse(Map.of());
             String rawUrl = String.valueOf(metadata.getOrDefault("url", ""));
             String title = String.valueOf(metadata.getOrDefault("title", ""));
-            String url = normalizeCitationUrl(rawUrl);
+            String url = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             // Refine Javadoc URLs to nested type pages where the chunk references them
             url =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(
@@ -313,7 +310,7 @@ public class RetrievalService {
                 );
             // Final canonicalization in case of any accidental duplications
             if (url.startsWith("http://") || url.startsWith("https://")) {
-                url = canonicalizeHttpDocUrl(url);
+                url = DocsSourceRegistry.canonicalizeHttpDocUrl(url);
             }
             String snippet = Optional.ofNullable(sourceDoc.getText()).orElse("");
 
@@ -369,70 +366,6 @@ public class RetrievalService {
             })
             .limit(props.getRag().getSearchReturnK())
             .collect(Collectors.toList());
-    }
-
-
-    /**
-     * Normalize URLs from locally mirrored files to their authoritative online sources.
-     * Handles Oracle Java SE 24 docs, JDK 24 GA, and Java 25 Early Access docs.
-     */
-    private String normalizeCitationUrl(String url) {
-        if (url == null || url.isBlank()) return url;
-        String trimmedUrl = url.trim();
-        if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
-            return canonicalizeHttpDocUrl(trimmedUrl);
-        }
-
-        // Map book PDFs to public PDFs even if not file:// (defensive)
-        String pathForBookMapping = trimmedUrl.startsWith("file://")
-            ? trimmedUrl.substring("file://".length())
-            : trimmedUrl;
-        Optional<String> publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(pathForBookMapping);
-        if (publicPdf.isPresent()) {
-            return publicPdf.get();
-        }
-
-        // Only handle file:// mirrors beyond this point
-        if (!trimmedUrl.startsWith("file://")) return trimmedUrl;
-
-        String localPath = trimmedUrl.substring("file://".length());
-        // Try embedded host reconstruction first
-        Optional<String> embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(localPath);
-        if (embedded.isPresent()) {
-            return embedded.get();
-        }
-        // Try local prefix mapping
-        Optional<String> mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(localPath);
-        return mapped.orElse(url);
-    }
-
-    /**
-     * Fix common path duplications in already-HTTP doc URLs (e.g., '/docs/api/api/').
-     */
-    private String canonicalizeHttpDocUrl(String url) {
-        String out = url;
-        // Collapse duplicated segments for Oracle and EA docs
-        out = out.replace("/docs/api/api/", "/docs/api/");
-        out = out.replace("/api/api/", "/api/");
-        // Fix malformed Spring docs paths that accidentally include '/java/' segment
-        if (out.contains("https://docs.spring.io/")) {
-            // Spring Boot Javadoc
-            out = out.replace(
-                "/spring-boot/docs/current/api/java/",
-                "/spring-boot/docs/current/api/"
-            );
-            // Spring Framework Javadoc
-            out = out.replace(
-                "/spring-framework/docs/current/javadoc-api/java/",
-                "/spring-framework/docs/current/javadoc-api/"
-            );
-        }
-        // Remove accidental double slashes (but keep protocol)
-        int protoIdx = out.indexOf("://");
-        String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
-        String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
-        rest = rest.replaceAll("/+", "/");
-        return prefix + rest;
     }
 
     private List<Document> executeFallbackSearch(String query, int maxDocs, RuntimeException exception) {

@@ -139,6 +139,50 @@ public class Enrichment {
     public void setBackground(List<String> background) {
         this.background = background == null ? List.of() : List.copyOf(background);
     }
+
+    /**
+     * Returns a sanitized copy of this enrichment with all string lists trimmed and filtered.
+     * Empty or null entries are removed, and remaining entries are trimmed of whitespace.
+     *
+     * @return sanitized enrichment instance (never null)
+     */
+    public Enrichment sanitized() {
+        Enrichment result = new Enrichment();
+        result.setPackageName(this.packageName);
+        result.setJdkVersion(this.jdkVersion);
+        result.setResource(this.resource);
+        result.setResourceVersion(this.resourceVersion);
+        result.setHints(trimFilter(this.hints));
+        result.setReminders(trimFilter(this.reminders));
+        result.setBackground(trimFilter(this.background));
+        return result;
+    }
+
+    /**
+     * Creates an empty enrichment with all lists initialized to empty.
+     *
+     * @return empty enrichment instance
+     */
+    public static Enrichment empty() {
+        Enrichment empty = new Enrichment();
+        empty.setHints(List.of());
+        empty.setReminders(List.of());
+        empty.setBackground(List.of());
+        return empty;
+    }
+
+    /**
+     * Trims and filters a list of strings, removing null/empty entries.
+     */
+    private static List<String> trimFilter(List<String> entries) {
+        if (entries == null) {
+            return List.of();
+        }
+        return entries.stream()
+                .map(entry -> entry == null ? "" : entry.trim())
+                .filter(entry -> !entry.isEmpty())
+                .toList();
+    }
 }
 
 

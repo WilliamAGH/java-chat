@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,13 +75,7 @@ public class ChatService {
         
         logger.debug("ChatService configured with inline enrichment markers for queryToken={}", queryToken);
 
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document contextDoc = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
-            String normUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
-                .append("\n").append(contextDoc.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
@@ -105,48 +100,16 @@ public class ChatService {
     }
 
     /**
-     * Normalize URLs placed into the LLM prompt so the model never sees local file:/// paths
-     * or malformed mirrors. This mirrors RetrievalService's normalization without exposing it.
+     * Appends context documents to a system prompt builder with normalized URLs.
      */
-    private String normalizeUrlForPrompt(String rawUrl) {
-        if (rawUrl == null || rawUrl.isBlank()) return rawUrl;
-        String trimmedUrl = rawUrl.trim();
-        // Already HTTP(S): canonicalize and fix common spring paths
-        if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
-            return canonicalizeHttpDocUrl(trimmedUrl);
+    private void appendContextDocs(StringBuilder systemContext, List<Document> contextDocs) {
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document contextDoc = contextDocs.get(docIndex);
+            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
+            String normUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
+                .append("\n").append(contextDoc.getText());
         }
-        // Map book PDFs to public server path
-        String resolvedPath = trimmedUrl.startsWith("file://")
-            ? trimmedUrl.substring("file://".length())
-            : trimmedUrl;
-        var publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(resolvedPath);
-        if (publicPdf.isPresent()) {
-            return publicPdf.get();
-        }
-        // Only handle file:// beyond this point
-        if (!trimmedUrl.startsWith("file://")) return trimmedUrl;
-        String localPath = trimmedUrl.substring("file://".length());
-        var embeddedUrl = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(localPath);
-        if (embeddedUrl.isPresent()) {
-            return canonicalizeHttpDocUrl(embeddedUrl.get());
-        }
-        var mappedUrl = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(localPath);
-        return mappedUrl.map(this::canonicalizeHttpDocUrl).orElse(trimmedUrl);
-    }
-
-    private String canonicalizeHttpDocUrl(String url) {
-        String out = url;
-        out = out.replace("/docs/api/api/", "/docs/api/");
-        out = out.replace("/api/api/", "/api/");
-        if (out.contains("https://docs.spring.io/")) {
-            out = out.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
-            out = out.replace("/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
-        }
-        int protoIdx = out.indexOf("://");
-        String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
-        String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
-        rest = rest.replaceAll("/+", "/");
-        return prefix + rest;
     }
 
     /**
@@ -168,13 +131,7 @@ public class ChatService {
         
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document contextDoc = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(contextDoc.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
@@ -245,13 +202,7 @@ public class ChatService {
             }
         }
 
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document contextDoc = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(contextDoc.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
@@ -275,13 +226,7 @@ public class ChatService {
 
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document contextDoc = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(safeUrl)
-                .append("\n").append(contextDoc.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));

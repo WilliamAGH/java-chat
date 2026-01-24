@@ -87,27 +87,13 @@ public class EnrichmentService {
             if (parsed.getHints() == null) parsed.setHints(List.of());
             if (parsed.getReminders() == null) parsed.setReminders(List.of());
             if (parsed.getBackground() == null) parsed.setBackground(List.of());
-            // Sanitize: trim and drop empty items across all lists
-            parsed.setHints(trimFilter(parsed.getHints()));
-            parsed.setReminders(trimFilter(parsed.getReminders()));
-            parsed.setBackground(trimFilter(parsed.getBackground()));
-            return parsed;
+            // Return sanitized enrichment with trimmed/filtered lists
+            return parsed.sanitized();
         } catch (JsonProcessingException exception) {
-            Enrichment fallback = new Enrichment();
+            Enrichment fallback = Enrichment.empty();
             fallback.setJdkVersion(jdkVersion);
-            fallback.setHints(List.of());
-            fallback.setReminders(List.of());
-            fallback.setBackground(List.of());
             return fallback;
         }
-    }
-
-    private List<String> trimFilter(List<String> entries) {
-        if (entries == null) return List.of();
-        return entries.stream()
-                .map(entryText -> entryText == null ? "" : entryText.trim())
-                .filter(entryText -> !entryText.isEmpty())
-                .toList();
     }
 
 

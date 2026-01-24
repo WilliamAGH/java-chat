@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -27,6 +28,7 @@ import java.time.Duration;
 @RestController
 @RequestMapping("/api/guided")
 @PermitAll
+@PreAuthorize("permitAll()")
 public class GuidedLearningController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 
@@ -87,29 +89,6 @@ public class GuidedLearningController extends BaseController {
         return guidedService.citationsForLesson(slug);
     }
 
-    private Enrichment sanitizeEnrichment(Enrichment enrichment) {
-        if (enrichment == null) {
-            // Return empty enrichment instead of null per NO1
-            Enrichment empty = new Enrichment();
-            empty.setHints(List.of());
-            empty.setReminders(List.of());
-            empty.setBackground(List.of());
-            return empty;
-        }
-        enrichment.setHints(trimFilter(enrichment.getHints()));
-        enrichment.setReminders(trimFilter(enrichment.getReminders()));
-        enrichment.setBackground(trimFilter(enrichment.getBackground()));
-        return enrichment;
-    }
-    
-    private java.util.List<String> trimFilter(java.util.List<String> in) {
-        if (in == null) return java.util.List.of();
-        return in.stream()
-                .map(item -> item == null ? "" : item.trim())
-                .filter(item -> item.length() > 0)
-                .toList();
-    }
-
     /**
      * Retrieves enrichment content (hints, reminders, background) for a specific lesson.
      *
@@ -118,7 +97,8 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping("/enrich")
     public Enrichment enrich(@RequestParam("slug") String slug) {
-        return sanitizeEnrichment(guidedService.enrichmentForLesson(slug));
+        Enrichment result = guidedService.enrichmentForLesson(slug);
+        return result == null ? Enrichment.empty() : result.sanitized();
     }
 
     /**

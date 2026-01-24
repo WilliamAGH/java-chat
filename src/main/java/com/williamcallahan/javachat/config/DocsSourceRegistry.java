@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -197,7 +198,7 @@ public final class DocsSourceRegistry {
         Optional<String> publicPdfUrl = Optional.empty();
         if (localPath != null) {
             final String normalizedPath = localPath.replace('\\', '/');
-            if (normalizeAsciiLower(normalizedPath).endsWith(PDF_EXTENSION)) {
+            if (AsciiTextNormalizer.toLowerAscii(normalizedPath).endsWith(PDF_EXTENSION)) {
                 final int markerIndex = normalizedPath.indexOf(LOCAL_DOCS_BOOKS);
                 if (markerIndex >= 0) {
                     final String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
@@ -213,16 +214,82 @@ public final class DocsSourceRegistry {
         return publicPdfUrl;
     }
 
-    private static String normalizeAsciiLower(String inputText) {
-        StringBuilder normalized = new StringBuilder(inputText.length());
-        for (int index = 0; index < inputText.length(); index++) {
-            char current = inputText.charAt(index);
-            if (current >= 'A' && current <= 'Z') {
-                normalized.append((char) (current + ('a' - 'A')));
-            } else {
-                normalized.append(current);
-            }
+    /**
+     * Canonicalizes HTTP/HTTPS documentation URLs by fixing common path duplications
+     * and collapsing double slashes.
+     *
+     * @param url HTTP/HTTPS URL to canonicalize
+     * @return canonicalized URL with path duplications fixed
+     */
+    public static String canonicalizeHttpDocUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
         }
-        return normalized.toString();
+        String result = url;
+        // Collapse duplicated segments for Oracle and EA docs
+        result = result.replace("/docs/api/api/", "/docs/api/");
+        result = result.replace("/api/api/", "/api/");
+        // Fix malformed Spring docs paths that accidentally include '/java/' segment
+        if (result.contains(SPRING_DOCS_HTTPS_PREFIX)) {
+            result = result.replace(
+                "/spring-boot/docs/current/api/java/",
+                "/spring-boot/docs/current/api/"
+            );
+            result = result.replace(
+                "/spring-framework/docs/current/javadoc-api/java/",
+                "/spring-framework/docs/current/javadoc-api/"
+            );
+        }
+        // Remove accidental double slashes (but keep protocol)
+        int protoIdx = result.indexOf("://");
+        String prefix = protoIdx >= 0 ? result.substring(0, protoIdx + 3) : "";
+        String rest = protoIdx >= 0 ? result.substring(protoIdx + 3) : result;
+        rest = rest.replaceAll("/+", "/");
+        return prefix + rest;
+    }
+
+    /**
+     * Normalizes a documentation URL from local file paths or mirrors to authoritative remote URLs.
+     * Handles file:// URLs, embedded host paths, and already-HTTP URLs.
+     *
+     * @param rawUrl raw URL that may be file://, local path, or HTTP(S)
+     * @return normalized authoritative URL
+     */
+    public static String normalizeDocUrl(String rawUrl) {
+        if (rawUrl == null || rawUrl.isBlank()) {
+            return rawUrl;
+        }
+        String trimmedUrl = rawUrl.trim();
+
+        // Already HTTP(S): canonicalize and return
+        if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
+            return canonicalizeHttpDocUrl(trimmedUrl);
+        }
+
+        // Map book PDFs to public server path
+        String resolvedPath = trimmedUrl.startsWith("file://")
+            ? trimmedUrl.substring("file://".length())
+            : trimmedUrl;
+        Optional<String> publicPdf = mapBookLocalToPublic(resolvedPath);
+        if (publicPdf.isPresent()) {
+            return publicPdf.get();
+        }
+
+        // Only handle file:// beyond this point
+        if (!trimmedUrl.startsWith("file://")) {
+            return trimmedUrl;
+        }
+
+        String localPath = trimmedUrl.substring("file://".length());
+
+        // Try embedded host reconstruction first
+        Optional<String> embeddedUrl = reconstructFromEmbeddedHost(localPath);
+        if (embeddedUrl.isPresent()) {
+            return canonicalizeHttpDocUrl(embeddedUrl.get());
+        }
+
+        // Try local prefix mapping
+        Optional<String> mappedUrl = mapLocalPrefixToRemote(localPath);
+        return mappedUrl.map(DocsSourceRegistry::canonicalizeHttpDocUrl).orElse(trimmedUrl);
     }
 }
