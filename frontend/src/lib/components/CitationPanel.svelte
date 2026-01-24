@@ -13,17 +13,38 @@
   const FALLBACK_LINK_TARGET = '#'
   const FALLBACK_SOURCE_LABEL = 'Source'
 
-  /** Type detection rules - evaluated in order, first match wins. */
-  const TYPE_DETECTION_RULES: ReadonlyArray<{
-    test: (url: string) => boolean
-    type: CitationType
-  }> = [
-    { test: (url) => url.endsWith(PDF_EXTENSION), type: 'pdf' },
-    { test: (url) => isHttpUrl(url) && matchesAnyPattern(url, ['docs.oracle.com', 'javadoc', '/api/', '/docs/api/']), type: 'api-doc' },
-    { test: (url) => isHttpUrl(url) && matchesAnyPattern(url, ['github.com', 'gitlab.com', 'bitbucket.org']), type: 'repo' },
-    { test: (url) => isHttpUrl(url), type: 'external' },
-    { test: (url) => url.startsWith(LOCAL_PATH_PREFIX), type: 'local' },
-  ]
+  /** Domain patterns that indicate API documentation sources. */
+  const API_DOC_PATTERNS = ['docs.oracle.com', 'javadoc', '/api/', '/docs/api/'] as const
+
+  /** Domain patterns that indicate repository sources. */
+  const REPO_PATTERNS = ['github.com', 'gitlab.com', 'bitbucket.org'] as const
+
+  /** Checks if URL is HTTP/HTTPS. */
+  function isHttpUrl(url: string): boolean {
+    return url.startsWith(URL_SCHEME_HTTP) || url.startsWith(URL_SCHEME_HTTPS)
+  }
+
+  /** Checks if URL contains any of the given patterns. */
+  function matchesAnyPattern(url: string, patterns: readonly string[]): boolean {
+    return patterns.some(pattern => url.includes(pattern))
+  }
+
+  /**
+   * Determines citation type from URL for icon and styling.
+   */
+  function getCitationType(url: string): CitationType {
+    if (!url) return 'unknown'
+    const lowerUrl = url.toLowerCase()
+
+    if (lowerUrl.endsWith(PDF_EXTENSION)) return 'pdf'
+    if (isHttpUrl(lowerUrl)) {
+      if (matchesAnyPattern(lowerUrl, API_DOC_PATTERNS)) return 'api-doc'
+      if (matchesAnyPattern(lowerUrl, REPO_PATTERNS)) return 'repo'
+      return 'external'
+    }
+    if (lowerUrl.startsWith(LOCAL_PATH_PREFIX)) return 'local'
+    return 'unknown'
+  }
 
   interface Props {
     /** The user query to fetch citations for. */
@@ -38,26 +59,6 @@
   let hasFetched = $state(false)
   let fetchError = $state<string | null>(null)
   let isExpanded = $state(false)
-
-  /** Checks if URL is HTTP/HTTPS. */
-  function isHttpUrl(url: string): boolean {
-    return url.startsWith(URL_SCHEME_HTTP) || url.startsWith(URL_SCHEME_HTTPS)
-  }
-
-  /** Checks if URL contains any of the given patterns. */
-  function matchesAnyPattern(url: string, patterns: readonly string[]): boolean {
-    return patterns.some(pattern => url.includes(pattern))
-  }
-
-  /**
-   * Determines citation type using rule-based matching.
-   */
-  function getCitationType(url: string): CitationType {
-    if (!url) return 'unknown'
-    const lowerUrl = url.toLowerCase()
-    const matchedRule = TYPE_DETECTION_RULES.find(rule => rule.test(lowerUrl))
-    return matchedRule?.type ?? 'unknown'
-  }
 
   /**
    * Extracts display-friendly domain or filename from URL.
