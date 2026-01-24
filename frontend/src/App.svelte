@@ -34,6 +34,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    padding-top: 57px; /* Height of fixed header */
   }
 
   .coming-soon {

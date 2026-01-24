@@ -94,11 +94,24 @@ export async function streamChat(
             continue
           }
 
+          // Parse JSON wrapper to preserve whitespace (Spring SSE can trim leading spaces)
+          // Format: {"text":"actual content with spaces"}
+          let textContent = data
+          if (data.startsWith('{') && data.includes('"text"')) {
+            try {
+              const parsed = JSON.parse(data) as { text?: string }
+              textContent = parsed.text ?? data
+            } catch {
+              // Fallback to raw data if JSON parsing fails
+              textContent = data
+            }
+          }
+
           // Accumulate within current SSE event
           if (hasEventData) {
             eventBuffer += '\n'
           }
-          eventBuffer += data
+          eventBuffer += textContent
           hasEventData = true
         } else if (line.trim() === '') {
           // Blank line marks end of SSE event - commit accumulated data
