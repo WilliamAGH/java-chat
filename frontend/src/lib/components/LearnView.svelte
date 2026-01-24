@@ -101,6 +101,7 @@
   }
 
   async function selectLesson(lesson: GuidedLesson): Promise<void> {
+    const targetSlug = lesson.slug
     // Reset state atomically before async operation
     selectedLesson = lesson
     loadingLesson = true
@@ -113,11 +114,15 @@
 
     try {
       const response = await fetchLessonContent(lesson.slug)
+      // Guard against stale response if user switched lessons
+      if (selectedLesson?.slug !== targetSlug) return
       lessonMarkdown = response.markdown
 
       // Fetch citations for the lesson topic (non-blocking, with error visibility)
       fetchCitations(lesson.title)
         .then((citations) => {
+          // Guard against stale citation response
+          if (selectedLesson?.slug !== targetSlug) return
           // Deduplicate by URL
           const seen = new Set<string>()
           lessonCitations = citations.filter((citation) => {
@@ -128,22 +133,31 @@
           })
         })
         .catch((citationError: unknown) => {
+          if (selectedLesson?.slug !== targetSlug) return
           lessonCitationsError = citationError instanceof Error
             ? citationError.message
             : 'Failed to load sources'
         })
         .finally(() => {
-          lessonCitationsLoaded = true
+          if (selectedLesson?.slug === targetSlug) {
+            lessonCitationsLoaded = true
+          }
         })
     } catch (error) {
+      if (selectedLesson?.slug !== targetSlug) return
       lessonError = error instanceof Error ? error.message : 'Failed to load lesson'
       lessonMarkdown = ''
     } finally {
-      loadingLesson = false
+      if (selectedLesson?.slug === targetSlug) {
+        loadingLesson = false
+      }
     }
   }
 
   function goBack(): void {
+    // Cancel any in-flight stream by clearing streaming state
+    isStreaming = false
+    currentStreamingContent = ''
     selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
@@ -173,6 +187,7 @@
   async function handleSend(message: string): Promise<void> {
     if (!message.trim() || isStreaming || !selectedLesson) return
 
+    const streamLessonSlug = selectedLesson.slug
     const userQuery = message.trim()
 
     messages = [...messages, {
@@ -190,6 +205,8 @@
     try {
       await streamGuidedChat(sessionId, selectedLesson.slug, userQuery, {
         onChunk: (chunk) => {
+          // Guard: ignore chunks if user navigated away
+          if (selectedLesson?.slug !== streamLessonSlug) return
           currentStreamingContent += chunk
           scrollToBottom()
         },
@@ -198,6 +215,8 @@
         }
       })
 
+      // Guard: don't add message if user navigated away
+      if (selectedLesson?.slug !== streamLessonSlug) return
       messages = [...messages, {
         role: 'assistant',
         content: currentStreamingContent,
@@ -205,6 +224,7 @@
         queryForCitations: userQuery
       }]
     } catch (error) {
+      if (selectedLesson?.slug !== streamLessonSlug) return
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
       messages = [...messages, {
         role: 'assistant',
@@ -213,9 +233,12 @@
         isError: true
       }]
     } finally {
-      isStreaming = false
-      currentStreamingContent = ''
-      await scrollToBottom()
+      // Guard: only reset streaming state if still on same lesson
+      if (selectedLesson?.slug === streamLessonSlug) {
+        isStreaming = false
+        currentStreamingContent = ''
+        await scrollToBottom()
+      }
     }
   }
 
