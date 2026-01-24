@@ -98,3 +98,4 @@ alwaysApply: true
 - SRC2 For dependency code questions, inspect `~/.m2` JARs first; fallback to upstream GitHub; never answer without referencing code.
 - SRC3 Inspect `~/.gradle/caches/` for dependency code in Gradle projects; verify actual implementation rather than assuming.
 - DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
+- DI1 Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean to ensure consistent configuration.

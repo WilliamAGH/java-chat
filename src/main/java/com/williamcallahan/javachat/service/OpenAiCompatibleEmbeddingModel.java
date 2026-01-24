@@ -34,7 +34,7 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
     private final int dimensionsHint;       // used only as a hint; actual vector size comes from response
     private final RestTemplate restTemplate;
 
-	private record EmbeddingRequestPayload(String model, String input) {
+	private record EmbeddingRequestPayload(String model, List<String> input) {
 	}
 
 	/**
@@ -79,9 +79,88 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
      */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
+        validateConfig();
+        String endpoint = resolveEndpoint(baseUrl);
+        
+        List<String> instructions = request.getInstructions();
+        EmbeddingRequestPayload payload = new EmbeddingRequestPayload(modelName, instructions);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
+
+        HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(payload, headers);
+
+        try {
+            Object rawResponse = restTemplate.postForObject(endpoint, entity, Object.class);
+            List<Embedding> embeddings = parseResponse(rawResponse);
+            return new EmbeddingResponse(embeddings);
+
+        } catch (EmbeddingApiResponseException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.warn("[EMBEDDING] Remote embedding call failed (exception type: {})",
+                exception.getClass().getSimpleName());
+            throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
+        }
+    }
+
+    private void validateConfig() {
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException("Remote embedding API key is not configured");
         }
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalStateException("Remote embedding base URL is not configured");
+        }
+    }
+
+    private String resolveEndpoint(String baseUrl) {
+        String endpoint = baseUrl;
+        if (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
+        if (!endpoint.endsWith("/v1/embeddings")) {
+            if (endpoint.endsWith("/v1")) {
+                endpoint = endpoint + "/embeddings";
+            } else if (!endpoint.contains("/v1/embeddings")) {
+                endpoint = endpoint + "/v1/embeddings";
+            }
+        }
+        return endpoint;
+    }
+
+    private List<Embedding> parseResponse(Object rawResponse) {
+        if (rawResponse == null) {
+            throw new EmbeddingApiResponseException("Remote embedding response was null");
+        }
+
+        Map<?, ?> responseMap = requireMap(rawResponse, "response");
+        Object responsePayload = responseMap.get("data");
+        if (!(responsePayload instanceof List<?> responseEntries) || responseEntries.isEmpty()) {
+            throw new EmbeddingApiResponseException("Remote embedding response missing 'data' entries");
+        }
+
+        List<Embedding> embeddings = new ArrayList<>();
+        for (int i = 0; i < responseEntries.size(); i++) {
+            Object entryObj = responseEntries.get(i);
+            Map<?, ?> entryMap = requireMap(entryObj, "data[" + i + "]");
+            Object embeddingPayload = entryMap.get("embedding");
+
+            if (!(embeddingPayload instanceof List<?> embeddingEntries) || embeddingEntries.isEmpty()) {
+                throw new EmbeddingApiResponseException("Remote embedding response missing embedding values");
+            }
+
+            float[] vector = new float[embeddingEntries.size()];
+            for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
+                Object numericEntry = embeddingEntries.get(vectorIndex);
+                if (!(numericEntry instanceof Number numberValue)) {
+                    throw new EmbeddingApiResponseException("Non-numeric embedding value at index " + vectorIndex);
+                }
+                vector[vectorIndex] = numberValue.floatValue();
+            }
+            embeddings.add(new Embedding(vector, i));
+        }
+        return embeddings;
+    }
+
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalStateException("Remote embedding base URL is not configured");
         }
@@ -98,34 +177,34 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
                 endpoint = endpoint + "/v1/embeddings";
             }
         }
-        List<Embedding> embeddings = new ArrayList<>();
-
+        
         List<String> instructions = request.getInstructions();
-        for (int instructionIndex = 0; instructionIndex < instructions.size(); instructionIndex++) {
-            String inputText = instructions.get(instructionIndex);
-            EmbeddingRequestPayload payload = new EmbeddingRequestPayload(modelName, inputText);
+        EmbeddingRequestPayload payload = new EmbeddingRequestPayload(modelName, instructions);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Bearer " + apiKey);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
 
-            HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(payload, headers);
+        HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(payload, headers);
 
-            try {
-                Object rawResponse = restTemplate.postForObject(endpoint, entity, Object.class);
-                if (rawResponse == null) {
-                    throw new EmbeddingApiResponseException("Remote embedding response was null");
-                }
+        try {
+            Object rawResponse = restTemplate.postForObject(endpoint, entity, Object.class);
+            if (rawResponse == null) {
+                throw new EmbeddingApiResponseException("Remote embedding response was null");
+            }
 
-                Map<?, ?> responseMap = requireMap(rawResponse, "response");
-                Object responsePayload = responseMap.get("data");
-                if (!(responsePayload instanceof List<?> responseEntries) || responseEntries.isEmpty()) {
-                    throw new EmbeddingApiResponseException("Remote embedding response missing 'data' entries");
-                }
+            Map<?, ?> responseMap = requireMap(rawResponse, "response");
+            Object responsePayload = responseMap.get("data");
+            if (!(responsePayload instanceof List<?> responseEntries) || responseEntries.isEmpty()) {
+                throw new EmbeddingApiResponseException("Remote embedding response missing 'data' entries");
+            }
 
-                Object firstEntry = responseEntries.get(0);
-                Map<?, ?> firstEntryMap = requireMap(firstEntry, "data[0]");
-                Object embeddingPayload = firstEntryMap.get("embedding");
+            List<Embedding> embeddings = new ArrayList<>();
+            for (int i = 0; i < responseEntries.size(); i++) {
+                Object entryObj = responseEntries.get(i);
+                Map<?, ?> entryMap = requireMap(entryObj, "data[" + i + "]");
+                Object embeddingPayload = entryMap.get("embedding");
+
                 if (!(embeddingPayload instanceof List<?> embeddingEntries) || embeddingEntries.isEmpty()) {
                     throw new EmbeddingApiResponseException("Remote embedding response missing embedding values");
                 }
@@ -138,17 +217,18 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
                     }
                     vector[vectorIndex] = numberValue.floatValue();
                 }
-                embeddings.add(new Embedding(vector, instructionIndex));
-            } catch (EmbeddingApiResponseException exception) {
-                throw exception;
-            } catch (Exception exception) {
-                log.warn("[EMBEDDING] Remote embedding call failed (exception type: {})",
-                    exception.getClass().getSimpleName());
-                throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
+                embeddings.add(new Embedding(vector, i));
             }
-        }
+            
+            return new EmbeddingResponse(embeddings);
 
-        return new EmbeddingResponse(embeddings);
+        } catch (EmbeddingApiResponseException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.warn("[EMBEDDING] Remote embedding call failed (exception type: {})",
+                exception.getClass().getSimpleName());
+            throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
+        }
     }
 
     /**

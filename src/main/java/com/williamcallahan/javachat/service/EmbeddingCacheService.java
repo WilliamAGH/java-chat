@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -37,10 +38,8 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class EmbeddingCacheService {
     private static final Logger CACHE_LOG = LoggerFactory.getLogger("EMBEDDING_CACHE");
-    private static final ObjectMapper CACHE_MAPPER = new ObjectMapper()
-        .registerModule(new JavaTimeModule())
-        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     
+    private final ObjectMapper cacheMapper;
     private final Path cacheDir;
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
@@ -89,17 +88,22 @@ public class EmbeddingCacheService {
 	        return resolved;
 	    }
 
-	    /**
-	     * Creates an embedding cache service rooted at the configured cache directory.
-	     */
-	    public EmbeddingCacheService(
-	            @Value("${app.embeddings.cache-dir:./data/embeddings-cache}") String cacheDir,
-	            EmbeddingModel embeddingModel,
-	            VectorStore vectorStore) {
-	        this.cacheDir = Path.of(cacheDir);
-	        this.embeddingModel = embeddingModel;
-	        this.vectorStore = vectorStore;
-	    }
+    /**
+     * Creates an embedding cache service rooted at the configured cache directory.
+     */
+    public EmbeddingCacheService(
+            @Value("${app.embeddings.cache-dir:./data/embeddings-cache}") String cacheDir,
+            EmbeddingModel embeddingModel,
+            VectorStore vectorStore,
+            ObjectMapper objectMapper) {
+        this.cacheDir = Path.of(cacheDir);
+        this.embeddingModel = embeddingModel;
+        this.vectorStore = vectorStore;
+        this.cacheMapper = objectMapper.copy()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    }
 
 	    /**
 	     * Initializes the cache directory and schedules periodic persistence for incremental updates.
@@ -313,7 +317,7 @@ public class EmbeddingCacheService {
 
         try (OutputStream fos = Files.newOutputStream(exportPath);
              GZIPOutputStream gzos = new GZIPOutputStream(fos)) {
-            CACHE_MAPPER.writeValue(gzos, new ArrayList<>(memoryCache.values()));
+            cacheMapper.writeValue(gzos, new ArrayList<>(memoryCache.values()));
             CACHE_LOG.info("Successfully exported cache");
         }
     }
@@ -481,7 +485,7 @@ public class EmbeddingCacheService {
         try (InputStream fileInputStream = Files.newInputStream(importPath);
              GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream)) {
 
-            List<CachedEmbedding> importedEmbeddings = CACHE_MAPPER.readValue(
+            List<CachedEmbedding> importedEmbeddings = cacheMapper.readValue(
                 gzipInputStream,
                 new TypeReference<List<CachedEmbedding>>() {}
             );

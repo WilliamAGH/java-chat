@@ -22,16 +22,18 @@ public class RerankerService {
 	    private static final Logger log = LoggerFactory.getLogger(
 	        RerankerService.class
 	    );
-	    private final OpenAIStreamingService openAIStreamingService;
-	    private final ObjectMapper mapper = new ObjectMapper();
+    private final OpenAIStreamingService openAIStreamingService;
+    private final ObjectMapper mapper;
 
     /**
      * Creates a reranker backed by the streaming LLM client.
      *
      * @param openAIStreamingService streaming LLM client
+     * @param objectMapper Jackson object mapper
      */
-    public RerankerService(OpenAIStreamingService openAIStreamingService) {
+    public RerankerService(OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper) {
         this.openAIStreamingService = openAIStreamingService;
+        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     }
 
     /**

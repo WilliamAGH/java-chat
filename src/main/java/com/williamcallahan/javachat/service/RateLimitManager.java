@@ -33,10 +33,6 @@ public class RateLimitManager {
         Instant resetTime,
         long retryAfterSeconds
     ) {
-        static ParsedRateLimitInfo empty() {
-            return new ParsedRateLimitInfo(null, 0);
-        }
-
         boolean hasResetTime() {
             return resetTime != null;
         }

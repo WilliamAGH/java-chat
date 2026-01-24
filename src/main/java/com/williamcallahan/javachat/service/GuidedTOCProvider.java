@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 
 /**
  * Loads and caches guided lesson metadata from the classpath to support guided learning flows.
@@ -21,9 +22,18 @@ import java.util.Optional;
 @Service
 public class GuidedTOCProvider {
     private static final Logger log = LoggerFactory.getLogger(GuidedTOCProvider.class);
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private volatile List<GuidedLesson> cache = Collections.emptyList();
     private volatile boolean tocLoaded = false;
+
+    /**
+     * Creates a TOC provider backed by a safely copied ObjectMapper instance.
+     *
+     * @param mapper configured ObjectMapper
+     */
+    public GuidedTOCProvider(ObjectMapper mapper) {
+        this.mapper = Objects.requireNonNull(mapper, "mapper").copy();
+    }
 
     /**
      * Returns the lesson table of contents, loading it lazily from the classpath on first access.
@@ -33,8 +43,10 @@ public class GuidedTOCProvider {
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
-                List<GuidedLesson> loadedLessons =
-                    mapper.readValue(tocStream, new TypeReference<List<GuidedLesson>>() {});
+                List<GuidedLesson> loadedLessons = mapper
+                    .readerFor(new TypeReference<List<GuidedLesson>>() {})
+                    .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(tocStream);
                 cache = List.copyOf(loadedLessons);
             }
         } catch (IOException exception) {
