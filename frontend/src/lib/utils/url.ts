@@ -73,6 +73,10 @@ export function sanitizeUrl(url: string | undefined | null): string {
     return FALLBACK_LINK_TARGET
   } catch {
     // URL parsing failed - might be a relative path or malformed
+    // Block protocol-relative URLs (//example.com) that inherit page scheme
+    if (trimmedUrl.startsWith('//')) {
+      return FALLBACK_LINK_TARGET
+    }
     // Only allow if it doesn't look like a dangerous scheme
     const lowerUrl = trimmedUrl.toLowerCase()
     if (lowerUrl.includes(':') && !isHttpUrl(lowerUrl)) {
