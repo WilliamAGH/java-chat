@@ -103,7 +103,8 @@ public class ChatService {
     private void appendContextDocs(StringBuilder systemContext, List<Document> contextDocs) {
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
             Document contextDoc = contextDocs.get(docIndex);
-            String rawUrl = String.valueOf(contextDoc.getMetadata().get("url"));
+            Object urlMetadata = contextDoc.getMetadata().get("url");
+            String rawUrl = urlMetadata != null ? urlMetadata.toString() : "";
             String normUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
                 .append("\n").append(contextDoc.getText());
