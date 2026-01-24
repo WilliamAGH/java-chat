@@ -139,7 +139,7 @@ public class RetrievalService {
 
     /**
      * Retrieve documents with custom limits for token-constrained models.
-     * Used for GPT-5 which has an 8K input token limit.
+     * Used for GPT-5.2 which has an 8K input token limit.
      */
     public List<Document> retrieveWithLimit(
         String query,

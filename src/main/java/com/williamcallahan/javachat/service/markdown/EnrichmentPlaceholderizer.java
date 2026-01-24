@@ -149,48 +149,21 @@ class EnrichmentPlaceholderizer {
 
             // Detect enrichment start only when not inside code fences or inline code
             if (!fenceTracker.isInsideCode() && startsWith(markdown, cursor, MARKER_START)) {
-                int typeStartIndex = cursor + 2;
-                // skip spaces
-                while (typeStartIndex < markdown.length()
-                    && Character.isWhitespace(markdown.charAt(typeStartIndex))) {
-                    typeStartIndex++;
-                }
-                // read type token
-                int typeEndIndex = typeStartIndex;
-                while (typeEndIndex < markdown.length()
-                    && Character.isLetter(markdown.charAt(typeEndIndex))) {
-                    typeEndIndex++;
-                }
-                String type = markdown.substring(typeStartIndex, Math.min(typeEndIndex, markdown.length()));
-                
-                // skip spaces
-                int cursorAfterType = typeEndIndex;
-                while (cursorAfterType < markdown.length()
-                    && Character.isWhitespace(markdown.charAt(cursorAfterType))) {
-                    cursorAfterType++;
-                }
-                boolean hasColon = (cursorAfterType < markdown.length() && markdown.charAt(cursorAfterType) == ':');
-                Optional<EnrichmentKind> enrichmentKind = EnrichmentKind.fromToken(type);
-                
-                if (hasColon && enrichmentKind.isPresent()) {
-                    int contentStartIndex = cursorAfterType + 1;
-                    if (contentStartIndex < markdown.length() && markdown.charAt(contentStartIndex) == ' ') {
-                        contentStartIndex++;
-                    }
+                EnrichmentParseResult parseResult = parseEnrichmentMarker(markdown, cursor);
+                if (parseResult.isValid()) {
                     EnrichmentProcessingResult processingResult = processEnrichment(
                         context,
                         cursor,
-                        contentStartIndex,
-                        enrichmentKind.get(),
+                        parseResult.contentStartIndex(),
+                        parseResult.kind(),
                         absolutePosition
                     );
-                    
+
                     if (processingResult != null) {
                         cursor = processingResult.nextIndex();
                         absolutePosition = processingResult.nextAbsolutePosition();
                         continue;
                     }
-                    // No closing found: treat as plain text, fall through
                 }
             }
 
@@ -404,4 +377,45 @@ class EnrichmentPlaceholderizer {
     }
 
     private record EnrichmentProcessingResult(int nextIndex, int nextAbsolutePosition) {}
+
+    /**
+     * Result of parsing an enrichment marker opening sequence.
+     *
+     * @param valid true if a valid enrichment marker was found
+     * @param kind the enrichment kind, or null if invalid
+     * @param contentStartIndex position where content begins (after the colon)
+     */
+    private record EnrichmentParseResult(boolean valid, EnrichmentKind kind, int contentStartIndex) {
+        static EnrichmentParseResult invalid() {
+            return new EnrichmentParseResult(false, null, -1);
+        }
+
+        static EnrichmentParseResult of(EnrichmentKind kind, int contentStartIndex) {
+            return new EnrichmentParseResult(true, kind, contentStartIndex);
+        }
+
+        boolean isValid() {
+            return valid;
+        }
+    }
+
+    /**
+     * Parses an enrichment marker at the given position.
+     * Expects format: {{kind: where kind is one of the EnrichmentKind tokens.
+     *
+     * @param markdown the markdown text
+     * @param markerStart position of the opening {{
+     * @return parse result indicating validity and extracted data
+     */
+    private EnrichmentParseResult parseEnrichmentMarker(String markdown, int markerStart) {
+        int colonIndex = markdown.indexOf(':', markerStart + MARKER_START.length());
+        if (colonIndex == -1) {
+            return EnrichmentParseResult.invalid();
+        }
+
+        String rawToken = markdown.substring(markerStart + MARKER_START.length(), colonIndex);
+        return EnrichmentKind.fromToken(rawToken)
+            .map(kind -> EnrichmentParseResult.of(kind, colonIndex + 1))
+            .orElse(EnrichmentParseResult.invalid());
+    }
 }

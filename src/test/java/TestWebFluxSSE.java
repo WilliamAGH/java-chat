@@ -45,7 +45,7 @@ public class TestWebFluxSSE {
             .build();
 
         ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
-            .model(ChatModel.of("gpt-5"))
+            .model(ChatModel.of("gpt-5.2"))
             .maxCompletionTokens(100)
             .reasoningEffort(ReasoningEffort.of("minimal"))
             .addUserMessage("Say 'Hello World' and nothing else")

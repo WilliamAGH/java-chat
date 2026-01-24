@@ -24,12 +24,11 @@ final class MarkdownNormalizer {
             if (fenceMarker != null && !fenceTracker.isInsideInlineCode()) {
                 if (!fenceTracker.isInsideFence() && (isStartOfLine || isAttachedFenceStart)) {
                     // Repair malformed "attached" fences like "Here:```java" by forcing the fence
-                    // onto its own line, which is required for standard markdown parsing.
+                    // onto its own line. We ensure a single newline exists, but do NOT force a blank line,
+                    // as CommonMark allows fences to interrupt paragraphs.
                     if (normalizedBuilder.length() > 0) {
                         char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
                         if (previousChar != '\n') {
-                            normalizedBuilder.append('\n').append('\n');
-                        } else if (normalizedBuilder.length() > 1 && normalizedBuilder.charAt(normalizedBuilder.length() - 2) != '\n') {
                             normalizedBuilder.append('\n');
                         }
                     }
@@ -61,7 +60,7 @@ final class MarkdownNormalizer {
                     cursor += fenceMarker.length();
                     fenceTracker.exitFence();
                     if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
-                        normalizedBuilder.append('\n').append('\n');
+                        normalizedBuilder.append('\n');
                     }
                     continue;
                 }

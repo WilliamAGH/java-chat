@@ -133,7 +133,7 @@ All config is env-driven. See `src/main/resources/application.properties` for de
 ### API Configuration
 - `GITHUB_TOKEN`: GitHub personal access token for GitHub Models
 - `OPENAI_API_KEY`: OpenAI API key (separate, independent service)
-- `OPENAI_MODEL`: Model name, default `gpt-5` (used by all endpoints)
+- `OPENAI_MODEL`: Model name, default `gpt-5.2` (used by all endpoints)
 - `OPENAI_TEMPERATURE`: default `0.7`
 - `OPENAI_BASE_URL`: Spring AI base URL (default: `https://models.github.ai/inference`)
   - **CRITICAL**: Must be `https://models.github.ai/inference` for GitHub Models
@@ -315,7 +315,7 @@ curl -X POST "http://localhost:8085/api/ingest/local?path=data/docs&maxFiles=100
 
 ## Retrieval & quality
 
-- Chunking: ~900 tokens with 150 overlap (GPT-5-compatible segmentation).
+- Chunking: ~900 tokens with 150 overlap (GPT-5.2-compatible segmentation).
 - Vector search: Qdrant similarity. Next steps: enable hybrid (BM25 + vector) and MMR diversity.
 - Re-ranker: planned BGE reranker (DJL) or LLM rerank for top-k. Citations pinned to top-3 by score.
 

@@ -11,7 +11,7 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import java.time.Duration;
 
 /**
- * Manual probe that prints GPT-5 streaming output using the OpenAI Java SDK.
+ * Manual probe that prints GPT-5.2 streaming output using the OpenAI Java SDK.
  */
 public class TestGPT5Streaming {
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
@@ -27,7 +27,7 @@ public class TestGPT5Streaming {
             System.exit(1);
         }
         
-        System.out.println("=== Testing GPT-5 Streaming ===");
+        System.out.println("=== Testing GPT-5.2 Streaming ===");
         System.out.println("API Key present: " + (OPENAI_API_KEY.length() > 0));
 
         System.out.println("\nSending request to OpenAI...\n");
@@ -47,7 +47,7 @@ public class TestGPT5Streaming {
             .build();
 
         ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
-            .model(ChatModel.of("gpt-5"))
+            .model(ChatModel.of("gpt-5.2"))
             .maxCompletionTokens(100)
             .reasoningEffort(ReasoningEffort.of("minimal"))
             .addUserMessage("Say 'Hello World' and nothing else")

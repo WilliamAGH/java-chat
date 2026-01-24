@@ -38,16 +38,24 @@ public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
     private static final String USER_MARKER = "User:";
     private static final String CONTEXT_MARKER = "[CTX ";
-    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5.2 8K input limit]\n\n";
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
-    private static final int TRUNCATION_SCAN_WINDOW = 2000;
     private static final int MAX_COMPLETION_TOKENS = 4000;
     private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
+
+    /** Safe token budget for GPT-5.2 input (8K limit). */
+    private static final int MAX_TOKENS_GPT5_INPUT = 7000;
+
+    /** Generous token budget for high-context models. */
+    private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
+
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
     private volatile boolean isAvailable = false;
     private final RateLimitManager rateLimitManager;
+    private final Chunker chunker;
+
     // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
     private volatile long primaryBackoffUntilEpochMs = 0L;
     
@@ -55,9 +63,11 @@ public class OpenAIStreamingService {
      * Creates a streaming service that can consult rate limit state when selecting an active provider.
      *
      * @param rateLimitManager rate limit state tracker
+     * @param chunker token-aware text chunker
      */
-    public OpenAIStreamingService(RateLimitManager rateLimitManager) {
+    public OpenAIStreamingService(RateLimitManager rateLimitManager, Chunker chunker) {
         this.rateLimitManager = rateLimitManager;
+        this.chunker = chunker;
     }
 
     @Value("${GITHUB_TOKEN:}")
@@ -69,7 +79,7 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_BASE_URL:https://api.openai.com/v1}")
     private String openaiBaseUrl;
 
-    @Value("${OPENAI_MODEL:gpt-5}")
+    @Value("${OPENAI_MODEL:gpt-5.2}")
     private String model;
     
     @Value("${GITHUB_MODELS_BASE_URL:https://models.github.ai/inference/v1}")
@@ -295,9 +305,9 @@ public class OpenAIStreamingService {
                 .model(ChatModel.of(normalizedModelId));
 
         if (gpt5Family) {
-            // GPT-5: omit temperature and set conservative max output tokens
+            // GPT-5.2: omit temperature and set conservative max output tokens
             builder.maxCompletionTokens(MAX_COMPLETION_TOKENS);
-            log.debug("Using GPT-5 configuration (no regression)");
+            log.debug("Using GPT-5.2 configuration (no regression)");
 
             ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
             if (effort != null) {
@@ -317,42 +327,31 @@ public class OpenAIStreamingService {
      */
     private String truncatePromptForModel(String prompt) {
         if (prompt == null || prompt.isEmpty()) return prompt;
-        // Approximate safe character budgets (chars ~ tokens * ~4)
-        final int MAX_CHARS_GPT5_INPUT = 28_000; // ~7k tokens, under 8k input limit
-        final int MAX_CHARS_DEFAULT = 400_000;   // generous for high-context models
 
         String modelId = normalizedModelId();
-        int limit = (isGpt5Family(modelId) || modelId.startsWith("o")) // Conservative limit for reasoning models
-            ? MAX_CHARS_GPT5_INPUT
-            : MAX_CHARS_DEFAULT;
+        int tokenLimit = (isGpt5Family(modelId) || modelId.startsWith("o"))
+            ? MAX_TOKENS_GPT5_INPUT
+            : MAX_TOKENS_DEFAULT_INPUT;
 
-        if (prompt.length() <= limit) return prompt;
-
-        // Prefer keeping the most recent context and user message
-        int lastUserMarkerIndex = prompt.lastIndexOf(USER_MARKER);
-        if (lastUserMarkerIndex > 0 && lastUserMarkerIndex > prompt.length() - TRUNCATION_SCAN_WINDOW) {
-            String recentContext = prompt.substring(Math.max(0, prompt.length() - limit));
-            // Trim to a clean-ish boundary
-            int paragraphBoundaryIndex = recentContext.indexOf(PARAGRAPH_SEPARATOR);
-            if (paragraphBoundaryIndex > 0 && paragraphBoundaryIndex < TRUNCATION_SCAN_WINDOW) {
-                recentContext = recentContext.substring(paragraphBoundaryIndex + PARAGRAPH_SEPARATOR.length());
-            }
-            int contextMarkerIndex = recentContext.indexOf(CONTEXT_MARKER);
-            if (contextMarkerIndex > 0 && contextMarkerIndex < TRUNCATION_SCAN_WINDOW) {
-                recentContext = recentContext.substring(contextMarkerIndex);
-            }
-            return TRUNCATION_NOTICE_GPT5 + recentContext;
+        String truncated = chunker.keepLastTokens(prompt, tokenLimit);
+        
+        if (truncated.length() < prompt.length()) {
+            String notice = (isGpt5Family(modelId) || modelId.startsWith("o")) 
+                ? TRUNCATION_NOTICE_GPT5 
+                : TRUNCATION_NOTICE_GENERIC;
+            return notice + truncated;
         }
-        return TRUNCATION_NOTICE_GENERIC + prompt.substring(prompt.length() - limit);
+        
+        return prompt;
     }
 
     private String normalizedModelId() {
         String rawModelId = model == null ? "" : model.trim();
-        return rawModelId.isEmpty() ? "gpt-5" : AsciiTextNormalizer.toLowerAscii(rawModelId);
+        return rawModelId.isEmpty() ? "gpt-5.2" : AsciiTextNormalizer.toLowerAscii(rawModelId);
     }
 
     private boolean isGpt5Family(String modelId) {
-        return modelId != null && modelId.startsWith("gpt-5");
+        return modelId != null && modelId.startsWith("gpt-5.2");
     }
 
     private ReasoningEffort resolveReasoningEffort(String normalizedModelId) {

@@ -382,13 +382,9 @@ public class DocsIngestionService {
             details.append(": ").append(message);
         }
 
-        // Add exception-specific diagnostic context
-        if (exception instanceof java.io.FileNotFoundException) {
-            details.append(" [file not found or inaccessible]");
-        } else if (exception instanceof java.nio.file.AccessDeniedException) {
-            details.append(" [permission denied]");
-        } else if (exception instanceof java.nio.charset.MalformedInputException) {
-            details.append(" [file encoding issue - not valid UTF-8]");
+        String diagnosticHint = ExceptionDiagnostics.getDiagnosticHint(exception);
+        if (diagnosticHint != null) {
+            details.append(" [").append(diagnosticHint).append("]");
         } else if (exception.getCause() != null) {
             details.append(" [caused by: ")
                    .append(exception.getCause().getClass().getSimpleName())
@@ -396,6 +392,32 @@ public class DocsIngestionService {
         }
 
         return new LocalIngestionFailure(file.toString(), phase, details.toString());
+    }
+
+    /**
+     * Maps exception types to user-friendly diagnostic hints.
+     * Extensible via the static registration method without modifying failure().
+     */
+    private static final class ExceptionDiagnostics {
+        private static final java.util.Map<Class<? extends Exception>, String> HINTS = new java.util.concurrent.ConcurrentHashMap<>();
+
+        static {
+            register(java.io.FileNotFoundException.class, "file not found or inaccessible");
+            register(java.nio.file.AccessDeniedException.class, "permission denied");
+            register(java.nio.charset.MalformedInputException.class, "file encoding issue - not valid UTF-8");
+            register(java.nio.file.NoSuchFileException.class, "file does not exist");
+        }
+
+        static void register(Class<? extends Exception> exceptionType, String hint) {
+            HINTS.put(exceptionType, hint);
+        }
+
+        static String getDiagnosticHint(Exception exception) {
+            if (exception == null) {
+                return null;
+            }
+            return HINTS.get(exception.getClass());
+        }
     }
 
     private String mapLocalPathToUrl(final Path file) {

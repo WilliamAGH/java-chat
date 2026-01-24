@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
@@ -22,34 +23,27 @@ import java.util.Objects;
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
-    private static final int RAG_LIMIT_GPT5 = 3;
-    private static final int RAG_TOKEN_LIMIT_GPT5 = 600;
-    
-    // OpenAI streaming preferred; ChatService builds prompts and can stream via SDK for internal uses
+
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
-    private final MarkdownService markdownService;
     private final double temperature;
 
     /**
-     * Creates the chat service with streaming, retrieval, and markdown dependencies.
+     * Creates the chat service with streaming, retrieval, and prompt configuration dependencies.
      *
      * @param openAIStreamingService LLM streaming service
      * @param retrievalService RAG retrieval service
      * @param systemPromptConfig system prompt configuration
-     * @param markdownService markdown processing service
-     * @param appProperties application configuration
+     * @param appProperties application configuration for LLM settings
      */
     public ChatService(OpenAIStreamingService openAIStreamingService,
                        RetrievalService retrievalService,
                        SystemPromptConfig systemPromptConfig,
-                       MarkdownService markdownService,
                        AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
-        this.markdownService = markdownService;
         this.temperature = appProperties.getLlm().getTemperature();
     }
 
@@ -195,14 +189,18 @@ public class ChatService {
     public ChatPromptOutcome buildPromptWithContextOutcome(List<Message> history,
                                                           String latestUserMessage,
                                                           String modelHint) {
-        // For GPT-5, use fewer RAG documents due to 8K token input limit
+        // Use reduced RAG for token-constrained models (GPT-5.x family)
         RetrievalService.RetrievalOutcome retrievalOutcome;
-        if ("gpt-5".equals(modelHint) || "gpt-5-chat".equals(modelHint)) {
+        if (ModelConfiguration.isTokenConstrained(modelHint)) {
             retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
-                latestUserMessage, RAG_LIMIT_GPT5, RAG_TOKEN_LIMIT_GPT5
+                latestUserMessage,
+                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
             );
-            logger.debug("Using reduced RAG for GPT-5: {} documents with max {} tokens each",
-                retrievalOutcome.documents().size(), RAG_TOKEN_LIMIT_GPT5);
+            logger.debug("Using reduced RAG for {}: {} documents with max {} tokens each",
+                modelHint,
+                retrievalOutcome.documents().size(),
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {
             retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
         }

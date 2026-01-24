@@ -17,7 +17,6 @@ import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.nodes.TextNode;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -223,9 +222,9 @@ public class UnifiedMarkdownService {
         // like "Key points: 1. First 2. Second" still render as proper <ol>/<ul>.
         renderInlineLists(document);
 
-        // Spacing and readability fixes for punctuation and long paragraphs
-        fixSentenceSpacing(document);
-        splitLongParagraphs(document);
+        // Intrusive spacing and paragraph splitting removed to preserve original formatting
+        // and avoid "double line break" visual artifacts.
+        
         String processedHtml = document.body().html();
         return processedHtml.trim();
     }
@@ -595,106 +594,7 @@ public class UnifiedMarkdownService {
 
     // === Pre-normalization and paragraph utilities (no regex) ===
     
-    private void fixSentenceSpacing(Document doc) {
-        for (Element paragraphElement : doc.select("p")) {
-            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-            if (!paragraphElement.children().isEmpty()) continue;
-            for (int nodeIndex = 0; nodeIndex < paragraphElement.childNodeSize(); nodeIndex++) {
-                org.jsoup.nodes.Node childNode = paragraphElement.childNode(nodeIndex);
-                if (childNode instanceof TextNode textNode) {
-                    String nodeText = textNode.getWholeText();
-                    String fixedSpacingText = fixTextSpacing(nodeText);
-                    if (fixedSpacingText != null && !fixedSpacingText.equals(nodeText)) {
-                        textNode.text(fixedSpacingText);
-                    }
-                }
-            }
-        }
-    }
-
-    private String fixTextSpacing(String text) {
-        if (text == null || text.isEmpty()) return text;
-        StringBuilder spacingBuilder = new StringBuilder(text.length() + 8);
-        for (int charIndex = 0; charIndex < text.length(); charIndex++) {
-            char character = text.charAt(charIndex);
-            spacingBuilder.append(character);
-            if ((character == '.' || character == '!' || character == '?')) {
-                // Only insert space if this looks like end of sentence, not a number/version
-                if (charIndex + 1 < text.length()) {
-                    char nextCharacter = text.charAt(charIndex + 1);
-                    // Skip spacing fix for numbers (3.14) and versions (v2.1)
-                    boolean prevIsDigit = charIndex > 0 && Character.isDigit(text.charAt(charIndex - 1));
-                    boolean nextIsDigit = Character.isDigit(nextCharacter);
-                    if (prevIsDigit && nextIsDigit) {
-                        // Part of a number like 3.14 - don't add space
-                        continue;
-                    }
-                    boolean prevIsLower = charIndex > 0 && Character.isLowerCase(text.charAt(charIndex - 1));
-                    // Insert space before uppercase sentence starts to avoid breaking URLs and package names.
-                    if (prevIsLower && nextCharacter != ' ' && nextCharacter != '\n' && Character.isUpperCase(nextCharacter)) {
-                        spacingBuilder.append(' ');
-                    }
-                }
-            }
-        }
-        return spacingBuilder.toString();
-    }
-
-    private void splitLongParagraphs(Document doc) {
-        java.util.List<Element> paragraphElements = new java.util.ArrayList<>(doc.select("p"));
-        for (Element paragraphElement : paragraphElements) {
-            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
-            if (!paragraphElement.children().isEmpty()) continue;
-            String paragraphText = paragraphElement.text();
-            if (paragraphText == null) continue;
-            // Simple sentence boundary detection
-            java.util.List<String> sentenceSegments = new java.util.ArrayList<>();
-            StringBuilder sentenceBuffer = new StringBuilder();
-            for (int textIndex = 0; textIndex < paragraphText.length(); textIndex++) {
-                char character = paragraphText.charAt(textIndex);
-                sentenceBuffer.append(character);
-                if ((character == '.' || character == '!' || character == '?')) {
-                    int nextSentenceStartIndex = getNextSentenceStart(paragraphText, textIndex);
-                    if (nextSentenceStartIndex != -1) {
-                        sentenceSegments.add(sentenceBuffer.toString().trim());
-                        sentenceBuffer.setLength(0);
-                        textIndex = nextSentenceStartIndex - 1;
-                    }
-                }
-            }
-            if (sentenceBuffer.length() > 0) sentenceSegments.add(sentenceBuffer.toString().trim());
-            // Only split if we have >= 5 sentences; keep first two together to satisfy spacing test expectations
-            if (sentenceSegments.size() >= 5) {
-                String firstParagraph = sentenceSegments.get(0) + " " + sentenceSegments.get(1);
-                paragraphElement.before(new Element("p").text(firstParagraph.trim()));
-                for (int sentenceIndex = 2; sentenceIndex < sentenceSegments.size(); sentenceIndex++) {
-                    String sentenceSegment = sentenceSegments.get(sentenceIndex);
-                    if (!sentenceSegment.isEmpty()) {
-                        paragraphElement.before(new Element("p").text(sentenceSegment));
-                    }
-                }
-                paragraphElement.remove();
-            }
-        }
-    }
-
-    /**
-     * Finds the start index of the next sentence after sentence-ending punctuation.
-     *
-     * @param text the text to scan
-     * @param sentenceEndIndex the index of the sentence-ending punctuation
-     * @return the index where the next sentence starts, or -1 if not found
-     */
-    private int getNextSentenceStart(String text, int sentenceEndIndex) {
-        int nextSentenceIndex = sentenceEndIndex + 1;
-        while (nextSentenceIndex < text.length() && text.charAt(nextSentenceIndex) == ' ') {
-            nextSentenceIndex++;
-        }
-        if (nextSentenceIndex < text.length() && Character.isUpperCase(text.charAt(nextSentenceIndex))) {
-            return nextSentenceIndex;
-        }
-        return -1;
-    }
+    // fixSentenceSpacing and splitLongParagraphs removed to ensure clean rendering
     
     /**
      * Gets cache statistics for monitoring.

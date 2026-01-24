@@ -48,7 +48,7 @@ public class TestWhatGetsStreamed {
             .build();
 
         ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
-            .model(ChatModel.of("gpt-5"))
+            .model(ChatModel.of("gpt-5.2"))
             .maxCompletionTokens(50)
             .reasoningEffort(ReasoningEffort.of("minimal"))
             .addUserMessage("Say hello")

@@ -1,7 +1,10 @@
 package com.williamcallahan.javachat.web;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -63,6 +66,7 @@ public class ChatController extends BaseController {
     private final UnifiedMarkdownService unifiedMarkdownService;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
+    private final ObjectMapper objectMapper;
     // Deprecated stream processor removed from active use; unified AST processing handles markdown.
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -80,12 +84,14 @@ public class ChatController extends BaseController {
 	     * @param unifiedMarkdownService unified markdown renderer
 	     * @param openAIStreamingService streaming LLM client
 	     * @param retrievalService retrieval service for diagnostics
+	     * @param objectMapper JSON mapper for safe SSE serialization
 	     * @param exceptionBuilder shared exception response builder
 	     */
 	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
 	                         UnifiedMarkdownService unifiedMarkdownService,
 	                         OpenAIStreamingService openAIStreamingService,
 	                         RetrievalService retrievalService,
+	                         ObjectMapper objectMapper,
 	                         ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
@@ -93,36 +99,20 @@ public class ChatController extends BaseController {
         this.unifiedMarkdownService = unifiedMarkdownService;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
+        this.objectMapper = objectMapper;
     }
 
     /**
-     * Escapes a string for safe inclusion in JSON, handling quotes, backslashes, and control characters.
-     * Required to preserve whitespace in SSE data which Spring can otherwise trim.
+     * Serializes an object to JSON, throwing a RuntimeException on failure to ensure errors propagate.
      */
-    private static String escapeJsonString(String input) {
-        if (input == null) {
-            return "";
+    private String jsonSerialize(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize SSE data", e);
         }
-        StringBuilder escaped = new StringBuilder(input.length() + 16);
-        for (int i = 0; i < input.length(); i++) {
-            char c = input.charAt(i);
-            switch (c) {
-                case '"' -> escaped.append("\\\"");
-                case '\\' -> escaped.append("\\\\");
-                case '\n' -> escaped.append("\\n");
-                case '\r' -> escaped.append("\\r");
-                case '\t' -> escaped.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        escaped.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        escaped.append(c);
-                    }
-                }
-            }
-        }
-        return escaped.toString();
     }
+
 
     /**
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
@@ -159,9 +149,9 @@ public class ChatController extends BaseController {
         AtomicInteger chunkCount = new AtomicInteger(0);
 
         // Build the complete prompt using existing ChatService logic
-        // Pass model hint to optimize RAG for GPT-5's 8K token input limit
+        // Pass model hint to optimize RAG for token-constrained models
         ChatService.ChatPromptOutcome promptOutcome =
-            chatService.buildPromptWithContextOutcome(history, userQuery, "gpt-5");
+            chatService.buildPromptWithContextOutcome(history, userQuery, ModelConfiguration.DEFAULT_MODEL);
         String fullPrompt = promptOutcome.prompt();
         
         // Use OpenAI streaming only (legacy fallback removed)
@@ -176,7 +166,7 @@ public class ChatController extends BaseController {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
                     })
-                    .onBackpressureLatest()  // Handle backpressure to prevent memory buildup
+                    .onBackpressureBuffer()  // Buffer signals to prevent data loss during spikes
                     .share();  // Hot-share to prevent double subscription causing duplicate API calls
 
             // Heartbeats terminate when data stream completes (success or error).
@@ -188,15 +178,14 @@ public class ChatController extends BaseController {
             Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                     .map(notice -> ServerSentEvent.<String>builder()
                         .event(SSE_EVENT_STATUS)
-                        .data("{\"message\":\"" + escapeJsonString(notice.summary())
-                            + "\",\"details\":\"" + escapeJsonString(notice.details()) + "\"}")
+                        .data(jsonSerialize(new StatusMessage(notice.summary(), notice.details())))
                         .build());
 
             // Wrap chunks in JSON to preserve whitespace - Spring's SSE handling can trim leading spaces
             // See: https://github.com/spring-projects/spring-framework/issues/27473
             Flux<ServerSentEvent<String>> dataEvents = dataStream
                     .map(chunk -> ServerSentEvent.<String>builder()
-                            .data("{\"text\":\"" + escapeJsonString(chunk) + "\"}")
+                            .data(jsonSerialize(new ChunkMessage(chunk)))
                             .build());
 
             return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats))
@@ -214,23 +203,41 @@ public class ChatController extends BaseController {
                             ? describeException(exception)
                             : error.toString();
                         PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
+                        
+                        String errorJson;
+                        try {
+                            errorJson = objectMapper.writeValueAsString(new ErrorMessage(errorDetail, diagnostics));
+                        } catch (JsonProcessingException e) {
+                            log.error("Failed to serialize error message", e);
+                            errorJson = "{\"message\":\"Critical error during serialization\",\"details\":\"See server logs\"}";
+                        }
+                        
                         return Flux.just(ServerSentEvent.<String>builder()
                             .event(SSE_EVENT_ERROR)
-                            .data("{\"message\":\"" + escapeJsonString(errorDetail)
-                                + "\",\"details\":\"" + escapeJsonString(diagnostics) + "\"}")
+                            .data(errorJson)
                             .build());
                     });
 
         } else {
             // Service unavailable - send structured error event so client can handle appropriately
             PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
+            String unavailableJson;
+            try {
+                unavailableJson = objectMapper.writeValueAsString(new ErrorMessage("Streaming service unavailable", "OpenAI streaming service is not ready"));
+            } catch (JsonProcessingException e) {
+                unavailableJson = "{\"message\":\"Service unavailable\"}";
+            }
             return Flux.just(ServerSentEvent.<String>builder()
                 .event(SSE_EVENT_ERROR)
-                .data("{\"message\":\"Streaming service unavailable\","
-                    + "\"details\":\"OpenAI streaming service is not ready\"}")
+                .data(unavailableJson)
                 .build());
         }
     }
+
+    // Helper records for JSON serialization
+    private record StatusMessage(String message, String details) {}
+    private record ChunkMessage(String text) {}
+    private record ErrorMessage(String message, String details) {}
 
     /**
      * Diagnostics: Return the RAG retrieval context for a given query.
@@ -238,8 +245,12 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/diagnostics/retrieval")
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
-        // Mirror GPT-5 constraints used in buildPromptWithContext
-        RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(query, 3, 600);
+        // Mirror token-constrained model constraints used in buildPromptWithContext
+        RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
+            query,
+            ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+            ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
+        );
         // Normalize URLs the same way as citations so we never emit file:// links
         List<Citation> citations = retrievalService.toCitations(outcome.documents());
         if (outcome.notices().isEmpty()) {

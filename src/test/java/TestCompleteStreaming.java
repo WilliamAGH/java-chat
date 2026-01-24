@@ -11,7 +11,7 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import java.time.Duration;
 
 /**
- * Manual smoke test for end-to-end GPT-5 streaming content extraction.
+ * Manual smoke test for end-to-end GPT-5.2 streaming content extraction.
  */
 public class TestCompleteStreaming {
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
@@ -27,10 +27,10 @@ public class TestCompleteStreaming {
             System.exit(1);
         }
         
-        System.out.println("=== Testing Complete GPT-5 Streaming Pipeline ===\n");
+        System.out.println("=== Testing Complete GPT-5.2 Streaming Pipeline ===\n");
         
         StringBuilder fullResponse = new StringBuilder();
-        System.out.println("Sending request to GPT-5...\n");
+        System.out.println("Sending request to GPT-5.2...\n");
         System.out.println("=== STREAMING RESPONSE ===");
 
         OpenAIClient client = OpenAIOkHttpClient.builder()
@@ -48,7 +48,7 @@ public class TestCompleteStreaming {
             .build();
 
         ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
-            .model(ChatModel.of("gpt-5"))
+            .model(ChatModel.of("gpt-5.2"))
             .maxCompletionTokens(200)
             .reasoningEffort(ReasoningEffort.of("minimal"))
             .addUserMessage("What is Spring Boot? Give a very brief answer.")
