@@ -8,6 +8,7 @@ import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -25,9 +26,12 @@ public class LocalStoreService {
     private static final int SAFE_NAME_PREFIX_LENGTH = 80;
     private static final int SAFE_NAME_SUFFIX_LENGTH = 40;
 
-    private final Path snapshotDir;
-    private final Path parsedDir;
-    private final Path indexDir;
+    private final String snapshotDirConfig;
+    private final String parsedDirConfig;
+    private final String indexDirConfig;
+    private Path snapshotDir;
+    private Path parsedDir;
+    private Path indexDir;
     private final ProgressTracker progressTracker;
 
     /**
@@ -37,9 +41,9 @@ public class LocalStoreService {
                              @Value("${app.docs.parsed-dir}") String parsedDir,
                              @Value("${app.docs.index-dir}") String indexDir,
                              ProgressTracker progressTracker) {
-        this.snapshotDir = Path.of(snapshotDir);
-        this.parsedDir = Path.of(parsedDir);
-        this.indexDir = Path.of(indexDir);
+        this.snapshotDirConfig = snapshotDir;
+        this.parsedDirConfig = parsedDir;
+        this.indexDirConfig = indexDir;
         this.progressTracker = progressTracker;
     }
 
@@ -49,6 +53,9 @@ public class LocalStoreService {
     @PostConstruct
     void createStoreDirectories() {
         try {
+            this.snapshotDir = Path.of(snapshotDirConfig);
+            this.parsedDir = Path.of(parsedDirConfig);
+            this.indexDir = Path.of(indexDirConfig);
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
@@ -140,6 +147,9 @@ public class LocalStoreService {
      * @throws IOException if the parent is null (root path) or directory creation fails
      */
     private void ensureParentDirectoryExists(Path filePath) throws IOException {
+        if (filePath == null) {
+            throw new IOException("File path is required");
+        }
         Path parentDir = filePath.getParent();
         if (parentDir == null) {
             throw new IOException("File path has no parent directory: " + filePath);
@@ -154,6 +164,14 @@ public class LocalStoreService {
             return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
+        }
+    }
+
+    private Path buildPath(String rawPath, String description) {
+        try {
+            return Path.of(rawPath);
+        } catch (InvalidPathException invalidPathException) {
+            throw new IllegalStateException("Invalid " + description + " directory path", invalidPathException);
         }
     }
 }

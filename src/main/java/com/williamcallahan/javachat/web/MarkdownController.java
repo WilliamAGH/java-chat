@@ -5,7 +5,6 @@ import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,11 +23,19 @@ public class MarkdownController {
     
     private static final Logger logger = LoggerFactory.getLogger(MarkdownController.class);
     
-    @Autowired
-    private MarkdownService markdownService;
+    private final MarkdownService markdownService;
+    private final UnifiedMarkdownService unifiedMarkdownService;
     
-    @Autowired
-    private UnifiedMarkdownService unifiedMarkdownService;
+    /**
+     * Creates a markdown controller with required services.
+     *
+     * @param markdownService legacy markdown processing service
+     * @param unifiedMarkdownService AST-based unified markdown processor
+     */
+    public MarkdownController(MarkdownService markdownService, UnifiedMarkdownService unifiedMarkdownService) {
+        this.markdownService = markdownService;
+        this.unifiedMarkdownService = unifiedMarkdownService;
+    }
     
     /**
      * Renders markdown text to HTML. This endpoint uses server-side caching to improve performance
