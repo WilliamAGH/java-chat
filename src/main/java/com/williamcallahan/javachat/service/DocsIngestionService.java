@@ -169,6 +169,9 @@ public class DocsIngestionService {
      * Returns the number of files processed (not chunks).
      */
     public int ingestLocalDirectory(String rootDir, int maxFiles) throws IOException {
+        if (rootDir == null || rootDir.isBlank()) {
+            throw new IllegalArgumentException("Local docs directory is required");
+        }
         Path root = Path.of(rootDir).toAbsolutePath().normalize();
         Path baseDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
         if (!root.startsWith(baseDir)) {

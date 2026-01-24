@@ -106,7 +106,7 @@ dependencies {
 
     // macOS DNS resolver to avoid Netty warning on Mac
     // Version managed by Spring Boot; classifier for Apple Silicon
-    runtimeOnly(group = "io.netty", name = "netty-resolver-dns-native-macos", classifier = "osx-aarch_64")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-aarch_64")
     runtimeOnly("io.netty:netty-resolver-dns-classes-macos")
 
     // Testing

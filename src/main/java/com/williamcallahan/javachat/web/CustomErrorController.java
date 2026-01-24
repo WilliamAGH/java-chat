@@ -122,9 +122,8 @@ public class CustomErrorController implements ErrorController {
             case 502:
             case 503:
             default:
-                // Redirect to general error page with status as a query parameter
-                String errorUrl = String.format("/error.html?status=%d", statusCode);
-                modelAndView.setViewName("forward:" + errorUrl);
+                // Redirect to a static error page; status stays in the model for rendering.
+                modelAndView.setViewName("forward:/error.html");
                 break;
         }
         
