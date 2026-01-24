@@ -244,16 +244,38 @@ class EnrichmentPlaceholderizer {
             .replace("'", "&#39;");
     }
 
+    /**
+     * Processes markdown content within an enrichment block to HTML.
+     *
+     * <p>Handles malformed markdown gracefully per MD5 (fail-safe defaults) while propagating
+     * true programming errors per RC2 (investigate and fix, don't mask).</p>
+     *
+     * @param content raw markdown content from enrichment block
+     * @return rendered HTML, or escaped content if parsing fails
+     * @throws NullPointerException if parser/renderer state is invalid (programming error)
+     * @throws IllegalStateException if internal state is corrupted (programming error)
+     */
     private String processFragmentForEnrichment(String content) {
         if (content == null || content.isEmpty()) return "";
-        String normalized = MarkdownNormalizer.preNormalizeForListsAndFences(content);
-        Node doc = parser.parse(normalized);
-        MarkdownAstUtils.stripInlineCitationMarkers(doc);
-        String innerHtml = renderer.render(doc);
-        Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
-        parsedDocument.outputSettings().prettyPrint(false);
-        convertNewlinesToBreaks(parsedDocument.body(), false);
-        return parsedDocument.body().html();
+        try {
+            String normalized = MarkdownNormalizer.preNormalizeForListsAndFences(content);
+            Node doc = parser.parse(normalized);
+            MarkdownAstUtils.stripInlineCitationMarkers(doc);
+            String innerHtml = renderer.render(doc);
+            Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
+            parsedDocument.outputSettings().prettyPrint(false);
+            convertNewlinesToBreaks(parsedDocument.body(), false);
+            return parsedDocument.body().html();
+        } catch (NullPointerException | IllegalStateException programmingError) {
+            // Rethrow programming errors - these indicate bugs that must be fixed
+            throw programmingError;
+        } catch (RuntimeException parserException) {
+            // Parser/renderer failures on malformed input - provide fail-safe fallback per MD5
+            logger.warn("Enrichment markdown parsing failed ({}): {}",
+                parserException.getClass().getSimpleName(),
+                parserException.getMessage());
+            return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
+        }
     }
 
     private static void convertNewlinesToBreaks(org.jsoup.nodes.Node rootNode, boolean inCodeOrPre) {
