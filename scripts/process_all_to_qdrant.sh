@@ -239,9 +239,7 @@ process_documents() {
     # Build the application using Gradle task
     log "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT"
-    ./gradlew buildForScripts --quiet >> "$LOG_FILE" 2>&1
-    
-    if [ $? -eq 0 ]; then
+    if ./gradlew buildForScripts --quiet >> "$LOG_FILE" 2>&1; then
         log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"
     else
         log "${RED}✗ Failed to build application${NC}"
