@@ -114,7 +114,8 @@ final class EmbeddingCacheFileImporter {
             List<EmbeddingCacheEntry> converted = new ArrayList<>(legacyList.size());
             for (Object legacyEntry : legacyList) {
                 if (!(legacyEntry instanceof EmbeddingCacheService.CachedEmbedding cachedEmbedding)) {
-                    continue;
+                    throw new IOException("Unexpected legacy cache entry type: "
+                        + (legacyEntry == null ? "null" : legacyEntry.getClass().getName()));
                 }
                 EmbeddingCacheEntry convertedEntry = new EmbeddingCacheEntry(
                     cachedEmbedding.id == null || cachedEmbedding.id.isBlank()
