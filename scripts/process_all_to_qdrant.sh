@@ -137,16 +137,34 @@ check_qdrant_connection() {
     
     log "${YELLOW}Checking Qdrant connection...${NC}"
     
-    local url="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
-    local response=$(curl -s -o /dev/null -w "%{http_code}" \
-        -H "api-key: $QDRANT_API_KEY" \
-        "$url")
+    # Respect QDRANT_SSL setting for protocol selection
+    local protocol="https"
+    if [ "$QDRANT_SSL" = "false" ] || [ "$QDRANT_SSL" = "0" ] || [ -z "$QDRANT_SSL" ]; then
+        protocol="http"
+        # For local non-TLS, include the port (REST port, not gRPC)
+        local rest_port="${QDRANT_REST_PORT:-6333}"
+        local url="${protocol}://${QDRANT_HOST}:${rest_port}/collections/$QDRANT_COLLECTION"
+    else
+        # For TLS (cloud), port 443 is implicit
+        local url="${protocol}://${QDRANT_HOST}/collections/$QDRANT_COLLECTION"
+    fi
+    
+    local curl_opts=(-s -o /dev/null -w "%{http_code}")
+    if [ -n "$QDRANT_API_KEY" ]; then
+        curl_opts+=(-H "api-key: $QDRANT_API_KEY")
+    fi
+    
+    local response=$(curl "${curl_opts[@]}" "$url")
     
     if [ "$response" = "200" ]; then
         log "${GREEN}✓ Qdrant connection successful${NC} ($(percent_complete))"
         
         # Get collection info
-        local info=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url")
+        local info_opts=(-s)
+        if [ -n "$QDRANT_API_KEY" ]; then
+            info_opts+=(-H "api-key: $QDRANT_API_KEY")
+        fi
+        local info=$(curl "${info_opts[@]}" "$url")
         local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
         local dimensions=$(echo "$info" | grep -o '"size":[0-9]*' | head -1 | cut -d: -f2)
         
@@ -156,6 +174,7 @@ check_qdrant_connection() {
         return 0
     else
         log "${RED}✗ Failed to connect to Qdrant (HTTP $response)${NC}"
+        log "${YELLOW}  URL: $url${NC}"
         return 1
     fi
 }

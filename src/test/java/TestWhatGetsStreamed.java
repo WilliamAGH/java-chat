@@ -73,6 +73,14 @@ public class TestWhatGetsStreamed {
         System.out.println("This creates 'data: ...data:...' which confuses the browser!");
     }
 
+    /**
+     * Extracts content from a streaming chunk, returning empty string for unparseable chunks.
+     *
+     * <p>This manual test utility intentionally continues on parse failures to observe the
+     * full stream behavior. Parse errors are logged to stderr for visibility during manual
+     * debugging sessions. This is not production code—real streaming handlers should propagate
+     * parse failures or use typed result containers.
+     */
     private static String extractContent(String chunk) {
         if (chunk == null) {
             return "";
@@ -85,6 +93,7 @@ public class TestWhatGetsStreamed {
             Map<String, Object> payload = objectMapper.readValue(trimmedChunk, new TypeReference<Map<String, Object>>() {});
             return extractDeltaContent(payload).orElse("");
         } catch (IOException parseFailure) {
+            // Intentional: log and continue to observe full stream in manual testing
             System.err.println("Parse error for chunk: " + parseFailure.getMessage());
             return "";
         }

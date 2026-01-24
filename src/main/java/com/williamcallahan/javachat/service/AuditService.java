@@ -190,26 +190,68 @@ public class AuditService {
             ))
         );
 
-        Map<String, ?> requestBody = Map.of(
-            "filter", filter,
-            "with_payload", true,
-            "limit", 2048
-        );
+        // Paginate through all results using next_page_offset
+        Object nextOffset = null;
+        int pageCount = 0;
+        int maxPages = 100; // Safety limit to prevent infinite loops
+        int pageSize = 1000; // Reduced from 2048 for more reliable pagination
+        
+        do {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("filter", filter);
+            requestBody.put("with_payload", true);
+            requestBody.put("limit", pageSize);
+            if (nextOffset != null) {
+                requestBody.put("offset", nextOffset);
+            }
 
-        try {
-            var response = restTemplate.exchange(
-                endpoint,
-                org.springframework.http.HttpMethod.POST,
-                new HttpEntity<>(requestBody, headers),
-                new org.springframework.core.ParameterizedTypeReference<Map<String, ?>>() {}
-            );
-            hashes.addAll(extractHashes(response.getBody()));
-        } catch (Exception requestFailure) {
-            // Propagate failure so caller knows audit could not complete
-            throw new IllegalStateException(
-                "Qdrant scroll failed for URL audit (endpoint: " + endpoint + ")", requestFailure);
+            try {
+                var response = restTemplate.exchange(
+                    endpoint,
+                    org.springframework.http.HttpMethod.POST,
+                    new HttpEntity<>(requestBody, headers),
+                    new org.springframework.core.ParameterizedTypeReference<Map<String, ?>>() {}
+                );
+                
+                Map<String, ?> body = response.getBody();
+                hashes.addAll(extractHashes(body));
+                nextOffset = extractNextOffset(body);
+                pageCount++;
+                
+                if (pageCount > 1) {
+                    log.debug("Scroll page {} fetched, total hashes so far: {}", pageCount, hashes.size());
+                }
+                
+            } catch (Exception requestFailure) {
+                // Propagate failure so caller knows audit could not complete
+                throw new IllegalStateException(
+                    "Qdrant scroll failed for URL audit (endpoint: " + endpoint + ")", requestFailure);
+            }
+        } while (nextOffset != null && pageCount < maxPages);
+        
+        if (pageCount >= maxPages) {
+            log.warn("Scroll pagination reached safety limit of {} pages; results may be incomplete", maxPages);
         }
+        
         return hashes;
+    }
+
+    /**
+     * Extracts the next_page_offset from a scroll response for pagination.
+     *
+     * @param responseBody the scroll API response body
+     * @return the next offset, or null if no more pages
+     */
+    private Object extractNextOffset(Object responseBody) {
+        if (!(responseBody instanceof Map<?, ?> responseMap)) {
+            return null;
+        }
+        Object resultNode = responseMap.get("result");
+        if (!(resultNode instanceof Map<?, ?> resultMap)) {
+            return null;
+        }
+        // next_page_offset is null when there are no more results
+        return resultMap.get("next_page_offset");
     }
 
     private List<String> extractHashes(Object responseBody) {

@@ -299,20 +299,32 @@ public class DocsIngestionService {
                 INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
                     documents.size(), duration, progressTracker.formatPercent());
             } else {
-                // Upload mode: send to Qdrant with fallback to cache
+                // Upload mode: send to Qdrant with retry for transient errors, fallback to cache as last resort
                 try {
-                    vectorStore.add(documents);
+                    com.williamcallahan.javachat.support.RetrySupport.executeWithRetry(
+                        () -> { vectorStore.add(documents); return null; },
+                        "Qdrant upload"
+                    );
                     long duration = System.currentTimeMillis() - startTime;
-                    INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
+                    INDEXING_LOG.info("[INDEXING] \u2713 Added {} vectors to Qdrant in {}ms ({})",
                         documents.size(), duration, progressTracker.formatPercent());
                 } catch (RuntimeException qdrantError) {
-                    // Qdrant failed (could be full or connection issue), fallback to local cache
-                    INDEXING_LOG.warn("[INDEXING] Qdrant upload failed (exception type: {}), falling back to local cache",
-                        qdrantError.getClass().getSimpleName());
-                    embeddingCache.getOrComputeEmbeddings(documents);
-                    long duration = System.currentTimeMillis() - startTime;
-                    INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
-                        documents.size(), duration, progressTracker.formatPercent());
+                    // Retry exhausted or non-transient error - check if we should fallback
+                    if (com.williamcallahan.javachat.support.RetrievalErrorClassifier
+                            .isTransientVectorStoreError(qdrantError)) {
+                        // Transient error after all retries - fallback to cache
+                        INDEXING_LOG.warn("[INDEXING] Qdrant upload failed after retries ({}), falling back to local cache",
+                            qdrantError.getClass().getSimpleName());
+                        embeddingCache.getOrComputeEmbeddings(documents);
+                        long duration = System.currentTimeMillis() - startTime;
+                        INDEXING_LOG.info("[INDEXING] \u2713 Cached {} vectors locally (fallback) in {}ms ({})",
+                            documents.size(), duration, progressTracker.formatPercent());
+                    } else {
+                        // Non-transient error (programming error, invalid data) - rethrow to fail fast
+                        INDEXING_LOG.error("[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
+                            qdrantError.getClass().getSimpleName());
+                        throw qdrantError;
+                    }
                 }
             }
             

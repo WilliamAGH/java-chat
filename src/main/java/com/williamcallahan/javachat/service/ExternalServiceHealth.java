@@ -160,20 +160,6 @@ public class ExternalServiceHealth {
         checkQdrantHealth();
     }
 
-    private int mapGrpcPortToRestPort(int grpcPort) {
-        if (grpcPort == QDRANT_GRPC_PORT) {
-            return QDRANT_REST_PORT;
-        }
-        if (grpcPort == DOCKER_GRPC_PORT) {
-            return DOCKER_REST_PORT;
-        }
-        // Default assumption: if not known, assume standard Qdrant offset or just return as is (safer to default to standard)
-        // If user configured a custom port, we can't guess the REST port easily without config.
-        // Assuming standard -1 offset is risky. Let's fallback to QDRANT_REST_PORT if unknown, or maybe the config provides it?
-        // Since this is a patch, let's stick to the known constants.
-        return QDRANT_REST_PORT;
-    }
-
     private void checkQdrantHealth() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
@@ -261,6 +247,25 @@ public class ExternalServiceHealth {
         } else {
             return String.format("%dm", minutes);
         }
+    }
+
+    /**
+     * Maps gRPC port to corresponding REST port for Qdrant.
+     *
+     * <p>Qdrant exposes gRPC on one port and REST on another. The configured port
+     * is typically gRPC; this method returns the corresponding REST port.
+     *
+     * @param grpcPort the configured gRPC port
+     * @return the corresponding REST port
+     */
+    private int mapGrpcPortToRestPort(int grpcPort) {
+        if (grpcPort == QDRANT_GRPC_PORT) {
+            return QDRANT_REST_PORT; // 6334 -> 6333
+        } else if (grpcPort == DOCKER_GRPC_PORT) {
+            return DOCKER_REST_PORT; // 8086 -> 8087
+        }
+        // Assume caller configured the REST port directly
+        return grpcPort;
     }
 
     /**
