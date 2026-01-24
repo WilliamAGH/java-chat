@@ -352,4 +352,82 @@ class MarkdownServiceTest {
         assertTrue(html.contains("<pre>"), "Indented code should render as a code block");
         assertTrue(html.contains("[1]"), "Bracketed citations should remain inside code");
     }
+
+    @Test
+    @DisplayName("No double line breaks in any HTML output")
+    void testNoDoubleLineBreaksInOutput() {
+        // Test various markdown structures that could produce double line breaks
+        String[] testCases = {
+            "# Heading\n\nParagraph one.\n\nParagraph two.",
+            "Para.\n\n- Item A\n- Item B\n\nPara after.",
+            "Text.\n\n```java\ncode\n```\n\nMore text.",
+            "| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter table.",
+            "> Quote\n\nAfter quote.\n\n## Header",
+            "1. First\n2. Second\n\n- Bullet\n\nEnd.",
+            "{{hint:A hint}}\n\n{{warning:A warning}}\n\nText."
+        };
+
+        for (String markdown : testCases) {
+            String html = markdownService.processStructured(markdown).html();
+            assertFalse(html.contains("\n\n"),
+                "Double line break found in output for: " + markdown.replace("\n", "\\n") +
+                "\nHTML was: " + html.replace("\n", "\\n"));
+        }
+    }
+
+    @Test
+    @DisplayName("Preserves newlines inside code blocks while collapsing outside")
+    void testPreservesNewlinesInsideCodeBlocks() {
+        String markdown = "Before.\n\n```java\nline1\n\nline3\n```\n\nAfter.";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testPreservesNewlinesInsideCodeBlocks] Full HTML:");
+        System.out.println(html);
+        System.out.println("[DEBUG] HTML escaped: " + html.replace("\n", "\\n"));
+        // Inside <pre><code>, the blank line should be preserved
+        assertTrue(html.contains("line1\n\nline3"),
+            "Blank lines inside code blocks should be preserved. HTML: " + html.replace("\n", "\\n"));
+        // The full HTML should not have consecutive newlines that aren't inside code blocks
+        // We check by scanning: consecutive \n\n should only appear inside <pre>...</pre>
+        assertNoDoubleNewlinesOutsideCodeBlocks(html);
+    }
+
+    /**
+     * Verifies no double newlines exist outside of pre/code blocks by scanning the HTML.
+     */
+    private void assertNoDoubleNewlinesOutsideCodeBlocks(String html) {
+        int preDepth = 0;
+        int codeDepth = 0;
+        boolean lastWasNewline = false;
+
+        for (int cursorIndex = 0; cursorIndex < html.length(); cursorIndex++) {
+            char currentChar = html.charAt(cursorIndex);
+
+            // Track pre/code depth
+            if (currentChar == '<' && cursorIndex + 5 < html.length()) {
+                String ahead = html.substring(cursorIndex, Math.min(cursorIndex + 7, html.length())).toLowerCase();
+                if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
+                    preDepth++;
+                } else if (ahead.startsWith("</pre>")) {
+                    preDepth = Math.max(0, preDepth - 1);
+                } else if (ahead.startsWith("<code>") || ahead.startsWith("<code ")) {
+                    codeDepth++;
+                } else if (ahead.startsWith("</code")) {
+                    codeDepth = Math.max(0, codeDepth - 1);
+                }
+            }
+
+            boolean insideCodeBlock = preDepth > 0 || codeDepth > 0;
+
+            if (currentChar == '\n') {
+                if (lastWasNewline && !insideCodeBlock) {
+                    fail("Found consecutive newlines outside code block at position " + cursorIndex +
+                         ". Context: ..." + html.substring(Math.max(0, cursorIndex - 20), cursorIndex).replace("\n", "\\n") +
+                         "[HERE]" + html.substring(cursorIndex, Math.min(html.length(), cursorIndex + 20)).replace("\n", "\\n") + "...");
+                }
+                lastWasNewline = true;
+            } else {
+                lastWasNewline = false;
+            }
+        }
+    }
 }

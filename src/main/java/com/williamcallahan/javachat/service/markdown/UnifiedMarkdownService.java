@@ -76,6 +76,9 @@ public class UnifiedMarkdownService {
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-")
             .set(HtmlRenderer.SUPPRESSED_LINKS, "(?i)^(javascript|data|vbscript):.*")
             .set(HtmlRenderer.INDENT_SIZE, 2)
+            // Strict blank line control: never allow consecutive blank lines in output
+            .set(HtmlRenderer.MAX_BLANK_LINES, 0)
+            .set(HtmlRenderer.MAX_TRAILING_BLANK_LINES, 0)
             .set(TablesExtension.COLUMN_SPANS, false)
             .set(TablesExtension.APPEND_MISSING_COLUMNS, true)
             .set(TablesExtension.DISCARD_EXTRA_COLUMNS, true)
@@ -224,9 +227,59 @@ public class UnifiedMarkdownService {
 
         // Intrusive spacing and paragraph splitting removed to preserve original formatting
         // and avoid "double line break" visual artifacts.
-        
+
         String processedHtml = document.body().html();
+        // Final sanitization: collapse any consecutive newlines to single newline (no regex)
+        processedHtml = collapseConsecutiveNewlines(processedHtml);
         return processedHtml.trim();
+    }
+
+    /**
+     * Collapses consecutive newlines to single newlines without using regex.
+     * Preserves whitespace within pre/code blocks by tracking tag depth.
+     */
+    private String collapseConsecutiveNewlines(String html) {
+        if (html == null || html.isEmpty()) {
+            return html;
+        }
+        StringBuilder collapsed = new StringBuilder(html.length());
+        boolean lastWasNewline = false;
+        int preDepth = 0;
+        int codeDepth = 0;
+        int cursor = 0;
+
+        while (cursor < html.length()) {
+            char currentChar = html.charAt(cursor);
+
+            // Track <pre> and <code> tags to preserve whitespace inside them
+            if (currentChar == '<' && cursor + 4 < html.length()) {
+                String ahead = html.substring(cursor, Math.min(cursor + 6, html.length())).toLowerCase();
+                if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
+                    preDepth++;
+                } else if (ahead.startsWith("</pre>")) {
+                    preDepth = Math.max(0, preDepth - 1);
+                } else if (ahead.startsWith("<code>") || ahead.startsWith("<code ")) {
+                    codeDepth++;
+                } else if (ahead.startsWith("</code")) {
+                    codeDepth = Math.max(0, codeDepth - 1);
+                }
+            }
+
+            boolean insideCodeBlock = preDepth > 0 || codeDepth > 0;
+
+            if (currentChar == '\n' && !insideCodeBlock) {
+                if (!lastWasNewline) {
+                    collapsed.append(currentChar);
+                    lastWasNewline = true;
+                }
+                // Skip consecutive newlines outside code blocks
+            } else {
+                collapsed.append(currentChar);
+                lastWasNewline = false;
+            }
+            cursor++;
+        }
+        return collapsed.toString();
     }
 
     /**
