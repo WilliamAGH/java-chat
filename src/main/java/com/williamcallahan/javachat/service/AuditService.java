@@ -1,5 +1,9 @@
 package com.williamcallahan.javachat.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.williamcallahan.javachat.model.AuditReport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +23,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -183,39 +186,42 @@ public class AuditService {
             headers.set("api-key", apiKey);
         }
 
-        Map<String, ?> filter = Map.of(
-            "must", List.of(Map.of(
-                "key", "url",
-                "match", Map.of("value", url)
-            ))
+        QdrantScrollFilter scrollFilter = new QdrantScrollFilter(
+            List.of(new QdrantScrollMustCondition("url", new QdrantScrollMatch(url)))
         );
 
         // Paginate through all results using next_page_offset
-        Object nextOffset = null;
+        JsonNode nextOffset = null;
         int pageCount = 0;
         int maxPages = 100; // Safety limit to prevent infinite loops
         int pageSize = 1000; // Reduced from 2048 for more reliable pagination
         
         do {
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("filter", filter);
-            requestBody.put("with_payload", true);
-            requestBody.put("limit", pageSize);
-            if (nextOffset != null) {
-                requestBody.put("offset", nextOffset);
-            }
+            QdrantScrollRequest requestBody = new QdrantScrollRequest(
+                scrollFilter,
+                true,
+                pageSize,
+                nextOffset
+            );
 
             try {
                 var response = restTemplate.exchange(
                     endpoint,
                     org.springframework.http.HttpMethod.POST,
                     new HttpEntity<>(requestBody, headers),
-                    new org.springframework.core.ParameterizedTypeReference<Map<String, ?>>() {}
+                    QdrantScrollResponse.class
                 );
                 
-                Map<String, ?> body = response.getBody();
-                hashes.addAll(extractHashes(body));
-                nextOffset = extractNextOffset(body);
+                QdrantScrollResponse body = response.getBody();
+                if (body != null && body.scrollResult() != null) {
+                    hashes.addAll(body.scrollResult().hashes());
+                    nextOffset = body.scrollResult().nextPageOffset();
+                    if (nextOffset != null && nextOffset.isNull()) {
+                        nextOffset = null;
+                    }
+                } else {
+                    nextOffset = null;
+                }
                 pageCount++;
                 
                 if (pageCount > 1) {
@@ -236,58 +242,58 @@ public class AuditService {
         return hashes;
     }
 
-    /**
-     * Extracts the next_page_offset from a scroll response for pagination.
-     *
-     * @param responseBody the scroll API response body
-     * @return the next offset, or null if no more pages
-     */
-    private Object extractNextOffset(Object responseBody) {
-        if (!(responseBody instanceof Map<?, ?> responseMap)) {
-            return null;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record QdrantScrollRequest(
+        @JsonProperty("filter") QdrantScrollFilter filter,
+        @JsonProperty("with_payload") boolean withPayload,
+        @JsonProperty("limit") int limit,
+        @JsonProperty("offset") JsonNode offset
+    ) {}
+
+    private record QdrantScrollFilter(
+        @JsonProperty("must") List<QdrantScrollMustCondition> must
+    ) {}
+
+    private record QdrantScrollMustCondition(
+        @JsonProperty("key") String key,
+        @JsonProperty("match") QdrantScrollMatch match
+    ) {}
+
+    private record QdrantScrollMatch(@JsonProperty("value") String value) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantScrollResponse(
+        @JsonProperty("result") QdrantScrollResult scrollResult
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantScrollResult(
+        @JsonProperty("points") List<QdrantScrollPoint> points,
+        @JsonProperty("next_page_offset") JsonNode nextPageOffset
+    ) {
+        List<String> hashes() {
+            if (points == null || points.isEmpty()) {
+                return List.of();
+            }
+            List<String> hashes = new ArrayList<>(points.size());
+            for (QdrantScrollPoint point : points) {
+                if (point == null || point.payload() == null) {
+                    continue;
+                }
+                String hash = point.payload().hash();
+                if (hash != null && !hash.isBlank()) {
+                    hashes.add(hash);
+                }
+            }
+            return hashes;
         }
-        Object resultNode = responseMap.get("result");
-        if (!(resultNode instanceof Map<?, ?> resultMap)) {
-            return null;
-        }
-        // next_page_offset is null when there are no more results
-        return resultMap.get("next_page_offset");
     }
 
-    private List<String> extractHashes(Object responseBody) {
-        if (!(responseBody instanceof Map<?, ?> responseMap)) {
-            return List.of();
-        }
-        Object scrollPayloadNode = responseMap.get("result");
-        if (!(scrollPayloadNode instanceof Map<?, ?> scrollPayloadMap)) {
-            return List.of();
-        }
-        Object pointsNode = scrollPayloadMap.get("points");
-        if (!(pointsNode instanceof List<?> pointsList)) {
-            return List.of();
-        }
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantScrollPoint(@JsonProperty("payload") QdrantScrollPayload payload) {}
 
-        List<String> hashes = new ArrayList<>();
-        for (Object point : pointsList) {
-            extractHash(point).ifPresent(hashes::add);
-        }
-        return hashes;
-    }
-
-    private Optional<String> extractHash(Object point) {
-        if (!(point instanceof Map<?, ?> pointMap)) {
-            return Optional.empty();
-        }
-        Object payloadNode = pointMap.get("payload");
-        if (!(payloadNode instanceof Map<?, ?> payloadMap)) {
-            return Optional.empty();
-        }
-        Object hashNode = payloadMap.get("hash");
-        if (hashNode instanceof String hashText) {
-            return Optional.of(hashText);
-        }
-        return Optional.empty();
-    }
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantScrollPayload(@JsonProperty("hash") String hash) {}
 
     /**
      * Builds the Qdrant REST API base URL with correct port mapping.

@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.config;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.event.EventListener;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -151,11 +152,10 @@ public class QdrantIndexInitializer {
         for (String base : restBaseUrls()) {
             String url = base + collectionPath;
             try {
-                ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers),
-                    new ParameterizedTypeReference<Map<String, Object>>() {}
+                ResponseEntity<QdrantCollectionInfoResponse> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), QdrantCollectionInfoResponse.class
                 );
-                
+
                 Integer collectionDimensions = extractVectorDimensions(response.getBody());
                 if (collectionDimensions != null) {
                     if (collectionDimensions != expectedDimensions) {
@@ -185,35 +185,64 @@ public class QdrantIndexInitializer {
     /**
      * Extracts vector dimensions from Qdrant collection info response.
      */
-    @SuppressWarnings("unchecked")
-    private Integer extractVectorDimensions(Map<String, Object> responseBody) {
-        if (responseBody == null) return null;
-        
-        Object result = responseBody.get("result");
-        if (!(result instanceof Map)) return null;
-        
-        Map<String, Object> resultMap = (Map<String, Object>) result;
-        Object config = resultMap.get("config");
-        if (!(config instanceof Map)) return null;
-        
-        Map<String, Object> configMap = (Map<String, Object>) config;
-        Object params = configMap.get("params");
-        if (!(params instanceof Map)) return null;
-        
-        Map<String, Object> paramsMap = (Map<String, Object>) params;
-        Object vectors = paramsMap.get("vectors");
-        
-        // Handle both named and unnamed vector configurations
-        if (vectors instanceof Map) {
-            Map<String, Object> vectorsMap = (Map<String, Object>) vectors;
-            Object size = vectorsMap.get("size");
-            if (size instanceof Number) {
-                return ((Number) size).intValue();
+    private Integer extractVectorDimensions(QdrantCollectionInfoResponse responseBody) {
+        if (responseBody == null || responseBody.collectionInfoResult() == null) {
+            return null;
+        }
+        QdrantCollectionConfig collectionConfig = responseBody.collectionInfoResult().collectionConfig();
+        if (collectionConfig == null || collectionConfig.collectionParams() == null) {
+            return null;
+        }
+        JsonNode vectorsNode = collectionConfig.collectionParams().vectorsNode();
+        if (vectorsNode == null || vectorsNode.isNull()) {
+            return null;
+        }
+        Integer directSize = extractVectorSize(vectorsNode);
+        if (directSize != null) {
+            return directSize;
+        }
+        if (!vectorsNode.isObject()) {
+            return null;
+        }
+        for (Map.Entry<String, JsonNode> entry : vectorsNode.properties()) {
+            Integer namedSize = extractVectorSize(entry.getValue());
+            if (namedSize != null) {
+                return namedSize;
             }
         }
-        
         return null;
     }
+
+    private Integer extractVectorSize(JsonNode vectorsNode) {
+        if (vectorsNode == null || vectorsNode.isNull()) {
+            return null;
+        }
+        JsonNode sizeNode = vectorsNode.get("size");
+        if (sizeNode != null && sizeNode.isNumber()) {
+            return sizeNode.intValue();
+        }
+        return null;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantCollectionInfoResponse(
+        @JsonProperty("result") QdrantCollectionInfoResult collectionInfoResult
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantCollectionInfoResult(
+        @JsonProperty("config") QdrantCollectionConfig collectionConfig
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantCollectionConfig(
+        @JsonProperty("params") QdrantCollectionParams collectionParams
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record QdrantCollectionParams(
+        @JsonProperty("vectors") JsonNode vectorsNode
+    ) {}
 
     private void createPayloadIndex(String field, String schemaType) {
         HttpHeaders headers = new HttpHeaders();
