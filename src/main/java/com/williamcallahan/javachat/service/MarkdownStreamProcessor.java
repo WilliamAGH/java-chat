@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.service.markdown.MarkdownProcessingException;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import org.slf4j.Logger;
@@ -312,7 +313,7 @@ public class MarkdownStreamProcessor {
         try {
             ProcessedMarkdown processed = markdownService.process(content);
             return processed.html();
-        } catch (Exception markdownProcessingException) {
+        } catch (MarkdownProcessingException markdownProcessingException) {
             logger.warn("Failed to process markdown, falling back to escaped text", markdownProcessingException);
             return escapeHtml(content).replace("\n", "<br />\n");
         }
