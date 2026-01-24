@@ -18,7 +18,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/markdown")
-@CrossOrigin(origins = "*")
 @PermitAll
 @PreAuthorize("permitAll()")
 public class MarkdownController {

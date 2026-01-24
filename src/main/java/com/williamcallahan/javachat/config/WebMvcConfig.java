@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import java.util.List;
 
 /**
  * MVC configuration for CORS and SPA routing.
@@ -15,7 +16,13 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
-    private final AppProperties appProperties;
+    private static final String WILDCARD_ORIGIN = "*";
+
+    private final List<String> allowedOrigins;
+    private final List<String> allowedMethods;
+    private final List<String> allowedHeaders;
+    private final boolean allowCredentials;
+    private final long maxAgeSeconds;
 
     /**
      * Creates MVC config with application properties for CORS rules.
@@ -23,7 +30,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
      * @param appProperties application configuration properties
      */
     public WebMvcConfig(AppProperties appProperties) {
-        this.appProperties = appProperties;
+        var cors = appProperties.getCors();
+        this.allowedOrigins = cors.getAllowedOrigins();
+        this.allowedMethods = cors.getAllowedMethods();
+        this.allowedHeaders = cors.getAllowedHeaders();
+        this.allowCredentials = cors.isAllowCredentials();
+        this.maxAgeSeconds = cors.getMaxAgeSeconds();
     }
 
     /**
@@ -33,13 +45,18 @@ public class WebMvcConfig implements WebMvcConfigurer {
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        var cors = appProperties.getCors();
-        registry.addMapping("/api/**")
-            .allowedOrigins(cors.getAllowedOrigins().toArray(String[]::new))
-            .allowedMethods(cors.getAllowedMethods().toArray(String[]::new))
-            .allowedHeaders(cors.getAllowedHeaders().toArray(String[]::new))
-            .allowCredentials(cors.isAllowCredentials())
-            .maxAge(cors.getMaxAgeSeconds());
+        List<String> origins = allowedOrigins;
+        var mapping = registry.addMapping("/api/**");
+        if (origins.contains(WILDCARD_ORIGIN)) {
+            mapping.allowedOriginPatterns(WILDCARD_ORIGIN);
+        } else {
+            mapping.allowedOrigins(origins.toArray(String[]::new));
+        }
+        mapping
+            .allowedMethods(allowedMethods.toArray(String[]::new))
+            .allowedHeaders(allowedHeaders.toArray(String[]::new))
+            .allowCredentials(allowCredentials)
+            .maxAge(maxAgeSeconds);
     }
 
     /**

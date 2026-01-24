@@ -9,6 +9,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.List;
 
 /**
  * Security configuration for API endpoints and static resources.
@@ -18,14 +19,21 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  */
 @Configuration
 public class SecurityConfig {
+    private static final String WILDCARD_ORIGIN = "*";
+
     /**
      * CORS configuration source for Spring Security filter chain integration.
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource(AppProperties appProperties) {
         var cors = appProperties.getCors();
+        List<String> allowedOrigins = cors.getAllowedOrigins();
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(cors.getAllowedOrigins());
+        if (allowedOrigins.contains(WILDCARD_ORIGIN)) {
+            config.setAllowedOriginPatterns(List.of(WILDCARD_ORIGIN));
+        } else {
+            config.setAllowedOrigins(allowedOrigins);
+        }
         config.setAllowedMethods(cors.getAllowedMethods());
         config.setAllowedHeaders(cors.getAllowedHeaders());
         config.setAllowCredentials(cors.isAllowCredentials());
