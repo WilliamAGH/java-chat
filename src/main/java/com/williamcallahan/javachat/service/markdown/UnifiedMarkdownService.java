@@ -235,17 +235,49 @@ public class UnifiedMarkdownService {
     }
 
     /**
+     * Tracks nesting depth of pre/code tags during HTML scanning.
+     * Immutable state object updated via withPre/withCode methods.
+     */
+    private record CodeBlockDepth(int preDepth, int codeDepth) {
+        static final CodeBlockDepth ZERO = new CodeBlockDepth(0, 0);
+
+        boolean isInsideCodeBlock() {
+            return preDepth > 0 || codeDepth > 0;
+        }
+
+        CodeBlockDepth incrementPre() {
+            return new CodeBlockDepth(preDepth + 1, codeDepth);
+        }
+
+        CodeBlockDepth decrementPre() {
+            return new CodeBlockDepth(Math.max(0, preDepth - 1), codeDepth);
+        }
+
+        CodeBlockDepth incrementCode() {
+            return new CodeBlockDepth(preDepth, codeDepth + 1);
+        }
+
+        CodeBlockDepth decrementCode() {
+            return new CodeBlockDepth(preDepth, Math.max(0, codeDepth - 1));
+        }
+    }
+
+    /**
      * Collapses consecutive newlines to single newlines without using regex.
      * Preserves whitespace within pre/code blocks by tracking tag depth.
+     *
+     * @param html non-null HTML string to process
+     * @return processed HTML with collapsed newlines; empty string if input is empty
+     * @throws NullPointerException if html is null
      */
     private String collapseConsecutiveNewlines(String html) {
-        if (html == null || html.isEmpty()) {
-            return html;
+        java.util.Objects.requireNonNull(html, "html must not be null");
+        if (html.isEmpty()) {
+            return "";
         }
         StringBuilder collapsed = new StringBuilder(html.length());
         boolean lastWasNewline = false;
-        int preDepth = 0;
-        int codeDepth = 0;
+        CodeBlockDepth depth = CodeBlockDepth.ZERO;
         int cursor = 0;
 
         while (cursor < html.length()) {
@@ -255,19 +287,17 @@ public class UnifiedMarkdownService {
             if (currentChar == '<' && cursor + 4 < html.length()) {
                 String ahead = html.substring(cursor, Math.min(cursor + 6, html.length())).toLowerCase();
                 if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
-                    preDepth++;
+                    depth = depth.incrementPre();
                 } else if (ahead.startsWith("</pre>")) {
-                    preDepth = Math.max(0, preDepth - 1);
+                    depth = depth.decrementPre();
                 } else if (ahead.startsWith("<code>") || ahead.startsWith("<code ")) {
-                    codeDepth++;
+                    depth = depth.incrementCode();
                 } else if (ahead.startsWith("</code")) {
-                    codeDepth = Math.max(0, codeDepth - 1);
+                    depth = depth.decrementCode();
                 }
             }
 
-            boolean insideCodeBlock = preDepth > 0 || codeDepth > 0;
-
-            if (currentChar == '\n' && !insideCodeBlock) {
+            if (currentChar == '\n' && !depth.isInsideCodeBlock()) {
                 if (!lastWasNewline) {
                     collapsed.append(currentChar);
                     lastWasNewline = true;
