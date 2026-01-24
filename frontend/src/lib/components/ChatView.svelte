@@ -3,11 +3,19 @@
   import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
   import WelcomeScreen from './WelcomeScreen.svelte'
+  import CitationPanel from './CitationPanel.svelte'
   import { streamChat, type ChatMessage } from '../services/chat'
 
-  let messages = $state<ChatMessage[]>([])
+  /** Extended message type that tracks the originating query for citations. */
+  interface MessageWithQuery extends ChatMessage {
+    /** The user query this assistant message responds to (for citation lookup). */
+    queryForCitations?: string
+  }
+
+  let messages = $state<MessageWithQuery[]>([])
   let isStreaming = $state(false)
   let currentStreamingContent = $state('')
+  let currentUserQuery = $state('')
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
   let streamStatusMessage = $state<string | null>(null)
@@ -32,29 +40,32 @@
     }
   }
 
-  async function handleSend(message: string) {
+  async function handleSend(message: string): Promise<void> {
     if (!message.trim() || isStreaming) return
+
+    const userQuery = message.trim()
 
     // Add user message
     messages = [...messages, {
       role: 'user',
-      content: message,
+      content: userQuery,
       timestamp: Date.now()
     }]
 
     shouldAutoScroll = true
     await scrollToBottom()
 
-    // Start streaming
+    // Start streaming - track query for citations
     isStreaming = true
     currentStreamingContent = ''
+    currentUserQuery = userQuery
     streamStatusMessage = null
     streamStatusDetails = null
 
     try {
       await streamChat(
         sessionId,
-        message,
+        userQuery,
         (chunk) => {
           currentStreamingContent += chunk
           scrollToBottom()
@@ -71,14 +82,14 @@
         }
       )
 
-      // Add completed assistant message
+      // Add completed assistant message with query reference for citations
       messages = [...messages, {
         role: 'assistant',
         content: currentStreamingContent,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        queryForCitations: userQuery
       }]
     } catch (error) {
-      console.error('Stream error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
       messages = [...messages, {
         role: 'assistant',
@@ -89,6 +100,7 @@
     } finally {
       isStreaming = false
       currentStreamingContent = ''
+      currentUserQuery = ''
       streamStatusMessage = null
       streamStatusDetails = null
       await scrollToBottom()
@@ -112,7 +124,12 @@
       {:else}
         <div class="messages-list">
           {#each messages as message, i (message.timestamp)}
-            <MessageBubble {message} index={i} />
+            <div class="message-with-citations">
+              <MessageBubble {message} index={i} />
+              {#if message.role === 'assistant' && message.queryForCitations && !message.isError}
+                <CitationPanel query={message.queryForCitations} />
+              {/if}
+            </div>
           {/each}
 
           {#if isStreaming && currentStreamingContent}
@@ -174,6 +191,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
+  }
+
+  .message-with-citations {
+    display: flex;
+    flex-direction: column;
   }
 
   /* Loading indicator */
