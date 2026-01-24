@@ -360,8 +360,8 @@ public class RetrievalService {
             .map(hit -> {
                 Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
                 // Mark document as coming from fallback search
-                doc.getMetadata().put("retrievalSource", "keyword_fallback");
-                doc.getMetadata().put("fallbackReason", errorType);
+                doc.getMetadata().put(METADATA_RETRIEVAL_SOURCE, SOURCE_KEYWORD_FALLBACK);
+                doc.getMetadata().put(METADATA_FALLBACK_REASON, errorType);
                 return doc;
             })
             .limit(props.getRag().getSearchReturnK())
