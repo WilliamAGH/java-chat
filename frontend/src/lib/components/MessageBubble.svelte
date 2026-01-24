@@ -8,24 +8,82 @@
     isStreaming?: boolean
   }
 
+  /**
+   * Debounce delay during streaming to batch rapid content updates.
+   * 80ms balances responsiveness with avoiding excessive re-renders -
+   * fast enough to feel real-time, slow enough to batch 2-3 chunks.
+   */
+  const STREAMING_RENDER_DEBOUNCE_MS = 80
+
+  /** Encapsulates render lifecycle: sequencing, timing, and abort control. */
+  interface RenderControl {
+    sequence: number
+    timer: ReturnType<typeof setTimeout> | null
+    abort: AbortController | null
+  }
+
   let { message, index, isStreaming = false }: Props = $props()
 
   let renderedContent = $state('')
+  let renderError = $state<string | null>(null)
   let contentEl: HTMLElement | null = $state(null)
+  let renderControl = $state<RenderControl>({ sequence: 0, timer: null, abort: null })
+
+  function cancelPendingRender(): void {
+    if (renderControl.timer) {
+      clearTimeout(renderControl.timer)
+    }
+    if (renderControl.abort) {
+      renderControl.abort.abort()
+    }
+    renderControl = { ...renderControl, timer: null, abort: null }
+  }
 
   // Render markdown when content changes
   $effect(() => {
-    if (message.role === 'assistant' && message.content) {
-      renderMarkdown(message.content)
-        .then(html => {
-          renderedContent = html
-        })
-        .catch(error => {
-          console.error('Markdown rendering failed:', error)
-          // Fall back to empty content on render failure
-          renderedContent = ''
-        })
+    if (message.role !== 'assistant') {
+      renderedContent = ''
+      renderError = null
+      return
     }
+
+    const nextContent = message.content ?? ''
+    const nextSequence = renderControl.sequence + 1
+    cancelPendingRender()
+    renderControl = { ...renderControl, sequence: nextSequence }
+
+    if (!nextContent) {
+      renderedContent = ''
+      renderError = null
+      return
+    }
+
+    const delayMs = isStreaming ? STREAMING_RENDER_DEBOUNCE_MS : 0
+    const timer = setTimeout(() => {
+      const controller = new AbortController()
+      renderControl = { ...renderControl, abort: controller }
+      renderMarkdown(nextContent, {
+        preferClient: isStreaming,
+        signal: controller.signal
+      })
+        .then(html => {
+          if (controller.signal.aborted || nextSequence !== renderControl.sequence) {
+            return
+          }
+          renderedContent = html
+          renderError = null
+        })
+        .catch(problem => {
+          if (controller.signal.aborted || nextSequence !== renderControl.sequence) {
+            return
+          }
+          console.error('Markdown rendering failed:', problem)
+          renderError = 'Markdown rendering unavailable'
+        })
+    }, delayMs)
+    renderControl = { ...renderControl, timer }
+
+    return cancelPendingRender
   })
 
   // Highlight code blocks after render - use core + java only for smaller bundle
@@ -78,7 +136,10 @@
       <p class="user-text">{message.content}</p>
     {:else}
       <div class="assistant-content" bind:this={contentEl}>
-        {#if renderedContent}
+        {#if renderError}
+          <p class="render-error">{renderError}</p>
+          <p>{message.content}</p>
+        {:else if renderedContent}
           {@html renderedContent}
         {:else}
           <p>{message.content}</p>
@@ -275,6 +336,16 @@
     border: none;
     font-size: inherit;
     color: var(--color-text-primary);
+  }
+
+  /* Render error notice */
+  .render-error {
+    font-size: var(--text-sm);
+    color: var(--color-error);
+    background: rgba(196, 93, 93, 0.1);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-3);
   }
 
   /* Streaming cursor */

@@ -21,6 +21,21 @@ export interface Enrichment {
   background?: string[]
 }
 
+export interface StreamStatus {
+  message: string
+  details?: string
+}
+
+export interface StreamError {
+  message: string
+  details?: string
+}
+
+export interface StreamChatOptions {
+  onStatus?: (status: StreamStatus) => void
+  onError?: (error: StreamError) => void
+}
+
 /**
  * Stream chat response from the backend using Server-Sent Events
  * @param sessionId - Unique session identifier
@@ -30,7 +45,8 @@ export interface Enrichment {
 export async function streamChat(
   sessionId: string,
   message: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  options: StreamChatOptions = {}
 ): Promise<void> {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
@@ -56,16 +72,68 @@ export async function streamChat(
   let buffer = ''
   let eventBuffer = ''
   let hasEventData = false
+  let currentEventType: string | null = null
+
+  /**
+   * Attempts JSON parsing only when content looks like JSON.
+   * Returns parsed object or null for plain text content.
+   * Throws SyntaxError for malformed JSON (starts with '{' or '[' but invalid).
+   */
+  function tryParseJson<T>(content: string): T | null {
+    const trimmed = content.trim()
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return null
+    }
+    return JSON.parse(trimmed) as T
+  }
+
+  const flushEvent = () => {
+    if (!hasEventData) {
+      currentEventType = null
+      return
+    }
+
+    const eventType = currentEventType?.trim().toLowerCase() ?? ''
+    const rawEventData = eventBuffer
+    eventBuffer = ''
+    hasEventData = false
+    currentEventType = null
+
+    if (eventType === 'status') {
+      const parsed = tryParseJson<StreamStatus>(rawEventData)
+      options.onStatus?.(parsed ?? { message: rawEventData })
+      return
+    }
+
+    if (eventType === 'error') {
+      const parsed = tryParseJson<StreamError>(rawEventData)
+      const streamError = parsed ?? { message: rawEventData }
+      options.onError?.(streamError)
+      const error = new Error(streamError.message)
+      ;(error as Error & { details?: string }).details = streamError.details
+      throw error
+    }
+
+    // Default and "text" events - extract text from JSON wrapper if present
+    const parsed = tryParseJson<{ text?: string }>(rawEventData)
+    const textContent = parsed?.text ?? rawEventData
+    if (textContent !== '') {
+      onChunk(textContent)
+    }
+  }
 
   try {
     while (true) {
       const { done, value } = await reader.read()
 
       if (done) {
-        // Commit any remaining event data at stream end
-        if (hasEventData) {
-          onChunk(eventBuffer)
+        // Commit any remaining buffered line before flushing event data
+        if (buffer.length > 0) {
+          eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer
+          hasEventData = true
+          buffer = ''
         }
+        flushEvent()
         break
       }
 
@@ -85,41 +153,31 @@ export async function streamChat(
           continue
         }
 
+        if (line.startsWith('event:')) {
+          currentEventType = line.startsWith('event: ')
+            ? line.slice(7)
+            : line.slice(6)
+          continue
+        }
+
         if (line.startsWith('data:')) {
           // Per SSE spec, strip optional space after "data:" prefix
-          const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+          const eventPayload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
 
           // Skip [DONE] token
-          if (data === '[DONE]') {
+          if (eventPayload === '[DONE]') {
             continue
-          }
-
-          // Parse JSON wrapper to preserve whitespace (Spring SSE can trim leading spaces)
-          // Format: {"text":"actual content with spaces"}
-          let textContent = data
-          if (data.startsWith('{') && data.includes('"text"')) {
-            try {
-              const parsed = JSON.parse(data) as { text?: string }
-              textContent = parsed.text ?? data
-            } catch {
-              // Fallback to raw data if JSON parsing fails
-              textContent = data
-            }
           }
 
           // Accumulate within current SSE event
           if (hasEventData) {
             eventBuffer += '\n'
           }
-          eventBuffer += textContent
+          eventBuffer += eventPayload
           hasEventData = true
         } else if (line.trim() === '') {
           // Blank line marks end of SSE event - commit accumulated data
-          if (hasEventData) {
-            onChunk(eventBuffer)
-            eventBuffer = ''
-            hasEventData = false
-          }
+          flushEvent()
         }
       }
     }

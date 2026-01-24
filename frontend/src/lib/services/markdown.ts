@@ -16,18 +16,55 @@ interface StructuredMarkdownResponse {
   isClean?: boolean
 }
 
+export interface RenderMarkdownOptions {
+  preferClient?: boolean
+  signal?: AbortSignal
+}
+
 /**
- * Render markdown to HTML using the server's structured endpoint
- * Falls back to client-side rendering if server is unavailable
+ * Distinguishes markdown rendering failures from network/abort errors.
+ * Network errors trigger client fallback; render errors surface to caller.
  */
-export async function renderMarkdown(content: string): Promise<string> {
+export class MarkdownRenderError extends Error {
+  constructor(
+    message: string,
+    public readonly cause?: unknown
+  ) {
+    super(message)
+    this.name = 'MarkdownRenderError'
+  }
+}
+
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError && String(error.message).includes('fetch')) {
+    return true
+  }
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return false
+  }
+  return error instanceof Error && error.name === 'NetworkError'
+}
+
+/**
+ * Render markdown to HTML using the server's structured endpoint.
+ * Falls back to client-side rendering only for network failures.
+ * Throws MarkdownRenderError for actual rendering failures.
+ */
+export async function renderMarkdown(
+  content: string,
+  options: RenderMarkdownOptions = {}
+): Promise<string> {
+  if (options.preferClient) {
+    return clientRenderMarkdown(content)
+  }
+
   try {
-    // Try server-side structured rendering first
     const response = await fetch('/api/markdown/render/structured', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
+      signal: options.signal,
       body: JSON.stringify({ content })
     })
 
@@ -35,13 +72,28 @@ export async function renderMarkdown(content: string): Promise<string> {
       const data: StructuredMarkdownResponse = await response.json()
       return processServerHtml(data.html)
     }
-  } catch (error) {
-    // Log the error for visibility, then fall through to client-side rendering
-    console.warn('Server markdown rendering unavailable, using client fallback:', error)
-  }
 
-  // Client-side fallback using marked
-  return clientRenderMarkdown(content)
+    // Non-2xx response - server rejected the request
+    if (response.status >= 500) {
+      // Server error - fall back to client rendering
+      console.warn(`Server markdown rendering failed (${response.status}), using client fallback`)
+      return clientRenderMarkdown(content)
+    }
+    // 4xx errors indicate malformed request - surface as error
+    throw new MarkdownRenderError(`Server rejected markdown request: ${response.status}`)
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw error
+    }
+    if (error instanceof MarkdownRenderError) {
+      throw error
+    }
+    if (isNetworkError(error)) {
+      console.warn('Server markdown rendering unavailable, using client fallback:', error)
+      return clientRenderMarkdown(content)
+    }
+    throw new MarkdownRenderError('Unexpected markdown rendering failure', error)
+  }
 }
 
 /**
