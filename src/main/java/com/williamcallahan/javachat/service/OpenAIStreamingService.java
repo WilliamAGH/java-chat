@@ -178,12 +178,12 @@ public class OpenAIStreamingService {
                 .timeout(streamingTimeout())
                 .build();
 
-            return Flux.using(
+            // StreamResponse implements AutoCloseable; explicit type params help inference
+            return Flux.<String, StreamResponse<ChatCompletionChunk>>using(
                 () -> streamingClient.chat().completions().createStreaming(params, requestOptions),
-                responseStream -> Flux.fromStream(responseStream.stream())
+                (StreamResponse<ChatCompletionChunk> responseStream) -> Flux.fromStream(responseStream.stream())
                     .concatMap(chunk -> Flux.fromIterable(chunk.choices()))
-                    .concatMap(choice -> Mono.justOrEmpty(choice.delta().content())),
-                StreamResponse::close
+                    .concatMap(choice -> Mono.justOrEmpty(choice.delta().content()))
             )
             .doOnComplete(() -> {
                 log.debug("Stream completed successfully");
