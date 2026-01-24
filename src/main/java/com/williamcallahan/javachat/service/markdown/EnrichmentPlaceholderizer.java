@@ -26,16 +26,13 @@ import java.util.UUID;
  * Extracts inline enrichment markers and replaces them with HTML placeholders.
  */
 class EnrichmentPlaceholderizer {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentPlaceholderizer.class);
-    
+
     private static final String MARKER_START = "{{";
     private static final String MARKER_END = "}}";
     private static final String PLACEHOLDER_PREFIX = "ENRICHMENT_";
-    private static final int FENCE_MIN_LENGTH = 3;
-    private static final char BACKTICK = '`';
-    private static final char TILDE = '~';
-    
+
     private final Parser parser;
     private final HtmlRenderer renderer;
 
@@ -109,80 +106,49 @@ class EnrichmentPlaceholderizer {
 
         StringBuilder outputBuilder = new StringBuilder(markdown.length() + 64);
         EnrichmentContext context = new EnrichmentContext(markdown, enrichments, placeholders, outputBuilder);
-        
+        CodeFenceStateTracker fenceTracker = new CodeFenceStateTracker();
+
         int cursor = 0;
-        int absolutePosition = 0; // running position for enrichment creation
-        
-        // Fence state
-        boolean inFence = false;
-        char fenceChar = 0;
-        int fenceLength = 0;
-        boolean inInlineCode = false;
-        int inlineBacktickLength = 0;
+        int absolutePosition = 0;
 
         while (cursor < markdown.length()) {
-            // Check for code fence start/end
-            // A fence is start-of-line (or after newline) sequence of >=3 backticks or tildes
             boolean isStartOfLine = (cursor == 0) || (markdown.charAt(cursor - 1) == '\n');
-            
+
+            // Check for fence markers at start of line
             if (isStartOfLine) {
-                FenceMarker marker = scanFenceMarker(markdown, cursor);
+                CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, cursor);
                 if (marker != null) {
-                    if (!inFence) {
-                        // Start of new fence
-                        inFence = true;
-                        fenceChar = marker.character;
-                        fenceLength = marker.length;
-                    } else {
-                        // Check if this closes the current fence
-                        // Must match char and be >= length
-                        if (marker.character == fenceChar && marker.length >= fenceLength) {
-                            inFence = false;
-                            fenceChar = 0;
-                            fenceLength = 0;
-                        }
+                    if (!fenceTracker.isInsideFence()) {
+                        fenceTracker.enterFence(marker.character(), marker.length());
+                    } else if (fenceTracker.wouldCloseFence(marker)) {
+                        fenceTracker.exitFence();
                     }
-                    
-                    // Copy the fence marker and advance
-                    for (int offset = 0; offset < marker.length; offset++) {
+
+                    for (int offset = 0; offset < marker.length(); offset++) {
                         outputBuilder.append(markdown.charAt(cursor + offset));
                     }
-                    cursor += marker.length;
-                    absolutePosition += marker.length;
+                    cursor += marker.length();
+                    absolutePosition += marker.length();
                     continue;
                 }
             }
 
-            // Track inline code spans (backticks) outside fenced code
-            if (!inFence) {
-                BacktickRun backtickRun = scanBacktickRun(markdown, cursor);
+            // Track inline code spans outside fenced code
+            if (!fenceTracker.isInsideFence()) {
+                CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, cursor);
                 if (backtickRun != null) {
-                    if (!inInlineCode && !hasClosingBacktickRun(markdown, cursor, backtickRun.length)) {
-                        for (int offset = 0; offset < backtickRun.length; offset++) {
-                            outputBuilder.append(markdown.charAt(cursor + offset));
-                        }
-                        cursor += backtickRun.length;
-                        absolutePosition += backtickRun.length;
-                        continue;
-                    }
-                    if (!inInlineCode) {
-                        inInlineCode = true;
-                        inlineBacktickLength = backtickRun.length;
-                    } else if (backtickRun.length == inlineBacktickLength) {
-                        inInlineCode = false;
-                        inlineBacktickLength = 0;
-                    }
-                    for (int offset = 0; offset < backtickRun.length; offset++) {
+                    int consumed = fenceTracker.processCharacter(markdown, cursor, isStartOfLine);
+                    for (int offset = 0; offset < backtickRun.length(); offset++) {
                         outputBuilder.append(markdown.charAt(cursor + offset));
                     }
-                    cursor += backtickRun.length;
-                    absolutePosition += backtickRun.length;
+                    cursor += backtickRun.length();
+                    absolutePosition += backtickRun.length();
                     continue;
                 }
             }
 
             // Detect enrichment start only when not inside code fences or inline code
-            if (!inFence && !inInlineCode && startsWith(markdown, cursor, MARKER_START)) {
+            if (!fenceTracker.isInsideCode() && startsWith(markdown, cursor, MARKER_START)) {
                 int typeStartIndex = cursor + 2;
                 // skip spaces
                 while (typeStartIndex < markdown.length()
@@ -236,60 +202,7 @@ class EnrichmentPlaceholderizer {
 
         return outputBuilder.toString();
     }
-    
-    private record FenceMarker(char character, int length) {}
-    private record BacktickRun(int length) {}
-    
-    private FenceMarker scanFenceMarker(String text, int index) {
-        if (index >= text.length()) return null;
-        char startChar = text.charAt(index);
-        if (startChar != BACKTICK && startChar != TILDE) return null;
-        
-        int length = 0;
-        while (index + length < text.length() && text.charAt(index + length) == startChar) {
-            length++;
-        }
-        
-        if (length >= FENCE_MIN_LENGTH) {
-            return new FenceMarker(startChar, length);
-        }
-        return null;
-    }
 
-    private BacktickRun scanBacktickRun(String text, int index) {
-        if (index < 0 || index >= text.length()) {
-            return null;
-        }
-        if (text.charAt(index) != BACKTICK) {
-            return null;
-        }
-        int length = 0;
-        while (index + length < text.length() && text.charAt(index + length) == BACKTICK) {
-            length++;
-        }
-        return new BacktickRun(length);
-    }
-
-    private boolean hasClosingBacktickRun(String text, int startIndex, int runLength) {
-        int scanIndex = startIndex + runLength;
-        while (scanIndex < text.length()) {
-            int nextBacktickIndex = text.indexOf(BACKTICK, scanIndex);
-            if (nextBacktickIndex < 0) {
-                return false;
-            }
-            int matchLength = 0;
-            while (nextBacktickIndex + matchLength < text.length()
-                && text.charAt(nextBacktickIndex + matchLength) == BACKTICK) {
-                matchLength++;
-            }
-            if (matchLength == runLength) {
-                return true;
-            }
-            scanIndex = nextBacktickIndex + matchLength;
-        }
-        return false;
-    }
-    
     private boolean startsWith(String text, int index, String prefix) {
         return text.startsWith(prefix, index);
     }
@@ -333,21 +246,14 @@ class EnrichmentPlaceholderizer {
 
     private String processFragmentForEnrichment(String content) {
         if (content == null || content.isEmpty()) return "";
-        try {
-            String normalized = MarkdownNormalizer.preNormalizeForListsAndFences(content);
-            Node doc = parser.parse(normalized);
-            MarkdownAstUtils.stripInlineCitationMarkers(doc);
-            String innerHtml = renderer.render(doc);
-            // strip surrounding <p> if it's the only wrapper
-            Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
-            parsedDocument.outputSettings().prettyPrint(false);
-            // Enrichment content often uses newlines as intentional line breaks; render those as <br>.
-            convertNewlinesToBreaks(parsedDocument.body(), false);
-            return parsedDocument.body().html();
-        } catch (RuntimeException processingFailure) {
-            logger.error("Failed to process enrichment fragment", processingFailure);
-            return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
-        }
+        String normalized = MarkdownNormalizer.preNormalizeForListsAndFences(content);
+        Node doc = parser.parse(normalized);
+        MarkdownAstUtils.stripInlineCitationMarkers(doc);
+        String innerHtml = renderer.render(doc);
+        Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
+        parsedDocument.outputSettings().prettyPrint(false);
+        convertNewlinesToBreaks(parsedDocument.body(), false);
+        return parsedDocument.body().html();
     }
 
     private static void convertNewlinesToBreaks(org.jsoup.nodes.Node rootNode, boolean inCodeOrPre) {
@@ -416,55 +322,35 @@ class EnrichmentPlaceholderizer {
     }
 
     private int findEnrichmentEndIndex(String markdown, int startIndex) {
+        CodeFenceStateTracker fenceTracker = new CodeFenceStateTracker();
         int scanIndex = startIndex;
-        boolean inFence = false;
-        char fenceChar = 0;
-        int fenceLength = 0;
-        boolean inInlineCode = false;
-        int inlineBacktickLength = 0;
-        
-        while (scanIndex < markdown.length()) {
-            // Check for fence start/end inside enrichment content
-            boolean isStartOfLine = (scanIndex == startIndex) || (markdown.charAt(scanIndex - 1) == '\n');
-            
-            if (isStartOfLine) {
-                 FenceMarker marker = scanFenceMarker(markdown, scanIndex);
-                 if (marker != null) {
-                     if (!inFence) {
-                         inFence = true;
-                         fenceChar = marker.character;
-                         fenceLength = marker.length;
-                     } else if (marker.character == fenceChar && marker.length >= fenceLength) {
-                         inFence = false;
-                         fenceChar = 0;
-                         fenceLength = 0;
-                     }
-                     // Skip the fence marker
-                     scanIndex += marker.length;
-                     continue;
-                 }
-            }
 
-            if (!inFence) {
-                BacktickRun backtickRun = scanBacktickRun(markdown, scanIndex);
-                if (backtickRun != null) {
-                    if (!inInlineCode && !hasClosingBacktickRun(markdown, scanIndex, backtickRun.length)) {
-                        scanIndex += backtickRun.length;
-                        continue;
+        while (scanIndex < markdown.length()) {
+            boolean isStartOfLine = (scanIndex == startIndex) || (markdown.charAt(scanIndex - 1) == '\n');
+
+            if (isStartOfLine) {
+                CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, scanIndex);
+                if (marker != null) {
+                    if (!fenceTracker.isInsideFence()) {
+                        fenceTracker.enterFence(marker.character(), marker.length());
+                    } else if (fenceTracker.wouldCloseFence(marker)) {
+                        fenceTracker.exitFence();
                     }
-                    if (!inInlineCode) {
-                        inInlineCode = true;
-                        inlineBacktickLength = backtickRun.length;
-                    } else if (backtickRun.length == inlineBacktickLength) {
-                        inInlineCode = false;
-                        inlineBacktickLength = 0;
-                    }
-                    scanIndex += backtickRun.length;
+                    scanIndex += marker.length();
                     continue;
                 }
             }
 
-            if (!inFence && !inInlineCode && startsWith(markdown, scanIndex, MARKER_END)) {
+            if (!fenceTracker.isInsideFence()) {
+                CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, scanIndex);
+                if (backtickRun != null) {
+                    fenceTracker.processCharacter(markdown, scanIndex, isStartOfLine);
+                    scanIndex += backtickRun.length();
+                    continue;
+                }
+            }
+
+            if (!fenceTracker.isInsideCode() && startsWith(markdown, scanIndex, MARKER_END)) {
                 return scanIndex;
             }
             scanIndex++;
