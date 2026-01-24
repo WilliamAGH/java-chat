@@ -26,10 +26,11 @@ export JAR_PATH = $(call get_jar)
 # - Requires GITHUB_TOKEN (PAT with models:read)
 # - Base URL and model names have sensible defaults
 # - CRITICAL: GitHub Models endpoint is https://models.github.ai/inference (NOT azure.com)
+# - Model names differ by provider: GitHub Models uses gpt-5, OpenAI uses gpt-5.2
 RUN_ARGS := \
   --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
   --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-  --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5.2}" \
+  --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
 
 .PHONY: help clean build test lint run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build

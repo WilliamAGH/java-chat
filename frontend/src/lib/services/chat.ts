@@ -69,6 +69,7 @@ export async function streamChat(
   }
 
   const decoder = new TextDecoder()
+  let streamCompletedNormally = false
   let buffer = ''
   let eventBuffer = ''
   let hasEventData = false
@@ -127,6 +128,7 @@ export async function streamChat(
       const { done, value } = await reader.read()
 
       if (done) {
+        streamCompletedNormally = true
         // Commit any remaining buffered line before flushing event data
         if (buffer.length > 0) {
           eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer
@@ -182,6 +184,14 @@ export async function streamChat(
       }
     }
   } finally {
+    // Cancel the reader on early exit to abort the network stream and avoid dangling connections
+    if (!streamCompletedNormally) {
+      try {
+        await reader.cancel()
+      } catch {
+        // Ignore cancel errors - stream may already be closed
+      }
+    }
     reader.releaseLock()
   }
 }

@@ -43,12 +43,13 @@ public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
     private static final String USER_MARKER = "User:";
     private static final String CONTEXT_MARKER = "[CTX ";
-    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5.2 8K input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int MAX_COMPLETION_TOKENS = 4000;
     private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
-    private static final String GPT_5_MODEL_PREFIX = "gpt-5.2";
+    /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
+    private static final String GPT_5_MODEL_PREFIX = "gpt-5";
 
     /** Safe token budget for GPT-5.2 input (8K limit). */
     private static final int MAX_TOKENS_GPT5_INPUT = 7000;
@@ -86,8 +87,11 @@ public class OpenAIStreamingService {
     private String openaiBaseUrl;
 
     @Value("${OPENAI_MODEL:gpt-5.2}")
-    private String model;
-    
+    private String openaiModel;
+
+    @Value("${GITHUB_MODELS_CHAT_MODEL:gpt-5}")
+    private String githubModelsChatModel;
+
     @Value("${GITHUB_MODELS_BASE_URL:https://models.github.ai/inference/v1}")
     private String githubModelsBaseUrl;
     
@@ -126,8 +130,9 @@ public class OpenAIStreamingService {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
             } else {
                 log.info(
-                    "OpenAI streaming available (model={}, primary={}, secondary={})",
-                    model,
+                    "OpenAI streaming available (githubModel={}, openaiModel={}, primary={}, secondary={})",
+                    githubModelsChatModel,
+                    openaiModel,
                     clientPrimary != null,
                     clientSecondary != null
                 );
@@ -181,21 +186,25 @@ public class OpenAIStreamingService {
      */
     public Flux<String> streamResponse(String prompt, double temperature) {
         log.debug("Starting OpenAI stream");
-        
+
         return Flux.<String>defer(() -> {
-            String truncatedPrompt = truncatePromptForModel(prompt);
-            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature);
+            // Select client first to determine which provider's model name to use
             OpenAIClient streamingClient = selectClientForStreaming();
-            
+
             if (streamingClient == null) {
                 String error = "All LLM providers unavailable - check rate limits and API credentials";
                 log.error("[LLM] {}", error);
                 return Flux.<String>error(new IllegalStateException(error));
             }
-            
-            RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
+
+            boolean useGitHubModels = isPrimaryClient(streamingClient);
+            RateLimitManager.ApiProvider activeProvider = useGitHubModels
                     ? RateLimitManager.ApiProvider.GITHUB_MODELS
                     : RateLimitManager.ApiProvider.OPENAI;
+
+            // Build params with provider-specific model after client selection
+            String truncatedPrompt = truncatePromptForModel(prompt);
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
             log.info("[LLM] [{}] Streaming started", activeProvider.getName());
             
             RequestOptions requestOptions = RequestOptions.builder()
@@ -240,10 +249,11 @@ public class OpenAIStreamingService {
                 log.error("[LLM] {}", error);
                 return Mono.error(new IllegalStateException(error));
             }
-            RateLimitManager.ApiProvider activeProvider = isPrimaryClient(blockingClient)
+            boolean useGitHubModels = isPrimaryClient(blockingClient);
+            RateLimitManager.ApiProvider activeProvider = useGitHubModels
                     ? RateLimitManager.ApiProvider.GITHUB_MODELS
                     : RateLimitManager.ApiProvider.OPENAI;
-            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature);
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
             try {
                 log.info("[LLM] [{}] Complete started", activeProvider.getName());
                 RequestOptions requestOptions = RequestOptions.builder()
@@ -303,8 +313,8 @@ public class OpenAIStreamingService {
         }
     }
 
-    private ResponseCreateParams buildResponseParams(String prompt, double temperature) {
-        String normalizedModelId = normalizedModelId();
+    private ResponseCreateParams buildResponseParams(String prompt, double temperature, boolean useGitHubModels) {
+        String normalizedModelId = normalizedModelId(useGitHubModels);
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel = gpt5Family || normalizedModelId.startsWith("o");
 
@@ -313,9 +323,9 @@ public class OpenAIStreamingService {
                 .model(ResponsesModel.ofString(normalizedModelId));
 
         if (gpt5Family) {
-            // GPT-5.2: omit temperature and set conservative max output tokens
+            // GPT-5 family: omit temperature and set conservative max output tokens
             builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
-            log.debug("Using GPT-5.2 configuration (no regression)");
+            log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
 
             ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
             if (effort != null) {
@@ -358,30 +368,49 @@ public class OpenAIStreamingService {
     
     /**
      * Truncate prompt conservatively based on model limits to avoid 413 errors.
+     *
+     * <p>Uses conservative GPT-5 family limits since both GitHub Models (gpt-5) and
+     * OpenAI (gpt-5.2) share the same 8K input constraint.</p>
      */
     private String truncatePromptForModel(String prompt) {
         if (prompt == null || prompt.isEmpty()) return prompt;
 
-        String modelId = normalizedModelId();
-        int tokenLimit = (isGpt5Family(modelId) || modelId.startsWith("o"))
-            ? MAX_TOKENS_GPT5_INPUT
-            : MAX_TOKENS_DEFAULT_INPUT;
+        // Both gpt-5 and gpt-5.2 are GPT-5 family with same token limits,
+        // so we use conservative limits regardless of which provider is selected later
+        String openaiModelId = normalizedModelId(false);
+        String githubModelId = normalizedModelId(true);
+        boolean isGpt5 = isGpt5Family(openaiModelId) || isGpt5Family(githubModelId);
+        boolean isReasoningModel = isGpt5 || openaiModelId.startsWith("o") || githubModelId.startsWith("o");
+
+        int tokenLimit = isReasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
 
         String truncated = chunker.keepLastTokens(prompt, tokenLimit);
-        
+
         if (truncated.length() < prompt.length()) {
-            String notice = (isGpt5Family(modelId) || modelId.startsWith("o")) 
-                ? TRUNCATION_NOTICE_GPT5 
-                : TRUNCATION_NOTICE_GENERIC;
+            String notice = isGpt5 ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
             return notice + truncated;
         }
         
         return prompt;
     }
 
-    private String normalizedModelId() {
-        String rawModelId = model == null ? "" : model.trim();
-        return rawModelId.isEmpty() ? GPT_5_MODEL_PREFIX : AsciiTextNormalizer.toLowerAscii(rawModelId);
+    /**
+     * Returns the normalized model ID for the specified provider.
+     *
+     * @param useGitHubModels true to use GitHub Models model name, false for OpenAI
+     * @return lowercase model ID appropriate for the provider
+     */
+    private String normalizedModelId(boolean useGitHubModels) {
+        String rawModelId;
+        String defaultModel;
+        if (useGitHubModels) {
+            rawModelId = githubModelsChatModel == null ? "" : githubModelsChatModel.trim();
+            defaultModel = "gpt-5";
+        } else {
+            rawModelId = openaiModel == null ? "" : openaiModel.trim();
+            defaultModel = "gpt-5.2";
+        }
+        return rawModelId.isEmpty() ? defaultModel : AsciiTextNormalizer.toLowerAscii(rawModelId);
     }
 
     private boolean isGpt5Family(String modelId) {
