@@ -87,7 +87,11 @@ dependencies {
     implementation("com.knuddels:jtokkit:$jtokkitVersion")
 
     // Markdown processing
-    implementation("com.vladsch.flexmark:flexmark-all:$flexmarkVersion")
+    implementation("com.vladsch.flexmark:flexmark:$flexmarkVersion")
+    implementation("com.vladsch.flexmark:flexmark-ext-tables:$flexmarkVersion")
+    implementation("com.vladsch.flexmark:flexmark-ext-gfm-strikethrough:$flexmarkVersion")
+    implementation("com.vladsch.flexmark:flexmark-ext-gfm-tasklist:$flexmarkVersion")
+    implementation("com.vladsch.flexmark:flexmark-ext-autolink:$flexmarkVersion")
 
     // Caching
     implementation("com.github.ben-manes.caffeine:caffeine:$caffeineVersion")
