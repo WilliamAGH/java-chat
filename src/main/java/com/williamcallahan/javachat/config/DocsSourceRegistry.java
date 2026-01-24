@@ -39,6 +39,8 @@ public final class DocsSourceRegistry {
     private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_BASE_KEY = "SPRING_AI_API_BASE";
 
+    private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
+
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
     private static final String DEFAULT_JAVA25_EA = "https://download.java.net/java/early_access/jdk25/docs/api/";
     private static final String DEFAULT_SPRING_BOOT_API_BASE =
@@ -290,6 +292,6 @@ public final class DocsSourceRegistry {
 
         // Try local prefix mapping
         Optional<String> mappedUrl = mapLocalPrefixToRemote(localPath);
-        return mappedUrl.map(DocsSourceRegistry::canonicalizeHttpDocUrl).orElse(trimmedUrl);
+        return mappedUrl.map(DocsSourceRegistry::canonicalizeHttpDocUrl).orElse(REDACTED_LOCAL_URL);
     }
 }
