@@ -5,6 +5,8 @@ import com.vladsch.flexmark.ast.Text;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.ast.NodeVisitor;
 import com.vladsch.flexmark.util.ast.VisitHandler;
+import com.williamcallahan.javachat.domain.markdown.CitationType;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

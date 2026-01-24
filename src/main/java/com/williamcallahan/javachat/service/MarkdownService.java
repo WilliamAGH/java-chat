@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
 import com.williamcallahan.javachat.service.markdown.MarkdownProcessingException;
-import com.williamcallahan.javachat.service.markdown.ProcessedMarkdown;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

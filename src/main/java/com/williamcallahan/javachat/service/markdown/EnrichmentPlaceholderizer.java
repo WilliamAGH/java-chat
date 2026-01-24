@@ -2,8 +2,14 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.vladsch.flexmark.util.ast.Node;
+import com.williamcallahan.javachat.domain.markdown.Background;
+import com.williamcallahan.javachat.domain.markdown.Example;
+import com.williamcallahan.javachat.domain.markdown.Hint;
+import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
+import com.williamcallahan.javachat.domain.markdown.Reminder;
+import com.williamcallahan.javachat.domain.markdown.Warning;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;

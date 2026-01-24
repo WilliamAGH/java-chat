@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service.markdown;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.data.MutableDataSet;
+import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -2,6 +2,9 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
+import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
+import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;

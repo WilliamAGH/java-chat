@@ -1,60 +1,61 @@
 package com.williamcallahan.javachat.service;
 
+import com.openai.client.OpenAIClient;
+import com.openai.core.RequestOptions;
+import com.openai.models.embeddings.CreateEmbeddingResponse;
+import com.openai.services.blocking.EmbeddingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class OpenAiCompatibleEmbeddingModelTest {
 
     @Test
-    void callBatchesInputsAndParsesTypedResponse() {
-        RestTemplate restTemplate = new RestTemplateBuilder().build();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+    void callUsesSdkAndPreservesIndexOrdering() {
+        OpenAIClient client = mock(OpenAIClient.class);
+        EmbeddingService embeddingService = mock(EmbeddingService.class);
 
-        String responseJson = """
-            {
-              "data": [
-                { "index": 0, "embedding": [0.25, -0.5] },
-                { "index": 1, "embedding": [0.0, 1.0] }
-              ]
-            }
-            """;
+        when(client.embeddings()).thenReturn(embeddingService);
 
-        server.expect(requestTo("https://api.openai.com/v1/embeddings"))
-            .andExpect(method(HttpMethod.POST))
-            .andExpect(header("Authorization", "Bearer test-key"))
-            .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+        CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
+            .model("text-embedding-3-small")
+            .usage(CreateEmbeddingResponse.Usage.builder().promptTokens(1L).totalTokens(1L).build())
+            .data(List.of(
+                com.openai.models.embeddings.Embedding.builder()
+                    .index(1L)
+                    .embedding(List.of(0.0f, 1.0f))
+                    .build(),
+                com.openai.models.embeddings.Embedding.builder()
+                    .index(0L)
+                    .embedding(List.of(0.25f, -0.5f))
+                    .build()
+            ))
+            .build();
+
+        when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         OpenAiCompatibleEmbeddingModel model = new OpenAiCompatibleEmbeddingModel(
-            "https://api.openai.com",
-            "test-key",
+            client,
             "text-embedding-3-small",
-            2,
-            restTemplate
+            2
         );
 
-        EmbeddingResponse response = model.call(new EmbeddingRequest(List.of("a", "b"), null));
+        EmbeddingResponse embeddingResponse = model.call(new EmbeddingRequest(List.of("a", "b"), null));
 
-        assertEquals(2, response.getResults().size());
-        assertEquals(0.25f, response.getResults().get(0).getOutput()[0]);
-        assertEquals(-0.5f, response.getResults().get(0).getOutput()[1]);
-        assertEquals(0.0f, response.getResults().get(1).getOutput()[0]);
-        assertEquals(1.0f, response.getResults().get(1).getOutput()[1]);
+        assertEquals(2, embeddingResponse.getResults().size());
+        assertEquals(0.25f, embeddingResponse.getResults().get(0).getOutput()[0]);
+        assertEquals(-0.5f, embeddingResponse.getResults().get(0).getOutput()[1]);
+        assertEquals(0.0f, embeddingResponse.getResults().get(1).getOutput()[0]);
+        assertEquals(1.0f, embeddingResponse.getResults().get(1).getOutput()[1]);
 
-        server.verify();
+        verify(embeddingService).create(any(), any(RequestOptions.class));
     }
 }
-
