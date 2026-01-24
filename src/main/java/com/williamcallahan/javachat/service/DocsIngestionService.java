@@ -310,7 +310,8 @@ public class DocsIngestionService {
                 try {
                     localStore.markHashIngested(hash);
                 } catch (IOException hashMarkException) {
-                    log.error("Failed to mark hash as ingested: {}", hash, hashMarkException);
+                    log.warn("Failed to mark hash as ingested (exception type: {})",
+                        hashMarkException.getClass().getSimpleName());
                 }
             }
             
@@ -383,10 +384,10 @@ public class DocsIngestionService {
             if (pkg.contains(".")) return pkg;
         }
         // Fallback: scan text for "Package java." pattern
-        int p = bodyText.indexOf("Package ");
-        if (p >= 0) {
-            int end = Math.min(bodyText.length(), p + 100);
-            String snippet = bodyText.substring(p, end);
+        int packageIndex = bodyText.indexOf("Package ");
+        if (packageIndex >= 0) {
+            int end = Math.min(bodyText.length(), packageIndex + 100);
+            String snippet = bodyText.substring(packageIndex, end);
             for (String token : snippet.split("\\s+")) {
                 if (token.startsWith("java.")) return token.replaceAll("[,.;]$", "");
             }
