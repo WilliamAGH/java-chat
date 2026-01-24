@@ -14,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -56,8 +55,8 @@ public class ChatController extends BaseController {
     @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
     private String localEmbeddingServerUrl;
 
-	    @Value("${app.local-embedding.enabled:false}")
-	    private boolean localEmbeddingEnabled;
+    @Value("${app.local-embedding.enabled:false}")
+    private boolean localEmbeddingEnabled;
 
     /**
      * Creates the chat controller wired to chat, retrieval, and streaming services.
@@ -110,9 +109,7 @@ public class ChatController extends BaseController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(@RequestBody ChatStreamRequest request, HttpServletResponse response) {
-        // Critical proxy headers for streaming
-        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
-        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
         String sessionId = request.resolvedSessionId();
@@ -141,14 +138,12 @@ public class ChatController extends BaseController {
 
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             // Use .share() to hot-share the stream and prevent double API subscription
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE)
-                    .filter(chunk -> chunk != null && !chunk.isEmpty())
-                    .doOnNext(chunk -> {
+            Flux<String> dataStream = sseSupport.prepareDataStream(
+                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    chunk -> {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
-                    })
-                    .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
-                    .share();
+                    });
 
             // Heartbeats terminate when data stream completes (success or error)
             Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
@@ -286,17 +281,17 @@ public class ChatController extends BaseController {
         }
         chatMemory.clear(sessionId);
         PIPELINE_LOG.info("Cleared chat session");
-	        return ResponseEntity.ok("Session cleared");
-	    }
-	    
-	    /**
-	     * Reports whether the configured local embedding server is reachable when the feature is enabled.
-	     */
-	    @GetMapping("/health/embeddings")
-	    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-	        if (!localEmbeddingEnabled) {
-	            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
-	        }
+        return ResponseEntity.ok("Session cleared");
+    }
+    
+    /**
+     * Reports whether the configured local embedding server is reachable when the feature is enabled.
+     */
+    @GetMapping("/health/embeddings")
+    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
+        if (!localEmbeddingEnabled) {
+            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
+        }
 
         try {
             // Simple health check - try to get models list

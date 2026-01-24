@@ -2,13 +2,16 @@ package com.williamcallahan.javachat.web;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.function.Consumer;
 
 import static com.williamcallahan.javachat.web.SseConstants.*;
 
@@ -37,6 +40,33 @@ public class SseSupport {
      */
     public SseSupport(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Configures HTTP response headers for SSE streaming through proxies.
+     * Disables buffering for Nginx and other reverse proxies that might delay streaming.
+     *
+     * @param response the servlet response to configure
+     */
+    public void configureStreamingHeaders(HttpServletResponse response) {
+        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
+        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+    }
+
+    /**
+     * Prepares a raw content stream for SSE transmission with backpressure handling.
+     * Filters empty chunks and applies the standard streaming configuration.
+     *
+     * @param source the raw content flux from the streaming service
+     * @param chunkConsumer consumer called for each non-empty chunk (typically for accumulation)
+     * @return a shared flux configured for SSE streaming
+     */
+    public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
+        return source
+            .filter(chunk -> chunk != null && !chunk.isEmpty())
+            .doOnNext(chunkConsumer)
+            .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
+            .share();
     }
 
     /**

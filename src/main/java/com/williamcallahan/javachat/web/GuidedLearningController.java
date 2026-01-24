@@ -10,7 +10,6 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -181,9 +180,7 @@ public class GuidedLearningController extends BaseController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(@RequestBody GuidedStreamRequest request, HttpServletResponse response) {
-        // Critical proxy headers for streaming
-        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
-        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
         String userQuery = request.userQuery();
@@ -199,11 +196,9 @@ public class GuidedLearningController extends BaseController {
             String fullPrompt = guidedService.buildGuidedPromptWithContext(history, lessonSlug, userQuery);
 
             // Clean OpenAI streaming with shared stream to prevent duplicate API calls
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE)
-                    .filter(chunk -> chunk != null && !chunk.isEmpty())
-                    .doOnNext(chunk -> fullResponse.append(chunk))
-                    .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
-                    .share();
+            Flux<String> dataStream = sseSupport.prepareDataStream(
+                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    chunk -> fullResponse.append(chunk));
 
             // Heartbeats terminate when data stream completes
             Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
