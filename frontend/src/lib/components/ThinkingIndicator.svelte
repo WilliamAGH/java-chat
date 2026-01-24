@@ -238,7 +238,7 @@
     }
   }
 
-  .icon-generate {
+  .icon-sparkle {
     width: 18px;
     height: 18px;
     animation: generate-glow var(--duration-glow) ease-in-out infinite;
@@ -367,7 +367,7 @@
     }
 
     .icon-search,
-    .icon-generate {
+    .icon-sparkle {
       width: 16px;
       height: 16px;
     }
