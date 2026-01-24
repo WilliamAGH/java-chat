@@ -34,7 +34,7 @@ public final class DocsSourceRegistry {
         "Failed to load docs-sources.properties (exceptionType={}) - using default URL mappings";
 
     private static final String JAVA24_API_BASE_KEY = "JAVA24_API_BASE";
-    private static final String JAVA25_EA_API_BASE_KEY = "JAVA25_EA_API_BASE";
+    private static final String JAVA25_API_BASE_KEY = "JAVA25_API_BASE";
     private static final String SPRING_BOOT_API_BASE_KEY = "SPRING_BOOT_API_BASE";
     private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_BASE_KEY = "SPRING_AI_API_BASE";
@@ -42,7 +42,7 @@ public final class DocsSourceRegistry {
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
 
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
-    private static final String DEFAULT_JAVA25_EA = "https://download.java.net/java/early_access/jdk25/docs/api/";
+    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/docs/api/";
     private static final String DEFAULT_SPRING_BOOT_API_BASE =
         "https://docs.spring.io/spring-boot/docs/current/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
@@ -71,14 +71,13 @@ public final class DocsSourceRegistry {
 
     private static final String HTTPS_PREFIX = "https://";
     private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
-    private static final String JAVA_EA_HOST_MARKER = "download.java.net/";
     private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
     private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
 
     private static final Properties PROPS = loadDocsSourceProperties();
 
     public static final String JAVA24_API_BASE = resolveSetting(JAVA24_API_BASE_KEY, DEFAULT_JAVA24);
-    public static final String JAVA25_EA_API_BASE = resolveSetting(JAVA25_EA_API_BASE_KEY, DEFAULT_JAVA25_EA);
+    public static final String JAVA25_API_BASE = resolveSetting(JAVA25_API_BASE_KEY, DEFAULT_JAVA25);
     public static final String SPRING_BOOT_API_BASE =
         resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
@@ -87,7 +86,6 @@ public final class DocsSourceRegistry {
 
     private static final String[] EMBEDDED_HOST_MARKERS = {
         DOCS_ORACLE_HOST_MARKER,
-        JAVA_EA_HOST_MARKER,
         SPRING_DOCS_HOST_MARKER
     };
 
@@ -130,12 +128,11 @@ public final class DocsSourceRegistry {
         prefixLookup.put(LOCAL_DOCS_JAVA24_NESTED, JAVA24_API_BASE);
         prefixLookup.put(LOCAL_DOCS_JAVA24_COMPLETE, JAVA24_API_BASE);
 
-        // Java 25 Early Access API (download.java.net)
-        prefixLookup.put(LOCAL_DOCS_JAVA25, JAVA25_EA_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_EA_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA25_EA_COMPLETE, JAVA25_EA_API_BASE);
-        // In case a GA mirror is stored under this name locally before GA, still point to EA docs
-        prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_EA_API_BASE);
+        // Java SE 25 API (Oracle) - includes alternate local paths for backwards compatibility
+        prefixLookup.put(LOCAL_DOCS_JAVA25, JAVA25_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA25_EA_COMPLETE, JAVA25_API_BASE);
+        prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_API_BASE);
 
         // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
         prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_API_BASE);

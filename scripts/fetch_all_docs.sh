@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Consolidated Documentation Fetcher with Deduplication
-# This script fetches all required documentation (Java 24/25/EA, Spring ecosystem)
+# This script fetches all required documentation (Java 24/25, Spring ecosystem)
 # and ensures no redundant downloads by checking existing files
 
 set -e
@@ -112,7 +112,7 @@ fetch_docs() {
 # Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES
 DOC_SOURCES=(
     "${JAVA24_API_BASE:-https://docs.oracle.com/en/java/javase/24/docs/api/}|$DOCS_ROOT/java/java24-complete|Java 24 Complete API|5|9000"
-    "${JAVA25_EA_API_BASE:-https://download.java.net/java/early_access/jdk25/docs/api/}|$DOCS_ROOT/java/java25-ea-complete|Java 25 EA Complete API|4|8000"
+    "${JAVA25_API_BASE:-https://docs.oracle.com/en/java/javase/25/docs/api/}|$DOCS_ROOT/java/java25-complete|Java 25 Complete API|5|8000"
     "${SPRING_BOOT_API_BASE:-https://docs.spring.io/spring-boot/docs/current/api/}|$DOCS_ROOT/spring-boot-complete|Spring Boot Complete API|5|7000"
     "${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Complete API|5|7000"
     "${SPRING_AI_API_BASE:-https://docs.spring.io/spring-ai/reference/1.0/api/}|$DOCS_ROOT/spring-ai-complete|Spring AI Complete API|6|200"
@@ -194,7 +194,6 @@ cat > "$METADATA_FILE" << EOF
   "directories": {
     "java24_complete": "$(find "$DOCS_ROOT/java/java24-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "java25_complete": "$(find "$DOCS_ROOT/java/java25-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "java25_ea_complete": "$(find "$DOCS_ROOT/java/java25-ea-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_boot_complete": "$(find "$DOCS_ROOT/spring-boot-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_framework_complete": "$(find "$DOCS_ROOT/spring-framework-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_ai_complete": "$(find "$DOCS_ROOT/spring-ai-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')"

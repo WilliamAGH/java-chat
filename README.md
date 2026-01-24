@@ -9,7 +9,7 @@ A modern, streaming RAG chat for Java learners, grounded in Java 24/25 documenta
 - **Qdrant Cloud Integration**: Connected to cloud-hosted vector database with 22,756+ indexed vectors
 - **Consolidated Pipeline**: Single-command fetch and process pipeline with SHA-256 hash-based deduplication
 - **Smart Deduplication**: Prevents redundant processing and re-uploading of documents
-- **Comprehensive Documentation**: Java 24 (10,743 files), Java 25 (10,510 files), Java 25 EA (1,257+ files), Spring AI (218 files)
+- **Comprehensive Documentation**: Java 24 (10,743 files), Java 25 (10,510 files), Spring AI (218 files)
  - **Dual-Mode UI (Chat + Guided Learning)**: Tabbed shell (`/`) loads isolated Chat (`/chat.html`) and new Guided Learning (`/guided.html`)
  - **Guided Learning (Think Java)**: Curated lessons powered by the “Think Java — 2nd Edition” PDF with lesson-scoped chat, citations, and enrichment
 
@@ -183,9 +183,8 @@ make process-all   # Process and upload to Qdrant (deduplicates)
 
 ### Available Documentation
 The pipeline automatically fetches and processes:
-- **Java 24 API**: Complete Javadocs (10,743 files ✅)
-- **Java 25 API**: Complete API docs (10,510 files ✅)
-- **Java 25 EA**: Early access from download.java.net (1,257+ files ✅)
+- **Java 24 API**: Complete Javadocs from docs.oracle.com (10,743 files ✅)
+- **Java 25 API**: Complete Javadocs from docs.oracle.com (10,510 files ✅)
 - **Spring Boot**: Full reference and API documentation (10,379 files)
 - **Spring Framework**: Core Spring docs (13,342 files)
 - **Spring AI**: AI/ML integration docs (218 files ✅)
@@ -209,8 +208,7 @@ The pipeline automatically fetches and processes:
 #### Legacy Scripts (for specific needs)
 ```bash
 # Individual fetchers if you need specific docs
-./scripts/fetch_java_complete.sh      # Java 24 only
-./scripts/fetch_java25_ea_complete.sh # Java 25 EA only
+./scripts/fetch_java_complete.sh      # Java 24/25 Javadocs
 ./scripts/fetch_spring_complete.sh    # Spring ecosystem only
 ```
 

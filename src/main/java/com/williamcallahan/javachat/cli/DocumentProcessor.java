@@ -40,8 +40,8 @@ public class DocumentProcessor {
     private static final String DOCSET_JAVA_24_COMPLETE_PATH = "java/java24-complete";
     private static final String DOCSET_JAVA_25_COMPLETE_NAME = "Java 25 Complete API";
     private static final String DOCSET_JAVA_25_COMPLETE_PATH = "java/java25-complete";
-    private static final String DOCSET_JAVA_25_EA_COMPLETE_NAME = "Java 25 EA Complete API";
-    private static final String DOCSET_JAVA_25_EA_COMPLETE_PATH = "java/java25-ea-complete";
+    private static final String DOCSET_JAVA_25_ALT_NAME = "Java 25 (alt mirror)";
+    private static final String DOCSET_JAVA_25_ALT_PATH = "java/java25-ea-complete";
     private static final String DOCSET_SPRING_BOOT_COMPLETE_NAME = "Spring Boot Complete";
     private static final String DOCSET_SPRING_BOOT_COMPLETE_PATH = "spring-boot-complete";
     private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME = "Spring Framework Complete";
@@ -106,7 +106,7 @@ public class DocumentProcessor {
         new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
         new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
         new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_JAVA_25_EA_COMPLETE_NAME, DOCSET_JAVA_25_EA_COMPLETE_PATH),
+        new DocumentationSet(DOCSET_JAVA_25_ALT_NAME, DOCSET_JAVA_25_ALT_PATH),
         new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
         new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
         new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH),
