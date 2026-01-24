@@ -5,6 +5,8 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Bean;
@@ -21,14 +23,31 @@ import java.util.stream.Stream;
 // NOTE: This is a manual utility runner, not part of test boot configuration.
 // IMPORTANT: Do NOT annotate with @SpringBootApplication here to avoid
 // multiple @SpringBootConfiguration conflicts during @SpringBootTest.
+/**
+ * Manual extraction quality runner that compares HTML cleanup results for sampled docs.
+ */
 @Configuration
 @Profile("manual")
 public class ExtractorQualityTest {
     
+    /**
+     * Launches the extraction quality runner in non-web mode.
+     *
+     * @param args ignored
+     */
     public static void main(String[] args) {
-        SpringApplication.run(ExtractorQualityTest.class, args);
+        SpringApplication application = new SpringApplication(ExtractorQualityTest.class);
+        application.setWebApplicationType(WebApplicationType.NONE);
+        ConfigurableApplicationContext context = application.run(args);
+        SpringApplication.exit(context);
     }
     
+    /**
+     * Executes the extraction comparison against a sample of documentation files.
+     *
+     * @param extractor HTML extractor under evaluation
+     * @return runner that prints a comparison report
+     */
     @Bean
     CommandLineRunner testExtraction(HtmlContentExtractor extractor) {
         return args -> {
@@ -154,8 +173,6 @@ public class ExtractorQualityTest {
             System.out.println("\n========================================");
             System.out.println("TEST COMPLETE");
             System.out.println("========================================\n");
-            
-            System.exit(0);
         };
     }
 }

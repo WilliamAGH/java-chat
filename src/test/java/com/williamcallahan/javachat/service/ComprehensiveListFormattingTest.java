@@ -5,6 +5,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Covers list formatting scenarios for markdown processing.
+ */
 class ComprehensiveListFormattingTest {
     
     private MarkdownService markdownService;

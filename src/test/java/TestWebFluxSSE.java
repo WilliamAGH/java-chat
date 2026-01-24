@@ -4,10 +4,18 @@ import reactor.core.publisher.Flux;
 import java.time.Duration;
 import java.util.Map;
 
+/**
+ * Manual probe that prints raw WebFlux SSE chunks from the OpenAI API.
+ */
 public class TestWebFluxSSE {
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
     
-    public static void main(String[] args) throws Exception {
+    /**
+     * Runs the raw SSE chunk probe.
+     *
+     * @param args ignored
+     */
+    public static void main(String[] args) {
         if (OPENAI_API_KEY == null || OPENAI_API_KEY.isEmpty()) {
             System.err.println("Please set OPENAI_API_KEY environment variable");
             System.exit(1);
@@ -47,8 +55,7 @@ public class TestWebFluxSSE {
             })
             .doOnComplete(() -> System.out.println("\n=== STREAM COMPLETE ==="))
             .doOnError(error -> {
-                System.err.println("Error: " + error.getMessage());
-                error.printStackTrace();
+                System.err.println("Error: " + error.getClass().getSimpleName());
             })
             .blockLast(Duration.ofSeconds(30));
         

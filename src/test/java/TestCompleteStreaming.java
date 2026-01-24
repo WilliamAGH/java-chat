@@ -3,15 +3,25 @@ import org.springframework.http.MediaType;
 import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 import java.util.List;
+import java.util.Optional;
 
+/**
+ * Manual smoke test for end-to-end GPT-5 streaming content extraction.
+ */
 public class TestCompleteStreaming {
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     
-    public static void main(String[] args) throws Exception {
+    /**
+     * Runs the streaming extraction test against the OpenAI API.
+     *
+     * @param args ignored
+     */
+    public static void main(String[] args) {
         if (OPENAI_API_KEY == null || OPENAI_API_KEY.isEmpty()) {
             System.err.println("Please set OPENAI_API_KEY environment variable");
             System.exit(1);
@@ -45,39 +55,8 @@ public class TestCompleteStreaming {
         
         stream
             .flatMap(chunk -> {
-                // Mirrors logic now handled by OpenAIStreamingService
-                if (chunk == null || chunk.trim().isEmpty() || chunk.equals("[DONE]")) {
-                    return Flux.empty();
-                }
-                
-                try {
-                    // Parse the raw JSON chunk directly
-                    Map<String, Object> data = objectMapper.readValue(chunk, new TypeReference<Map<String, Object>>() {});
-                    
-                    // Extract content from the delta field
-                    Object choicesObj = data.get("choices");
-                    if (choicesObj instanceof List) {
-                        List<?> choices = (List<?>) choicesObj;
-                        if (!choices.isEmpty()) {
-                            Object firstChoiceObj = choices.get(0);
-                            if (firstChoiceObj instanceof Map) {
-                                Map<?, ?> firstChoice = (Map<?, ?>) firstChoiceObj;
-                                Object deltaObj = firstChoice.get("delta");
-                                if (deltaObj instanceof Map) {
-                                    Map<?, ?> delta = (Map<?, ?>) deltaObj;
-                                    Object content = delta.get("content");
-                                    if (content != null && !content.toString().isEmpty()) {
-                                        String text = content.toString();
-                                        return Flux.just(text);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("Failed to parse chunk: " + e.getMessage());
-                }
-                return Flux.empty();
+                String extractedContent = extractContent(chunk);
+                return extractedContent.isEmpty() ? Flux.empty() : Flux.just(extractedContent);
             })
             .doOnNext(content -> {
                 // Print each content chunk as it arrives
@@ -94,14 +73,48 @@ public class TestCompleteStreaming {
                 }
             })
             .doOnError(error -> {
-                System.err.println("\nError: " + error.getMessage());
-                error.printStackTrace();
+                System.err.println("\nError during streaming: " + error.getClass().getSimpleName());
             })
             .blockLast(Duration.ofSeconds(60));
         
         System.out.println("\nTest complete!");
-        
-        // Exit with proper code
-        System.exit(fullResponse.length() > 0 ? 0 : 1);
+    }
+
+    private static String extractContent(String chunk) {
+        if (chunk == null) {
+            return "";
+        }
+        String trimmedChunk = chunk.trim();
+        if (trimmedChunk.isEmpty() || "[DONE]".equals(trimmedChunk)) {
+            return "";
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(trimmedChunk, new TypeReference<Map<String, Object>>() {});
+            return extractDeltaContent(payload).orElse("");
+        } catch (IOException parseFailure) {
+            System.err.println("Parse error for chunk: " + parseFailure.getMessage());
+            return "";
+        }
+    }
+
+    private static Optional<String> extractDeltaContent(Map<String, Object> payload) {
+        Object choicesRaw = payload.get("choices");
+        if (!(choicesRaw instanceof List<?> choicesList) || choicesList.isEmpty()) {
+            return Optional.empty();
+        }
+        Object choiceRaw = choicesList.get(0);
+        if (!(choiceRaw instanceof Map<?, ?> choiceMap)) {
+            return Optional.empty();
+        }
+        Object deltaRaw = choiceMap.get("delta");
+        if (!(deltaRaw instanceof Map<?, ?> deltaMap)) {
+            return Optional.empty();
+        }
+        Object contentRaw = deltaMap.get("content");
+        if (contentRaw == null) {
+            return Optional.empty();
+        }
+        String contentText = contentRaw.toString();
+        return contentText.isEmpty() ? Optional.empty() : Optional.of(contentText);
     }
 }

@@ -13,6 +13,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Verifies robots.txt output and sitemap link generation.
+ */
 @WebMvcTest(controllers = RobotsController.class)
 @Import({SiteUrlResolver.class, com.williamcallahan.javachat.config.AppProperties.class})
 @TestPropertySource(properties = "app.public-base-url=https://java-chat.example")

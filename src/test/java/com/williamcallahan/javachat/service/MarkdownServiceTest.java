@@ -1,12 +1,16 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Exercises markdown normalization and rendering paths for the unified service.
+ */
 class MarkdownServiceTest {
     
     private MarkdownService markdownService;
@@ -225,10 +229,11 @@ class MarkdownServiceTest {
     void testInlineListFromRemainderExample() {
         String markdown = "The remainder operator is useful in several ways, such as:- Checking divisibility: If x % y equals 0.- Extracting digits: x % 10 gives the rightmost digit.- Its application in encryption algorithms.";
         String html = markdownService.processStructured(markdown).html();
+        String normalizedHtml = AsciiTextNormalizer.toLowerAscii(html);
         assertTrue(html.contains("<ul>"), "Should create unordered list from inline items");
-        assertTrue(html.toLowerCase().contains("checking divisibility"));
-        assertTrue(html.toLowerCase().contains("extracting digits"));
-        assertTrue(html.toLowerCase().contains("encryption"));
+        assertTrue(normalizedHtml.contains("checking divisibility"));
+        assertTrue(normalizedHtml.contains("extracting digits"));
+        assertTrue(normalizedHtml.contains("encryption"));
     }
 
     @Test
@@ -251,7 +256,7 @@ class MarkdownServiceTest {
         String md = "Key points: 1. First 2. Second 3. Third.";
         String html = markdownService.processStructured(md).html();
         // Leading text preserved as paragraph
-        assertTrue(html.contains("<p>Key points:</p>") || html.contains("<p>Key points:</p>"), "Leading text should be a paragraph");
+        assertTrue(html.contains("<p>Key points:</p>"), "Leading text should be a paragraph");
         // Ordered list with items
         assertTrue(html.contains("<ol>"), "Should render ordered list");
         // Ensure there are 3 items
@@ -280,10 +285,11 @@ class MarkdownServiceTest {
     void testServerEnrichmentRendering() {
         String md = "{{hint:Line A\nLine B}}"; // real newline
         String html = markdownService.processStructured(md).html();
+        String normalizedHtml = AsciiTextNormalizer.toLowerAscii(html);
         // Card wrapper
         assertTrue(html.contains("inline-enrichment hint"), "Hint card should render");
         // Header title
-        assertTrue(html.toLowerCase().contains("helpful hints"), "Card header should show Helpful Hints");
+        assertTrue(normalizedHtml.contains("helpful hints"), "Card header should show Helpful Hints");
         // Paragraphized with <br>
         assertTrue(html.contains("<p>Line A<br>Line B</p>") || html.contains("<p>Line A<br />Line B</p>"), "Line breaks preserved in card");
     }
@@ -293,8 +299,8 @@ class MarkdownServiceTest {
     void testUnifiedStylingHooks() {
         String md = "|A|B|\n|---|---|\n|1|2|\n\n> quote";
         String html = markdownService.processStructured(md).html();
-        assertTrue(html.contains("class=\"markdown-table\"") || html.contains("class=\"markdown-table\""), "Table should have styling class");
-        assertTrue(html.contains("<blockquote class=\"markdown-quote\">") || html.contains("<blockquote class=\"markdown-quote\">"), "Blockquote should have styling class");
+        assertTrue(html.contains("class=\"markdown-table\""), "Table should have styling class");
+        assertTrue(html.contains("<blockquote class=\"markdown-quote\">"), "Blockquote should have styling class");
     }
 
     @Test
@@ -313,7 +319,7 @@ class MarkdownServiceTest {
         System.out.println("[DEBUG testExampleCardRendersCode] Input: " + md);
         System.out.println("[DEBUG testExampleCardRendersCode] HTML:\n" + html);
         assertTrue(html.contains("inline-enrichment example"), "Example card should render");
-        assertTrue(html.contains("<code class=\"language-java\">") || html.contains("<code class=\"language-java\">"), "Code block should have language class");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Code block should have language class");
         assertTrue(html.contains("public class A"));
     }
 

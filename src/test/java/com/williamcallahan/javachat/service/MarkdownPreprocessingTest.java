@@ -5,6 +5,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Verifies preprocessing rules applied before markdown rendering.
+ */
 class MarkdownPreprocessingTest {
     
     private MarkdownService markdownService;

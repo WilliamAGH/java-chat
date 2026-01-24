@@ -24,6 +24,11 @@ public class TestConfiguration {
     @Tag("integration")
     @ExtendWith(RequiresExternalServicesCondition.class)
     public @interface RequiresExternalServices {
+        /**
+         * Optional tags describing which external services the test needs.
+         *
+         * @return service identifiers for diagnostics
+         */
         String[] value() default {};
     }
 
@@ -31,6 +36,12 @@ public class TestConfiguration {
      * Condition that checks if required external services are available
      */
     public static class RequiresExternalServicesCondition implements ExecutionCondition {
+        /**
+         * Determines whether integration tests should run based on credentials and flags.
+         *
+         * @param context current extension context
+         * @return enabled or disabled result with a reason
+         */
         @Override
         public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
             // Check for API keys

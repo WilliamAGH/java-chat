@@ -23,6 +23,9 @@ import org.springframework.context.annotation.Import;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 
+/**
+ * Verifies enrichment endpoints return expected payloads under WebMvcTest.
+ */
 @WebMvcTest(controllers = EnrichmentController.class)
 @Import({AppProperties.class, WebMvcConfig.class})
 @org.springframework.test.context.TestPropertySource(properties = "app.docs.jdk-version=24")

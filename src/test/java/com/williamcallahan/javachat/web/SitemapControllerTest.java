@@ -13,6 +13,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Verifies sitemap XML uses the configured public base URL.
+ */
 @WebMvcTest(controllers = SitemapController.class)
 @Import({SiteUrlResolver.class, com.williamcallahan.javachat.config.AppProperties.class})
 @TestPropertySource(properties = "app.public-base-url=https://java-chat.example")
