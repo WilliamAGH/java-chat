@@ -50,6 +50,7 @@ public class EmbeddingCacheService {
 	private final AtomicInteger embeddingsSinceLastSave = new AtomicInteger(0);
 	private static final int AUTO_SAVE_THRESHOLD = 50; // Save every 50 embeddings
 	private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final Object cacheFileLock = new Object();
 
 	/**
 	 * Wraps cache persistence failures as a runtime exception suitable for Spring initialization paths.
@@ -234,10 +235,12 @@ public class EmbeddingCacheService {
         Path exportPath = validateAndResolvePath(filename);
         CACHE_LOG.info("Exporting {} cached embeddings", memoryCache.size());
 
-        try (OutputStream fos = Files.newOutputStream(exportPath);
-             GZIPOutputStream gzos = new GZIPOutputStream(fos)) {
-            cacheMapper.writeValue(gzos, new ArrayList<>(memoryCache.values()));
-            CACHE_LOG.info("Successfully exported cache");
+        synchronized (cacheFileLock) {
+            try (OutputStream fos = Files.newOutputStream(exportPath);
+                 GZIPOutputStream gzos = new GZIPOutputStream(fos)) {
+                cacheMapper.writeValue(gzos, new ArrayList<>(memoryCache.values()));
+                CACHE_LOG.info("Successfully exported cache");
+            }
         }
     }
 
@@ -401,22 +404,24 @@ public class EmbeddingCacheService {
     private void importCacheFromPath(Path importPath) throws IOException {
         CACHE_LOG.info("Importing cached embeddings");
 
-        try (InputStream fileInputStream = Files.newInputStream(importPath);
-             GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream);
-             BufferedInputStream bufferedInputStream = new BufferedInputStream(gzipInputStream)) {
+        synchronized (cacheFileLock) {
+            try (InputStream fileInputStream = Files.newInputStream(importPath);
+                 GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream);
+                 BufferedInputStream bufferedInputStream = new BufferedInputStream(gzipInputStream)) {
 
-            List<EmbeddingCacheEntry> importedEmbeddings = cacheFileImporter.read(bufferedInputStream);
+                List<EmbeddingCacheEntry> importedEmbeddings = cacheFileImporter.read(bufferedInputStream);
 
-            if (importedEmbeddings == null) {
-                throw new IOException("Unexpected cache format; expected a list of embeddings");
+                if (importedEmbeddings == null) {
+                    throw new IOException("Unexpected cache format; expected a list of embeddings");
+                }
+
+                for (EmbeddingCacheEntry cachedEmbedding : importedEmbeddings) {
+                    String cacheKey = generateCacheKey(cachedEmbedding.getContent(), cachedEmbedding.getMetadata());
+                    memoryCache.put(cacheKey, cachedEmbedding);
+                }
+
+                CACHE_LOG.info("Successfully imported {} embeddings", importedEmbeddings.size());
             }
-
-            for (EmbeddingCacheEntry cachedEmbedding : importedEmbeddings) {
-                String cacheKey = generateCacheKey(cachedEmbedding.getContent(), cachedEmbedding.getMetadata());
-                memoryCache.put(cacheKey, cachedEmbedding);
-            }
-
-            CACHE_LOG.info("Successfully imported {} embeddings", importedEmbeddings.size());
         }
     }
 
