@@ -48,6 +48,8 @@ public class ChatController extends BaseController {
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
     private static final double TEMPERATURE = 0.7;
     private static final int HEARTBEAT_INTERVAL_SECONDS = 20;
+    /** Buffer capacity for backpressure handling in streaming responses. */
+    private static final int STREAM_BACKPRESSURE_BUFFER_SIZE = 512;
 
     /** SSE event type for error notifications sent to the client. */
     private static final String SSE_EVENT_ERROR = "error";
@@ -193,7 +195,7 @@ public class ChatController extends BaseController {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
                     })
-                    .onBackpressureBuffer()  // Buffer signals to prevent data loss during spikes
+                    .onBackpressureBuffer(STREAM_BACKPRESSURE_BUFFER_SIZE)  // Bounded buffer to prevent unbounded memory growth
                     .share();  // Hot-share to prevent double subscription causing duplicate API calls
 
             // Heartbeats terminate when data stream completes (success or error).
