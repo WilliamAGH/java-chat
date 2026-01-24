@@ -48,6 +48,66 @@ public final class RetrievalErrorClassifier {
     }
 
     /**
+     * Determines whether the exception is a transient Qdrant/vector store error that should trigger fallback.
+     *
+     * <p>Transient errors include connection issues, timeouts, and service unavailability (503).
+     * Non-transient errors like invalid UUID format or programming errors should NOT trigger fallback
+     * as they indicate bugs that need fixing.
+     *
+     * @param error the exception to classify
+     * @return true if the error is transient and fallback is appropriate
+     */
+    public static boolean isTransientVectorStoreError(Throwable error) {
+        String errorType = determineErrorType(error);
+        
+        // Connection errors and rate limits are transient
+        if ("Connection Error".equals(errorType) || "429 Rate Limited".equals(errorType)) {
+            return true;
+        }
+        
+        // Check for specific Qdrant/gRPC error patterns in exception chain
+        Throwable current = error;
+        while (current != null) {
+            String exceptionName = current.getClass().getName().toLowerCase(Locale.ROOT);
+            String message = current.getMessage();
+            String lowerMessage = message != null ? message.toLowerCase(Locale.ROOT) : "";
+            
+            // gRPC errors from Qdrant client
+            if (exceptionName.contains("grpc") || exceptionName.contains("qdrant")) {
+                // Service unavailable, deadline exceeded are transient
+                if (lowerMessage.contains("unavailable") 
+                    || lowerMessage.contains("deadline exceeded")
+                    || lowerMessage.contains("resource exhausted")) {
+                    return true;
+                }
+            }
+            
+            // ExecutionException wrapping gRPC failures
+            if (current instanceof java.util.concurrent.ExecutionException) {
+                // Check the cause for gRPC issues
+                Throwable cause = current.getCause();
+                if (cause != null) {
+                    String causeName = cause.getClass().getName().toLowerCase(Locale.ROOT);
+                    if (causeName.contains("statusruntimeexception")) {
+                        return true; // gRPC status errors are typically transient
+                    }
+                }
+            }
+            
+            // IllegalArgumentException for UUID parsing is NOT transient (programming error)
+            if (current instanceof IllegalArgumentException 
+                && lowerMessage.contains("uuid")) {
+                return false;
+            }
+            
+            current = current.getCause();
+        }
+        
+        // Default: unknown errors are not assumed to be transient
+        return false;
+    }
+
+    /**
      * Log user-friendly context about why vector search failed.
      *
      * @param log logger to emit messages
