@@ -1,8 +1,12 @@
 package com.williamcallahan.javachat.config;
 
 import jakarta.annotation.PostConstruct;
+import java.net.URI;
+import java.net.URISyntaxException;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.util.Locale;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +16,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = AppProperties.CONFIG_PREFIX)
 public class AppProperties {
+
+    private static final Logger log = LoggerFactory.getLogger(AppProperties.class);
 
     public static final String CONFIG_PREFIX = "app";
 
@@ -23,6 +29,15 @@ public class AppProperties {
     private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
+    private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
+
+    /**
+     * Default base URL for SEO endpoints when no explicit public base URL is configured.
+     *
+     * <p>Production deployments should override this via configuration so that robots.txt and sitemap.xml
+     * emit absolute URLs for the real public host.
+     */
+    private static final String DEFAULT_PUBLIC_BASE_URL = "http://localhost:8080";
 
     private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
@@ -31,6 +46,7 @@ public class AppProperties {
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
     private CorsConfig cors = new CorsConfig();
+    private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
     /**
      * Creates configuration sections with default values.
@@ -47,6 +63,111 @@ public class AppProperties {
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY);
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+        this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
+    }
+
+    /**
+     * Returns the configured public base URL used for absolute URLs in SEO endpoints.
+     *
+     * @return base URL like {@code https://example.com}
+     */
+    public String getPublicBaseUrl() {
+        return publicBaseUrl;
+    }
+
+    /**
+     * Sets the configured public base URL used for absolute URLs in SEO endpoints.
+     *
+     * @param publicBaseUrl base URL like {@code https://example.com}
+     */
+    public void setPublicBaseUrl(final String publicBaseUrl) {
+        this.publicBaseUrl = publicBaseUrl;
+    }
+
+    private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
+        if (configuredPublicBaseUrl == null || configuredPublicBaseUrl.isBlank()) {
+            log.warn(
+                "{} is not configured; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String trimmedBaseUrl = configuredPublicBaseUrl.trim();
+        final URI parsed;
+        try {
+            parsed = new URI(trimmedBaseUrl);
+        } catch (URISyntaxException syntaxError) {
+            String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
+            log.warn(
+                "{} is invalid ({}); defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                sanitizedMessage,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String scheme = parsed.getScheme();
+        if (scheme == null || scheme.isBlank()) {
+            log.warn(
+                "{} is missing a scheme; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String normalizedScheme = AsciiTextNormalizer.toLowerAscii(scheme);
+        if (!"http".equals(normalizedScheme) && !"https".equals(normalizedScheme)) {
+            log.warn(
+                "{} must use http/https scheme; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String host = parsed.getHost();
+        if (host == null || host.isBlank()) {
+            log.warn(
+                "{} is missing a host; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final int port = parsed.getPort();
+        try {
+            // Strip any path/query/fragment; keep scheme/host/port only.
+            return new URI(
+                normalizedScheme,
+                null,
+                host,
+                port,
+                null,
+                null,
+                null
+            ).toString();
+        } catch (URISyntaxException syntaxError) {
+            String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
+            log.warn(
+                "{} could not be normalized ({}); defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                sanitizedMessage,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+    }
+
+    private static String sanitizeLogMessage(final String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        return message.replace("\r", "").replace("\n", "");
     }
 
     /**
