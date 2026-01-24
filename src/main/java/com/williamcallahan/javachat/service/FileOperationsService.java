@@ -26,7 +26,7 @@ public class FileOperationsService {
      * @throws IOException If file operations fail
      */
     public void saveTextFile(Path filePath, String content) throws IOException {
-        Files.createDirectories(filePath.getParent());
+        ensureParentDirectoryExists(filePath);
         Files.writeString(filePath, content, StandardCharsets.UTF_8);
     }
 
@@ -67,7 +67,24 @@ public class FileOperationsService {
      * @throws IOException If directory creation fails
      */
     public void createDirectories(Path filePath) throws IOException {
-        Files.createDirectories(filePath.getParent());
+        ensureParentDirectoryExists(filePath);
+    }
+
+    /**
+     * Ensures the parent directory exists for a given file path, creating it if necessary.
+     *
+     * @param filePath the file path whose parent directory should exist
+     * @throws IOException if the parent is null (root path) or directory creation fails
+     */
+    private void ensureParentDirectoryExists(Path filePath) throws IOException {
+        if (filePath == null) {
+            throw new IOException("File path is required");
+        }
+        Path parentDir = filePath.getParent();
+        if (parentDir == null) {
+            throw new IOException("File path has no parent directory: " + filePath);
+        }
+        Files.createDirectories(parentDir);
     }
 
     /**

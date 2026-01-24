@@ -4,8 +4,8 @@
 # Oracle Java SE 24 API
 export JAVA24_API_BASE="https://docs.oracle.com/en/java/javase/24/docs/api/"
 
-# Java 25 Early Access API
-export JAVA25_EA_API_BASE="https://download.java.net/java/early_access/jdk25/docs/api/"
+# Oracle Java SE 25 API
+export JAVA25_API_BASE="https://docs.oracle.com/en/java/javase/25/docs/api/"
 
 # Spring ecosystem
 export SPRING_BOOT_API_BASE="https://docs.spring.io/spring-boot/docs/current/api/"

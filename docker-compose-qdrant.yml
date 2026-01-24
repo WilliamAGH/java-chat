@@ -1,7 +1,10 @@
 version: '3.8'
 services:
   qdrant:
-    image: qdrant/qdrant:v1.14.1
+    # Pin to v1.13.0 to match io.qdrant:client:1.13.0 from Spring AI 1.1.2 BOM
+    # Upgrading requires Spring AI BOM update to avoid gRPC protocol mismatches
+    # Use GitHub Container Registry to avoid Docker Hub rate limits (per DK1)
+    image: ghcr.io/qdrant/qdrant:v1.13.0
     container_name: qdrant
     ports:
       - "8087:6333"  # REST (mapped into allowed range)

@@ -3,55 +3,103 @@ package com.williamcallahan.javachat.service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
+/**
+ * Persists document snapshots, parsed chunks, and ingestion markers on the local filesystem.
+ */
 @Service
 public class LocalStoreService {
-    private final Path snapshotDir;
-    private final Path parsedDir;
-    private final Path indexDir;
+    private static final String SHA_256_ALGORITHM = "SHA-256";
+    private static final int SHORT_SHA_BYTES = 6;
+    private static final int HASH_PREFIX_LENGTH = 12;
+    private static final int SAFE_NAME_MAX_LENGTH = 150;
+    private static final int SAFE_NAME_PREFIX_LENGTH = 80;
+    private static final int SAFE_NAME_SUFFIX_LENGTH = 40;
+
+    private final String snapshotDirConfig;
+    private final String parsedDirConfig;
+    private final String indexDirConfig;
+    private Path snapshotDir;
+    private Path parsedDir;
+    private Path indexDir;
     private final ProgressTracker progressTracker;
 
+    /**
+     * Creates the local store using configured directory roots for snapshots, parsed content, and ingest markers.
+     */
     public LocalStoreService(@Value("${app.docs.snapshot-dir}") String snapshotDir,
                              @Value("${app.docs.parsed-dir}") String parsedDir,
                              @Value("${app.docs.index-dir}") String indexDir,
-                             ProgressTracker progressTracker) throws IOException {
-        this.snapshotDir = Paths.get(snapshotDir);
-        this.parsedDir = Paths.get(parsedDir);
-        this.indexDir = Paths.get(indexDir);
+                             ProgressTracker progressTracker) {
+        this.snapshotDirConfig = snapshotDir;
+        this.parsedDirConfig = parsedDir;
+        this.indexDirConfig = indexDir;
         this.progressTracker = progressTracker;
-        Files.createDirectories(this.snapshotDir);
-        Files.createDirectories(this.parsedDir);
-        Files.createDirectories(this.indexDir);
     }
 
+    /**
+     * Ensures the backing directories exist before any ingestion work begins.
+     */
+    @PostConstruct
+    void createStoreDirectories() {
+        try {
+            this.snapshotDir = Path.of(snapshotDirConfig);
+            this.parsedDir = Path.of(parsedDirConfig);
+            this.indexDir = Path.of(indexDirConfig);
+            Files.createDirectories(this.snapshotDir);
+            Files.createDirectories(this.parsedDir);
+            Files.createDirectories(this.indexDir);
+        } catch (InvalidPathException | IOException exception) {
+            throw new IllegalStateException("Failed to create local store directories", exception);
+        }
+    }
+
+    /**
+     * Stores a raw HTML snapshot for a document URL.
+     */
     public void saveHtml(String url, String html) throws IOException {
-        Path p = snapshotDir.resolve(safeName(url) + ".html");
-        Files.createDirectories(p.getParent());
-        Files.writeString(p, html, StandardCharsets.UTF_8);
+        Path snapshotFilePath = snapshotDir.resolve(safeName(url) + ".html");
+        ensureParentDirectoryExists(snapshotFilePath);
+        Files.writeString(snapshotFilePath, html, StandardCharsets.UTF_8);
     }
 
+    /**
+     * Stores a parsed chunk payload for later local search and attribution.
+     */
     public void saveChunkText(String url, int index, String text, String hash) throws IOException {
-        Path p = parsedDir.resolve(safeName(url) + "_" + index + "_" + hash.substring(0, 12) + ".txt");
-        Files.createDirectories(p.getParent());
-        Files.writeString(p, text, StandardCharsets.UTF_8);
+        String shortHash = hash.length() >= HASH_PREFIX_LENGTH 
+            ? hash.substring(0, HASH_PREFIX_LENGTH) 
+            : hash;
+        Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + shortHash + ".txt");
+        ensureParentDirectoryExists(chunkFilePath);
+        Files.writeString(chunkFilePath, text, StandardCharsets.UTF_8);
         // Update progress after chunk text is saved
         if (progressTracker != null) {
             progressTracker.markChunkParsed();
         }
     }
 
+    /**
+     * Returns true when an ingest marker exists for the given chunk hash.
+     */
     public boolean isHashIngested(String hash) {
         Path marker = indexDir.resolve(hash);
         return Files.exists(marker);
     }
 
+    /**
+     * Writes an ingest marker for the given chunk hash when not already present.
+     */
     public void markHashIngested(String hash) throws IOException {
         Path marker = indexDir.resolve(hash);
         if (!Files.exists(marker)) {
@@ -66,43 +114,59 @@ public class LocalStoreService {
     private String safeName(String url) {
         String sanitized = url.replaceAll("[^a-zA-Z0-9._-]", "_");
         // Ensure filename stays within safe limits for most filesystems
-        int max = 150; // conservative cap for base name before adding index/hash suffixes
-        if (sanitized.length() <= max) return sanitized;
-        String prefix = sanitized.substring(0, 80);
-        String suffix = sanitized.substring(sanitized.length() - 40);
+        if (sanitized.length() <= SAFE_NAME_MAX_LENGTH) return sanitized;
+        String prefix = sanitized.substring(0, SAFE_NAME_PREFIX_LENGTH);
+        String suffix = sanitized.substring(sanitized.length() - SAFE_NAME_SUFFIX_LENGTH);
         String hash = shortSha256(url);
         return prefix + "_" + hash + "_" + suffix;
     }
 
-    // Expose safeName for audit tooling
+    /**
+     * Produces a filesystem-safe name for URLs used in snapshot and chunk file naming.
+     */
     public String toSafeName(String url) {
         return safeName(url);
     }
 
+    /**
+     * Returns the root directory for parsed chunk files.
+     */
     public Path getParsedDir() {
         return parsedDir;
     }
 
+    /**
+     * Returns the root directory for ingest marker files.
+     */
     public Path getIndexDir() {
         return indexDir;
     }
 
+    /**
+     * Ensures the parent directory exists for a given file path, creating it if necessary.
+     *
+     * @param filePath the file path whose parent directory should exist
+     * @throws IOException if the parent is null (root path) or directory creation fails
+     */
+    private void ensureParentDirectoryExists(Path filePath) throws IOException {
+        if (filePath == null) {
+            throw new IOException("File path is required");
+        }
+        Path parentDir = filePath.getParent();
+        if (parentDir == null) {
+            throw new IOException("File path has no parent directory: " + filePath);
+        }
+        Files.createDirectories(parentDir);
+    }
+
     private String shortSha256(String input) {
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < 6; i++) { // first 6 bytes -> 12 hex chars
-                sb.append(String.format("%02x", digest[i]));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            // Fallback to simple hash if SHA-256 unavailable (should not happen)
-            return Integer.toHexString(input.hashCode());
+            MessageDigest messageDigest = MessageDigest.getInstance(SHA_256_ALGORITHM);
+            byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
         }
     }
+
 }
-
-
-
-

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -141,7 +142,8 @@ public class HtmlContentExtractor {
                         }
                     }
                     case "pre", "code" -> {
-                        sb.append("\n```\n").append(text).append("\n```\n");
+                        String rawCode = child.wholeText();
+                        sb.append("\n```\n").append(rawCode).append("\n```\n");
                     }
                     case "ul", "ol" -> {
                         child.select("li").forEach(li -> 
@@ -179,9 +181,9 @@ public class HtmlContentExtractor {
      * Check if element is likely navigation.
      */
     private boolean isNavigationElement(Element element) {
-        String className = element.className().toLowerCase();
-        String id = element.id().toLowerCase();
-        String text = element.text().toLowerCase();
+        String className = AsciiTextNormalizer.toLowerAscii(element.className());
+        String id = AsciiTextNormalizer.toLowerAscii(element.id());
+        String text = AsciiTextNormalizer.toLowerAscii(element.text());
         
         return className.contains("nav") || 
                className.contains("menu") ||
@@ -194,16 +196,17 @@ public class HtmlContentExtractor {
                text.startsWith("hide") ||
                text.startsWith("show");
     }
+
     
     /**
      * Check if text contains excessive noise.
      */
     private boolean containsExcessiveNoise(String text) {
         int noiseCount = 0;
-        String lowerText = text.toLowerCase();
+        String lowerText = AsciiTextNormalizer.toLowerAscii(text);
         
         for (String noise : NOISE_PATTERNS) {
-            if (lowerText.contains(noise.toLowerCase())) {
+            if (lowerText.contains(AsciiTextNormalizer.toLowerAscii(noise))) {
                 noiseCount++;
             }
         }
@@ -218,9 +221,21 @@ public class HtmlContentExtractor {
     private String filterNoise(String text) {
         String[] lines = text.split("\n");
         StringBuilder cleaned = new StringBuilder();
+        boolean inCodeFence = false;
         
         for (String line : lines) {
             String trimmed = line.trim();
+
+            if (trimmed.startsWith("```")) {
+                inCodeFence = !inCodeFence;
+                cleaned.append(line).append("\n");
+                continue;
+            }
+
+            if (inCodeFence) {
+                cleaned.append(line).append("\n");
+                continue;
+            }
             
             // Skip empty lines
             if (trimmed.isEmpty()) {
@@ -229,22 +244,77 @@ public class HtmlContentExtractor {
             }
             
             // Skip lines that are pure noise
+            String trimmedLower = AsciiTextNormalizer.toLowerAscii(trimmed);
             boolean isNoise = NOISE_PATTERNS.stream()
-                .anyMatch(noise -> trimmed.equalsIgnoreCase(noise));
+                .anyMatch(noise -> trimmedLower.equals(AsciiTextNormalizer.toLowerAscii(noise)));
             
             if (!isNoise) {
                 // Also skip very short lines that are likely navigation
-                if (trimmed.length() > 3 || trimmed.matches("^[A-Z].*")) {
+                if (trimmed.length() > 3 || startsWithUppercaseLetter(trimmed)) {
                     cleaned.append(line).append("\n");
                 }
             }
         }
         
-        // Clean up excessive whitespace
-        return cleaned.toString()
-            .replaceAll("\n{3,}", "\n\n")  // Max 2 consecutive newlines
-            .replaceAll(" {2,}", " ")       // Collapse multiple spaces
-            .trim();
+        // Clean up excessive whitespace without disturbing code fences
+        return normalizeWhitespaceOutsideCodeFences(cleaned.toString()).trim();
+    }
+
+    private boolean startsWithUppercaseLetter(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        char firstCharacter = text.charAt(0);
+        return firstCharacter >= 'A' && firstCharacter <= 'Z';
+    }
+
+    private String normalizeWhitespaceOutsideCodeFences(String text) {
+        StringBuilder normalized = new StringBuilder(text.length());
+        boolean inFence = false;
+        int newlineRun = 0;
+        int index = 0;
+        while (index < text.length()) {
+            if (index + 2 < text.length()
+                && text.charAt(index) == '`'
+                && text.charAt(index + 1) == '`'
+                && text.charAt(index + 2) == '`') {
+                normalized.append("```");
+                index += 3;
+                inFence = !inFence;
+                newlineRun = 0;
+                continue;
+            }
+
+            char character = text.charAt(index);
+            if (!inFence) {
+                if (character == '\n') {
+                    newlineRun++;
+                    if (newlineRun <= 2) {
+                        normalized.append(character);
+                    }
+                    index++;
+                    continue;
+                }
+                newlineRun = 0;
+                if (character == ' ') {
+                    if (normalized.length() == 0) {
+                        normalized.append(character);
+                        index++;
+                        continue;
+                    }
+                    char previous = normalized.charAt(normalized.length() - 1);
+                    if (previous == ' ' || previous == '\n') {
+                        index++;
+                        continue;
+                    }
+                }
+            }
+
+            newlineRun = 0;
+            normalized.append(character);
+            index++;
+        }
+        return normalized.toString();
     }
     
     /**
@@ -256,16 +326,16 @@ public class HtmlContentExtractor {
         
         // Class/Interface name and description
         Elements classHeaders = doc.select(".header h1, .header h2, .title");
-        classHeaders.forEach(h -> content.append(h.text()).append("\n\n"));
+        classHeaders.forEach(header -> content.append(header.text()).append("\n\n"));
         
         // Package info
         Elements packageInfo = doc.select(".subTitle, .package");
-        packageInfo.forEach(p -> content.append("Package: ").append(p.text()).append("\n"));
+        packageInfo.forEach(pkgElement -> content.append("Package: ").append(pkgElement.text()).append("\n"));
         
         // Main description
         Elements descriptions = doc.select(".description, .block");
-        descriptions.forEach(d -> {
-            String text = d.text();
+        descriptions.forEach(descElement -> {
+            String text = descElement.text();
             if (!containsExcessiveNoise(text)) {
                 content.append("\n").append(text).append("\n");
             }
@@ -275,15 +345,15 @@ public class HtmlContentExtractor {
         Elements methodSummaries = doc.select(".summary .memberSummary");
         if (!methodSummaries.isEmpty()) {
             content.append("\n\nMethod Summary:\n");
-            methodSummaries.forEach(m -> content.append("• ").append(m.text()).append("\n"));
+            methodSummaries.forEach(methodSummary -> content.append("• ").append(methodSummary.text()).append("\n"));
         }
         
         // Method details
         Elements methodDetails = doc.select(".details .memberDetails");
         if (!methodDetails.isEmpty()) {
             content.append("\n\nMethod Details:\n");
-            methodDetails.forEach(m -> {
-                String text = m.text();
+            methodDetails.forEach(methodDetail -> {
+                String text = methodDetail.text();
                 if (!containsExcessiveNoise(text)) {
                     content.append(text).append("\n\n");
                 }

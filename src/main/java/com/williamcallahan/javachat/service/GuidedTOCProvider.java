@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -8,34 +9,66 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 
+/**
+ * Loads and caches guided lesson metadata from the classpath to support guided learning flows.
+ */
 @Service
 public class GuidedTOCProvider {
     private static final Logger log = LoggerFactory.getLogger(GuidedTOCProvider.class);
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private volatile List<GuidedLesson> cache = Collections.emptyList();
+    private volatile boolean tocLoaded = false;
 
+    /**
+     * Creates a TOC provider backed by a safely copied ObjectMapper instance.
+     *
+     * @param mapper configured ObjectMapper
+     */
+    public GuidedTOCProvider(ObjectMapper mapper) {
+        this.mapper = Objects.requireNonNull(mapper, "mapper").copy();
+    }
+
+    /**
+     * Returns the lesson table of contents, loading it lazily from the classpath on first access.
+     */
     public synchronized List<GuidedLesson> getTOC() {
-        if (!cache.isEmpty()) return cache;
+        if (tocLoaded) return cache;
         try {
-            ClassPathResource res = new ClassPathResource("guided/toc.json");
-            try (InputStream in = res.getInputStream()) {
-                cache = mapper.readValue(in, new TypeReference<List<GuidedLesson>>(){});
+            ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
+            try (InputStream tocStream = tocResource.getInputStream()) {
+                List<GuidedLesson> loadedLessons = mapper
+                    .readerFor(new TypeReference<List<GuidedLesson>>() {})
+                    .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(tocStream);
+                cache = List.copyOf(loadedLessons);
             }
-        } catch (Exception e) {
-            log.warn("Failed to load guided TOC: {}", e.getMessage());
+        } catch (IOException exception) {
+            log.warn("Failed to load guided TOC (exceptionType={})", exception.getClass().getName());
             cache = Collections.emptyList();
+        } finally {
+            tocLoaded = true;
         }
         return cache;
     }
 
+    /**
+     * Finds a lesson by its slug in the cached table of contents.
+     */
     public Optional<GuidedLesson> findBySlug(String slug) {
         if (slug == null || slug.isBlank()) return Optional.empty();
-        return getTOC().stream().filter(l -> slug.equalsIgnoreCase(l.getSlug())).findFirst();
+        String normalizedSlug = AsciiTextNormalizer.toLowerAscii(slug);
+        return getTOC().stream()
+            .filter(lesson -> {
+                String lessonSlug = lesson.getSlug();
+                return lessonSlug != null && normalizedSlug.equals(AsciiTextNormalizer.toLowerAscii(lessonSlug));
+            })
+            .findFirst();
     }
 }
-

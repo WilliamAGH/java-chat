@@ -1,9 +1,11 @@
 package com.williamcallahan.javachat;
 
 import com.williamcallahan.javachat.service.HtmlContentExtractor;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,9 +15,18 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+/**
+ * Manual smoke test for HTML extraction that compares noise removal between old and new paths.
+ */
 public class StandaloneExtractionTest {
     
-    public static void main(String[] args) throws Exception {
+    /**
+     * Runs the extraction comparison against sampled documentation files.
+     *
+     * @param args ignored
+     * @throws IOException when reading sample files fails
+     */
+    public static void main(String[] args) throws IOException {
         HtmlContentExtractor extractor = new HtmlContentExtractor();
         String docsRoot = "data/docs";
         
@@ -23,7 +34,7 @@ public class StandaloneExtractionTest {
         String[][] sources = {
             {"java/java24-complete", "Java 24"},
             {"java/java25-complete", "Java 25"},
-            {"java/java25-ea-complete", "Java 25 EA"},
+            {"java/java25-ea-complete", "Java 25 (alt mirror)"},
             {"spring-boot-complete", "Spring Boot"},
             {"spring-framework-complete", "Spring Framework"}
         };
@@ -102,10 +113,13 @@ public class StandaloneExtractionTest {
                 
                 int oldNoise = 0;
                 int newNoise = 0;
-                
+                String oldTextLower = AsciiTextNormalizer.toLowerAscii(oldText);
+                String newTextLower = AsciiTextNormalizer.toLowerAscii(newText);
+
                 for (String noise : noisePatterns) {
-                    if (oldText.toLowerCase().contains(noise.toLowerCase())) oldNoise++;
-                    if (newText.toLowerCase().contains(noise.toLowerCase())) newNoise++;
+                    String normalizedNoise = AsciiTextNormalizer.toLowerAscii(noise);
+                    if (oldTextLower.contains(normalizedNoise)) oldNoise++;
+                    if (newTextLower.contains(normalizedNoise)) newNoise++;
                 }
                 
                 totalOldNoise += oldNoise;

@@ -15,6 +15,7 @@ import reactor.core.publisher.Flux;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -22,11 +23,15 @@ import java.time.Duration;
 import java.time.Instant;
 
 import org.springframework.core.io.ClassPathResource;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.*;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
+/**
+ * Orchestrates guided learning flows over curated lesson metadata using retrieval, enrichment, and streaming chat.
+ */
 @Service
 public class GuidedLearningService {
     private static final Logger logger = LoggerFactory.getLogger(GuidedLearningService.class);
@@ -40,8 +45,18 @@ public class GuidedLearningService {
     // Public server path of the Think Java book (as mapped by DocsSourceRegistry)
     private static final String THINK_JAVA_PDF_PATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
 
+    /** System guidance for Think Java-grounded responses with learning aid markers. */
+    private static final String THINK_JAVA_GUIDANCE =
+        "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
+        "Use ONLY content grounded in this book for factual claims. " +
+        "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
+        "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
+
     private final String jdkVersion;
 
+    /**
+     * Creates the guided learning orchestrator using retrieval and enrichment services plus the configured JDK version hint.
+     */
     public GuidedLearningService(GuidedTOCProvider tocProvider,
                                  RetrievalService retrievalService,
                                  EnrichmentService enrichmentService,
@@ -56,10 +71,19 @@ public class GuidedLearningService {
         this.jdkVersion = jdkVersion;
     }
 
+    /**
+     * Returns the guided lesson table of contents.
+     */
     public List<GuidedLesson> getTOC() { return tocProvider.getTOC(); }
 
+    /**
+     * Returns guided lesson metadata for a slug when present.
+     */
     public Optional<GuidedLesson> getLesson(String slug) { return tocProvider.findBySlug(slug); }
 
+    /**
+     * Retrieves citations for a lesson using book-focused retrieval and best-effort PDF page anchoring.
+     */
     public List<Citation> citationsForLesson(String slug) {
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         if (lesson == null) return List.of();
@@ -71,8 +95,11 @@ public class GuidedLearningService {
         return enhancePdfCitationsWithPage(filtered, base);
     }
 
+    /**
+     * Builds enrichment markers for a lesson using retrieved snippets and the configured JDK version.
+     */
     public Enrichment enrichmentForLesson(String slug) {
-        logger.debug("GuidedLearningService.enrichmentForLesson called for slug: {}", slug);
+        logger.debug("GuidedLearningService.enrichmentForLesson called");
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         if (lesson == null) return emptyEnrichment();
         String query = buildLessonQuery(lesson);
@@ -81,22 +108,20 @@ public class GuidedLearningService {
         List<String> snippets = filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
         Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
         logger.debug("GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
-            enrichment.getHints().size(), enrichment.getReminders().size(), enrichment.getBackground().size());
+	            enrichment.getHints().size(), enrichment.getReminders().size(), enrichment.getBackground().size());
         return enrichment;
     }
 
+    /**
+     * Streams a guided answer grounded in the Think Java book with additional structured guidance.
+     */
     public Flux<String> streamGuidedAnswer(List<Message> history, String slug, String userMessage) {
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
-                "Use ONLY content grounded in this book for factual claims. " +
-                "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-                "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
-
-        return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
+        return chatService.streamAnswerWithContext(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
     }
     
     /**
@@ -109,13 +134,8 @@ public class GuidedLearningService {
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
-                "Use ONLY content grounded in this book for factual claims. " +
-                "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-                "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
-
         // Build the complete prompt using ChatService's prompt building logic
-        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
+        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
     }
 
     /**
@@ -180,32 +200,52 @@ To run this program, follow these steps:
         // We pass a synthetic latestUserMessage that instructs the model to write the lesson
         String latestUserMessage = "Write the lesson for: " + title + "\nFocus on: " + query;
         List<Message> emptyHistory = List.of();
-        String cacheKey = slug == null ? "" : slug;
-        StringBuilder sb = new StringBuilder();
+        StringBuilder lessonMarkdownBuilder = new StringBuilder();
         return chatService.streamAnswerWithContext(emptyHistory, latestUserMessage, filtered, guidance)
-                .doOnNext(sb::append)
-                .doOnComplete(() -> putLessonCache(cacheKey, sb.toString()));
+                .doOnNext(lessonMarkdownBuilder::append)
+                .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
     }
 
     // ===== In-memory cache for lesson markdown =====
-    private static final long CACHE_TTL_SECONDS = 30 * 60; // 30 minutes
-    private static class CacheEntry { final String md; final Instant at; CacheEntry(String md){ this.md=md; this.at=Instant.now(); } }
-    private final ConcurrentMap<String, CacheEntry> lessonCache = new ConcurrentHashMap<>();
+    private static final long LESSON_MARKDOWN_CACHE_TTL_MINUTES = 30;
+    private static final Duration LESSON_MARKDOWN_CACHE_TTL =
+        Duration.ofMinutes(LESSON_MARKDOWN_CACHE_TTL_MINUTES);
 
+    /**
+     * Stores lesson markdown alongside the time it was cached to enforce an in-memory TTL.
+     */
+    private record LessonMarkdownCacheEntry(String markdown, Instant cachedAt) {}
+
+    private final ConcurrentMap<String, LessonMarkdownCacheEntry> lessonMarkdownCache =
+        new ConcurrentHashMap<>();
+
+    /**
+     * Returns cached lesson markdown when present and not expired.
+     */
     public Optional<String> getCachedLessonMarkdown(String slug) {
-        CacheEntry e = lessonCache.getOrDefault(slug, null);
-        if (e == null) return Optional.empty();
-        if (Duration.between(e.at, Instant.now()).getSeconds() > CACHE_TTL_SECONDS) {
-            lessonCache.remove(slug);
+        if (slug == null || slug.isBlank()) {
             return Optional.empty();
         }
-        return Optional.ofNullable(e.md);
+        LessonMarkdownCacheEntry cacheEntry = lessonMarkdownCache.get(slug);
+        if (cacheEntry == null) return Optional.empty();
+        if (Duration.between(cacheEntry.cachedAt(), Instant.now()).compareTo(LESSON_MARKDOWN_CACHE_TTL) > 0) {
+            lessonMarkdownCache.remove(slug);
+            return Optional.empty();
+        }
+        return Optional.of(cacheEntry.markdown());
     }
 
-    public void putLessonCache(String slug, String md) {
-        if (slug != null && md != null && !md.isBlank()) {
-            lessonCache.put(slug, new CacheEntry(md));
+    /**
+     * Caches lesson markdown for later reuse when the slug and content are non-blank.
+     */
+    public void putLessonCache(String slug, String markdown) {
+        if (slug == null || slug.isBlank()) {
+            return;
         }
+        if (markdown == null || markdown.isBlank()) {
+            return;
+        }
+        lessonMarkdownCache.put(slug, new LessonMarkdownCacheEntry(markdown, Instant.now()));
     }
 
     // ===== PDF Pagination heuristics for /pdfs/Think Java - 2nd Edition Book.pdf =====
@@ -216,12 +256,14 @@ To run this program, follow these steps:
         synchronized (this) {
             if (cachedPdfPages != null) return cachedPdfPages;
             try {
-                ClassPathResource res = new ClassPathResource("public/pdfs/Think Java - 2nd Edition Book.pdf");
-                try (InputStream in = res.getInputStream(); PDDocument doc = Loader.loadPDF(in.readAllBytes())) {
-                    cachedPdfPages = doc.getNumberOfPages();
+                ClassPathResource pdfResource = new ClassPathResource("public/pdfs/Think Java - 2nd Edition Book.pdf");
+                try (InputStream pdfStream = pdfResource.getInputStream();
+                     PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
+                    cachedPdfPages = document.getNumberOfPages();
                 }
-            } catch (Exception e) {
-                cachedPdfPages = 0; // unknown
+            } catch (IOException ioException) {
+                logger.error("Failed to load Think Java PDF for pagination", ioException);
+                throw new IllegalStateException("Unable to read Think Java PDF", ioException);
             }
             return cachedPdfPages;
         }
@@ -231,67 +273,89 @@ To run this program, follow these steps:
         try {
             String safe = localStore.toSafeName(url);
             Path dir = localStore.getParsedDir();
+            if (dir == null) {
+                return 0;
+            }
             try (var stream = Files.list(dir)) {
                 return (int) stream
-                    .filter(path -> path.getFileName().toString().startsWith(safe + "_"))
-                    .filter(path -> path.getFileName().toString().endsWith(".txt"))
+                    .filter(path -> {
+                        Path fileNamePath = path.getFileName();
+                        if (fileNamePath == null) {
+                            return false;
+                        }
+                        String fileName = fileNamePath.toString();
+                        return fileName.startsWith(safe + "_") && fileName.endsWith(".txt");
+                    })
                     .count();
             }
-        } catch (Exception e) {
-            return 0;
+        } catch (IOException ioException) {
+            throw new IllegalStateException("Unable to count local chunks for URL", ioException);
         }
     }
 
     private List<Citation> enhancePdfCitationsWithPage(List<Document> docs, List<Citation> citations) {
         if (docs.size() != citations.size()) return citations;
         int pages = getThinkJavaPdfPages();
-        for (int i = 0; i < docs.size(); i++) {
-            Document d = docs.get(i);
-            Citation c = citations.get(i);
-            String url = c.getUrl();
-            if (url == null || !url.toLowerCase().endsWith(".pdf")) continue;
-            Object idxObj = d.getMetadata().get("chunkIndex");
-            int chunkIdx = -1;
-            try { if (idxObj != null) chunkIdx = Integer.parseInt(String.valueOf(idxObj)); } catch (NumberFormatException ignored) {}
+        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
+            Document document = docs.get(docIndex);
+            Citation citation = citations.get(docIndex);
+            String url = citation.getUrl();
+            if (url == null || !url.toLowerCase(Locale.ROOT).endsWith(".pdf")) continue;
+            Object chunkIndexMetadata = document.getMetadata().get("chunkIndex");
+            int chunkIndex = -1;
+            try {
+                if (chunkIndexMetadata != null) {
+                    chunkIndex = Integer.parseInt(String.valueOf(chunkIndexMetadata));
+                }
+            } catch (NumberFormatException chunkIndexParseException) {
+                logger.debug("Failed to parse chunkIndex from metadata: {}",
+                    sanitizeForLogText(String.valueOf(chunkIndexMetadata)));
+            }
             int totalChunks = totalChunksForUrl(url);
-            if (pages > 0 && chunkIdx >= 0 && totalChunks > 0) {
-                int page = Math.max(1, Math.min(pages, (int) Math.round(((chunkIdx + 1.0) / totalChunks) * pages)));
+            if (pages > 0 && chunkIndex >= 0 && totalChunks > 0) {
+                int page = Math.max(1, Math.min(pages, (int) Math.round(((chunkIndex + 1.0) / totalChunks) * pages)));
                 String withAnchor = url.contains("#page=") ? url : url + "#page=" + page;
-                c.setUrl(withAnchor);
-                c.setAnchor("page=" + page);
+                citation.setUrl(withAnchor);
+                citation.setAnchor("page=" + page);
             }
         }
         return citations;
     }
 
     private List<Document> filterToBook(List<Document> docs) {
-        if (docs == null) return List.of();
         List<Document> filtered = new ArrayList<>();
-        for (Document d : docs) {
-            String url = String.valueOf(d.getMetadata().getOrDefault("url", ""));
-            if (url != null && url.contains(THINK_JAVA_PDF_PATH)) {
-                filtered.add(d);
+        for (Document document : docs) {
+            String url = String.valueOf(document.getMetadata().getOrDefault("url", ""));
+            if (url.contains(THINK_JAVA_PDF_PATH)) {
+                filtered.add(document);
             }
         }
         return filtered;
     }
 
     private String buildLessonQuery(GuidedLesson lesson) {
-        StringBuilder sb = new StringBuilder();
-        if (lesson.getTitle() != null) sb.append(lesson.getTitle()).append(". ");
-        if (lesson.getSummary() != null) sb.append(lesson.getSummary()).append(" ");
+        StringBuilder queryBuilder = new StringBuilder();
+        if (lesson.getTitle() != null) queryBuilder.append(lesson.getTitle()).append(". ");
+        if (lesson.getSummary() != null) queryBuilder.append(lesson.getSummary()).append(" ");
         if (lesson.getKeywords() != null && !lesson.getKeywords().isEmpty()) {
-            sb.append(String.join(", ", lesson.getKeywords()));
+            queryBuilder.append(String.join(", ", lesson.getKeywords()));
         }
-        return sb.toString().trim();
+        return queryBuilder.toString().trim();
     }
 
     private Enrichment emptyEnrichment() {
-        Enrichment e = new Enrichment();
-        e.setJdkVersion(jdkVersion);
-        e.setHints(List.of());
-        e.setReminders(List.of());
-        e.setBackground(List.of());
-        return e;
+        Enrichment fallbackEnrichment = new Enrichment();
+        fallbackEnrichment.setJdkVersion(jdkVersion);
+        fallbackEnrichment.setHints(List.of());
+        fallbackEnrichment.setReminders(List.of());
+        fallbackEnrichment.setBackground(List.of());
+        return fallbackEnrichment;
+    }
+
+    private static String sanitizeForLogText(String rawText) {
+        if (rawText == null) {
+            return "";
+        }
+        return rawText.replace("\r", "\\r").replace("\n", "\\n");
     }
 }

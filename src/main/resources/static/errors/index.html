@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Error Reference - aVenture</title>
+    <link rel="stylesheet" href="/theme.css">
+    <link rel="icon" href="/favicon.ico">
+    <style>
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
+        }
+
+        .header {
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin: 0 0 0.75rem;
+            color: hsl(var(--surface-foreground));
+        }
+
+        .header p {
+            color: hsl(var(--surface-muted-foreground));
+            font-size: 1rem;
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .section {
+            margin-bottom: 2.5rem;
+        }
+
+        .section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: hsl(var(--surface-muted-foreground));
+            margin: 0 0 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid hsl(var(--surface-border));
+        }
+
+        .error-grid {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .error-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            background: hsl(var(--surface-card) / 0.6);
+            border: 1px solid hsl(var(--surface-border));
+            border-radius: var(--surface-radius-md);
+            text-decoration: none;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .error-item:hover {
+            background: hsl(var(--surface-card) / 0.9);
+            border-color: hsl(var(--surface-ring) / 0.3);
+            transform: translateX(4px);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 3rem;
+            padding: 0.35rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: "SFMono-Regular", Consolas, monospace;
+        }
+
+        .status-4xx { background: rgba(251, 191, 36, 0.15); color: rgb(180, 83, 9); }
+        .status-5xx { background: rgba(239, 68, 68, 0.15); color: rgb(185, 28, 28); }
+
+        @media (prefers-color-scheme: dark) {
+            .status-4xx { background: rgba(251, 191, 36, 0.2); color: rgb(253, 224, 71); }
+            .status-5xx { background: rgba(239, 68, 68, 0.2); color: rgb(252, 165, 165); }
+        }
+
+        .error-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .error-type {
+            font-family: "SFMono-Regular", Consolas, monospace;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: hsl(var(--surface-foreground));
+            margin: 0 0 0.25rem;
+        }
+
+        .error-desc {
+            font-size: 0.85rem;
+            color: hsl(var(--surface-muted-foreground));
+            margin: 0;
+        }
+
+        .arrow {
+            color: hsl(var(--surface-muted-foreground));
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        .error-item:hover .arrow {
+            opacity: 1;
+        }
+
+        .footer {
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid hsl(var(--surface-border));
+            font-size: 0.85rem;
+            color: hsl(var(--surface-muted-foreground));
+        }
+
+        .footer a {
+            color: hsl(var(--surface-foreground));
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>API Error Reference</h1>
+            <p>
+                This API returns errors using
+                <a href="https://www.rfc-editor.org/rfc/rfc9457" target="_blank" rel="noopener">RFC 9457 Problem Details</a>.
+                Each error includes a <code>type</code> URI linking to documentation below.
+            </p>
+        </header>
+
+        <section class="section">
+            <h2 class="section-title">Client Errors (4xx)</h2>
+            <div class="error-grid">
+                <a href="/errors/validation-failed" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">validation-failed</p>
+                        <p class="error-desc">Request body or parameters failed validation</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/missing-parameter" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">missing-parameter</p>
+                        <p class="error-desc">Required query parameter was not provided</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/invalid-parameter-type" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">invalid-parameter-type</p>
+                        <p class="error-desc">Parameter value has wrong type</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/invalid-argument" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">invalid-argument</p>
+                        <p class="error-desc">Business logic rejected the input</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/invalid-json" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">invalid-json</p>
+                        <p class="error-desc">Request body is not valid JSON</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/client-closed-request" class="error-item">
+                    <span class="status-badge status-4xx">400</span>
+                    <div class="error-info">
+                        <p class="error-type">client-closed-request</p>
+                        <p class="error-desc">Client disconnected before request completed</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/authentication-required" class="error-item">
+                    <span class="status-badge status-4xx">401</span>
+                    <div class="error-info">
+                        <p class="error-type">authentication-required</p>
+                        <p class="error-desc">Valid authentication credentials required</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/access-denied" class="error-item">
+                    <span class="status-badge status-4xx">403</span>
+                    <div class="error-info">
+                        <p class="error-type">access-denied</p>
+                        <p class="error-desc">Authenticated but insufficient permissions</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/not-found" class="error-item">
+                    <span class="status-badge status-4xx">404</span>
+                    <div class="error-info">
+                        <p class="error-type">not-found</p>
+                        <p class="error-desc">Resource or endpoint does not exist</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/method-not-allowed" class="error-item">
+                    <span class="status-badge status-4xx">405</span>
+                    <div class="error-info">
+                        <p class="error-type">method-not-allowed</p>
+                        <p class="error-desc">HTTP method not supported for this endpoint</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/not-acceptable" class="error-item">
+                    <span class="status-badge status-4xx">406</span>
+                    <div class="error-info">
+                        <p class="error-type">not-acceptable</p>
+                        <p class="error-desc">Cannot produce content matching Accept header</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/duplicate-key" class="error-item">
+                    <span class="status-badge status-4xx">409</span>
+                    <div class="error-info">
+                        <p class="error-type">duplicate-key</p>
+                        <p class="error-desc">Record conflicts with existing unique constraint</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/integrity-violation" class="error-item">
+                    <span class="status-badge status-4xx">409</span>
+                    <div class="error-info">
+                        <p class="error-type">integrity-violation</p>
+                        <p class="error-desc">Data integrity constraint violated</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/unsupported-media-type" class="error-item">
+                    <span class="status-badge status-4xx">415</span>
+                    <div class="error-info">
+                        <p class="error-type">unsupported-media-type</p>
+                        <p class="error-desc">Content-Type header not supported</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/rate-limited" class="error-item">
+                    <span class="status-badge status-4xx">429</span>
+                    <div class="error-info">
+                        <p class="error-type">rate-limited</p>
+                        <p class="error-desc">Too many requests, please slow down</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="section">
+            <h2 class="section-title">Server Errors (5xx)</h2>
+            <div class="error-grid">
+                <a href="/errors/internal-error" class="error-item">
+                    <span class="status-badge status-5xx">500</span>
+                    <div class="error-info">
+                        <p class="error-type">internal-error</p>
+                        <p class="error-desc">Unexpected server error occurred</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/not-implemented" class="error-item">
+                    <span class="status-badge status-5xx">501</span>
+                    <div class="error-info">
+                        <p class="error-type">not-implemented</p>
+                        <p class="error-desc">Operation not yet implemented</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/service-unavailable" class="error-item">
+                    <span class="status-badge status-5xx">503</span>
+                    <div class="error-info">
+                        <p class="error-type">service-unavailable</p>
+                        <p class="error-desc">Service temporarily unavailable</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/circuit-breaker-open" class="error-item">
+                    <span class="status-badge status-5xx">503</span>
+                    <div class="error-info">
+                        <p class="error-type">circuit-breaker-open</p>
+                        <p class="error-desc">Circuit breaker protecting degraded service</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/database-unavailable" class="error-item">
+                    <span class="status-badge status-5xx">503</span>
+                    <div class="error-info">
+                        <p class="error-type">database-unavailable</p>
+                        <p class="error-desc">Database connection unavailable</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+                <a href="/errors/database-error" class="error-item">
+                    <span class="status-badge status-5xx">503</span>
+                    <div class="error-info">
+                        <p class="error-type">database-error</p>
+                        <p class="error-desc">Database operation failed</p>
+                    </div>
+                    <span class="arrow">&rarr;</span>
+                </a>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>
+                <a href="/swagger-ui/">API Documentation</a> &middot;
+                <a href="https://www.rfc-editor.org/rfc/rfc9457" target="_blank" rel="noopener">RFC 9457</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

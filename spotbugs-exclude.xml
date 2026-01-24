@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+        Error handlers must respond to any HTTP method that may trigger an error.
+        CustomErrorController explicitly allows common methods to ensure consistent error rendering
+        for browser requests and API clients; this is not an application endpoint intended for state changes.
+    -->
+    <Match>
+        <Bug pattern="SPRING_CSRF_UNRESTRICTED_REQUEST_MAPPING"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+        <Method name="handleError"/>
+    </Match>
+
+
+    <!--
+        Spring-managed dependencies are intentionally shared; SpotBugs flags these as EI_EXPOSE_REP2,
+        but these fields are not exposed via accessors and are required for DI.
+    -->
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.EmbeddingCacheService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.MarkdownService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.ChatService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedLearningService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.MarkdownController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.TooltipController"/>
+    </Match>
+
+    <!--
+        Public-facing REST controllers are intentionally open and do not use Spring Security annotations.
+        FindSecBugs reports these as endpoints to prompt security review; in this project the API surface is intended.
+    -->
+    <Match>
+        <Bug code="SECSC"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
+    </Match>
+
+    <!--
+        SpotBugs can report redundant null checks for implicit receiver null checks (bytecode-level NPE checks)
+        when nullability annotations indicate a value is non-null. These are noise and not actionable.
+    -->
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.EnrichmentController"/>
+        <Method name="enrich"/>
+    </Match>
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+        <Method name="enrich"/>
+    </Match>
+
+    <!--
+        Case-insensitive comparisons are used only for parsing or display convenience.
+        Suppress IMPROPER_UNICODE where normalization is non-security-critical.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.ApiKeyLoggingConfig"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.DocsSourceRegistry"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.PortInitializer"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedTOCProvider"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.HtmlContentExtractor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentPlaceholderizer$EnrichmentKind"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentProcessor$EnrichmentVisitor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.SiteUrlResolver"/>
+    </Match>
+
+    <!--
+        ErrorTestController intentionally throws exceptions to validate error handling paths.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.web.ErrorTestController"/>
+    </Match>
+</FindBugsFilter>

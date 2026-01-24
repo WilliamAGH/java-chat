@@ -10,6 +10,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 
+/**
+ * Extracts text and basic metadata from PDF documents using Apache PDFBox.
+ */
+/**
+ * Extracts text content and metadata from PDF documents.
+ */
 @Service
 public class PdfContentExtractor {
     private static final Logger log = LoggerFactory.getLogger(PdfContentExtractor.class);
@@ -22,7 +28,7 @@ public class PdfContentExtractor {
      * @throws IOException if the PDF cannot be read
      */
     public String extractTextFromPdf(Path pdfPath) throws IOException {
-        log.info("Extracting text from PDF: {}", pdfPath.getFileName());
+        log.info("Extracting text from PDF");
         
         try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
             PDFTextStripper stripper = new PDFTextStripper();
@@ -38,9 +44,9 @@ public class PdfContentExtractor {
                 text.length(), document.getNumberOfPages());
             
             return text;
-        } catch (IOException e) {
+        } catch (IOException exception) {
             // Let caller decide how to log/handle this; avoid duplicate stack traces
-            throw e;
+            throw exception;
         }
     }
     
@@ -54,7 +60,7 @@ public class PdfContentExtractor {
      * @throws IOException if the PDF cannot be read
      */
     public String extractTextFromPdfRange(Path pdfPath, int startPage, int endPage) throws IOException {
-        log.info("Extracting text from PDF {} (pages {}-{})", pdfPath.getFileName(), startPage, endPage);
+        log.info("Extracting text from PDF pages {}-{}", startPage, endPage);
         
         try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
             PDFTextStripper stripper = new PDFTextStripper();
@@ -70,9 +76,9 @@ public class PdfContentExtractor {
                 text.length(), startPage, endPage);
             
             return text;
-        } catch (IOException e) {
+        } catch (IOException exception) {
             // Let caller decide how to log/handle this; avoid duplicate stack traces
-            throw e;
+            throw exception;
         }
     }
     
@@ -115,9 +121,9 @@ public class PdfContentExtractor {
             java.util.List<String> pages = new java.util.ArrayList<>(document.getNumberOfPages());
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
-            for (int p = 1; p <= document.getNumberOfPages(); p++) {
-                stripper.setStartPage(p);
-                stripper.setEndPage(p);
+            for (int pageNumber = 1; pageNumber <= document.getNumberOfPages(); pageNumber++) {
+                stripper.setStartPage(pageNumber);
+                stripper.setEndPage(pageNumber);
                 String text = stripper.getText(document);
                 pages.add(text == null ? "" : text);
             }

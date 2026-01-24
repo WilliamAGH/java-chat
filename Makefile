@@ -1,35 +1,56 @@
 SHELL := /bin/bash
 
 APP_NAME := java-chat
-MVNW := ./mvnw
+GRADLEW := ./gradlew
+QDRANT_COMPOSE_FILE := docker-compose-qdrant.yml
+
+# Terminal colors for output prefixing
+RED    := \033[0;31m
+GREEN  := \033[0;32m
+YELLOW := \033[0;33m
+CYAN   := \033[0;36m
+NC     := \033[0m
+
 # Compute JAR lazily so it's resolved after the build runs
 # Use a function instead of variable to evaluate at runtime
-get_jar = $(shell ls -t target/*.jar 2>/dev/null | head -n 1)
+# Exclude -plain.jar which is the non-bootable archive
+get_jar = $(shell ls -t build/libs/*.jar 2>/dev/null | grep -v '\-plain\.jar' | head -n 1)
+
+# Export color codes and paths for use in scripts
+export RED GREEN YELLOW CYAN NC
+export PROJECT_ROOT := $(shell pwd)
+export JAR_PATH = $(call get_jar)
+
 
 # Runtime arguments mapped from GitHub Models env vars
 # - Requires GITHUB_TOKEN (PAT with models:read)
 # - Base URL and model names have sensible defaults
 # - CRITICAL: GitHub Models endpoint is https://models.github.ai/inference (NOT azure.com)
+# - Model names differ by provider: GitHub Models uses gpt-5, OpenAI uses gpt-5.2
 RUN_ARGS := \
   --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
   --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
   --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
   --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
 
-.PHONY: help clean build test run dev compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline
+.PHONY: help clean build test lint run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 clean: ## Clean build outputs
-	$(MVNW) clean
+	$(GRADLEW) clean
 
-build: ## Build the project (skip tests)
-	$(MVNW) -DskipTests package
+build: frontend-build ## Build the project (skip tests)
+	$(GRADLEW) build -x test
 
 test: ## Run tests (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  $(MVNW) test
+	  $(GRADLEW) test
+
+lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
+	$(GRADLEW) spotbugsMain pmdMain
+	cd frontend && npm run check
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
@@ -44,7 +65,23 @@ run: build ## Run the packaged jar (loads .env if present)
 	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS) & disown
 
-dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
+dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
+	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
+	@echo "$(CYAN)Frontend: http://localhost:5173/$(NC)"
+	@echo "$(YELLOW)Backend API: http://localhost:8085/api/$(NC)"
+	@echo ""
+	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
+	  trap 'kill 0' INT TERM; \
+	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
+	  (if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
+	   --args="--server.port=8085 $(RUN_ARGS)" \
+	   -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" 2>&1 \
+	   | awk '{print "\033[33m[java]\033[0m " $$0; fflush()}') & \
+	  wait
+
+dev-backend: ## Run only Spring Boot backend (dev profile)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
 	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
@@ -56,23 +93,31 @@ dev: ## Live dev (DevTools hot reload) with profile=dev (loads .env if present)
 	    if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$port: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 1; fi; \
 	  done; \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
-	  SPRING_PROFILES_ACTIVE=dev $(MVNW) spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" -Dspring-boot.run.arguments="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)"
+	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
+	    --args="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)" \
+	    -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
+
+frontend-install: ## Install frontend dependencies
+	cd frontend && npm install
+
+frontend-build: frontend-install ## Build frontend for production
+	cd frontend && npm run build
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
 	@for p in 8086 8087; do \
 	  PIDS=$$(lsof -ti tcp:$$p || true); \
 	  if [ -n "$$PIDS" ]; then echo "Freeing port $$p by killing: $$PIDS" >&2; kill -9 $$PIDS || true; sleep 1; fi; \
 	done; \
-	docker compose up -d
+	docker compose -f $(QDRANT_COMPOSE_FILE) up -d
 
 compose-down: ## Stop Docker Compose services
-	docker compose down
+	docker compose -f $(QDRANT_COMPOSE_FILE) down
 
 compose-logs: ## Tail logs for Docker Compose services
-	docker compose logs -f
+	docker compose -f $(QDRANT_COMPOSE_FILE) logs -f
 
 compose-ps: ## List Docker Compose services
-	docker compose ps
+	docker compose -f $(QDRANT_COMPOSE_FILE) ps
 
 health: ## Check app health endpoint
 	curl -sS http://localhost:$${PORT:-8085}/actuator/health
@@ -98,4 +143,3 @@ full-pipeline: ## Complete pipeline: fetch docs, process, and upload to Qdrant
 	@./scripts/process_all_to_qdrant.sh
 	@echo ""
 	@echo "✅ Full pipeline complete!"
-

@@ -129,13 +129,15 @@ public class DualPassChatService {
 Add metadata to track content confidence and source.
 
 ```java
+import com.fasterxml.jackson.databind.JsonNode;
+
 public class EnrichedContent {
     private String text;
     private float ragConfidence;  // 0.0-1.0 based on similarity score
     private float llmConfidence;  // Based on temperature/certainty
     private SourceType primarySource; // RAG, LLM, or HYBRID
     private List<Citation> citations;
-    private Map<String, Object> metadata;
+    private Map<String, JsonNode> metadata;
     
     public static EnrichedContent fromRetrievalContext(
             String text, 
@@ -194,6 +196,8 @@ public class StreamAnnotationService {
 Return responses with comprehensive metadata headers.
 
 ```java
+import com.fasterxml.jackson.databind.JsonNode;
+
 public class AttributedResponse {
     private String response;
     private ResponseMetadata metadata;
@@ -203,7 +207,7 @@ public class AttributedResponse {
         private float llmContribution;  // 0.0-1.0 (e.g., 0.35 = 35% from LLM)
         private List<Citation> citations;
         private List<ContentSegment> segments;
-        private Map<String, Object> debugInfo;
+        private Map<String, JsonNode> debugInfo;
     }
     
     public static class ContentSegment {

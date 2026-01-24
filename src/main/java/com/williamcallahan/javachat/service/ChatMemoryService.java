@@ -32,7 +32,7 @@ public class ChatMemoryService {
      * Callers receive an independent copy that can be safely iterated without synchronization.
      */
     public List<Message> getHistory(String sessionId) {
-        List<Message> history = sessionToMessages.computeIfAbsent(sessionId, k ->
+        List<Message> history = sessionToMessages.computeIfAbsent(sessionId, sessionKey ->
             Collections.synchronizedList(new ArrayList<>())
         );
         // Return a snapshot to avoid ConcurrentModificationException during iteration
@@ -46,21 +46,38 @@ public class ChatMemoryService {
      * Use with care - prefer addUser/addAssistant for adding messages.
      */
     List<Message> getHistoryInternal(String sessionId) {
-        return sessionToMessages.computeIfAbsent(sessionId, k ->
+        return sessionToMessages.computeIfAbsent(sessionId, sessionKey ->
             Collections.synchronizedList(new ArrayList<>())
         );
     }
 
+    /**
+     * Adds a user message to the session history and turn list.
+     *
+     * @param sessionId session identifier
+     * @param text message text
+     */
     public void addUser(String sessionId, String text) {
         getHistoryInternal(sessionId).add(new UserMessage(text));
         getTurnsInternal(sessionId).add(new ChatTurn("user", text));
     }
 
+    /**
+     * Adds an assistant message to the session history and turn list.
+     *
+     * @param sessionId session identifier
+     * @param text message text
+     */
     public void addAssistant(String sessionId, String text) {
         getHistoryInternal(sessionId).add(new AssistantMessage(text));
         getTurnsInternal(sessionId).add(new ChatTurn("assistant", text));
     }
 
+    /**
+     * Clears all stored history for the provided session.
+     *
+     * @param sessionId session identifier
+     */
     public void clear(String sessionId) {
         sessionToMessages.remove(sessionId);
         sessionToTurns.remove(sessionId);
@@ -70,7 +87,7 @@ public class ChatMemoryService {
      * Returns a thread-safe snapshot of the turns for the given session.
      */
     public List<ChatTurn> getTurns(String sessionId) {
-        List<ChatTurn> turns = sessionToTurns.computeIfAbsent(sessionId, k ->
+        List<ChatTurn> turns = sessionToTurns.computeIfAbsent(sessionId, sessionKey ->
             Collections.synchronizedList(new ArrayList<>())
         );
         synchronized (turns) {
@@ -82,7 +99,7 @@ public class ChatMemoryService {
      * Returns the internal synchronized list for direct modification.
      */
     List<ChatTurn> getTurnsInternal(String sessionId) {
-        return sessionToTurns.computeIfAbsent(sessionId, k ->
+        return sessionToTurns.computeIfAbsent(sessionId, sessionKey ->
             Collections.synchronizedList(new ArrayList<>())
         );
     }

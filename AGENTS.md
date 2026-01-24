@@ -19,6 +19,7 @@ alwaysApply: true
 - FS8 No generic utilities: reject `*Utils/*Helper/*Common`; banned: `BaseMapper<T>`, `GenericRepository<T,ID>`, `SharedUtils`.
 - FS9 Large files (>500 LOC): extract only pieces you touch into clean-architecture roots; avoid broad refactors.
 - FS10 Domain value types: identifiers, amounts, slugs wrap in records with constructor validation; never raw primitives across API boundaries.
+- FS11 Never use `@SuppressWarnings` to resolve lint issues; fix the code or refactor structure to comply with rules.
 - MO1 Monolith = >500 LOC or multi-concern catch-all (`*Utils/*Helper/*Common`).
 - MO2 New functionality starts in new files in canonical roots; never add code to monoliths.
 - MO3 Shrink on touch: when editing monoliths, extract at least one seam and net-decrease file size; if unsafe, stop and ask.
@@ -58,8 +59,8 @@ alwaysApply: true
 - TS3 Assert observable behavior: test response shapes/outcomes, not internal invocations or string comparisons.
 - TS4 Refactor-resilient: unchanged behavior = passing tests regardless of internal restructuring.
 - TS5 Naming: integration tests end with `IT`; unit tests end with `Test`.
-- VR1 Build: `make build` or `mvn clean compile`; expect success.
-- VR2 Tests: `make test` or `mvn test`; targeted runs use `-Dtest=...`.
+- VR1 Build: `make build` or `./gradlew build`; expect success.
+- VR2 Tests: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
 - VR3 Runtime: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
 - TL1 Standard commands: `make run`, `make dev`, `make test`, `make build`, `make compose-up`, `make compose-down`.
 - TL2 Docker: `docker compose up -d` for Qdrant vector store.
@@ -79,9 +80,14 @@ alwaysApply: true
 - ST2 Event types: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
 - ST3 Error handling: `onErrorContinue` for partial failures; never drop entire response on single failure.
 - ST4 Heartbeats: maintain connection with periodic events during long operations.
-- JD1 Javadocs required on public classes and methods; keep them concise and standards-compliant.
-- JD2 Explain why as much as what; avoid academic tags except required `@deprecated`/`@since`.
-- JD3 Deprecations require both `@Deprecated` and Javadoc `@deprecated` tag with reason and successor pointer.
+- JD1 Javadocs mandatory on public/protected classes, methods, and enums; one sentence for simple elements, 2-3 for complex ones.
+- JD2 Focus on "why" (purpose, rationale, constraints) over "what" (which code already shows); never restate method name as description.
+- JD3 First sentence is the summary: complete sentence, present tense, third person ("Calculates...", "Returns...", "Stores...").
+- JD4 Use `@param` only when name isn't self-documenting or constraints exist; use `@return` only for non-obvious return values.
+- JD5 Include `@throws` for checked exceptions and runtime exceptions callers should handle; state the condition triggering each.
+- JD6 Reference evidence: when logic derives from specs/docs, cite source inline (e.g., "Per RFC 7231 section 6.5.1" or "See Spring Framework docs: [topic]").
+- JD7 Deprecations require both `@Deprecated` annotation and `@deprecated` Javadoc tag with migration path: `@deprecated Use {@link NewClass#newMethod} instead`.
+- JD8 No filler phrases: ban "This method...", "This class...", "Gets the...", "Sets the...", "Returns the..."; start with verb or noun directly.
 - ER1 Use exceptions for exceptional cases; avoid defensive checks on trusted inputs.
 - ER2 Never catch and ignore; either handle meaningfully or propagate.
 - ER3 Prefer specific exception types over generic `Exception` or `RuntimeException`.
@@ -90,3 +96,7 @@ alwaysApply: true
 - DP3 Deprecated code must be a thin shim extending its successor; no aliases, fallbacks, or alternate implementations.
 - SRC1 Never make assumptions; if unsure, stop and verify.
 - SRC2 For dependency code questions, inspect `~/.m2` JARs first; fallback to upstream GitHub; never answer without referencing code.
+- SRC3 Inspect `~/.gradle/caches/` for dependency code in Gradle projects; verify actual implementation rather than assuming.
+- DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
+- DI1 Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean to ensure consistent configuration.
+- SB1 Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`; never use `META-INF/additional-spring-configuration-metadata.json` as a band-aid for `@Value` usage.

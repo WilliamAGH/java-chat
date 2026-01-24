@@ -11,6 +11,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * Generates enrichment metadata by prompting the LLM with contextual snippets.
+ */
 @Service
 public class EnrichmentService {
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentService.class);
@@ -18,23 +21,29 @@ public class EnrichmentService {
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Creates the enrichment service with JSON handling and LLM access.
+     */
     public EnrichmentService(ObjectMapper objectMapper,
                              OpenAIStreamingService openAIStreamingService) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper.copy();
         this.openAIStreamingService = openAIStreamingService;
     }
 
+    /**
+     * Builds enrichment metadata for a user query and JDK version using context snippets.
+     */
     @Cacheable(value = "enrichment-cache", key = "#userQuery + ':' + #jdkVersion")
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
-        logger.debug("EnrichmentService.enrich called for query: {}", userQuery);
+        logger.debug("EnrichmentService.enrich called");
         StringBuilder prompt = new StringBuilder();
         // Add base system context for consistency
         prompt.append("You are operating as part of the Java learning assistant system.\n");
         prompt.append("Extract enrichment metadata to enhance learning from the provided context.\n\n");
         prompt.append("User query: ").append(userQuery).append("\n\n");
         prompt.append("Context snippets from Java documentation:\n");
-        for (int i = 0; i < contextSnippets.size(); i++) {
-            prompt.append("- ").append(contextSnippets.get(i)).append("\n");
+        for (int snippetIndex = 0; snippetIndex < contextSnippets.size(); snippetIndex++) {
+            prompt.append("- ").append(contextSnippets.get(snippetIndex)).append("\n");
         }
         prompt.append("\nRespond as JSON with these fields:\n");
         prompt.append("- hints[]: Practical tips and best practices (2-3 items max)\n");
@@ -59,8 +68,8 @@ public class EnrichmentService {
                 logger.warn("Empty response from API, using fallback");
                 json = "{}";
             }
-        } catch (Exception ex) {
-            logger.warn("Enrichment service failed for query '{}': {}", userQuery, ex.getMessage());
+        } catch (RuntimeException exception) {
+            logger.warn("Enrichment service failed (exception type: {})", exception.getClass().getSimpleName());
             json = "{}"; // Return empty JSON for graceful degradation
         }
 
@@ -78,27 +87,13 @@ public class EnrichmentService {
             if (parsed.getHints() == null) parsed.setHints(List.of());
             if (parsed.getReminders() == null) parsed.setReminders(List.of());
             if (parsed.getBackground() == null) parsed.setBackground(List.of());
-            // Sanitize: trim and drop empty items across all lists
-            parsed.setHints(trimFilter(parsed.getHints()));
-            parsed.setReminders(trimFilter(parsed.getReminders()));
-            parsed.setBackground(trimFilter(parsed.getBackground()));
-            return parsed;
-        } catch (JsonProcessingException ex) {
-            Enrichment fallback = new Enrichment();
+            // Return sanitized enrichment with trimmed/filtered lists
+            return parsed.sanitized();
+        } catch (JsonProcessingException exception) {
+            Enrichment fallback = Enrichment.empty();
             fallback.setJdkVersion(jdkVersion);
-            fallback.setHints(List.of());
-            fallback.setReminders(List.of());
-            fallback.setBackground(List.of());
             return fallback;
         }
-    }
-
-    private List<String> trimFilter(List<String> in) {
-        if (in == null) return List.of();
-        return in.stream()
-                .map(s -> s == null ? "" : s.trim())
-                .filter(s -> !s.isEmpty())
-                .toList();
     }
 
 
@@ -106,23 +101,29 @@ public class EnrichmentService {
 
     private String cleanJson(String raw) {
         if (raw == null) return "{}";
-        String s = raw.trim();
-        if (s.startsWith("```") ) {
-            int first = s.indexOf('{');
-            int last = s.lastIndexOf('}');
-            if (first >= 0 && last >= first) {
-                return s.substring(first, last + 1);
+        String trimmedJson = raw.trim();
+        if (trimmedJson.startsWith("```")) {
+            int firstBrace = trimmedJson.indexOf('{');
+            int lastBrace = trimmedJson.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace >= firstBrace) {
+                return trimmedJson.substring(firstBrace, lastBrace + 1);
             }
-            s = s.replaceAll("(?s)```(?:json)?\\s*", "").replaceAll("```\\s*", "");
-        }
-        if (!s.startsWith("{") ) {
-            int first = s.indexOf('{');
-            int last = s.lastIndexOf('}');
-            if (first >= 0 && last >= first) {
-                return s.substring(first, last + 1);
+            int firstNewline = trimmedJson.indexOf('\n');
+            if (firstNewline >= 0) {
+                trimmedJson = trimmedJson.substring(firstNewline + 1);
+            }
+            int lastFence = trimmedJson.lastIndexOf("```");
+            if (lastFence >= 0) {
+                trimmedJson = trimmedJson.substring(0, lastFence).trim();
             }
         }
-        return s;
+        if (!trimmedJson.startsWith("{")) {
+            int firstBrace = trimmedJson.indexOf('{');
+            int lastBrace = trimmedJson.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace >= firstBrace) {
+                return trimmedJson.substring(firstBrace, lastBrace + 1);
+            }
+        }
+        return trimmedJson;
     }
 }
-

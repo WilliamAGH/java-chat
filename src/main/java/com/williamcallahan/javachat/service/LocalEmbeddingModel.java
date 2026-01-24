@@ -1,9 +1,10 @@
 package com.williamcallahan.javachat.service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.Embedding;
@@ -15,7 +16,11 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClientException;
 
+/**
+ * Embedding model wrapper that calls a local service with safe fallbacks.
+ */
 public class LocalEmbeddingModel implements EmbeddingModel {
 
     private static final Logger log = LoggerFactory.getLogger(
@@ -28,8 +33,24 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     private final RestTemplate restTemplate;
     private boolean serverAvailable = true;
     private long lastCheckTime = 0;
-    private static final long CHECK_INTERVAL_MS = 60000; // Re-check every minute
+    private static final long CHECK_INTERVAL_MS = 60_000L;
+    private static final int CONNECT_TIMEOUT_SECONDS = 10;
+    private static final int READ_TIMEOUT_SECONDS = 60;
+    private static final int FALLBACK_DIMENSION_LIMIT = 100;
+    private static final float FALLBACK_SCALE = 0.1f;
+    private static final int BYTE_MAX = 255;
+    private static final float BYTE_MIDPOINT = 0.5f;
+    private static final String HASH_ALGORITHM = "SHA-256";
+    private static final float[] EMPTY_VECTOR = new float[0];
 
+    /**
+     * Creates a local embedding model backed by the configured service endpoint.
+     *
+     * @param baseUrl local embedding base URL
+     * @param modelName embedding model name
+     * @param dimensions embedding vector dimensions
+     * @param restTemplateBuilder RestTemplate builder
+     */
     public LocalEmbeddingModel(
         String baseUrl,
         String modelName,
@@ -40,8 +61,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         this.modelName = modelName;
         this.dimensions = dimensions;
         this.restTemplate = restTemplateBuilder
-            .connectTimeout(java.time.Duration.ofSeconds(10))
-            .readTimeout(java.time.Duration.ofSeconds(60))
+            .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+            .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
             .build();
         // Check server availability on startup
         checkServerAvailability();
@@ -59,22 +80,26 @@ public class LocalEmbeddingModel implements EmbeddingModel {
             restTemplate.getForObject(healthUrl, String.class);
             if (!serverAvailable) {
                 log.info(
-                    "[EMBEDDING] Local embedding server is now available at {}",
-                    baseUrl
+                    "[EMBEDDING] Local embedding server is now available"
                 );
             }
             serverAvailable = true;
-        } catch (Exception e) {
+        } catch (RestClientException healthCheckException) {
             if (serverAvailable) {
                 log.warn(
-                    "[EMBEDDING] Local embedding server not reachable at {}. Using fallback embeddings (this message appears once).",
-                    baseUrl
+                    "[EMBEDDING] Local embedding server not reachable. Using fallback embeddings."
                 );
             }
             serverAvailable = false;
         }
     }
 
+    /**
+     * Generates embeddings for the provided request, falling back when needed.
+     *
+     * @param request embedding request payload
+     * @return embedding response
+     */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
         checkServerAvailability();
@@ -85,8 +110,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
 
         try {
             return callEmbeddingApi(request);
-        } catch (Exception e) {
-            return handleApiFailure(e, request);
+        } catch (RestClientException | IllegalStateException apiException) {
+            return handleApiFailure(apiException, request);
         }
     }
 
@@ -114,16 +139,14 @@ public class LocalEmbeddingModel implements EmbeddingModel {
      */
     private EmbeddingResponse callEmbeddingApi(EmbeddingRequest request) {
         log.debug(
-            "[EMBEDDING] Generating embeddings for {} texts using model: {}",
-            request.getInstructions().size(),
-            modelName
+            "[EMBEDDING] Generating embeddings for request payload"
         );
 
         List<Embedding> embeddings = new ArrayList<>();
 
         for (String text : request.getInstructions()) {
             float[] vector = fetchEmbeddingFromApi(text);
-            if (vector != null) {
+            if (vector.length > 0) {
                 embeddings.add(new Embedding(vector, embeddings.size()));
             } else {
                 embeddings.add(
@@ -146,28 +169,20 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     private float[] fetchEmbeddingFromApi(String text) {
         String url = baseUrl + "/v1/embeddings";
 
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", modelName);
-        requestBody.put("input", text);
+        EmbeddingRequestPayload requestBody = new EmbeddingRequestPayload(modelName, text);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(
-            requestBody,
-            headers
-        );
+        HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(requestBody, headers);
 
         log.debug(
-            "[EMBEDDING] Calling API at: {} for text of length: {} chars",
-            url,
-            text.length()
+            "[EMBEDDING] Calling embedding API"
         );
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> response = restTemplate.postForObject(
+        EmbeddingResponsePayload response = restTemplate.postForObject(
             url,
             entity,
-            Map.class
+            EmbeddingResponsePayload.class
         );
 
         return parseEmbeddingResponse(response);
@@ -176,24 +191,25 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     /**
      * Parse the embedding vector from the API response.
      */
-    @SuppressWarnings("unchecked")
-    private float[] parseEmbeddingResponse(Map<String, Object> response) {
-        if (response == null || !response.containsKey("data")) {
-            log.error("Invalid response from embedding API: {}", response);
-            return null;
+    private float[] parseEmbeddingResponse(EmbeddingResponsePayload response) {
+        if (response == null || response.data() == null) {
+            log.error("Invalid response from embedding API");
+            return EMPTY_VECTOR;
         }
 
-        List<Map<String, Object>> dataList = (List<
-            Map<String, Object>
-        >) response.get("data");
+        List<EmbeddingData> dataList = response.data();
         if (dataList.isEmpty()) {
             log.error("Empty data list in embedding API response");
-            return null;
+            return EMPTY_VECTOR;
         }
 
-        List<Double> embeddingList = (List<Double>) dataList
-            .get(0)
-            .get("embedding");
+        EmbeddingData first = dataList.get(0);
+        if (first == null || first.embedding() == null || first.embedding().isEmpty()) {
+            log.error("Empty embedding payload in embedding API response");
+            return EMPTY_VECTOR;
+        }
+
+        List<Double> embeddingList = first.embedding();
         float[] vector = new float[embeddingList.size()];
         for (int i = 0; i < embeddingList.size(); i++) {
             vector[i] = embeddingList.get(i).floatValue();
@@ -207,12 +223,12 @@ public class LocalEmbeddingModel implements EmbeddingModel {
      * Handle API failure by marking server unavailable and returning fallback embeddings.
      */
     private EmbeddingResponse handleApiFailure(
-        Exception e,
+        RuntimeException exception,
         EmbeddingRequest request
     ) {
         log.warn(
-            "[EMBEDDING] Failed to get embeddings from server, using fallback: {}",
-            e.getMessage()
+            "[EMBEDDING] Failed to get embeddings from server, using fallback (exceptionType={})",
+            exception.getClass().getName()
         );
         serverAvailable = false;
         lastCheckTime = System.currentTimeMillis();
@@ -226,20 +242,43 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         // This is not semantically meaningful but allows the app to continue
         float[] vector = new float[dimensions];
         if (text != null && !text.isEmpty()) {
-            int hash = text.hashCode();
-            java.util.Random rand = new java.util.Random(hash);
-            for (int i = 0; i < Math.min(dimensions, 100); i++) {
-                vector[i] = (rand.nextFloat() - 0.5f) * 0.1f; // Small values
+            byte[] hashBytes = hashText(text);
+            int limit = Math.min(dimensions, FALLBACK_DIMENSION_LIMIT);
+            for (int index = 0; index < limit; index++) {
+                int byteIndex = index % hashBytes.length;
+                int normalizedByte = Byte.toUnsignedInt(hashBytes[byteIndex]);
+                float centered = (normalizedByte / (float) BYTE_MAX) - BYTE_MIDPOINT;
+                vector[index] = centered * FALLBACK_SCALE;
             }
         }
         return vector;
     }
 
+    private byte[] hashText(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+            return digest.digest(text.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException hashException) {
+            throw new IllegalStateException("Missing hash algorithm: " + HASH_ALGORITHM, hashException);
+        }
+    }
+
+    /**
+     * Returns the configured embedding dimensions.
+     *
+     * @return embedding dimensions
+     */
     @Override
     public int dimensions() {
         return dimensions;
     }
 
+    /**
+     * Embeds a single document, falling back if the local service is unavailable.
+     *
+     * @param document document to embed
+     * @return embedding vector
+     */
     @Override
     public float[] embed(org.springframework.ai.document.Document document) {
         EmbeddingRequest request = new EmbeddingRequest(
@@ -252,5 +291,14 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         }
         log.warn("Failed to embed document, returning fallback vector");
         return createFallbackEmbedding(document.getText());
+    }
+
+    private record EmbeddingRequestPayload(String model, String input) {
+    }
+
+    private record EmbeddingResponsePayload(List<EmbeddingData> data) {
+    }
+
+    private record EmbeddingData(List<Double> embedding) {
     }
 }

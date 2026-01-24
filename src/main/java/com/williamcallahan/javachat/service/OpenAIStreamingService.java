@@ -2,14 +2,23 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
-import com.openai.core.JsonValue;
+import com.openai.core.RequestOptions;
+import com.openai.core.Timeout;
 import com.openai.core.http.StreamResponse;
-import com.openai.helpers.ChatCompletionAccumulator;
-import com.openai.models.ChatModel;
-import com.openai.models.chat.completions.ChatCompletion;
-import com.openai.models.chat.completions.ChatCompletionChunk;
-import com.openai.models.chat.completions.ChatCompletionCreateParams;
+import com.openai.errors.OpenAIIoException;
+import com.openai.errors.OpenAIServiceException;
+import com.openai.models.Reasoning;
+import com.openai.models.ReasoningEffort;
+import com.openai.models.ResponsesModel;
+import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseOutputItem;
+import com.openai.models.responses.ResponseOutputMessage;
+import com.openai.models.responses.ResponseOutputText;
+import com.openai.models.responses.ResponseStreamEvent;
+import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,10 +27,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.lang.reflect.Method;
- 
-
-import java.util.concurrent.atomic.AtomicReference;
+import jakarta.annotation.PreDestroy;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -34,18 +41,40 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
-    
+    private static final String USER_MARKER = "User:";
+    private static final String CONTEXT_MARKER = "[CTX ";
+    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
+    private static final String PARAGRAPH_SEPARATOR = "\n\n";
+    private static final int MAX_COMPLETION_TOKENS = 4000;
+    private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
+    /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
+    private static final String GPT_5_MODEL_PREFIX = "gpt-5";
+
+    /** Safe token budget for GPT-5.2 input (8K limit). */
+    private static final int MAX_TOKENS_GPT5_INPUT = 7000;
+
+    /** Generous token budget for high-context models. */
+    private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
+
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
-    private boolean isAvailable = false;
-    private String primaryDescription = null;
-    private String secondaryDescription = null;
+    private volatile boolean isAvailable = false;
     private final RateLimitManager rateLimitManager;
+    private final Chunker chunker;
+
     // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
     private volatile long primaryBackoffUntilEpochMs = 0L;
     
-    public OpenAIStreamingService(RateLimitManager rateLimitManager) {
+    /**
+     * Creates a streaming service that can consult rate limit state when selecting an active provider.
+     *
+     * @param rateLimitManager rate limit state tracker
+     * @param chunker token-aware text chunker
+     */
+    public OpenAIStreamingService(RateLimitManager rateLimitManager, Chunker chunker) {
         this.rateLimitManager = rateLimitManager;
+        this.chunker = chunker;
     }
 
     @Value("${GITHUB_TOKEN:}")
@@ -54,48 +83,98 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_API_KEY:}")
     private String openaiApiKey;
     
-    @Value("${OPENAI_MODEL:gpt-5}")
-    private String model;
-    
+    @Value("${OPENAI_BASE_URL:https://api.openai.com/v1}")
+    private String openaiBaseUrl;
+
+    @Value("${OPENAI_MODEL:gpt-5.2}")
+    private String openaiModel;
+
+    @Value("${GITHUB_MODELS_CHAT_MODEL:gpt-5}")
+    private String githubModelsChatModel;
+
     @Value("${GITHUB_MODELS_BASE_URL:https://models.github.ai/inference/v1}")
     private String githubModelsBaseUrl;
     
+    @Value("${OPENAI_REASONING_EFFORT:}")
+    private String reasoningEffortSetting;
+
+    @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
+    private long streamingRequestTimeoutSeconds;
+
+    @Value("${OPENAI_STREAMING_READ_TIMEOUT_SECONDS:75}")
+    private long streamingReadTimeoutSeconds;
+
     @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}")
     private long primaryBackoffSeconds;
     
+
+    /**
+     * Initializes OpenAI-compatible clients for configured providers after Spring injects credentials.
+     */
     @jakarta.annotation.PostConstruct
     public void initializeClient() {
         try {
             // Initialize both when possible; prefer GitHub Models as primary
             if (githubToken != null && !githubToken.isBlank()) {
                 log.info("Initializing OpenAI client with GitHub Models endpoint");
-                this.clientPrimary = OpenAIOkHttpClient.builder()
-                        .apiKey(githubToken)
-                        .baseUrl(githubModelsBaseUrl)
-                        .timeout(java.time.Duration.ofSeconds(30))
-                        .build();
+                this.clientPrimary = createClient(githubToken, githubModelsBaseUrl);
                 log.info("OpenAI client initialized successfully with GitHub Models");
-                this.primaryDescription = "GitHub Models (" + githubModelsBaseUrl + ")";
             }
             if (openaiApiKey != null && !openaiApiKey.isBlank()) {
                 log.info("Initializing OpenAI client with OpenAI API (fallback)");
-                this.clientSecondary = OpenAIOkHttpClient.builder()
-                        .apiKey(openaiApiKey)
-                        .baseUrl("https://api.openai.com/v1")
-                        .timeout(java.time.Duration.ofSeconds(30))
-                        .build();
+                this.clientSecondary = createClient(openaiApiKey, openaiBaseUrl);
                 log.info("OpenAI client initialized successfully with OpenAI API");
-                this.secondaryDescription = "OpenAI (https://api.openai.com/v1)";
             }
             this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
             if (!this.isAvailable) {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
-                this.isAvailable = false;
+            } else {
+                log.info(
+                    "OpenAI streaming available (githubModel={}, openaiModel={}, primary={}, secondary={})",
+                    githubModelsChatModel,
+                    openaiModel,
+                    clientPrimary != null,
+                    clientSecondary != null
+                );
             }
-        } catch (Exception e) {
-            log.error("Failed to initialize OpenAI client", e);
-            this.isAvailable = false;
+        } catch (RuntimeException initializationException) {
+            log.error("Failed to initialize OpenAI client", initializationException);
+            this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
+            if (!this.isAvailable) {
+                log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
+            }
         }
+    }
+
+    /**
+     * Closes OpenAI clients during application shutdown.
+     */
+    @PreDestroy
+    public void shutdown() {
+        closeClientSafely(clientPrimary, "primary");
+        closeClientSafely(clientSecondary, "secondary");
+    }
+
+    private void closeClientSafely(OpenAIClient client, String clientName) {
+        if (client == null) {
+            return;
+        }
+        try {
+            client.close();
+            log.debug("Closed OpenAI client ({})", clientName);
+        } catch (RuntimeException closeException) {
+            log.warn("Failed to close OpenAI client ({})", clientName, closeException);
+        }
+    }
+
+    private OpenAIClient createClient(String apiKey, String baseUrl) {
+        return OpenAIOkHttpClient.builder()
+                .apiKey(apiKey)
+                .baseUrl(normalizeBaseUrl(baseUrl))
+                // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
+                // Retries cause InterruptedException when Reactor cancels a sleeping retry.
+                .maxRetries(0)
+                .build();
     }
     
     /**
@@ -106,216 +185,256 @@ public class OpenAIStreamingService {
      * @return A Flux of content strings as they arrive from the model
      */
     public Flux<String> streamResponse(String prompt, double temperature) {
-        log.debug("Starting OpenAI stream for prompt length: {}", prompt.length());
-        
-        return Flux.<String>create(sink -> {
-            try {
-                ChatCompletionCreateParams params = buildChatParams(prompt, temperature);
-                OpenAIClient first = selectClientForStreaming();
-                if (first == null) {
-                    log.error("No OpenAI-compatible client is configured or available for streaming. "
-                            + "Check API credentials and configuration.");
-                    sink.error(new IllegalStateException(
-                            "No OpenAI-compatible client is configured or available for streaming."));
-                    return;
-                }
-                ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
-                AtomicReference<ChatCompletion> finalCompletion = new AtomicReference<>();
-                
-                RateLimitManager.ApiProvider firstProvider = (first == clientPrimary)
-                        ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                        : RateLimitManager.ApiProvider.OPENAI;
-                log.info("[LLM] Streaming via {}", describeProvider(first));
-                try (StreamResponse<ChatCompletionChunk> streamResponse =
-                        first.chat().completions().createStreaming(params)) {
-                    
-                    streamResponse.stream()
-                        .peek(accumulator::accumulate)  // Accumulate for final result
-                        .forEach(chunk -> {
-                            log.debug("Raw chunk: {}", chunk);
-                            chunk.choices().forEach(choice -> {
-                                log.debug("Choice delta: {}", choice.delta());
-                                choice.delta().content().ifPresent(content -> {
-                                    log.debug("Received content chunk: '{}'", content);
-                                    sink.next(content);
-                                });
-                            });
-                        });
-                    
-                    // Get the complete response for any post-processing needs
-                    finalCompletion.set(accumulator.chatCompletion());
-                    log.debug("Stream completed successfully");
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(firstProvider);
-                    }
-                    sink.complete();
-                    
-                } catch (Exception e) {
-                    log.error("[LLM] Primary streaming failed ({}): {}", describeProvider(first), summarize(e));
-                    if (first == clientPrimary && isRetryablePrimaryFailure(e)) {
-                        markPrimaryBackoff("stream failure: " + summarize(e));
-                        if (rateLimitManager != null) {
-                            rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, e.getMessage());
-                        }
-                    }
-                    // Fallback once if secondary available
-                    try {
-                        OpenAIClient alt = selectAlternateClient();
-                        if (alt != null) {
-                            log.info("[LLM] Retrying streaming with alternate provider: {}", describeProvider(alt));
-                            try (StreamResponse<ChatCompletionChunk> altResponse =
-                                         alt.chat().completions().createStreaming(params)) {
-                                altResponse.stream()
-                                        .peek(com.openai.helpers.ChatCompletionAccumulator.create()::accumulate)
-                                        .forEach(chunk -> chunk.choices().forEach(choice ->
-                                                choice.delta().content().ifPresent(sink::next)));
-                                if (rateLimitManager != null) {
-                                    rateLimitManager.recordSuccess(RateLimitManager.ApiProvider.OPENAI);
-                                }
-                                sink.complete();
-                                return;
-                            }
-                        }
-                    } catch (Exception ex) {
-                        log.error("[LLM] Alternate provider streaming failed ({}): {}", describeProvider(selectAlternateClient()), summarize(ex));
-                    }
-                    sink.error(e);
-                }
-                
-            } catch (Exception e) {
-                log.error("Error setting up OpenAI stream", e);
-                sink.error(e);
+        log.debug("Starting OpenAI stream");
+
+        return Flux.<String>defer(() -> {
+            // Select client first to determine which provider's model name to use
+            OpenAIClient streamingClient = selectClientForStreaming();
+
+            if (streamingClient == null) {
+                String error = "All LLM providers unavailable - check rate limits and API credentials";
+                log.error("[LLM] {}", error);
+                return Flux.<String>error(new IllegalStateException(error));
             }
+
+            boolean useGitHubModels = isPrimaryClient(streamingClient);
+            RateLimitManager.ApiProvider activeProvider = useGitHubModels
+                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                    : RateLimitManager.ApiProvider.OPENAI;
+
+            // Build params with provider-specific model after client selection
+            String truncatedPrompt = truncatePromptForModel(prompt);
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
+            log.info("[LLM] [{}] Streaming started", activeProvider.getName());
+            
+            RequestOptions requestOptions = RequestOptions.builder()
+                .timeout(streamingTimeout())
+                .build();
+
+            // StreamResponse implements AutoCloseable; explicit type params help inference
+            return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
+                () -> streamingClient.responses().createStreaming(params, requestOptions),
+                (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
+                    .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event)))
+            )
+            .doOnComplete(() -> {
+                log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
+                if (rateLimitManager != null) {
+                    rateLimitManager.recordSuccess(activeProvider);
+                }
+            })
+            .doOnError(exception -> {
+                log.error("[LLM] [{}] Streaming failed: {}",
+                        activeProvider.getName(), exception.getMessage(), exception);
+                if (rateLimitManager != null) {
+                    recordProviderFailure(activeProvider, exception);
+                }
+                maybeBackoffPrimary(streamingClient, exception);
+            });
         })
         // Move blocking SDK stream consumption off the servlet thread.
         // Prevents thread starvation and aligns with Reactor best practices.
         .subscribeOn(Schedulers.boundedElastic());
     }
-    
+
     /**
      * Get a complete (non-streaming) response from OpenAI (async wrapper).
      */
     public Mono<String> complete(String prompt, double temperature) {
         final String truncatedPrompt = truncatePromptForModel(prompt);
-        return Mono.fromCallable(() -> {
-            OpenAIClient first = selectClientForBlocking();
-            ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
+        return Mono.defer(() -> {
+            OpenAIClient blockingClient = selectClientForBlocking();
+            if (blockingClient == null) {
+                String error = "All LLM providers unavailable - check rate limits and API credentials";
+                log.error("[LLM] {}", error);
+                return Mono.error(new IllegalStateException(error));
+            }
+            boolean useGitHubModels = isPrimaryClient(blockingClient);
+            RateLimitManager.ApiProvider activeProvider = useGitHubModels
+                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                    : RateLimitManager.ApiProvider.OPENAI;
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
             try {
-                log.info("[LLM] Complete via {}", describeProvider(first));
-                ChatCompletion completion = first.chat().completions().create(params);
+                log.info("[LLM] [{}] Complete started", activeProvider.getName());
+                RequestOptions requestOptions = RequestOptions.builder()
+                    .timeout(completeTimeout())
+                    .build();
+                Response completion = blockingClient.responses().create(params, requestOptions);
                 if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(first == clientPrimary
-                            ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                            : RateLimitManager.ApiProvider.OPENAI);
+                    rateLimitManager.recordSuccess(activeProvider);
                 }
-                return completion.choices().stream()
-                        .findFirst()
-                        .flatMap(choice -> choice.message().content())
-                        .orElse("");
-            } catch (Exception primaryError) {
-                if (first == clientPrimary && isRetryablePrimaryFailure(primaryError)) {
-                    markPrimaryBackoff("complete failure: " + summarize(primaryError));
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, primaryError.getMessage());
-                    }
+                log.debug("[LLM] [{}] Complete succeeded", activeProvider.getName());
+                String response = extractTextFromResponse(completion);
+                return Mono.just(response);
+            } catch (RuntimeException completionException) {
+                log.error("[LLM] [{}] Complete failed: {}",
+                        activeProvider.getName(), completionException.getMessage(), completionException);
+                if (rateLimitManager != null) {
+                    recordProviderFailure(activeProvider, completionException);
                 }
-                OpenAIClient alt = selectAlternateClient();
-                if (alt != null) {
-                    log.warn("[LLM] Primary complete failed ({}), retrying with {}: {}",
-                            describeProvider(first), describeProvider(alt), summarize(primaryError));
-                    ChatCompletion completion = alt.chat().completions().create(params);
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(RateLimitManager.ApiProvider.OPENAI);
-                    }
-                    return completion.choices().stream()
-                            .findFirst()
-                            .flatMap(choice -> choice.message().content())
-                            .orElse("");
-                }
-                throw primaryError;
+                maybeBackoffPrimary(blockingClient, completionException);
+                return Mono.error(completionException);
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
-    
-    private ChatCompletionCreateParams buildChatParams(String prompt, double temperature) {
-        // Enforce GPT-5; never regress the model
-        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
-                .addUserMessage(prompt)
-                .model(ChatModel.GPT_5);
 
-        // GPT-5: omit temperature and set conservative max output tokens
-        builder.maxCompletionTokens(4000);
-        log.debug("Using GPT-5 configuration (no regression)");
+    private Timeout streamingTimeout() {
+        return Timeout.builder()
+            .request(java.time.Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
+            .read(java.time.Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
+            .build();
+    }
 
-        // Attempt to set reasoning_effort=minimal when supported by the SDK
-        trySetReasoningEffort(builder);
+    private Timeout completeTimeout() {
+        return Timeout.builder()
+            .request(java.time.Duration.ofSeconds(COMPLETE_REQUEST_TIMEOUT_SECONDS))
+            .build();
+    }
+
+    private void recordProviderFailure(RateLimitManager.ApiProvider provider, Throwable throwable) {
+        if (!(throwable instanceof OpenAIServiceException serviceException)) {
+            if (isRetryablePrimaryFailure(throwable)) {
+                rateLimitManager.recordRateLimit(provider, throwable.getMessage());
+            }
+            return;
+        }
+
+        if (serviceException.statusCode() == 429) {
+            rateLimitManager.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+        }
+    }
+
+    private void maybeBackoffPrimary(OpenAIClient client, Throwable throwable) {
+        if (!isPrimaryClient(client)) {
+            return;
+        }
+        if (isRetryablePrimaryFailure(throwable)) {
+            markPrimaryBackoff();
+        }
+    }
+
+    private ResponseCreateParams buildResponseParams(String prompt, double temperature, boolean useGitHubModels) {
+        String normalizedModelId = normalizedModelId(useGitHubModels);
+        boolean gpt5Family = isGpt5Family(normalizedModelId);
+        boolean reasoningModel = gpt5Family || normalizedModelId.startsWith("o");
+
+        ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
+                .input(prompt)
+                .model(ResponsesModel.ofString(normalizedModelId));
+
+        if (gpt5Family) {
+            // GPT-5 family: omit temperature and set conservative max output tokens
+            builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
+            log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
+
+            ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
+            if (effort != null) {
+                builder.reasoning(Reasoning.builder().effort(effort).build());
+            }
+        } else if (!reasoningModel && Double.isFinite(temperature)) {
+            builder.temperature(temperature);
+        }
 
         return builder.build();
     }
 
-    /**
-     * Best-effort application of reasoning_effort="minimal" without creating a compile-time
-     * dependency on specific SDK versions. Uses reflection to call either a typed
-     * reasoningEffort(Enum) method, or falls back to an extra body map if available.
-     */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private void trySetReasoningEffort(ChatCompletionCreateParams.Builder builder) {
-        try {
-            // 1) Preferred: builder.reasoningEffort(ReasoningEffort.MINIMAL)
-            for (Method m : builder.getClass().getMethods()) {
-                if ("reasoningEffort".equals(m.getName()) && m.getParameterCount() == 1) {
-                    Class<?> paramType = m.getParameterTypes()[0];
-                    if (paramType.isEnum()) {
-                        Object minimal = Enum.valueOf((Class<Enum>) paramType, "MINIMAL");
-                        m.invoke(builder, minimal);
-                        log.info("[LLM] reasoning_effort=MINIMAL (SDK enum)");
-                        return;
-                    }
+    private String extractTextDelta(ResponseStreamEvent event) {
+        return event.outputTextDelta()
+            .map(ResponseTextDeltaEvent::delta)
+            .orElse(null);
+    }
+
+    private String extractTextFromResponse(Response response) {
+        if (response == null) {
+            return "";
+        }
+        StringBuilder outputBuilder = new StringBuilder();
+        for (ResponseOutputItem outputItem : response.output()) {
+            if (!outputItem.isMessage()) {
+                continue;
+            }
+            ResponseOutputMessage message = outputItem.asMessage();
+            for (ResponseOutputMessage.Content content : message.content()) {
+                if (content.isOutputText()) {
+                    ResponseOutputText outputText = content.asOutputText();
+                    outputBuilder.append(outputText.text());
                 }
             }
-
-            // 2) Fallback: Chat Completions supports only top-level "reasoning_effort"
-            //    Do NOT send a nested "reasoning" object on this endpoint.
-            builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
-            log.info("[LLM] reasoning_effort set via additional body property");
-            return;
-        } catch (Exception ex) {
-            log.debug("Skipping reasoning_effort due to SDK compatibility: {}", ex.toString());
         }
+        return outputBuilder.toString();
     }
     
-    
-    
-    // Model mapping removed to prevent unintended regression; GPT-5 is enforced
+    // Model mapping removed to prevent unintended regression; use configured model id
     
     /**
      * Truncate prompt conservatively based on model limits to avoid 413 errors.
+     *
+     * <p>Uses conservative GPT-5 family limits since both GitHub Models (gpt-5) and
+     * OpenAI (gpt-5.2) share the same 8K input constraint.</p>
      */
     private String truncatePromptForModel(String prompt) {
         if (prompt == null || prompt.isEmpty()) return prompt;
-        // Approximate safe character budgets (chars ~ tokens * ~4)
-        final int MAX_CHARS_GPT5_INPUT = 28_000; // ~7k tokens, under 8k input limit
-        final int MAX_CHARS_DEFAULT = 400_000;   // generous for high-context models
 
-        int limit = ("gpt-5".equalsIgnoreCase(model) || "gpt-5-chat".equalsIgnoreCase(model))
-            ? MAX_CHARS_GPT5_INPUT
-            : MAX_CHARS_DEFAULT;
+        // Both gpt-5 and gpt-5.2 are GPT-5 family with same token limits,
+        // so we use conservative limits regardless of which provider is selected later
+        String openaiModelId = normalizedModelId(false);
+        String githubModelId = normalizedModelId(true);
+        boolean isGpt5 = isGpt5Family(openaiModelId) || isGpt5Family(githubModelId);
+        boolean isReasoningModel = isGpt5 || openaiModelId.startsWith("o") || githubModelId.startsWith("o");
 
-        if (prompt.length() <= limit) return prompt;
+        int tokenLimit = isReasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
 
-        // Prefer keeping the most recent context and user message
-        String marker = "User:";
-        int lastUserIdx = prompt.lastIndexOf(marker);
-        if (lastUserIdx > 0 && lastUserIdx > prompt.length() - 2_000) {
-            String recent = prompt.substring(Math.max(0, prompt.length() - limit));
-            // Trim to a clean-ish boundary
-            int para = recent.indexOf("\n\n");
-            if (para > 0 && para < 2_000) recent = recent.substring(para + 2);
-            int ctx = recent.indexOf("[CTX ");
-            if (ctx > 0 && ctx < 2_000) recent = recent.substring(ctx);
-            return "[Context truncated due to GPT-5 8K input limit]\n\n" + recent;
+        String truncated = chunker.keepLastTokens(prompt, tokenLimit);
+
+        if (truncated.length() < prompt.length()) {
+            String notice = isGpt5 ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
+            return notice + truncated;
         }
-        return "[Context truncated due to model input limit]\n\n" + prompt.substring(prompt.length() - limit);
+        
+        return prompt;
+    }
+
+    /**
+     * Returns the normalized model ID for the specified provider.
+     *
+     * @param useGitHubModels true to use GitHub Models model name, false for OpenAI
+     * @return lowercase model ID appropriate for the provider
+     */
+    private String normalizedModelId(boolean useGitHubModels) {
+        String rawModelId;
+        String defaultModel;
+        if (useGitHubModels) {
+            rawModelId = githubModelsChatModel == null ? "" : githubModelsChatModel.trim();
+            defaultModel = "gpt-5";
+        } else {
+            rawModelId = openaiModel == null ? "" : openaiModel.trim();
+            defaultModel = "gpt-5.2";
+        }
+        return rawModelId.isEmpty() ? defaultModel : AsciiTextNormalizer.toLowerAscii(rawModelId);
+    }
+
+    private boolean isGpt5Family(String modelId) {
+        return modelId != null && modelId.startsWith(GPT_5_MODEL_PREFIX);
+    }
+
+    private ReasoningEffort resolveReasoningEffort(String normalizedModelId) {
+        if (reasoningEffortSetting == null || reasoningEffortSetting.isBlank()) {
+            return null;
+        }
+        return ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+    }
+
+    private String normalizeBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return baseUrl;
+        }
+        String trimmed = baseUrl.trim();
+        String normalized = trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        if (normalized.endsWith("/inference")) {
+            // openai-java expects baseUrl to include the API version prefix, e.g. /v1.
+            return normalized + "/v1";
+        }
+        return normalized;
     }
     
     /**
@@ -326,74 +445,90 @@ public class OpenAIStreamingService {
     }
 
     private OpenAIClient selectClientForStreaming() {
-        // Fast-fail preference for the day: if manager says OpenAI is available, use it directly
-        if (rateLimitManager != null && clientSecondary != null && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
-            return clientSecondary;
-        }
-
-        boolean githubOk = clientPrimary != null && !isPrimaryInBackoff();
-        if (rateLimitManager != null && clientPrimary != null) {
-            githubOk = githubOk && rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS);
-        }
-        if (githubOk) return clientPrimary;
+        // Prefer OpenAI when available (more reliable, shorter rate limit windows)
         if (clientSecondary != null) {
-            if (rateLimitManager == null || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+            if (rateLimitManager == null
+                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.OPENAI.getName());
                 return clientSecondary;
             }
         }
-        return clientPrimary; // may be null; upstream will handle availability
+
+        // Try GitHub Models if not in backoff and not rate limited
+        if (clientPrimary != null && !isPrimaryInBackoff()) {
+            if (rateLimitManager == null
+                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS)) {
+                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
+                return clientPrimary;
+            }
+        }
+
+        // All providers marked as rate limited - try OpenAI anyway (short rate limit windows).
+        // Let the API decide if we're actually still rate limited.
+        if (clientSecondary != null) {
+            log.warn("[{}] All providers marked as rate limited; attempting OpenAI anyway "
+                    + "(typical rate limits are 1-60 seconds)", RateLimitManager.ApiProvider.OPENAI.getName());
+            return clientSecondary;
+        }
+
+        // OpenAI not configured - try GitHub Models as last resort
+        if (clientPrimary != null) {
+            log.warn("[{}] All providers marked as rate limited; attempting GitHub Models as last resort",
+                    RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
+            return clientPrimary;
+        }
+
+        log.error("No LLM clients configured - check OPENAI_API_KEY and GITHUB_TOKEN environment variables");
+        return null;
     }
 
     private OpenAIClient selectClientForBlocking() {
         return selectClientForStreaming();
     }
 
-    private OpenAIClient selectAlternateClient() {
-        if (clientPrimary != null && clientSecondary != null) {
-            // If we failed on primary, return secondary
-            return clientSecondary;
+    private boolean isPrimaryClient(OpenAIClient client) {
+        return Objects.equals(client, clientPrimary);
+    }
+
+    private boolean isRateLimit(Throwable throwable) {
+        if (throwable instanceof RateLimitException) {
+            return true;
         }
-        return null;
-    }
-
-    private String describeProvider(OpenAIClient client) {
-        if (client == null) return "none";
-        if (client == clientPrimary && primaryDescription != null) return primaryDescription;
-        if (client == clientSecondary && secondaryDescription != null) return secondaryDescription;
-        return "unknown";
-    }
-
-    private String summarize(Exception e) {
-        String s = e.toString();
-        if (s.length() > 180) return s.substring(0, 180) + "…";
-        return s;
+        if (throwable instanceof OpenAIServiceException serviceException) {
+            return serviceException.statusCode() == 429;
+        }
+        return false;
     }
     
-    private boolean isRateLimit(Throwable t) {
-        if (t instanceof RateLimitException) return true;
-        String m = t.getMessage();
-        return m != null && (m.contains("Rate limit") || m.contains("429"));
-    }
-    
-    private boolean isRetryablePrimaryFailure(Throwable t) {
-        // Treat common transient failures as retryable to enable fast fallback
-        return isRateLimit(t)
-                || t instanceof java.util.concurrent.TimeoutException
-                || t instanceof InterruptedException
-                || (t.getMessage() != null && t.getMessage().toLowerCase().contains("sleep interrupted"))
-                || t.toString().contains("401")
-                || t.toString().contains("403");
+    private boolean isRetryablePrimaryFailure(Throwable throwable) {
+        if (isRateLimit(throwable)) {
+            return true;
+        }
+        if (throwable instanceof OpenAIIoException) {
+            return true;
+        }
+        if (throwable instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+            return true;
+        }
+        if (throwable instanceof OpenAIServiceException serviceException) {
+            int statusCode = serviceException.statusCode();
+            return statusCode == 401 || statusCode == 403 || statusCode >= 500;
+        }
+        String message = throwable.getMessage();
+        return message != null && AsciiTextNormalizer.toLowerAscii(message).contains("sleep interrupted");
     }
     
     private boolean isPrimaryInBackoff() {
         return System.currentTimeMillis() < primaryBackoffUntilEpochMs;
     }
     
-    private void markPrimaryBackoff(String reason) {
+    private void markPrimaryBackoff() {
         long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
         this.primaryBackoffUntilEpochMs = until;
         long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
-        log.warn("Temporarily disabling primary provider {} for {}s due to {}",
-                describeProvider(clientPrimary), seconds, reason);
+        log.warn("[{}] Temporarily disabled for {}s due to failure",
+                RateLimitManager.ApiProvider.GITHUB_MODELS.getName(), seconds);
     }
+
 }

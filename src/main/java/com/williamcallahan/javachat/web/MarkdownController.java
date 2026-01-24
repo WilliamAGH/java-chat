@@ -1,15 +1,25 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.domain.markdown.MarkdownCacheClearOutcome;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCacheClearResponse;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCacheStatsSnapshot;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCacheStatsResponse;
+import com.williamcallahan.javachat.domain.markdown.MarkdownErrorResponse;
+import com.williamcallahan.javachat.domain.markdown.MarkdownRenderOutcome;
+import com.williamcallahan.javachat.domain.markdown.MarkdownRenderResponse;
+import com.williamcallahan.javachat.domain.markdown.MarkdownRenderRequest;
+import com.williamcallahan.javachat.domain.markdown.MarkdownStructuredErrorResponse;
+import com.williamcallahan.javachat.domain.markdown.MarkdownStructuredOutcome;
+import com.williamcallahan.javachat.domain.markdown.MarkdownStructuredResponse;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import jakarta.annotation.security.PermitAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 /**
  * REST controller for markdown rendering operations.
@@ -17,16 +27,30 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/markdown")
-@CrossOrigin(origins = "*")
+@PermitAll
+@PreAuthorize("permitAll()")
 public class MarkdownController {
     
     private static final Logger logger = LoggerFactory.getLogger(MarkdownController.class);
     
-    @Autowired
-    private MarkdownService markdownService;
+    private final MarkdownService markdownService;
+    private final UnifiedMarkdownService unifiedMarkdownService;
+    private final ExceptionResponseBuilder exceptionBuilder;
     
-    @Autowired
-    private UnifiedMarkdownService unifiedMarkdownService;
+    /**
+     * Creates a markdown controller with required services.
+     *
+     * @param markdownService legacy markdown processing service
+     * @param unifiedMarkdownService AST-based unified markdown processor
+     * @param exceptionBuilder shared exception response builder
+     */
+    public MarkdownController(MarkdownService markdownService,
+                              UnifiedMarkdownService unifiedMarkdownService,
+                              ExceptionResponseBuilder exceptionBuilder) {
+        this.markdownService = markdownService;
+        this.unifiedMarkdownService = unifiedMarkdownService;
+        this.exceptionBuilder = exceptionBuilder;
+    }
     
     /**
      * Renders markdown text to HTML. This endpoint uses server-side caching to improve performance
@@ -38,45 +62,45 @@ public class MarkdownController {
      *                    "content": "Your **markdown** text here."
      *                  }
      *                }</pre>
-     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
-     *         <pre>{@code {"html": "<p>...", "source": "server", "cached": true|false}}</pre>
+     * @return A {@link ResponseEntity} containing the rendered markdown outcome.
      */
     @PostMapping(value = "/render", 
                  consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> renderMarkdown(@RequestBody Map<String, String> request) {
+    public ResponseEntity<MarkdownRenderResponse> renderMarkdown(@RequestBody MarkdownRenderRequest renderRequest) {
         try {
-            String markdown = request.get("content");
-            
-            if (markdown == null || markdown.isEmpty()) {
-                return ResponseEntity.ok(Map.of(
-                    "html", "",
-                    "source", "server",
-                    "cached", false
+            if (renderRequest.isBlank()) {
+                return ResponseEntity.ok(new MarkdownRenderOutcome(
+                    "",
+                    "server",
+                    false,
+                    0,
+                    0
                 ));
             }
             
-            logger.debug("Processing markdown of length: {}", markdown.length());
+            logger.debug("Processing markdown of length: {}", renderRequest.content().length());
             
-            var processed = markdownService.processStructured(markdown);
+            var processed = markdownService.processStructured(renderRequest.content());
             
-            return ResponseEntity.ok(Map.of(
-                "html", processed.html(),
-                "source", "server",
-                "cached", false,  // Cache status not tracked at this layer
-                "citations", processed.citations().size(),
-                "enrichments", processed.enrichments().size()
+            return ResponseEntity.ok(new MarkdownRenderOutcome(
+                processed.html(),
+                "server",
+                false,
+                processed.citations().size(),
+                processed.enrichments().size()
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering markdown", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to render markdown",
-                "message", e.getMessage()
+        } catch (RuntimeException renderException) {
+            logger.error("Error rendering markdown (exception type: {})",
+                renderException.getClass().getSimpleName());
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to render markdown",
+                exceptionBuilder.describeException(renderException)
             ));
         }
     }
-    
+
     /**
      * Renders markdown text to HTML for a real-time preview. This endpoint does *not* use caching,
      * ensuring the latest content is always rendered.
@@ -87,38 +111,39 @@ public class MarkdownController {
      *                    "content": "Your **markdown** text here."
      *                  }
      *                }</pre>
-     * @return A {@link ResponseEntity} containing a {@link Map} with the rendered HTML. On success:
-     *         <pre>{@code {"html": "<p>...", "source": "preview", "cached": false}}</pre>
+     * @return A {@link ResponseEntity} containing the rendered markdown outcome.
      */
     @PostMapping(value = "/preview",
                  consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> previewMarkdown(@RequestBody Map<String, String> request) {
+    public ResponseEntity<MarkdownRenderResponse> previewMarkdown(@RequestBody MarkdownRenderRequest renderRequest) {
         try {
-            String markdown = request.get("content");
-            
-            if (markdown == null || markdown.isEmpty()) {
-                return ResponseEntity.ok(Map.of(
-                    "html", "",
-                    "source", "preview",
-                    "cached", false
+            if (renderRequest.isBlank()) {
+                return ResponseEntity.ok(new MarkdownRenderOutcome(
+                    "",
+                    "preview",
+                    false,
+                    0,
+                    0
                 ));
             }
             
-            var processed = markdownService.processStructured(markdown);
-            String html = processed.html();
+            var processed = markdownService.processStructured(renderRequest.content());
             
-            return ResponseEntity.ok(Map.of(
-                "html", html,
-                "source", "preview",
-                "cached", false
+            return ResponseEntity.ok(new MarkdownRenderOutcome(
+                processed.html(),
+                "preview",
+                false,
+                processed.citations().size(),
+                processed.enrichments().size()
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering preview markdown", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to render preview",
-                "message", e.getMessage()
+        } catch (RuntimeException previewException) {
+            logger.error("Error rendering preview markdown (exception type: {})",
+                previewException.getClass().getSimpleName());
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to render preview",
+                exceptionBuilder.describeException(previewException)
             ));
         }
     }
@@ -127,25 +152,27 @@ public class MarkdownController {
      * Retrieves statistics about the server-side markdown render cache.
      * Provides metrics like hit count, miss count, size, and hit rate.
      *
-     * @return A {@link ResponseEntity} with a {@link Map} containing cache statistics.
+     * @return A {@link ResponseEntity} with cache statistics.
      */
     @GetMapping("/cache/stats")
-    public ResponseEntity<Map<String, Object>> getCacheStats() {
+    public ResponseEntity<MarkdownCacheStatsResponse> getCacheStats() {
         try {
             var stats = unifiedMarkdownService.getCacheStats();
             
-            return ResponseEntity.ok(Map.of(
-                "hitCount", stats.hitCount(),
-                "missCount", stats.missCount(),
-                "evictionCount", stats.evictionCount(),
-                "size", stats.size(),
-                "hitRate", String.format("%.2f%%", stats.hitRate() * 100)
+            return ResponseEntity.ok(new MarkdownCacheStatsSnapshot(
+                stats.hitCount(),
+                stats.missCount(),
+                stats.evictionCount(),
+                stats.size(),
+                String.format("%.2f%%", stats.hitRate() * 100)
             ));
             
-        } catch (Exception e) {
-            logger.error("Error getting cache stats", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to get cache stats"
+        } catch (RuntimeException statsException) {
+            logger.error("Error getting cache stats (exception type: {})",
+                statsException.getClass().getSimpleName());
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to get cache stats",
+                exceptionBuilder.describeException(statsException)
             ));
         }
     }
@@ -156,21 +183,22 @@ public class MarkdownController {
      * @return A {@link ResponseEntity} with a status message.
      */
     @PostMapping("/cache/clear")
-    public ResponseEntity<Map<String, String>> clearCache() {
+    public ResponseEntity<MarkdownCacheClearResponse> clearCache() {
         try {
             unifiedMarkdownService.clearCache();
             logger.info("Markdown cache cleared via API");
             
-            return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Cache cleared successfully"
+            return ResponseEntity.ok(new MarkdownCacheClearOutcome(
+                "success",
+                "Cache cleared successfully"
             ));
             
-        } catch (Exception e) {
-            logger.error("Error clearing cache", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "status", "error",
-                "message", "Failed to clear cache"
+        } catch (RuntimeException clearException) {
+            logger.error("Error clearing cache (exception type: {})",
+                clearException.getClass().getSimpleName());
+            return ResponseEntity.status(500).body(new MarkdownCacheClearOutcome(
+                "error",
+                "Failed to clear cache: " + exceptionBuilder.describeException(clearException)
             ));
         }
     }
@@ -185,42 +213,43 @@ public class MarkdownController {
     @PostMapping(value = "/render/structured", 
                  consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> renderStructured(@RequestBody Map<String, String> request) {
+    public ResponseEntity<MarkdownStructuredResponse> renderStructured(@RequestBody MarkdownRenderRequest renderRequest) {
         try {
-            String markdown = request.get("content");
-            
-            if (markdown == null || markdown.isEmpty()) {
-                return ResponseEntity.ok(Map.of(
-                    "html", "",
-                    "citations", 0,
-                    "enrichments", 0,
-                    "warnings", 0,
-                    "processingTimeMs", 0L,
-                    "source", "unified-service"
+            if (renderRequest.isBlank()) {
+                return ResponseEntity.ok(new MarkdownStructuredOutcome(
+                    "",
+                    java.util.List.of(),
+                    java.util.List.of(),
+                    java.util.List.of(),
+                    0L,
+                    "unified-service",
+                    0,
+                    true
                 ));
             }
             
-            logger.debug("Processing markdown with UnifiedMarkdownService, length: {}", markdown.length());
+            logger.debug("Processing markdown with UnifiedMarkdownService, length: {}", renderRequest.content().length());
             
-            var processed = unifiedMarkdownService.process(markdown);
+            var processed = unifiedMarkdownService.process(renderRequest.content());
             
-            return ResponseEntity.ok(Map.of(
-                "html", processed.html(),
-                "citations", processed.citations(),
-                "enrichments", processed.enrichments(),
-                "warnings", processed.warnings(),
-                "processingTimeMs", processed.processingTimeMs(),
-                "source", "unified-service",
-                "structuredElementCount", processed.getStructuredElementCount(),
-                "isClean", processed.isClean()
+            return ResponseEntity.ok(new MarkdownStructuredOutcome(
+                processed.html(),
+                processed.citations(),
+                processed.enrichments(),
+                processed.warnings(),
+                processed.processingTimeMs(),
+                "unified-service",
+                processed.getStructuredElementCount(),
+                processed.isClean()
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering structured markdown", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Failed to render structured markdown",
-                "message", e.getMessage(),
-                "source", "unified-service"
+        } catch (RuntimeException structuredException) {
+            logger.error("Error rendering structured markdown (exception type: {})",
+                structuredException.getClass().getSimpleName());
+            return ResponseEntity.status(500).body(new MarkdownStructuredErrorResponse(
+                "Failed to render structured markdown",
+                "unified-service",
+                exceptionBuilder.describeException(structuredException)
             ));
         }
     }

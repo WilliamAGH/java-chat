@@ -1,105 +1,87 @@
 # ================================
-# LIGHTWEIGHT JAVA CHAT DOCKERFILE
+# JAVA CHAT DOCKERFILE
 # ================================
-# Memory-optimized for <512MB RAM usage
-# Uses modern Alpine Linux + Eclipse Temurin JRE
+# Multi-stage build for Frontend and Backend
+# Switched to Debian/Ubuntu-based images to resolve Alpine network issues
+# All images sourced from public.ecr.aws to avoid Docker Hub rate limits
 
 # ================================
-# BUILD STAGE - Maven + JDK
+# FRONTEND BUILD STAGE
 # ================================
-# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk-alpine AS builder
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS frontend-builder
+WORKDIR /app/frontend
 
-# Install Maven (Alpine package is lightweight)
-RUN apk add --no-cache maven
+# Copy dependency definitions
+COPY frontend/package*.json ./
+RUN npm ci
 
-# Set working directory
+# Copy source files
+COPY frontend/ .
+
+# Build frontend (outputs to ../src/main/resources/static/)
+# Favicons and static assets in frontend/public/ are automatically copied by Vite
+RUN npm run build
+
+# ================================
+# BACKEND BUILD STAGE
+# ================================
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
-# Copy Maven wrapper and pom.xml first (for better layer caching)
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
+# Copy Gradle wrapper, build files, and static analysis configs
+COPY gradle/ gradle/
+COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
+RUN chmod +x gradlew
 
-# Download dependencies (cached if pom.xml unchanged)
-RUN ./mvnw dependency:go-offline -B
+# Download dependencies (quiet mode to avoid verbose tree output)
+RUN ./gradlew dependencies --no-daemon -q
 
-# Copy source code
+# Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
 
-# Build the application
-RUN ./mvnw clean package -DskipTests -B
+# Copy built frontend assets (includes favicons + Svelte build) from frontend-builder
+COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
+
+# Build the application and copy bootable JAR to known location
+# Gradle produces two JARs: bootable (Spring Boot) and -plain.jar (non-bootable)
+RUN ./gradlew clean build -x test --no-daemon && \
+    cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
 
 # ================================
-# RUNTIME STAGE - JRE Only
+# RUNTIME STAGE
 # ================================
-# Use Amazon ECR Public mirror to avoid Docker Hub rate limits
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre-alpine AS runtime
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre AS runtime
 
-# Add labels for better container management
-LABEL maintainer="Java Chat Team" \
-      description="Lightweight Java Chat AI Application" \
-      version="1.0"
+# Install curl for health check
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install curl for health checks (minimal Alpine package)
-RUN apk add --no-cache curl
+# Create non-root user
+RUN useradd -u 1001 -m -s /bin/bash appuser
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
-
-# Set working directory
 WORKDIR /app
 
-# Copy the JAR from builder stage
-COPY --from=builder /app/target/*.jar app.jar
+# Copy the bootable JAR from builder stage
+COPY --from=builder /app/build/app.jar app.jar
 
-# Change ownership to non-root user
-RUN chown -R appuser:appgroup /app
+# Create logs directory and set permissions
+RUN mkdir -p logs && chown -R appuser:appuser logs app.jar
 
-# Switch to non-root user
 USER appuser
 
-# Expose port (Railway will assign via PORT env var)
 EXPOSE 8085
 
-# Health check using PORT environment variable
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/actuator/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
 
-# ================================
-# JVM OPTIMIZATION FOR <512MB RAM
-# ================================
-# Memory settings optimized for container constraints (512MB limit):
-# -Xmx192m: Max heap 192MB (shift budget to metaspace)
-# -Xms64m:  Small initial heap for faster start and lower RSS
-# -XX:MaxMetaspaceSize=192m: Allow more classes to prevent metaspace OOM
-# -XX:ReservedCodeCacheSize=32m: Cap JIT code cache
-# -XX:MaxDirectMemorySize=32m: Cap Netty/gRPC direct buffers
-# -Xss256k: Smaller thread stacks
-# -XX:+UseStringDeduplication: Reduce duplicate string overhead
-# -Dreactor.schedulers.defaultBoundedElasticSize=32: Limit elastic threads
-# -Dreactor.schedulers.defaultBoundedElasticQueueSize=256: Limit task queue
-# -Dreactor.netty.ioWorkerCount=2: Fewer IO threads
-# -Dio.netty.allocator.maxOrder=7: Smaller pooled chunks
-# -XX:+ExitOnOutOfMemoryError: Fail fast
-# ================================
-# Use PORT environment variable (Railway assigns this)
-# Default to 8085 if not set
+# Environment variables
 ENV PORT=8085
-
-# Disable Qdrant initialization for Railway (no vector DB needed for basic functionality)
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
-
-# Enable hash-based fallback for graceful degradation when embeddings fail
 ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
-
-# Disable aggressive port management in container environment
 ENV APP_KILL_ON_CONFLICT=false
 
-# JSON array format for ENTRYPOINT (recommended by Docker)
-# Use shell form to allow PORT variable expansion
-# Disable Netty native OpenSSL (tcnative) to avoid segfaults on Alpine/musl
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
   -Xms64m -Xmx192m \
@@ -114,16 +96,4 @@ ENTRYPOINT ["/bin/sh", "-c", "java \
   -Dreactor.netty.ioWorkerCount=2 \
   -Dio.netty.allocator.maxOrder=7 \
   -Djava.security.egd=file:/dev/./urandom \
-  -Dio.netty.handler.ssl.noOpenSsl=true \
-  -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true \
   -jar app.jar --spring.main.banner-mode=off --spring.jmx.enabled=false --server.port=${PORT}"]
-
-# ================================
-# IMAGE SIZE OPTIMIZATION
-# ================================
-# Base image: eclipse-temurin:21-jre-alpine (~80MB)
-# Alpine Linux: Minimal package manager, no bloat
-# JRE only: ~100MB smaller than JDK
-# Multi-stage: Build dependencies not in final image
-# Total expected size: ~150-200MB
-# ================================

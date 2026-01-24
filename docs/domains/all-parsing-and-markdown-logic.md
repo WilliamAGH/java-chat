@@ -36,7 +36,7 @@ This document provides a comprehensive analysis of all parsing and markdown proc
 │       ├── applyInlineEnrichments() - DOM enrichment rendering
 │       └── createCitationPill() - citation UI components
 │
-├── 📊 STREAMING FLOW (GPT-5 → User)
+├── 📊 STREAMING FLOW (GPT-5.2 → User)
 │   ├── ChatService.streamAnswer() → Flux<String> (uses OpenAIStreamingService)
 │   ├── ChatController.stream() → SSE events
 │   ├── normalizeDelta() - token joining/cleanup
@@ -193,7 +193,7 @@ Final UnifiedMarkdownService.process()
 - Requires trigger phrases: `:`, `such as`, `include`, etc.
 - Handles nested lists with colon notation
 
-### 3. Streaming and GPT-5 Processing
+### 3. Streaming and GPT-5.2 Processing
 
 #### ChatController.stream()
 
@@ -224,10 +224,10 @@ ChatMemory persistence
 - Buffers small tokens to reduce SSE overhead
 - Maintains proper sentence spacing
 
-#### GPT-5 Response Handling
+#### GPT-5.2 Response Handling
 
 **Server-Side**:
-1. Raw markdown from GPT-5
+1. Raw markdown from GPT-5.2
 2. Token-level streaming via SSE
 3. Final `UnifiedMarkdownService.process()` on complete response
 4. Structured citations and enrichments extracted
@@ -349,7 +349,7 @@ public record MarkdownCitation(
 #### Complete Markdown Processing Flow
 
 ```
-User Query → ChatService → GPT-5 API
+User Query → ChatService → GPT-5.2 API
                               ↓
 Raw Markdown Response ← Streaming Tokens
                               ↓
@@ -435,7 +435,7 @@ Client Fallback:
 
 #### Key Configuration Files
 - `application.properties` - Basic settings
-- `pom.xml` - Flexmark dependencies
+- `build.gradle.kts` - Flexmark dependencies
 - `UnifiedMarkdownService` constructor - Flexmark options
 
 #### Environment Variables
@@ -469,7 +469,7 @@ This update consolidates how every relevant component behaves, when/where markdo
 
 ### Refined Mind Map (current state)
 ```
-GPT-5 (tokens)
+GPT-5.2 (tokens)
   → ResilientApiClient (parse JSON/SSE) 
     → ChatService.streamAnswer(Flux<String>)
       → ChatController.stream (SSE): data: <delta>

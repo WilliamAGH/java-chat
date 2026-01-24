@@ -1,16 +1,20 @@
 package com.williamcallahan.javachat.service;
 
-import org.junit.jupiter.api.Test;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Covers list formatting scenarios for markdown processing.
+ */
 class ComprehensiveListFormattingTest {
     
     private MarkdownService markdownService;
     
     @BeforeEach
     void setUp() {
-        markdownService = new MarkdownService();
+        markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
     
     @Test

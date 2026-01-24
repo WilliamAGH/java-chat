@@ -1,186 +1,256 @@
 package com.williamcallahan.javachat.config;
 
+import jakarta.annotation.PostConstruct;
+import java.net.URI;
+import java.net.URISyntaxException;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+/**
+ * Binds application configuration under the "app" prefix.
+ */
 @Component
-@ConfigurationProperties(prefix = "app")
+@ConfigurationProperties(prefix = AppProperties.CONFIG_PREFIX)
 public class AppProperties {
-    
-    private Rag rag = new Rag();
+
+    private static final Logger log = LoggerFactory.getLogger(AppProperties.class);
+
+    public static final String CONFIG_PREFIX = "app";
+
+    private static final String NULL_SECT_FMT = "Configuration section %s must not be null.";
+    private static final String RAG_KEY = "app.rag";
+    private static final String LOCAL_EMBED_KEY = "app.local-embedding";
+    private static final String REMOTE_EMB_KEY = "app.remote-embedding";
+    private static final String DOCS_KEY = "app.docs";
+    private static final String DIAG_KEY = "app.diagnostics";
+    private static final String QDRANT_KEY = "app.qdrant";
+    private static final String CORS_KEY = "app.cors";
+    private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
+    private static final String EMBEDDINGS_KEY = "app.embeddings";
+    private static final String LLM_KEY = "app.llm";
+
+    /**
+     * Default base URL for SEO endpoints when no explicit public base URL is configured.
+     *
+     * <p>Production deployments should override this via configuration so that robots.txt and sitemap.xml
+     * emit absolute URLs for the real public host.
+     */
+    private static final String DEFAULT_PUBLIC_BASE_URL = "http://localhost:8085";
+
+    private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
     private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
-    private Docs docs = new Docs();
+    private DocumentationConfig docs = new DocumentationConfig();
     private Diagnostics diagnostics = new Diagnostics();
     private Qdrant qdrant = new Qdrant();
-    
-    public Rag getRag() {
-        return rag;
-    }
-    
-    public void setRag(Rag rag) {
-        this.rag = rag;
+    private CorsConfig cors = new CorsConfig();
+    private Embeddings embeddings = new Embeddings();
+    private Llm llm = new Llm();
+    private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
+
+    /**
+     * Creates configuration sections with default values.
+     */
+    public AppProperties() {
     }
 
-    public LocalEmbedding getLocalEmbedding() {
-        return localEmbedding;
+    @PostConstruct
+    void validateConfiguration() {
+        requireConfiguredSection(rag, RAG_KEY).validateConfiguration();
+        requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY).validateConfiguration();
+        requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
+        requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
+        requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
+        requireConfiguredSection(qdrant, QDRANT_KEY);
+        requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
+        requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
+        requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
+        this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
 
-    public void setLocalEmbedding(LocalEmbedding localEmbedding) {
-        this.localEmbedding = localEmbedding;
+    /**
+     * Returns the configured public base URL used for absolute URLs in SEO endpoints.
+     *
+     * @return base URL like {@code https://example.com}
+     */
+    public String getPublicBaseUrl() {
+        return publicBaseUrl;
     }
 
-    public Docs getDocs() {
-        return docs;
+    /**
+     * Sets the configured public base URL used for absolute URLs in SEO endpoints.
+     *
+     * @param publicBaseUrl base URL like {@code https://example.com}
+     */
+    public void setPublicBaseUrl(final String publicBaseUrl) {
+        this.publicBaseUrl = publicBaseUrl;
     }
 
-    public void setDocs(Docs docs) {
-        this.docs = docs;
+    private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
+        if (configuredPublicBaseUrl == null || configuredPublicBaseUrl.isBlank()) {
+            log.warn(
+                "{} is not configured; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String trimmedBaseUrl = configuredPublicBaseUrl.trim();
+        final URI parsed;
+        try {
+            parsed = new URI(trimmedBaseUrl);
+        } catch (URISyntaxException syntaxError) {
+            String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
+            log.warn(
+                "{} is invalid ({}); defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                sanitizedMessage,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String scheme = parsed.getScheme();
+        if (scheme == null || scheme.isBlank()) {
+            log.warn(
+                "{} is missing a scheme; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String normalizedScheme = AsciiTextNormalizer.toLowerAscii(scheme);
+        if (!"http".equals(normalizedScheme) && !"https".equals(normalizedScheme)) {
+            log.warn(
+                "{} must use http/https scheme; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final String host = parsed.getHost();
+        if (host == null || host.isBlank()) {
+            log.warn(
+                "{} is missing a host; defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
+
+        final int port = parsed.getPort();
+        try {
+            // Strip any path/query/fragment; keep scheme/host/port only.
+            return new URI(
+                normalizedScheme,
+                null,
+                host,
+                port,
+                null,
+                null,
+                null
+            ).toString();
+        } catch (URISyntaxException syntaxError) {
+            String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
+            log.warn(
+                "{} could not be normalized ({}); defaulting to {}",
+                PUBLIC_BASE_URL_KEY,
+                sanitizedMessage,
+                DEFAULT_PUBLIC_BASE_URL
+            );
+            return DEFAULT_PUBLIC_BASE_URL;
+        }
     }
-    
-    public Diagnostics getDiagnostics() { return diagnostics; }
-    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = diagnostics; }
-    public Qdrant getQdrant() { return qdrant; }
-    public void setQdrant(Qdrant qdrant) { this.qdrant = qdrant; }
+
+    private static String sanitizeLogMessage(final String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        return message.replace("\r", "").replace("\n", "");
+    }
+
+    public RetrievalAugmentationConfig getRag() { return rag; }
+    public void setRag(RetrievalAugmentationConfig rag) { this.rag = requireConfiguredSection(rag, RAG_KEY); }
+
+    public LocalEmbedding getLocalEmbedding() { return localEmbedding; }
+    public void setLocalEmbedding(LocalEmbedding localEmbedding) { this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY); }
+
     public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
-    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = remoteEmbedding; }
-    
-    public static class Rag {
-        private int searchTopK = 10;
-        private int searchReturnK = 5;
-        private int chunkMaxTokens = 900;
-        private int chunkOverlapTokens = 150;
-        private int searchCitations = 3;
-        private double searchMmrLambda = 0.5;
-        
-        public int getSearchTopK() {
-            return searchTopK;
-        }
-        
-        public void setSearchTopK(int searchTopK) {
-            this.searchTopK = searchTopK;
-        }
-        
-        public int getSearchReturnK() {
-            return searchReturnK;
-        }
-        
-        public void setSearchReturnK(int searchReturnK) {
-            this.searchReturnK = searchReturnK;
-        }
+    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY); }
 
-        public int getChunkMaxTokens() {
-            return chunkMaxTokens;
-        }
+    public DocumentationConfig getDocs() { return docs; }
+    public void setDocs(DocumentationConfig docs) { this.docs = requireConfiguredSection(docs, DOCS_KEY); }
 
-        public void setChunkMaxTokens(int chunkMaxTokens) {
-            this.chunkMaxTokens = chunkMaxTokens;
-        }
+    public Diagnostics getDiagnostics() { return diagnostics; }
+    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY); }
 
-        public int getChunkOverlapTokens() {
-            return chunkOverlapTokens;
-        }
+    public Qdrant getQdrant() { return qdrant; }
+    public void setQdrant(Qdrant qdrant) { this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY); }
 
-        public void setChunkOverlapTokens(int chunkOverlapTokens) {
-            this.chunkOverlapTokens = chunkOverlapTokens;
-        }
+    public CorsConfig getCors() { return cors; }
+    public void setCors(CorsConfig cors) { this.cors = requireConfiguredSection(cors, CORS_KEY); }
 
-        public int getSearchCitations() {
-            return searchCitations;
-        }
+    public Embeddings getEmbeddings() { return embeddings; }
+    public void setEmbeddings(Embeddings embeddings) { this.embeddings = requireConfiguredSection(embeddings, EMBEDDINGS_KEY); }
 
-        public void setSearchCitations(int searchCitations) {
-            this.searchCitations = searchCitations;
-        }
+    public Llm getLlm() { return llm; }
+    public void setLlm(Llm llm) { this.llm = requireConfiguredSection(llm, LLM_KEY); }
 
-        public double getSearchMmrLambda() {
-            return searchMmrLambda;
+    private static <T> T requireConfiguredSection(T section, String sectionKey) {
+        if (section == null) {
+            throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
         }
-
-        public void setSearchMmrLambda(double searchMmrLambda) {
-            this.searchMmrLambda = searchMmrLambda;
-        }
+        return section;
     }
 
-    public static class LocalEmbedding {
-        private boolean enabled = false;
-        private String serverUrl = "http://127.0.0.1:1234";
-        private String model = "text-embedding-qwen3-embedding-8b";
-        private int dimensions = 4096;
-        private boolean useHashWhenDisabled = false;
-
-        public boolean isEnabled() { return enabled; }
-        public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-        public String getServerUrl() { return serverUrl; }
-        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
-
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
-
-        public int getDimensions() { return dimensions; }
-        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
-
-        public boolean isUseHashWhenDisabled() { return useHashWhenDisabled; }
-        public void setUseHashWhenDisabled(boolean useHashWhenDisabled) { this.useHashWhenDisabled = useHashWhenDisabled; }
-    }
-
-    public static class RemoteEmbedding {
-        private String serverUrl = ""; // e.g., https://api.novita.ai/openai
-        private String model = "text-embedding-3-small";
-        private String apiKey = "";
-        private int dimensions = 4096;
-
-        public String getServerUrl() { return serverUrl; }
-        public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
-        public String getApiKey() { return apiKey; }
-        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
-        public int getDimensions() { return dimensions; }
-        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
-    }
-
-    public static class Docs {
-        private String rootUrl = "https://docs.oracle.com/en/java/javase/24/";
-        private int jdkVersion = 24;
-        private String snapshotDir = "data/snapshots";
-        private String parsedDir = "data/parsed";
-        private String indexDir = "data/index";
-
-        public String getRootUrl() { return rootUrl; }
-        public void setRootUrl(String rootUrl) { this.rootUrl = rootUrl; }
-
-        public int getJdkVersion() { return jdkVersion; }
-        public void setJdkVersion(int jdkVersion) { this.jdkVersion = jdkVersion; }
-
-        public String getSnapshotDir() { return snapshotDir; }
-        public void setSnapshotDir(String snapshotDir) { this.snapshotDir = snapshotDir; }
-
-        public String getParsedDir() { return parsedDir; }
-        public void setParsedDir(String parsedDir) { this.parsedDir = parsedDir; }
-
-        public String getIndexDir() { return indexDir; }
-        public void setIndexDir(String indexDir) { this.indexDir = indexDir; }
-    }
-    
-    public static class Diagnostics {
-        // Whether to log each raw streaming chunk (DEBUG). Default false to avoid flooding logs.
-        private boolean streamChunkLogging = false;
-        // Sample every Nth chunk when logging is enabled. 0 => log every chunk.
-        private int streamChunkSample = 0;
-        
-        public boolean isStreamChunkLogging() { return streamChunkLogging; }
-        public void setStreamChunkLogging(boolean streamChunkLogging) { this.streamChunkLogging = streamChunkLogging; }
-        public int getStreamChunkSample() { return streamChunkSample; }
-        public void setStreamChunkSample(int streamChunkSample) { this.streamChunkSample = streamChunkSample; }
-    }
-
+    /** Qdrant vector store settings. */
     public static class Qdrant {
-        // Mirror app.qdrant.ensure-payload-indexes
         private boolean ensurePayloadIndexes = true;
-
         public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
         public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
+    }
+
+    /** Embedding vector configuration. */
+    public static class Embeddings {
+        private int dimensions = 1536;
+        private String cacheDir = "./data/embeddings-cache";
+        public int getDimensions() { return dimensions; }
+        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
+        public String getCacheDir() { return cacheDir; }
+        public void setCacheDir(String cacheDir) { this.cacheDir = cacheDir; }
+
+        Embeddings validateConfiguration() {
+            if (dimensions <= 0) {
+                throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
+            }
+            return this;
+        }
+    }
+
+    /** LLM generation parameters. */
+    public static class Llm {
+        private static final double MIN_TEMPERATURE = 0.0;
+        private static final double MAX_TEMPERATURE = 2.0;
+
+        private double temperature = 0.7;
+        public double getTemperature() { return temperature; }
+        public void setTemperature(double temperature) { this.temperature = temperature; }
+
+        Llm validateConfiguration() {
+            if (temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
+                throw new IllegalArgumentException(
+                    String.format(Locale.ROOT,
+                        "app.llm.temperature must be in range [%.1f, %.1f], got: %.2f",
+                        MIN_TEMPERATURE, MAX_TEMPERATURE, temperature));
+            }
+            return this;
+        }
     }
 }

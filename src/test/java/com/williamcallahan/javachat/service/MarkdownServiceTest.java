@@ -1,18 +1,23 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Exercises markdown normalization and rendering paths for the unified service.
+ */
 class MarkdownServiceTest {
     
     private MarkdownService markdownService;
     
     @BeforeEach
     void setUp() {
-        markdownService = new MarkdownService();
+        markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
 
     @Test
@@ -224,10 +229,11 @@ class MarkdownServiceTest {
     void testInlineListFromRemainderExample() {
         String markdown = "The remainder operator is useful in several ways, such as:- Checking divisibility: If x % y equals 0.- Extracting digits: x % 10 gives the rightmost digit.- Its application in encryption algorithms.";
         String html = markdownService.processStructured(markdown).html();
+        String normalizedHtml = AsciiTextNormalizer.toLowerAscii(html);
         assertTrue(html.contains("<ul>"), "Should create unordered list from inline items");
-        assertTrue(html.toLowerCase().contains("checking divisibility"));
-        assertTrue(html.toLowerCase().contains("extracting digits"));
-        assertTrue(html.toLowerCase().contains("encryption"));
+        assertTrue(normalizedHtml.contains("checking divisibility"));
+        assertTrue(normalizedHtml.contains("extracting digits"));
+        assertTrue(normalizedHtml.contains("encryption"));
     }
 
     @Test
@@ -250,7 +256,7 @@ class MarkdownServiceTest {
         String md = "Key points: 1. First 2. Second 3. Third.";
         String html = markdownService.processStructured(md).html();
         // Leading text preserved as paragraph
-        assertTrue(html.contains("<p>Key points:</p>") || html.contains("<p>Key points:</p>"), "Leading text should be a paragraph");
+        assertTrue(html.contains("<p>Key points:</p>"), "Leading text should be a paragraph");
         // Ordered list with items
         assertTrue(html.contains("<ol>"), "Should render ordered list");
         // Ensure there are 3 items
@@ -279,12 +285,16 @@ class MarkdownServiceTest {
     void testServerEnrichmentRendering() {
         String md = "{{hint:Line A\nLine B}}"; // real newline
         String html = markdownService.processStructured(md).html();
+        System.out.println("[DEBUG testServerEnrichmentRendering] HTML: " + html.replace("\n", "\\n"));
+        String normalizedHtml = AsciiTextNormalizer.toLowerAscii(html);
         // Card wrapper
         assertTrue(html.contains("inline-enrichment hint"), "Hint card should render");
         // Header title
-        assertTrue(html.toLowerCase().contains("helpful hints"), "Card header should show Helpful Hints");
-        // Paragraphized with <br>
-        assertTrue(html.contains("<p>Line A<br>Line B</p>") || html.contains("<p>Line A<br />Line B</p>"), "Line breaks preserved in card");
+        assertTrue(normalizedHtml.contains("helpful hints"), "Card header should show Helpful Hints");
+        // Verify soft break rendered as <br> between lines (jsoup may normalize <br /> to <br>)
+        assertTrue(
+            containsSoftBreakBetween(html, "Line A", "Line B"),
+            "Line breaks preserved in card. HTML: " + html.replace("\n", "\\n"));
     }
 
     @Test
@@ -292,39 +302,153 @@ class MarkdownServiceTest {
     void testUnifiedStylingHooks() {
         String md = "|A|B|\n|---|---|\n|1|2|\n\n> quote";
         String html = markdownService.processStructured(md).html();
-        assertTrue(html.contains("class=\"markdown-table\"") || html.contains("class=\"markdown-table\""), "Table should have styling class");
-        assertTrue(html.contains("<blockquote class=\"markdown-quote\">") || html.contains("<blockquote class=\"markdown-quote\">"), "Blockquote should have styling class");
+        assertTrue(html.contains("class=\"markdown-table\""), "Table should have styling class");
+        assertTrue(html.contains("<blockquote class=\"markdown-quote\">"), "Blockquote should have styling class");
     }
 
     @Test
     @DisplayName("Pre-normalization ensures attached fences get separated and closed")
     void testPreNormalizeFences() {
-        String md = "Here:```javaimport java.util.*;\nclass X{}"; // missing closing fence, attached info
-        String html = markdownService.processStructured(md).html();
+        String markdown = "Here:```javaimport java.util.*;\nclass X{}"; // missing closing fence, attached info
+        String html = markdownService.processStructured(markdown).html();
         assertTrue(html.contains("<pre>") && html.contains("<code"), "Should render a code block despite malformed fence");
     }
 
     @Test
     @DisplayName("Example enrichment renders fenced code with language class")
     void testExampleCardRendersCode() {
-        String md = "{{example:```java\npublic class A{}\n```}}";
-        String html = markdownService.processStructured(md).html();
-        System.out.println("[DEBUG testExampleCardRendersCode] Input: " + md);
+        String markdown = "{{example:```java\npublic class A{}\n```}}";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testExampleCardRendersCode] Input: " + markdown);
         System.out.println("[DEBUG testExampleCardRendersCode] HTML:\n" + html);
         assertTrue(html.contains("inline-enrichment example"), "Example card should render");
-        assertTrue(html.contains("<code class=\"language-java\">") || html.contains("<code class=\"language-java\">"), "Code block should have language class");
+        assertTrue(html.contains("<code class=\"language-java\">"), "Code block should have language class");
         assertTrue(html.contains("public class A"));
     }
 
     @Test
     @DisplayName("Enrichment markers inside code blocks are not transformed")
     void testEnrichmentInsideCodeNotRendered() {
-        String md = "```java\n// {{warning:do not render}}\nSystem.out.println(\"ok\");\n```";
-        String html = markdownService.processStructured(md).html();
-        System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] Input: " + md);
+        String markdown = "```java\n// {{warning:do not render}}\nSystem.out.println(\"ok\");\n```";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] Input: " + markdown);
         System.out.println("[DEBUG testEnrichmentInsideCodeNotRendered] HTML:\n" + html);
         // Ensure we still have a code block and the marker text remains (not replaced by card)
         assertTrue(html.contains("<pre>"), "Code block should render");
         assertTrue(html.contains("{{warning:do not render}}") || html.contains("warning:do not render"), "Marker should remain as text inside code");
+    }
+
+    @Test
+    @DisplayName("Inline code markers are not transformed into enrichment cards")
+    void testInlineCodeMarkerNotRendered() {
+        String markdown = "Inline marker: `{{hint: no-card}}` should stay code.";
+        String html = markdownService.processStructured(markdown).html();
+        assertFalse(html.contains("inline-enrichment"), "Inline code should not generate enrichment cards");
+        assertTrue(html.contains("<code>{{hint: no-card}}</code>"), "Inline code should preserve marker text");
+    }
+
+    @Test
+    @DisplayName("Indented code preserves bracketed citations")
+    void testIndentedCodePreservesBracketedCitations() {
+        String markdown = "    int total = 0; // [1]";
+        String html = markdownService.processStructured(markdown).html();
+        assertTrue(html.contains("<pre>"), "Indented code should render as a code block");
+        assertTrue(html.contains("[1]"), "Bracketed citations should remain inside code");
+    }
+
+    @Test
+    @DisplayName("No double line breaks in any HTML output")
+    void testNoDoubleLineBreaksInOutput() {
+        // Test various markdown structures that could produce double line breaks
+        String[] testCases = {
+            "# Heading\n\nParagraph one.\n\nParagraph two.",
+            "Para.\n\n- Item A\n- Item B\n\nPara after.",
+            "Text.\n\n```java\ncode\n```\n\nMore text.",
+            "| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter table.",
+            "> Quote\n\nAfter quote.\n\n## Header",
+            "1. First\n2. Second\n\n- Bullet\n\nEnd.",
+            "{{hint:A hint}}\n\n{{warning:A warning}}\n\nText."
+        };
+
+        for (String markdown : testCases) {
+            String html = markdownService.processStructured(markdown).html();
+            assertFalse(html.contains("\n\n"),
+                "Double line break found in output for: " + markdown.replace("\n", "\\n") +
+                "\nHTML was: " + html.replace("\n", "\\n"));
+        }
+    }
+
+    @Test
+    @DisplayName("Preserves newlines inside code blocks while collapsing outside")
+    void testPreservesNewlinesInsideCodeBlocks() {
+        String markdown = "Before.\n\n```java\nline1\n\nline3\n```\n\nAfter.";
+        String html = markdownService.processStructured(markdown).html();
+        System.out.println("[DEBUG testPreservesNewlinesInsideCodeBlocks] Full HTML:");
+        System.out.println(html);
+        System.out.println("[DEBUG] HTML escaped: " + html.replace("\n", "\\n"));
+        // Inside <pre><code>, the blank line should be preserved
+        assertTrue(html.contains("line1\n\nline3"),
+            "Blank lines inside code blocks should be preserved. HTML: " + html.replace("\n", "\\n"));
+        // The full HTML should not have consecutive newlines that aren't inside code blocks
+        // We check by scanning: consecutive \n\n should only appear inside <pre>...</pre>
+        assertNoDoubleNewlinesOutsideCodeBlocks(html);
+    }
+
+    /**
+     * Verifies no double newlines exist outside of pre/code blocks by scanning the HTML.
+     */
+    private void assertNoDoubleNewlinesOutsideCodeBlocks(String html) {
+        int preDepth = 0;
+        int codeDepth = 0;
+        boolean lastWasNewline = false;
+
+        for (int cursorIndex = 0; cursorIndex < html.length(); cursorIndex++) {
+            char currentChar = html.charAt(cursorIndex);
+
+            // Track pre/code depth
+            if (currentChar == '<' && cursorIndex + 5 < html.length()) {
+                String ahead = html.substring(cursorIndex, Math.min(cursorIndex + 7, html.length())).toLowerCase();
+                if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
+                    preDepth++;
+                } else if (ahead.startsWith("</pre>")) {
+                    preDepth = Math.max(0, preDepth - 1);
+                } else if (ahead.startsWith("<code>") || ahead.startsWith("<code ")) {
+                    codeDepth++;
+                } else if (ahead.startsWith("</code")) {
+                    codeDepth = Math.max(0, codeDepth - 1);
+                }
+            }
+
+            boolean insideCodeBlock = preDepth > 0 || codeDepth > 0;
+
+            if (currentChar == '\n') {
+                if (lastWasNewline && !insideCodeBlock) {
+                    fail("Found consecutive newlines outside code block at position " + cursorIndex +
+                         ". Context: ..." + html.substring(Math.max(0, cursorIndex - 20), cursorIndex).replace("\n", "\\n") +
+                         "[HERE]" + html.substring(cursorIndex, Math.min(html.length(), cursorIndex + 20)).replace("\n", "\\n") + "...");
+                }
+                lastWasNewline = true;
+            } else {
+                lastWasNewline = false;
+            }
+        }
+    }
+
+    /**
+     * Checks if HTML contains a soft break between two text segments.
+     * Accepts variants: {@code <br>}, {@code <br />}, with optional trailing whitespace.
+     */
+    private boolean containsSoftBreakBetween(String html, String before, String after) {
+        // Pattern: before + <br> or <br /> + optional whitespace/newline + after
+        int beforeIndex = html.indexOf(before);
+        if (beforeIndex == -1) {
+            return false;
+        }
+        int searchStart = beforeIndex + before.length();
+        String remainder = html.substring(searchStart);
+
+        // Check for <br> or <br /> followed by optional whitespace then "after"
+        // Use (?s) for dotall mode so .* matches across newlines
+        return remainder.matches("(?s)^<br\\s*/?>\\s*" + java.util.regex.Pattern.quote(after) + ".*");
     }
 }

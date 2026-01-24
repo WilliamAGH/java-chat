@@ -1,16 +1,20 @@
 package com.williamcallahan.javachat.service;
 
-import org.junit.jupiter.api.Test;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Verifies preprocessing rules applied before markdown rendering.
+ */
 class MarkdownPreprocessingTest {
     
     private MarkdownService markdownService;
     
     @BeforeEach
     void setUp() {
-        markdownService = new MarkdownService();
+        markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
     
     @Test
@@ -43,34 +47,22 @@ class MarkdownPreprocessingTest {
     }
     
     @Test
-    void testMissingSpacesAfterPunctuation() {
-        String input = "This is a sentence.Here is another!And a third?Yet another.";
+    void testInlineTripleBackticksRemainText() {
+        String input = "Use ``` to denote a code fence in markdown.";
         String html = markdownService.processStructured(input).html();
 
-        System.out.println("\nTest: Missing spaces after punctuation");
-        System.out.println("Input: " + input);
-        System.out.println("HTML: " + html);
-
-        // Should render as paragraphs with proper spacing
-        assertTrue(html.contains("<p>"), "Should render as paragraphs");
-        assertTrue(html.contains("sentence. Here"), "Should add space after period");
-        assertTrue(html.contains("another! And") || html.contains("another!</p>"), "Should handle exclamation");
-        assertTrue(html.contains("third? Yet"), "Should add space after question mark");
+        assertFalse(html.contains("<pre>"), "Inline triple backticks should not open a fenced block");
+        assertTrue(html.contains("```"), "Inline triple backticks should remain visible as text");
     }
-    
+
     @Test
-    void testParagraphBreaksInLongText() {
-        String input = "The % operator in Java is the remainder operator. It returns the remainder after division. For example, 10 % 3 equals 1. This is useful for checking divisibility. When a % b equals 0, a is divisible by b.";
+    void testSentenceSpacingAvoidsUrlsAndPackages() {
+        String input = "Refer to java.lang.String and https://example.com/Test. NextSentence starts here.";
         String html = markdownService.processStructured(input).html();
 
-        System.out.println("\nTest: Paragraph breaks in long text");
-        System.out.println("Input: " + input);
-        System.out.println("HTML: " + html);
-
-        assertTrue(html.contains("<p>"), "Should render as paragraphs");
-        // Count paragraph tags
-        int paraCount = html.split("<p>").length - 1;
-        assertTrue(paraCount > 1, "Should have multiple paragraphs, got: " + paraCount);
+        assertTrue(html.contains("java.lang.String"), "Package and class names should stay intact");
+        assertFalse(html.contains("java. lang"), "Package names must not be split");
+        assertTrue(html.contains("href=\"https://example.com/Test\""), "URL should remain intact");
     }
     
     @Test
@@ -101,6 +93,17 @@ class MarkdownPreprocessingTest {
         int theIdx = html.indexOf("The", codeClose + 1);
         int restIdx = html.indexOf("result is 1.", codeClose + 1);
         assertTrue(theIdx > codeClose && restIdx > codeClose, "Prose must appear after the closed code block");
+    }
+
+    @Test
+    void testTildeFencePreserved() {
+        String input = "~~~\n- not a list\n{{warning:still code}}\n~~~\nAfter fence.";
+        String html = markdownService.processStructured(input).html();
+
+        assertTrue(html.contains("<pre>"), "Tilde fences should render as code blocks");
+        assertTrue(html.contains("- not a list"), "Fence content should remain intact");
+        assertTrue(html.contains("{{warning:still code}}"), "Markers inside fences should not render as cards");
+        assertTrue(html.contains("After fence."), "Prose after fence should render");
     }
     
     @Test

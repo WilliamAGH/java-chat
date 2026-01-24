@@ -5,11 +5,14 @@ import com.vladsch.flexmark.ast.Text;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.ast.NodeVisitor;
 import com.vladsch.flexmark.util.ast.VisitHandler;
+import com.williamcallahan.javachat.domain.markdown.CitationType;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * AST-based citation processor that replaces regex-based citation extraction.
@@ -34,7 +37,7 @@ public class CitationProcessor {
         CitationVisitor visitor = new CitationVisitor();
         visitor.visit(document);
         
-        List<MarkdownCitation> citations = visitor.getCitations();
+        List<MarkdownCitation> citations = visitor.citations();
         logger.debug("Extracted {} citations using AST processing", citations.size());
         
         return citations;
@@ -53,11 +56,11 @@ public class CitationProcessor {
             new VisitHandler<>(Text.class, this::visitText)
         );
         
-        public void visit(Node node) {
+        void visit(Node node) {
             visitor.visit(node);
         }
         
-        public List<MarkdownCitation> getCitations() {
+        List<MarkdownCitation> citations() {
             return List.copyOf(citations);
         }
         
@@ -67,13 +70,13 @@ public class CitationProcessor {
          */
         private void visitLink(Link link) {
             String url = link.getUrl().toString();
-            String title = extractLinkTitle(link);
             CitationType type = CitationType.fromUrl(url);
             
-            if (isValidCitation(url, title)) {
+            String title = extractLinkTitle(link);
+            if (isValidCitation(url)) {
                 MarkdownCitation citation = MarkdownCitation.create(url, title, "", type, position++);
                 citations.add(citation);
-                logger.debug("Found citation: {} -> {}", title, url);
+                logger.debug("Found citation at position {}", citation.position());
             }
             
             // Continue visiting child nodes
@@ -121,20 +124,16 @@ public class CitationProcessor {
          * @param title the title to validate
          * @return true if valid citation
          */
-        private boolean isValidCitation(String url, String title) {
+        private boolean isValidCitation(String url) {
             if (url == null || url.trim().isEmpty()) {
                 return false;
             }
             
             // Skip common non-citation links
-            String lowerUrl = url.toLowerCase();
-            if (lowerUrl.startsWith("mailto:") || 
-                lowerUrl.startsWith("tel:") || 
-                lowerUrl.startsWith("javascript:")) {
-                return false;
-            }
-            
-            return true;
+            String lowerUrl = url.toLowerCase(Locale.ROOT);
+            return !lowerUrl.startsWith("mailto:")
+                && !lowerUrl.startsWith("tel:")
+                && !lowerUrl.startsWith("javascript:");
         }
     }
 }

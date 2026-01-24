@@ -1,26 +1,42 @@
 package com.williamcallahan.javachat.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+/**
+ * Reorders retrieved documents using an LLM-driven relevance ranking.
+ */
 @Service
 public class RerankerService {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        RerankerService.class
-    );
+	    private static final Logger log = LoggerFactory.getLogger(
+	        RerankerService.class
+	    );
     private final OpenAIStreamingService openAIStreamingService;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
 
-    public RerankerService(OpenAIStreamingService openAIStreamingService) {
+    /**
+     * Creates a reranker backed by the streaming LLM client.
+     *
+     * @param openAIStreamingService streaming LLM client
+     * @param objectMapper Jackson object mapper
+     */
+    public RerankerService(OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper) {
         this.openAIStreamingService = openAIStreamingService;
+        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     }
 
     /**
@@ -40,41 +56,39 @@ public class RerankerService {
             return docs;
         }
 
-        log.debug("Reranking {} documents for query: {}", docs.size(), query);
+        log.debug("Reranking {} documents", docs.size());
 
-        try {
-            String response = callLlmForReranking(query, docs);
-            if (response == null || response.isBlank()) {
-                return limitDocs(docs, returnK);
-            }
-
-            List<Document> reordered = parseRerankResponse(response, docs);
-            if (reordered.isEmpty()) {
-                log.warn(
-                    "Reranking produced empty results, falling back to original order"
-                );
-                return limitDocs(docs, returnK);
-            }
-
-            log.debug("Successfully reranked {} documents", reordered.size());
-            return limitDocs(reordered, returnK);
-        } catch (Exception e) {
-            log.error("Reranking failed, using original document order", e);
-            return limitDocs(docs, returnK);
+        Optional<String> responseOpt = callLlmForReranking(query, docs);
+        if (responseOpt.isEmpty() || responseOpt.get().isBlank()) {
+            throw new RerankingFailureException("Reranking response was empty");
         }
+
+        List<Document> reordered;
+        try {
+            reordered = parseRerankResponse(responseOpt.get(), docs);
+        } catch (JsonProcessingException jsonException) {
+            throw new RerankingFailureException("Reranking response parse failed", jsonException);
+        }
+        if (reordered.isEmpty()) {
+            throw new RerankingFailureException("Reranking response produced no valid ordering");
+        }
+
+        log.debug("Successfully reranked {} documents", reordered.size());
+        return limitDocs(reordered, returnK);
     }
 
     /**
-     * Call the LLM service to get reranking order.
-     * Returns null if service unavailable or times out.
+     * Calls LLM service to get reranking order.
+     *
+     * @return reranking response, or empty if service unavailable or times out
      */
-    private String callLlmForReranking(String query, List<Document> docs) {
+    private Optional<String> callLlmForReranking(String query, List<Document> docs) {
         if (
             openAIStreamingService == null ||
             !openAIStreamingService.isAvailable()
         ) {
             log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
-            return null;
+            throw new RerankingFailureException("Reranking service unavailable");
         }
 
         String prompt = buildRerankPrompt(query, docs);
@@ -83,15 +97,9 @@ public class RerankerService {
         return openAIStreamingService
             .complete(prompt, 0.0)
             .timeout(java.time.Duration.ofSeconds(4))
-            .onErrorResume(e -> {
-                log.debug(
-                    "Reranker LLM call short-circuited: {}",
-                    e.toString()
-                );
-                return reactor.core.publisher.Mono.empty();
-            })
-            .blockOptional()
-            .orElse(null);
+            .doOnError(timeoutOrApiError ->
+                log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
+            .blockOptional();
     }
 
     /**
@@ -111,19 +119,23 @@ public class RerankerService {
         prompt.append(
             "Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n"
         );
-        prompt.append("Query: ").append(query).append("\n\n");
+	        prompt.append("Query: ").append(query).append("\n\n");
 
-        for (int i = 0; i < docs.size(); i++) {
-            Document d = docs.get(i);
-            prompt
-                .append("[")
-                .append(i)
+        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
+            Document document = docs.get(docIndex);
+            Map<String, ?> metadata = document.getMetadata();
+            String title = extractMetadataString(metadata, "title");
+            String url = extractMetadataString(metadata, "url");
+            String text = document.getText();
+	            prompt
+	                .append("[")
+	                .append(docIndex)
                 .append("] ")
-                .append(d.getMetadata().get("title"))
+                .append(title)
                 .append(" | ")
-                .append(d.getMetadata().get("url"))
+                .append(url)
                 .append("\n")
-                .append(trim(d.getText(), 500))
+                .append(trim(text == null ? "" : text, 500))
                 .append("\n\n");
         }
 
@@ -136,48 +148,107 @@ public class RerankerService {
     private List<Document> parseRerankResponse(
         String response,
         List<Document> docs
-    ) throws Exception {
-        String json = extractJsonFromResponse(response);
-        JsonNode root = mapper.readTree(json);
-
+    ) throws JsonProcessingException {
         List<Document> reordered = new ArrayList<>();
-        if (root.has("order") && root.get("order").isArray()) {
-            for (JsonNode n : root.get("order")) {
-                int idx = n.asInt();
-                if (idx >= 0 && idx < docs.size()) {
-                    reordered.add(docs.get(idx));
-                }
+        RerankOrderResponse orderResponse = parseRerankOrderResponse(response);
+        if (orderResponse == null || orderResponse.order() == null) {
+            return reordered;
+        }
+        for (Integer documentIndex : orderResponse.order()) {
+            if (documentIndex == null) {
+                continue;
+            }
+            if (documentIndex >= 0 && documentIndex < docs.size()) {
+                reordered.add(docs.get(documentIndex));
             }
         }
         return reordered;
     }
 
     /**
-     * Extract JSON from LLM response, handling markdown code blocks.
+     * Extracts a JSON object from the LLM response, preferring fenced blocks when present.
      */
-    private String extractJsonFromResponse(String response) {
-        String json = response;
+    private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
+        String jsonObject = extractFirstJsonObject(response);
+        if (jsonObject == null || jsonObject.isBlank()) {
+            throw new JsonProcessingException("Rerank response did not contain a JSON object") {};
+        }
+        try {
+            return mapper.readerFor(RerankOrderResponse.class).readValue(jsonObject);
+        } catch (IOException ioException) {
+            throw new JsonProcessingException("Failed to parse rerank JSON payload", ioException) {};
+        }
+    }
 
-        // Extract from markdown code block if present
-        if (json.contains("```")) {
-            int start = json.indexOf("```");
-            if (start >= 0) {
-                start = json.indexOf("\n", start) + 1;
-                int end = json.indexOf("```", start);
-                if (end > start) {
-                    json = json.substring(start, end).trim();
+    private String extractFirstJsonObject(String response) {
+        if (response == null || response.isBlank()) {
+            return "";
+        }
+        String fencedCandidate = extractFirstFencedBlock(response);
+        String candidate = fencedCandidate.isEmpty() ? response : fencedCandidate;
+        return findFirstJsonObject(candidate);
+    }
+
+    private String extractFirstFencedBlock(String text) {
+        int fenceStartIndex = text.indexOf("```");
+        if (fenceStartIndex < 0) {
+            return "";
+        }
+        int fenceLineBreakIndex = text.indexOf('\n', fenceStartIndex + 3);
+        if (fenceLineBreakIndex < 0) {
+            return "";
+        }
+        int fenceEndIndex = text.indexOf("```", fenceLineBreakIndex + 1);
+        if (fenceEndIndex < 0) {
+            return "";
+        }
+        return text.substring(fenceLineBreakIndex + 1, fenceEndIndex).trim();
+    }
+
+    private String findFirstJsonObject(String text) {
+        int firstBraceIndex = text.indexOf('{');
+        if (firstBraceIndex < 0) {
+            return "";
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int braceDepth = 0;
+        for (int index = firstBraceIndex; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (character == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (character == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (character == '"') {
+                inString = true;
+                continue;
+            }
+
+            if (character == '{') {
+                braceDepth++;
+            } else if (character == '}') {
+                braceDepth--;
+                if (braceDepth == 0) {
+                    return text.substring(firstBraceIndex, index + 1).trim();
                 }
             }
         }
-
-        // Handle response starting with backticks or "json" prefix
-        json = json.replaceAll("^`+|`+$", "").trim();
-        if (json.startsWith("json")) {
-            json = json.substring(4).trim();
-        }
-
-        return json;
+        return text.substring(firstBraceIndex).trim();
     }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record RerankOrderResponse(@JsonProperty("order") List<Integer> order) {}
 
     /**
      * Limit document list to returnK elements.
@@ -186,8 +257,19 @@ public class RerankerService {
         return docs.subList(0, Math.min(returnK, docs.size()));
     }
 
-    private String trim(String s, int len) {
-        return s.length() <= len ? s : s.substring(0, len) + "…";
+    private String trim(String text, int maxLength) {
+        return text.length() <= maxLength ? text : text.substring(0, maxLength) + "…";
+    }
+
+    private static String extractMetadataString(Map<String, ?> metadata, String key) {
+        if (metadata == null) {
+            return "";
+        }
+        Object metadataValue = metadata.get(key);
+        if (metadataValue == null) {
+            return "";
+        }
+        return String.valueOf(metadataValue);
     }
 
     /**
@@ -198,13 +280,13 @@ public class RerankerService {
         if (docs == null || docs.isEmpty()) {
             return "empty";
         }
-        StringBuilder sb = new StringBuilder();
+        StringBuilder hashBuilder = new StringBuilder();
         for (Document doc : docs) {
             Object url = doc.getMetadata().get("url");
             String text = doc.getText();
-            sb.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
-            sb.append("|");
+            hashBuilder.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
+            hashBuilder.append("|");
         }
-        return Integer.toHexString(sb.toString().hashCode());
+        return Integer.toHexString(hashBuilder.toString().hashCode());
     }
 }

@@ -3,23 +3,62 @@ package com.williamcallahan.javachat.service;
 import org.springframework.stereotype.Component;
 import java.util.*;
 
+/**
+ * Provides a curated glossary of Java terms for UI tooltips.
+ */
 @Component
 public class TooltipRegistry {
+
+    private static final String NO_LINK = "";
+
+    /**
+     * Defines a tooltip entry with a term, short definition, and optional reference link.
+     */
     public static class TooltipDefinition {
         private final String term;
         private final String definition;
         private final String link;
 
+        /**
+         * Creates a tooltip definition suitable for JSON serialization.
+         *
+         * @param term the tooltip term
+         * @param definition the short definition
+         * @param link the reference link, may be null
+         */
         public TooltipDefinition(String term, String definition, String link) {
-            this.term = term; this.definition = definition; this.link = link;
+            this.term = Objects.requireNonNull(term, "term");
+            this.definition = Objects.requireNonNull(definition, "definition");
+            this.link = Objects.requireNonNullElse(link, NO_LINK);
         }
-        public String getTerm() { return term; }
-        public String getDefinition() { return definition; }
-        public String getLink() { return link; }
+
+        /**
+         * Returns the tooltip term displayed in the UI.
+         */
+        public String getTerm() {
+            return term;
+        }
+
+        /**
+         * Returns the short tooltip definition.
+         */
+        public String getDefinition() {
+            return definition;
+        }
+
+        /**
+         * Returns the reference link for the term, or an empty string when unavailable.
+         */
+        public String getLink() {
+            return link;
+        }
     }
 
     private final Map<String, TooltipDefinition> glossary = new LinkedHashMap<>();
 
+    /**
+     * Seeds the glossary with common Java terms used across the learning UI.
+     */
     public TooltipRegistry() {
         // Seed with top Java terms (expand as needed)
         add("primitive", "A basic value type like int, double, boolean stored directly (not an object).", "https://docs.oracle.com/javase/tutorial/java/nutsandbolts/datatypes.html");
@@ -32,12 +71,14 @@ public class TooltipRegistry {
         add("optional", "A container object which may or may not contain a non-null value, used to avoid null checks.", "https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html");
     }
 
-    private void add(String term, String def, String link) {
-        glossary.put(term.toLowerCase(Locale.ROOT), new TooltipDefinition(term, def, link));
+    private void add(String term, String definition, String link) {
+        glossary.put(term.toLowerCase(Locale.ROOT), new TooltipDefinition(term, definition, link));
     }
 
+    /**
+     * Returns the current tooltip definitions in insertion order.
+     */
     public List<TooltipDefinition> list() {
         return new ArrayList<>(glossary.values());
     }
 }
-

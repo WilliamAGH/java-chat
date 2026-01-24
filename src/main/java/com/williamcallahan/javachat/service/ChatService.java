@@ -1,44 +1,58 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
+/**
+ * Builds chat prompts, enriches them with retrieval context, and delegates streaming to the LLM provider.
+ */
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
-    
-    // OpenAI streaming preferred; ChatService builds prompts and can stream via SDK for internal uses
+
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SystemPromptConfig systemPromptConfig;
-    
-    @Autowired
-    private MarkdownService markdownService;
+    private final double temperature;
 
+    /**
+     * Creates the chat service with streaming, retrieval, and prompt configuration dependencies.
+     *
+     * @param openAIStreamingService LLM streaming service
+     * @param retrievalService RAG retrieval service
+     * @param systemPromptConfig system prompt configuration
+     * @param appProperties application configuration for LLM settings
+     */
     public ChatService(OpenAIStreamingService openAIStreamingService,
                        RetrievalService retrievalService,
-                       SystemPromptConfig systemPromptConfig) {
+                       SystemPromptConfig systemPromptConfig,
+                       AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
+        this.temperature = appProperties.getLlm().getTemperature();
     }
 
     /**
      * Streaming via {@link OpenAIStreamingService}. This builds the prompt and streams with the SDK.
      */
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
-        logger.debug("ChatService.streamAnswer called for query: {}", latestUserMessage);
+        int queryToken = Objects.hashCode(latestUserMessage);
+        logger.debug("ChatService.streamAnswer called");
         
         // Retrieve context and provide user feedback about search quality
         List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
@@ -57,14 +71,9 @@ public class ChatService {
             }
         }
         
-        logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
+        logger.debug("ChatService configured with inline enrichment markers for queryToken={}", queryToken);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
-            String normUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(normUrl).append("\n").append(d.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
@@ -81,55 +90,27 @@ public class ChatService {
             return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
         }
 
-        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
-                .onErrorResume(ex -> {
-                    logger.error("Streaming failed", ex);
-                    return Flux.error(ex);
+        return openAIStreamingService.streamResponse(fullPrompt, temperature)
+                .onErrorResume(streamingException -> {
+                    logger.error("Streaming failed", streamingException);
+                    return Flux.error(streamingException);
                 });
     }
 
     /**
-     * Normalize URLs placed into the LLM prompt so the model never sees local file:/// paths
-     * or malformed mirrors. This mirrors RetrievalService's normalization without exposing it.
+     * Appends context documents to a system prompt builder with normalized URLs.
      */
-    private String normalizeUrlForPrompt(String url) {
-        if (url == null || url.isBlank()) return url;
-        String u = url.trim();
-        // Already HTTP(S): canonicalize and fix common spring paths
-        if (u.startsWith("http://") || u.startsWith("https://")) {
-            return canonicalizeHttpDocUrl(u);
+    private void appendContextDocs(StringBuilder systemContext, List<Document> contextDocs) {
+        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
+            Document contextDoc = contextDocs.get(docIndex);
+            Object urlMetadata = contextDoc.getMetadata().get("url");
+            String rawUrl = urlMetadata != null ? urlMetadata.toString() : "";
+            String normUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
+            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
+                .append("\n").append(contextDoc.getText());
         }
-        // Map book PDFs to public server path
-        String publicPdf = com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(u.startsWith("file://") ? u.substring("file://".length()) : u);
-        if (publicPdf != null) return publicPdf;
-        // Only handle file:// beyond this point
-        if (!u.startsWith("file://")) return u;
-        String p = u.substring("file://".length());
-        String embedded = com.williamcallahan.javachat.config.DocsSourceRegistry.reconstructFromEmbeddedHost(p);
-        if (embedded != null) return canonicalizeHttpDocUrl(embedded);
-        String mapped = com.williamcallahan.javachat.config.DocsSourceRegistry.mapLocalPrefixToRemote(p);
-        return mapped != null ? canonicalizeHttpDocUrl(mapped) : u; // final fallback: keep original
     }
 
-    private String canonicalizeHttpDocUrl(String url) {
-        String out = url;
-        out = out.replace("/docs/api/api/", "/docs/api/");
-        out = out.replace("/api/api/", "/api/");
-        if (out.contains("https://docs.spring.io/")) {
-            out = out.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
-            out = out.replace("/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
-        }
-        int protoIdx = out.indexOf("://");
-        String prefix = protoIdx >= 0 ? out.substring(0, protoIdx + 3) : "";
-        String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
-        rest = rest.replaceAll("/+", "/");
-        return prefix + rest;
-    }
-
-    /**
-     * Stream answer reusing existing pipeline but with preselected context documents
-     * and optional guidance to prepend to the system context.
-     */
     /**
      * Legacy streaming with preselected context. Prefer building a prompt with
      * {@link #buildPromptWithContextAndGuidance(List, String, List, String)} and
@@ -149,12 +130,7 @@ public class ChatService {
         
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
@@ -163,13 +139,16 @@ public class ChatService {
 
         String fullPrompt = buildPromptFromMessages(messages);
 
-        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
-                .onErrorResume(ex -> {
-                    logger.error("Streaming failed", ex);
-                    return Flux.error(ex);
+        return openAIStreamingService.streamResponse(fullPrompt, temperature)
+                .onErrorResume(exception -> {
+                    logger.error("Streaming failed", exception);
+                    return Flux.error(exception);
                 });
     }
 
+    /**
+     * Resolves citations for a query using the retrieval pipeline.
+     */
     public List<Citation> citationsFor(String userQuery) {
         List<Document> docs = retrievalService.retrieve(userQuery);
         return retrievalService.toCitations(docs);
@@ -187,24 +166,47 @@ public class ChatService {
     }
     
     /**
-     * Build a complete prompt with context for OpenAI streaming service.
-     * This reuses the existing prompt building logic from streamAnswer.
+     * Builds a full prompt with retrieval context for the default model.
      */
     public String buildPromptWithContext(List<Message> history, String latestUserMessage) {
         return buildPromptWithContext(history, latestUserMessage, null);
     }
     
+    /**
+     * Builds a full prompt with retrieval context and an optional model hint.
+     */
     public String buildPromptWithContext(List<Message> history, String latestUserMessage, String modelHint) {
-        // For GPT-5, use fewer RAG documents due to 8K token input limit
-        List<Document> contextDocs;
-        if ("gpt-5".equals(modelHint) || "gpt-5-chat".equals(modelHint)) {
-            // Limit RAG for GPT-5: use fewer, shorter documents
-            contextDocs = retrievalService.retrieveWithLimit(latestUserMessage, 3, 600); // 3 docs, 600 tokens each = ~1800 tokens
-            logger.debug("Using reduced RAG for GPT-5: {} documents with max 600 tokens each", contextDocs.size());
+        return buildPromptWithContextOutcome(history, latestUserMessage, modelHint).prompt();
+    }
+
+    /**
+     * Builds a prompt while returning retrieval notices for UI diagnostics.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param modelHint optional model hint
+     * @return prompt plus retrieval notices
+     */
+    public ChatPromptOutcome buildPromptWithContextOutcome(List<Message> history,
+                                                          String latestUserMessage,
+                                                          String modelHint) {
+        // Use reduced RAG for token-constrained models (GPT-5.x family)
+        RetrievalService.RetrievalOutcome retrievalOutcome;
+        if (ModelConfiguration.isTokenConstrained(modelHint)) {
+            retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
+                latestUserMessage,
+                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
+            );
+            logger.debug("Using reduced RAG for {}: {} documents with max {} tokens each",
+                modelHint,
+                retrievalOutcome.documents().size(),
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {
-            contextDocs = retrievalService.retrieve(latestUserMessage);
+            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
         }
-        
+
+        List<Document> contextDocs = retrievalOutcome.documents();
         String searchQualityNote = determineSearchQuality(contextDocs);
         
         // Build system prompt using centralized configuration
@@ -220,19 +222,14 @@ public class ChatService {
             }
         }
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
 
-        return buildPromptFromMessages(messages);
+        return new ChatPromptOutcome(buildPromptFromMessages(messages), retrievalOutcome.notices());
     }
 
     /**
@@ -249,67 +246,18 @@ public class ChatService {
 
         StringBuilder systemContext = new StringBuilder(completePrompt);
 
-        for (int i = 0; i < contextDocs.size(); i++) {
-            Document d = contextDocs.get(i);
-            String rawUrl = String.valueOf(d.getMetadata().get("url"));
-            String safeUrl = normalizeUrlForPrompt(rawUrl);
-            systemContext.append("\n[CTX ").append(i + 1).append("] ").append(safeUrl).append("\n").append(d.getText());
-        }
+        appendContextDocs(systemContext, contextDocs);
 
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(systemContext.toString()));
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
-        
+
         return buildPromptFromMessages(messages);
     }
-    
+
     /**
-     * Process response text with markdown rendering.
-     * This can be used to pre-render markdown on the server side.
-     * 
-     * @param text The raw text response from AI
-     * @return HTML-rendered markdown
-     */
-    /**
-     * Legacy markdown rendering path. Prefer {@link UnifiedMarkdownService}
-     * integration where possible and avoid rendering on the hot path.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public String processResponseWithMarkdown(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        
-        try {
-            // Use new AST-based processing for better compliance
-            var processed = markdownService.processStructured(text);
-            logger.debug("Processed response with AST-based markdown rendering");
-            return processed.html();
-        } catch (Exception e) {
-            logger.error("Error processing response with markdown", e);
-            // Fallback to plain text with basic escaping
-            return text.replace("&", "&amp;")
-                      .replace("<", "&lt;")
-                      .replace(">", "&gt;")
-                      .replace("\n", "<br />\n");
-        }
-    }
-    
-    /**
-     * Stream answers with optional markdown processing.
-     * Each chunk can be processed through markdown if needed.
-     */
-    /**
-     * Legacy streaming with optional markdown render. Use OpenAIStreamingService instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public Flux<String> streamAnswerWithMarkdown(List<Message> history, String latestUserMessage, boolean renderMarkdown) {
-        return streamAnswer(history, latestUserMessage);
-    }
-    
-    /**
-     * Determine the quality of search results and provide context to the AI
+     * Determine the quality of search results and provide context to the AI.
      */
     private String determineSearchQuality(List<Document> docs) {
         if (docs.isEmpty()) {
@@ -340,6 +288,21 @@ public class ChatService {
         } else {
             return String.format("Found %d documents (%d high-quality) via search. Some results may be less relevant.", 
                 docs.size(), highQualityDocs);
+        }
+    }
+
+    /**
+     * Captures the prompt and any retrieval notices for UI diagnostics.
+     *
+     * @param prompt generated prompt
+     * @param notices retrieval notices to surface to clients
+     */
+    public record ChatPromptOutcome(String prompt, List<RetrievalService.RetrievalNotice> notices) {
+        public ChatPromptOutcome {
+            if (prompt == null) {
+                throw new IllegalArgumentException("Prompt cannot be null");
+            }
+            notices = notices == null ? List.of() : List.copyOf(notices);
         }
     }
 }

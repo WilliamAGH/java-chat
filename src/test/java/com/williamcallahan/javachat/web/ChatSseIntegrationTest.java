@@ -12,9 +12,14 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Integration coverage for chat SSE responses to ensure clean, client-ready text.
+ */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 @TestConfiguration.RequiresExternalServices
@@ -40,13 +45,12 @@ class ChatSseIntegrationTest {
                 .timeout(Duration.ofSeconds(30));
 
         // Collect SSE events until terminal [DONE] or timeout
-        String aggregated = body
+        List<String> sseChunks = Objects.requireNonNull(body
                 .takeUntil(chunk -> chunk.contains("[DONE]"))
                 .take(Duration.ofSeconds(10))
                 .collectList()
-                .block(Duration.ofSeconds(15))
-                .stream()
-                .reduce("", (a, b) -> a + b);
+                .block(Duration.ofSeconds(15)), "Expected SSE chunks");
+        String aggregated = sseChunks.stream().reduce("", (a, b) -> a + b);
 
         assertNotNull(aggregated);
         assertTrue(aggregated.contains("data:"), "SSE should contain data: prefixes");
@@ -62,5 +66,4 @@ class ChatSseIntegrationTest {
         assertTrue(plain.trim().length() > 0, "Should have non-empty content");
     }
 }
-
 

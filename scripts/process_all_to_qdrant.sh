@@ -38,13 +38,18 @@ for arg in "$@"; do
     esac
 done
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Source colors from parent Makefile if available, otherwise define inline
+if [ -n "$RED" ]; then
+    # Already exported from Makefile
+    :
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m' # No Color
+fi
 
 echo "=============================================="
 echo "Document Processor"
@@ -132,16 +137,36 @@ check_qdrant_connection() {
     
     log "${YELLOW}Checking Qdrant connection...${NC}"
     
-    local url="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
-    local response=$(curl -s -o /dev/null -w "%{http_code}" \
-        -H "api-key: $QDRANT_API_KEY" \
-        "$url")
+    # Respect QDRANT_SSL setting for protocol selection
+    local protocol="https"
+    if [ "$QDRANT_SSL" = "false" ] || [ "$QDRANT_SSL" = "0" ] || [ -z "$QDRANT_SSL" ]; then
+        protocol="http"
+        # For local non-TLS, include the port (REST port, not gRPC)
+        local rest_port="${QDRANT_REST_PORT:-6333}"
+        local url="${protocol}://${QDRANT_HOST}:${rest_port}/collections/$QDRANT_COLLECTION"
+    else
+        # For TLS (cloud), port 443 is implicit
+        local url="${protocol}://${QDRANT_HOST}/collections/$QDRANT_COLLECTION"
+    fi
+    
+    local curl_opts=(-s -o /dev/null -w "%{http_code}")
+    if [ -n "$QDRANT_API_KEY" ]; then
+        curl_opts+=(-H "api-key: $QDRANT_API_KEY")
+    fi
+    
+    local response
+    response=$(curl "${curl_opts[@]}" "$url" || echo "000")
     
     if [ "$response" = "200" ]; then
         log "${GREEN}✓ Qdrant connection successful${NC} ($(percent_complete))"
         
         # Get collection info
-        local info=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url")
+        local info_opts=(-s)
+        if [ -n "$QDRANT_API_KEY" ]; then
+            info_opts+=(-H "api-key: $QDRANT_API_KEY")
+        fi
+        local info
+        info=$(curl "${info_opts[@]}" "$url" || echo "{}")
         local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
         local dimensions=$(echo "$info" | grep -o '"size":[0-9]*' | head -1 | cut -d: -f2)
         
@@ -151,6 +176,7 @@ check_qdrant_connection() {
         return 0
     else
         log "${RED}✗ Failed to connect to Qdrant (HTTP $response)${NC}"
+        log "${YELLOW}  URL: $url${NC}"
         return 1
     fi
 }
@@ -231,12 +257,10 @@ process_documents() {
         sleep 2
     fi
     
-    # Build the application
+    # Build the application using Gradle task
     log "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT"
-    ./mvnw -DskipTests clean package >> "$LOG_FILE" 2>&1
-    
-    if [ $? -eq 0 ]; then
+    if ./gradlew buildForScripts --quiet >> "$LOG_FILE" 2>&1; then
         log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"
     else
         log "${RED}✗ Failed to build application${NC}"
@@ -261,7 +285,7 @@ process_documents() {
     java -Dspring.profiles.active=cli \
          -DEMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE" \
          -DDOCS_DIR="$DOCS_ROOT" \
-         -jar target/*.jar >> "$LOG_FILE" 2>&1 &
+         -jar build/libs/*.jar >> "$LOG_FILE" 2>&1 &
     local APP_PID=$!
     
     log "${BLUE}ℹ Application started with PID: $APP_PID${NC}"

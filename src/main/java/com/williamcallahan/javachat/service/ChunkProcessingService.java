@@ -14,12 +14,19 @@ import java.util.List;
 @Service
 public class ChunkProcessingService {
 
+    private static final int DEFAULT_CHUNK_SIZE = 900;
+    private static final int DEFAULT_CHUNK_OVERLAP = 150;
+    private static final int PDF_PAGE_CHUNK_OVERLAP = 0;
+
     private final Chunker chunker;
     private final ContentHasher hasher;
     private final DocumentFactory documentFactory;
     private final LocalStoreService localStore;
     private final PdfContentExtractor pdfExtractor;
 
+    /**
+     * Creates the chunking pipeline with storage and hashing dependencies.
+     */
     public ChunkProcessingService(
             Chunker chunker,
             ContentHasher hasher,
@@ -51,14 +58,14 @@ public class ChunkProcessingService {
             String packageName) throws IOException {
 
         // Chunk the text with standard parameters
-        List<String> chunks = chunker.chunkByTokens(text, 900, 150);
+        List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
         List<Document> documents = new ArrayList<>();
 
-        for (int i = 0; i < chunks.size(); i++) {
-            String chunkText = chunks.get(i);
+        for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
+            String chunkText = chunks.get(chunkIndex);
 
             // Generate standardized hash
-            String hash = hasher.generateChunkHash(url, i, chunkText);
+            String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
 
             // Skip if already processed (deduplication)
             if (localStore.isHashIngested(hash)) {
@@ -67,13 +74,13 @@ public class ChunkProcessingService {
 
             // Create document with standardized metadata
             Document document = documentFactory.createDocument(
-                chunkText, url, title, i, packageName, hash);
+                chunkText, url, title, chunkIndex, packageName, hash);
 
             documents.add(document);
 
             // Store chunk text but DON'T mark as ingested yet
             // Will be marked after successful vector store addition
-            localStore.saveChunkText(url, i, chunkText, hash);
+            localStore.saveChunkText(url, chunkIndex, chunkText, hash);
         }
 
         return documents;
@@ -94,15 +101,15 @@ public class ChunkProcessingService {
             String title,
             String packageName) {
 
-        List<String> chunks = chunker.chunkByTokens(text, 900, 150);
+        List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
         List<Document> documents = new ArrayList<>();
 
-        for (int i = 0; i < chunks.size(); i++) {
-            String chunkText = chunks.get(i);
-            String hash = hasher.generateChunkHash(url, i, chunkText);
+        for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
+            String chunkText = chunks.get(chunkIndex);
+            String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
 
             Document document = documentFactory.createDocument(
-                chunkText, url, title, i, packageName, hash);
+                chunkText, url, title, chunkIndex, packageName, hash);
 
             documents.add(document);
         }
@@ -121,16 +128,16 @@ public class ChunkProcessingService {
             String packageName) throws java.io.IOException {
 
         List<String> pages = pdfExtractor.extractPageTexts(pdfPath);
-        List<Document> out = new ArrayList<>();
+        List<Document> pageDocuments = new ArrayList<>();
         int globalIndex = 0;
 
-        for (int i = 0; i < pages.size(); i++) {
-            String pageText = pages.get(i);
+        for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+            String pageText = pages.get(pageIndex);
             if (pageText == null) pageText = "";
 
             // Split pageText by tokens if longer than window; no overlap for simplicity
-            List<String> sub = chunker.chunkByTokens(pageText, 900, 0);
-            for (String chunkText : sub) {
+            List<String> pageChunks = chunker.chunkByTokens(pageText, DEFAULT_CHUNK_SIZE, PDF_PAGE_CHUNK_OVERLAP);
+            for (String chunkText : pageChunks) {
                 String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
                 if (!localStore.isHashIngested(hash)) {
                     Document doc = documentFactory.createDocumentWithPages(
@@ -140,14 +147,14 @@ public class ChunkProcessingService {
                             globalIndex,
                             packageName,
                             hash,
-                            i + 1,
-                            i + 1);
-                    out.add(doc);
+                            pageIndex + 1,
+                            pageIndex + 1);
+                    pageDocuments.add(doc);
                     localStore.saveChunkText(url, globalIndex, chunkText, hash);
                 }
                 globalIndex++;
             }
         }
-        return out;
+        return pageDocuments;
     }
 }

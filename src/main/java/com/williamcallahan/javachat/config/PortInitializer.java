@@ -1,34 +1,44 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.ServerSocket;
-import java.util.HashMap;
-import java.util.Map;
 
+/**
+ * Ensures a usable server port is selected before Spring Boot starts.
+ */
 public class PortInitializer implements EnvironmentPostProcessor, Ordered {
 
     private static final int DEFAULT_MIN = 8085;
     private static final int DEFAULT_MAX = 8090;
+    private static final String PROFILE_TEST = "test";
+    private static final String ENV_ACTIVE_PROFILE = "SPRING_PROFILES_ACTIVE";
+    private static final String PORT_PROPERTY = "server.port";
+    private static final String PORT_SOURCE_NAME = "forcedServerPort";
+    private static final String RANGE_SEPARATOR = "-";
 
+    /**
+     * Resolves the port range, selects a preferred port, and injects it into the environment.
+     *
+     * @param environment the Spring environment to update
+     * @param application the Spring Boot application
+     */
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         // Disable port manipulation entirely when running under the 'test' profile
-        for (String p : environment.getActiveProfiles()) {
-            if ("test".equalsIgnoreCase(p)) {
+        for (String activeProfileName : environment.getActiveProfiles()) {
+            String normalizedProfile = AsciiTextNormalizer.toLowerAscii(activeProfileName == null ? "" : activeProfileName.trim());
+            if (PROFILE_TEST.equals(normalizedProfile)) {
                 System.err.println("[startup] PortInitializer disabled under 'test' profile");
                 return;
             }
         }
-        String activeEnv = System.getenv("SPRING_PROFILES_ACTIVE");
-        if (activeEnv != null && activeEnv.toLowerCase().contains("test")) {
+        String activeEnv = System.getenv(ENV_ACTIVE_PROFILE);
+        if (activeEnv != null && AsciiTextNormalizer.toLowerAscii(activeEnv).contains(PROFILE_TEST)) {
             System.err.println("[startup] PortInitializer disabled via SPRING_PROFILES_ACTIVE=test");
             return;
         }
@@ -37,120 +47,32 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
         int max = getInt(environment, "app.ports.max", "APP_PORT_MAX", DEFAULT_MAX);
 
         String range = get(environment, "app.ports.range", "APP_PORT_RANGE", null);
-        if (range != null && range.contains("-")) {
-            String[] parts = range.split("-");
+        if (range != null && range.contains(RANGE_SEPARATOR)) {
+            String[] parts = range.split(RANGE_SEPARATOR);
             try {
                 min = Integer.parseInt(parts[0].trim());
                 max = Integer.parseInt(parts[1].trim());
-            } catch (Exception ignored) {
-                // keep defaults if parsing fails
+            } catch (NumberFormatException ignored) {
+                System.err.println("[startup] Invalid port range format; using defaults");
             }
         }
-        if (min > max) { int t = min; min = max; max = t; }
-
-        boolean killOnConflict = getBool(environment, "app.ports.killOnConflict", "APP_KILL_ON_CONFLICT", true);
+        if (min > max) {
+            int swap = min;
+            min = max;
+            max = swap;
+        }
 
         // Preferred from existing server.port/PORT, otherwise start at min
-        int preferred = getInt(environment, "server.port", "PORT", min);
+        int preferred = getInt(environment, PORT_PROPERTY, "PORT", min);
         if (preferred < min || preferred > max) {
             preferred = min;
         }
 
-        int chosen = preferred;
+        environment.getPropertySources().addFirst(
+            new ServerPortPropertySource(PORT_SOURCE_NAME, Integer.toString(preferred))
+        );
 
-        if (isPortInUse(chosen)) {
-            if (killOnConflict) {
-                killProcessOnPort(chosen);
-                waitForPortToBeFree(chosen, 5000);
-            }
-            if (isPortInUse(chosen)) {
-                int firstFree = findFirstFreePortInRange(min, max);
-                if (firstFree > 0) {
-                    chosen = firstFree;
-                } else if (killOnConflict) {
-                    // Nothing free; force using preferred by killing again
-                    killProcessOnPort(preferred);
-                    waitForPortToBeFree(preferred, 5000);
-                    chosen = preferred;
-                } else {
-                    // As a last resort, keep preferred and hope binding succeeds later
-                    chosen = preferred;
-                }
-            }
-        }
-
-        Map<String, Object> props = new HashMap<>();
-        props.put("server.port", Integer.toString(chosen));
-        environment.getPropertySources().addFirst(new MapPropertySource("forcedServerPort", props));
-
-        System.err.println("[startup] Using server.port=" + chosen + " (allowed range " + min + "-" + max + ")");
-    }
-
-    private static int findFirstFreePortInRange(int min, int max) {
-        for (int p = min; p <= max; p++) {
-            if (!isPortInUse(p)) {
-                return p;
-            }
-        }
-        return -1;
-    }
-
-    private static boolean isPortInUse(int port) {
-        // First check with lsof to see if any process is using the port
-        try {
-            Process list = new ProcessBuilder("/bin/sh", "-lc", "lsof -ti tcp:" + port).start();
-            String pids = readAll(list);
-            list.waitFor();
-            if (pids != null && !pids.trim().isEmpty()) {
-                System.err.println("[startup] Found process(es) on port " + port + ": " + pids.trim());
-                return true; // processes found
-            }
-        } catch (Exception e) {
-            System.err.println("[startup] Warning: lsof check failed for port " + port + ": " + e.getMessage());
-        }
-        
-        // Also try to bind to double-check
-        try (ServerSocket socket = new ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return false; // successfully bound -> not in use
-        } catch (IOException e) {
-            System.err.println("[startup] Port " + port + " binding failed: " + e.getMessage());
-            return true; // exception means port is in use
-        }
-    }
-
-    private static void waitForPortToBeFree(int port, long timeoutMillis) {
-        long start = System.currentTimeMillis();
-        while (System.currentTimeMillis() - start < timeoutMillis) {
-            if (!isPortInUse(port)) return;
-            try { Thread.sleep(100); } catch (InterruptedException ignored) { }
-        }
-    }
-
-    private static void killProcessOnPort(int port) {
-        // macOS/BSD 'xargs' may not support -r; fallback by checking output ourselves
-        String[] listCmd = {"/bin/sh", "-lc", "lsof -ti tcp:" + port};
-        try {
-            Process list = new ProcessBuilder(listCmd).redirectErrorStream(true).start();
-            String pids = readAll(list);
-            list.waitFor();
-            if (pids != null && !pids.trim().isEmpty()) {
-                String killCmd = "kill -9 " + pids.replaceAll("\\s+", " ").trim();
-                new ProcessBuilder("/bin/sh", "-lc", killCmd).start().waitFor();
-                System.err.println("[startup] Killed process(es) on port " + port + ": " + pids.trim());
-            }
-        } catch (Exception e) {
-            System.err.println("[startup] Warning: failed to kill process on port " + port + ": " + e.getMessage());
-        }
-    }
-
-    private static String readAll(Process p) throws IOException {
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line).append(' ');
-            return sb.toString();
-        }
+        System.err.println("[startup] Using server.port=" + preferred + " (allowed range " + min + "-" + max + ")");
     }
 
     private static String get(ConfigurableEnvironment env, String keyProp, String keyEnv, String def) {
@@ -162,18 +84,40 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     private static int getInt(ConfigurableEnvironment env, String keyProp, String keyEnv, int def) {
         String v = get(env, keyProp, keyEnv, null);
         if (v == null) return def;
-        try { return Integer.parseInt(v.trim()); } catch (Exception e) { return def; }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (NumberFormatException ignored) {
+            return def;
+        }
     }
 
-    private static boolean getBool(ConfigurableEnvironment env, String keyProp, String keyEnv, boolean def) {
-        String v = get(env, keyProp, keyEnv, null);
-        if (v == null) return def;
-        return v.equalsIgnoreCase("true") || v.equalsIgnoreCase("1") || v.equalsIgnoreCase("yes");
-    }
-
+    /**
+     * Orders this initializer to run before other environment processors.
+     *
+     * @return order value for Spring Boot processors
+     */
     @Override
     public int getOrder() {
         return Ordered.HIGHEST_PRECEDENCE;
     }
-}
 
+    /**
+     * Property source that pins the selected server port at the highest precedence.
+     */
+    private static final class ServerPortPropertySource extends PropertySource<String> {
+        private final String portValue;
+
+        private ServerPortPropertySource(String name, String portValue) {
+            super(name);
+            this.portValue = portValue;
+        }
+
+        @Override
+        public Object getProperty(String name) {
+            if (PORT_PROPERTY.equals(name)) {
+                return portValue;
+            }
+            return null;
+        }
+    }
+}
