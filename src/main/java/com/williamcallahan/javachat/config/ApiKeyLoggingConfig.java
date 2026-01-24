@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +58,7 @@ public class ApiKeyLoggingConfig {
      */
     @PostConstruct
     public void logApiKeyStatus() {
-        String normalizedProfile = normalizeAsciiLower(activeProfile == null ? "" : activeProfile.trim());
+        String normalizedProfile = AsciiTextNormalizer.toLowerAscii(activeProfile == null ? "" : activeProfile.trim());
         final boolean devProfile = DEV_PROFILE.equals(normalizedProfile);
         final boolean githubModelsEnabled = baseUrl != null && baseUrl.contains(GITHUB_MODELS_HOST);
 
@@ -123,18 +124,4 @@ public class ApiKeyLoggingConfig {
     private boolean isNonBlank(final String text) {
         return text != null && !text.isBlank();
     }
-
-    private String normalizeAsciiLower(String inputText) {
-        StringBuilder normalized = new StringBuilder(inputText.length());
-        for (int index = 0; index < inputText.length(); index++) {
-            char current = inputText.charAt(index);
-            if (current >= 'A' && current <= 'Z') {
-                normalized.append((char) (current + ('a' - 'A')));
-            } else {
-                normalized.append(current);
-            }
-        }
-        return normalized.toString();
-    }
-
 }
