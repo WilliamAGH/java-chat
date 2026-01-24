@@ -97,8 +97,7 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping("/enrich")
     public Enrichment enrich(@RequestParam("slug") String slug) {
-        Enrichment result = guidedService.enrichmentForLesson(slug);
-        return result == null ? Enrichment.empty() : result.sanitized();
+        return guidedService.enrichmentForLesson(slug).sanitized();
     }
 
     /**

@@ -42,8 +42,7 @@ public class EnrichmentController {
     public Enrichment enrich(@RequestParam("q") String query) {
         var docs = retrievalService.retrieve(query);
         List<String> snippets = docs.stream().map(doc -> doc.getText()).limit(6).collect(Collectors.toList());
-        Enrichment result = enrichmentService.enrich(query, jdkVersion, snippets);
-        return result == null ? Enrichment.empty() : result.sanitized();
+        return enrichmentService.enrich(query, jdkVersion, snippets).sanitized();
     }
 
     // New alias for consistent naming with chat routes

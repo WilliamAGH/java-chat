@@ -65,7 +65,7 @@ public class AuditService {
      */
     public AuditReport auditByUrl(String url) throws IOException {
         Set<String> expectedHashes = getExpectedHashes(url);
-        Set<String> qdrantHashes = fetchQdrantHashes(url);
+        List<String> qdrantHashes = fetchQdrantHashes(url);
         
         return compareAndReport(url, expectedHashes, qdrantHashes);
     }
@@ -117,7 +117,8 @@ public class AuditService {
         return expectedHashes;
     }
 
-    private AuditReport compareAndReport(String url, Set<String> expectedHashes, Set<String> qdrantHashes) {
+    private AuditReport compareAndReport(String url, Set<String> expectedHashes, List<String> qdrantHashList) {
+        Set<String> qdrantHashes = new LinkedHashSet<>(qdrantHashList);
         // 3) Compare
         Set<String> missingHashes = new LinkedHashSet<>(expectedHashes);
         missingHashes.removeAll(qdrantHashes);
@@ -127,7 +128,7 @@ public class AuditService {
 
         // Detect duplicates in Qdrant by hash (should be 0 if id=hash going forward)
         Map<String, Integer> duplicateCounts = new HashMap<>();
-        for (String hashValue : qdrantHashes) {
+        for (String hashValue : qdrantHashList) {
             duplicateCounts.merge(hashValue, 1, Integer::sum);
         }
         List<String> duplicateHashes = duplicateCounts.entrySet().stream()
@@ -156,8 +157,8 @@ public class AuditService {
         );
     }
 
-    private Set<String> fetchQdrantHashes(String url) {
-        Set<String> hashes = new LinkedHashSet<>();
+    private List<String> fetchQdrantHashes(String url) {
+        List<String> hashes = new ArrayList<>();
         RestTemplate restTemplate = new RestTemplate();
         String base = (useTls ? "https://" + host : "http://" + host + ":" + port);
         String endpoint = base + "/collections/" + collection + "/points/scroll";
@@ -196,20 +197,20 @@ public class AuditService {
         return hashes;
     }
 
-    private Set<String> extractHashes(Object responseBody) {
+    private List<String> extractHashes(Object responseBody) {
         if (!(responseBody instanceof Map<?, ?> responseMap)) {
-            return Set.of();
+            return List.of();
         }
         Object scrollPayloadNode = responseMap.get("result");
         if (!(scrollPayloadNode instanceof Map<?, ?> scrollPayloadMap)) {
-            return Set.of();
+            return List.of();
         }
         Object pointsNode = scrollPayloadMap.get("points");
         if (!(pointsNode instanceof List<?> pointsList)) {
-            return Set.of();
+            return List.of();
         }
 
-        Set<String> hashes = new LinkedHashSet<>();
+        List<String> hashes = new ArrayList<>();
         for (Object point : pointsList) {
             extractHash(point).ifPresent(hashes::add);
         }
