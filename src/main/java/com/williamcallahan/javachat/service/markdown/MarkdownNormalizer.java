@@ -13,57 +13,62 @@ final class MarkdownNormalizer {
         }
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         boolean inFence = false;
+        char fenceChar = 0;
+        int fenceLength = 0;
         for (int cursor = 0; cursor < markdownText.length();) {
-            // Opening fence detection - only when NOT already inside a fence
-            if (!inFence && cursor + 2 < markdownText.length()
-                && markdownText.charAt(cursor) == '`'
-                && markdownText.charAt(cursor + 1) == '`'
-                && markdownText.charAt(cursor + 2) == '`') {
-                boolean openingFence = !inFence;
-                if (openingFence && normalizedBuilder.length() > 0) {
-                    char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
-                    if (previousChar != '\n') {
-                        normalizedBuilder.append('\n').append('\n');
+            boolean isStartOfLine = cursor == 0 || markdownText.charAt(cursor - 1) == '\n';
+            if (isStartOfLine) {
+                FenceMarker marker = scanFenceMarker(markdownText, cursor);
+                if (marker != null) {
+                    if (!inFence) {
+                        if (normalizedBuilder.length() > 0) {
+                            char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
+                            if (previousChar != '\n') {
+                                normalizedBuilder.append('\n').append('\n');
+                            }
+                        }
+                        inFence = true;
+                        fenceChar = marker.character();
+                        fenceLength = marker.length();
+                        appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
+                        cursor += marker.length();
+                        while (cursor < markdownText.length()) {
+                            char languageChar = markdownText.charAt(cursor);
+                            if (Character.isLetterOrDigit(languageChar) || languageChar == '-' || languageChar == '_') {
+                                normalizedBuilder.append(languageChar);
+                                cursor++;
+                            } else {
+                                break;
+                            }
+                        }
+                        if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                            normalizedBuilder.append('\n');
+                        }
+                        continue;
+                    }
+                    if (marker.character() == fenceChar && marker.length() >= fenceLength) {
+                        if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
+                            normalizedBuilder.append('\n');
+                        }
+                        appendFenceMarker(normalizedBuilder, marker, markdownText, cursor);
+                        cursor += marker.length();
+                        inFence = false;
+                        fenceChar = 0;
+                        fenceLength = 0;
+                        if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
+                            normalizedBuilder.append('\n').append('\n');
+                        }
+                        continue;
                     }
                 }
-                normalizedBuilder.append("```");
-                cursor += 3;
-                while (cursor < markdownText.length()) {
-                    char languageChar = markdownText.charAt(cursor);
-                    if (Character.isLetterOrDigit(languageChar) || languageChar == '-' || languageChar == '_') {
-                        normalizedBuilder.append(languageChar);
-                        cursor++;
-                    } else {
-                        break;
-                    }
-                }
-                if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
-                    normalizedBuilder.append('\n');
-                }
-                inFence = true;
-                continue;
-            }
-            if (inFence
-                && cursor + 2 < markdownText.length()
-                && markdownText.charAt(cursor) == '`'
-                && markdownText.charAt(cursor + 1) == '`'
-                && markdownText.charAt(cursor + 2) == '`') {
-                if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
-                    normalizedBuilder.append('\n');
-                }
-                normalizedBuilder.append("```");
-                cursor += 3;
-                inFence = false;
-                if (cursor < markdownText.length() && markdownText.charAt(cursor) != '\n') {
-                    normalizedBuilder.append('\n').append('\n');
-                }
-                continue;
             }
             normalizedBuilder.append(markdownText.charAt(cursor));
             cursor++;
         }
         if (inFence) {
-            normalizedBuilder.append('\n').append("```");
+            char closingChar = fenceChar == 0 ? '`' : fenceChar;
+            int closingLength = Math.max(3, fenceLength);
+            normalizedBuilder.append('\n').append(String.valueOf(closingChar).repeat(closingLength));
         }
         // Second pass: indent blocks under numeric headers so following content
         // (bullets/enrichments/code) stays inside the same list item until next header.
@@ -76,6 +81,8 @@ final class MarkdownNormalizer {
         }
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         boolean inFence = false;
+        char fenceChar = 0;
+        int fenceLength = 0;
         boolean inNumericHeader = false;
         int cursor = 0;
         int textLength = markdownText.length();
@@ -88,8 +95,17 @@ final class MarkdownNormalizer {
             String line = markdownText.substring(lineStartIndex, lineEndIndex);
             String trimmed = line.stripLeading();
             // fence toggle
-            if (trimmed.startsWith("```") && !trimmed.startsWith("````")) {
-                inFence = !inFence;
+            FenceMarker marker = scanFenceMarker(trimmed, 0);
+            if (marker != null) {
+                if (!inFence) {
+                    inFence = true;
+                    fenceChar = marker.character();
+                    fenceLength = marker.length();
+                } else if (marker.character() == fenceChar && marker.length() >= fenceLength) {
+                    inFence = false;
+                    fenceChar = 0;
+                    fenceLength = 0;
+                }
             }
             boolean isHeader = false;
             if (!inFence) {
@@ -141,13 +157,36 @@ final class MarkdownNormalizer {
             return false;
         }
         // Keep nested lists and fences as-is; they already carry their own structure.
-        if (trimmedLine.startsWith("```")) {
+        if (scanFenceMarker(trimmedLine, 0) != null) {
             return false;
         }
         char firstChar = trimmedLine.charAt(0);
         boolean unorderedMarker = firstChar == '-' || firstChar == '*' || firstChar == '+' || firstChar == '•';
         // Skip indentation for ordered list markers (1. / 1) / a. / i.)
         return !unorderedMarker && !startsWithOrderedMarker(trimmedLine);
+    }
+
+    private record FenceMarker(char character, int length) {}
+
+    private static FenceMarker scanFenceMarker(String text, int index) {
+        if (text == null || index < 0 || index >= text.length()) {
+            return null;
+        }
+        char markerChar = text.charAt(index);
+        if (markerChar != '`' && markerChar != '~') {
+            return null;
+        }
+        int length = 0;
+        while (index + length < text.length() && text.charAt(index + length) == markerChar) {
+            length++;
+        }
+        return length >= 3 ? new FenceMarker(markerChar, length) : null;
+    }
+
+    private static void appendFenceMarker(StringBuilder builder, FenceMarker marker, String text, int index) {
+        for (int offset = 0; offset < marker.length(); offset++) {
+            builder.append(text.charAt(index + offset));
+        }
     }
 
     private static boolean startsWithOrderedMarker(String trimmedLine) {

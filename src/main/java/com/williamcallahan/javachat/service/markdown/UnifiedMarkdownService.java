@@ -46,7 +46,6 @@ public class UnifiedMarkdownService {
     private final Parser parser;
     private final HtmlRenderer renderer;
     private final CitationProcessor citationProcessor;
-    private final EnrichmentProcessor enrichmentProcessor;
     private final EnrichmentPlaceholderizer enrichmentPlaceholderizer; // added
     private final Cache<String, ProcessedMarkdown> processCache;
 
@@ -58,7 +57,7 @@ public class UnifiedMarkdownService {
     public UnifiedMarkdownService() {
         // Configure Flexmark with optimal settings
         MutableDataSet options = new MutableDataSet()
-.set(Parser.EXTENSIONS, Arrays.asList(
+            .set(Parser.EXTENSIONS, Arrays.asList(
                 TablesExtension.create(),
                 StrikethroughExtension.create(),
                 TaskListExtension.create(),
@@ -67,12 +66,13 @@ public class UnifiedMarkdownService {
             .set(Parser.BLANK_LINES_IN_AST, false)
             .set(Parser.HTML_BLOCK_DEEP_PARSER, false)
             .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true)
-.set(HtmlRenderer.ESCAPE_HTML, true)
+            .set(HtmlRenderer.ESCAPE_HTML, true)
             .set(HtmlRenderer.SUPPRESS_HTML, false)
             // Preserve soft-breaks as plain newlines so browsers treat them as spaces, avoiding forced <br/>
             .set(HtmlRenderer.SOFT_BREAK, "\n")
             .set(HtmlRenderer.HARD_BREAK, "<br />\n")
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-")
+            .set(HtmlRenderer.SUPPRESSED_LINKS, "(?i)^(javascript|data|vbscript):.*")
             .set(HtmlRenderer.INDENT_SIZE, 2)
             .set(TablesExtension.COLUMN_SPANS, false)
             .set(TablesExtension.APPEND_MISSING_COLUMNS, true)
@@ -82,7 +82,6 @@ public class UnifiedMarkdownService {
         this.parser = Parser.builder(options).build();
         this.renderer = HtmlRenderer.builder(options).build();
         this.citationProcessor = new CitationProcessor();
-        this.enrichmentProcessor = new EnrichmentProcessor();
         this.enrichmentPlaceholderizer = new EnrichmentPlaceholderizer(parser, renderer); // init
         
         // Initialize cache
@@ -143,7 +142,6 @@ public class UnifiedMarkdownService {
             // Extract structured data using AST visitors (not regex)
             List<MarkdownCitation> citations = citationProcessor.extractCitations(document);
             List<MarkdownEnrichment> enrichments = new java.util.ArrayList<>(placeholderEnrichments);
-            enrichments.addAll(enrichmentProcessor.extractEnrichments(document));
             
             // Render HTML from AST
             String html = renderer.render(document);
@@ -597,6 +595,7 @@ public class UnifiedMarkdownService {
     private void fixSentenceSpacing(Document doc) {
         for (Element paragraphElement : doc.select("p")) {
             if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            if (!paragraphElement.children().isEmpty()) continue;
             for (int nodeIndex = 0; nodeIndex < paragraphElement.childNodeSize(); nodeIndex++) {
                 org.jsoup.nodes.Node childNode = paragraphElement.childNode(nodeIndex);
                 if (childNode instanceof TextNode textNode) {
@@ -627,8 +626,9 @@ public class UnifiedMarkdownService {
                         // Part of a number like 3.14 - don't add space
                         continue;
                     }
-                    // Insert space before letters (not digits) that follow sentence-ending punctuation
-                    if (nextCharacter != ' ' && nextCharacter != '\n' && Character.isLetter(nextCharacter)) {
+                    boolean prevIsLower = charIndex > 0 && Character.isLowerCase(text.charAt(charIndex - 1));
+                    // Insert space before uppercase sentence starts to avoid breaking URLs and package names.
+                    if (prevIsLower && nextCharacter != ' ' && nextCharacter != '\n' && Character.isUpperCase(nextCharacter)) {
                         spacingBuilder.append(' ');
                     }
                 }
@@ -641,6 +641,7 @@ public class UnifiedMarkdownService {
         java.util.List<Element> paragraphElements = new java.util.ArrayList<>(doc.select("p"));
         for (Element paragraphElement : paragraphElements) {
             if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            if (!paragraphElement.children().isEmpty()) continue;
             String paragraphText = paragraphElement.text();
             if (paragraphText == null) continue;
             // Simple sentence boundary detection
