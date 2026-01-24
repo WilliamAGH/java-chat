@@ -167,11 +167,4 @@ public class LocalStoreService {
         }
     }
 
-    private Path buildPath(String rawPath, String description) {
-        try {
-            return Path.of(rawPath);
-        } catch (InvalidPathException invalidPathException) {
-            throw new IllegalStateException("Invalid " + description + " directory path", invalidPathException);
-        }
-    }
 }
