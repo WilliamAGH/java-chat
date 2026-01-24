@@ -73,8 +73,12 @@ public class EmbeddingCacheService {
         if (filename == null || filename.isBlank()) {
             throw new InvalidParameterException("Filename cannot be null or blank");
         }
-        // Reject obvious path traversal attempts
-        if (filename.contains("..") || filename.startsWith("/") || filename.contains(":")) {
+        // Reject obvious path traversal attempts and path separators
+        if (filename.contains("..")
+            || filename.startsWith("/")
+            || filename.contains(":")
+            || filename.contains("/")
+            || filename.contains("\\")) {
             throw new InvalidParameterException("Invalid filename: path traversal not allowed");
         }
         Path resolved = cacheDir.resolve(filename).normalize();
