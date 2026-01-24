@@ -207,9 +207,7 @@ public class GuidedLearningController extends BaseController {
             return Flux.merge(dataStream, heartbeats)
                     .filter(event -> event != null && !event.isEmpty())  // Filter out empty heartbeat strings
                     .doOnComplete(() -> {
-                        // Store processed HTML for consistency with Chat
-                        var processed = markdownService.processStructured(fullResponse.toString());
-                        chatMemory.addAssistant(sessionId, processed.html());
+                        chatMemory.addAssistant(sessionId, fullResponse.toString());
                     })
                     .onErrorResume(error -> {
                         // Log and send error marker to client - errors must be communicated, not silently dropped

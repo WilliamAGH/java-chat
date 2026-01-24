@@ -10,10 +10,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.RetrievalService;
-import org.springframework.ai.document.Document;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
-import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -54,6 +51,10 @@ public class ChatController extends BaseController {
     private static final String SSE_EVENT_ERROR = "error";
     /** SSE event type for diagnostic status events. */
     private static final String SSE_EVENT_STATUS = "status";
+    /** SSE event type for primary text chunks. */
+    private static final String SSE_EVENT_TEXT = "text";
+    /** SSE comment content for heartbeats. */
+    private static final String SSE_COMMENT_KEEPALIVE = "keepalive";
 
     /**
      * Monotonic request counter for correlating log entries within a single chat request.
@@ -63,7 +64,6 @@ public class ChatController extends BaseController {
     
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
-    private final UnifiedMarkdownService unifiedMarkdownService;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final ObjectMapper objectMapper;
@@ -81,22 +81,19 @@ public class ChatController extends BaseController {
 	     *
 	     * @param chatService chat orchestration service
 	     * @param chatMemory conversation memory service
-	     * @param unifiedMarkdownService unified markdown renderer
-	     * @param openAIStreamingService streaming LLM client
+     * @param openAIStreamingService streaming LLM client
 	     * @param retrievalService retrieval service for diagnostics
 	     * @param objectMapper JSON mapper for safe SSE serialization
 	     * @param exceptionBuilder shared exception response builder
 	     */
-	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
-	                         UnifiedMarkdownService unifiedMarkdownService,
-	                         OpenAIStreamingService openAIStreamingService,
-	                         RetrievalService retrievalService,
-	                         ObjectMapper objectMapper,
-	                         ExceptionResponseBuilder exceptionBuilder) {
+    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
+                         OpenAIStreamingService openAIStreamingService,
+                         RetrievalService retrievalService,
+                         ObjectMapper objectMapper,
+                         ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
-        this.unifiedMarkdownService = unifiedMarkdownService;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.objectMapper = objectMapper;
@@ -173,7 +170,7 @@ public class ChatController extends BaseController {
             // Errors propagate through dataEvents to onErrorResume below - no duplicate logging here.
             Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
                     .takeUntilOther(dataStream.ignoreElements())
-                    .map(tick -> ServerSentEvent.<String>builder().comment("keepalive").build());
+                    .map(tick -> ServerSentEvent.<String>builder().comment(SSE_COMMENT_KEEPALIVE).build());
 
             Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                     .map(notice -> ServerSentEvent.<String>builder()
@@ -185,15 +182,13 @@ public class ChatController extends BaseController {
             // See: https://github.com/spring-projects/spring-framework/issues/27473
             Flux<ServerSentEvent<String>> dataEvents = dataStream
                     .map(chunk -> ServerSentEvent.<String>builder()
+                            .event(SSE_EVENT_TEXT)
                             .data(jsonSerialize(new ChunkMessage(chunk)))
                             .build());
 
             return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats))
                     .doOnComplete(() -> {
-                        // Store the full response using AST-based processing
-                        ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
-                        String processed = processedResult.html();
-                        chatMemory.addAssistant(sessionId, processed);
+                        chatMemory.addAssistant(sessionId, fullResponse.toString());
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                     })
                     .onErrorResume(error -> {
