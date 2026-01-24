@@ -10,10 +10,7 @@
         <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
         <Method name="handleError"/>
     </Match>
-    <Match>
-        <Bug code="SECSC"/>
-        <Package name="com.williamcallahan.javachat.web"/>
-    </Match>
+
 
     <!--
         Spring-managed dependencies are intentionally shared; SpotBugs flags these as EI_EXPOSE_REP2,
@@ -66,7 +63,7 @@
     -->
     <Match>
         <Bug code="SECSC"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\.web\\..*"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
     </Match>
 
     <!--
