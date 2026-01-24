@@ -190,6 +190,19 @@ tasks.register<Test>("integrationTest") {
     shouldRunAfter(tasks.test)
 }
 
+// bootRun JVM configuration
+// Note: -Dorg.gradle.jvmargs in Makefile configures Gradle daemon, not the app.
+// These jvmArgs configure the actual Spring Boot application process.
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    jvmArgs(
+        "-Xmx2g",
+        "-Dio.netty.handler.ssl.noOpenSsl=true",
+        "-Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
+    )
+    systemProperty("java.net.preferIPv4Stack", "true")
+    // spring.devtools.restart.enabled is controlled by devtools presence on classpath
+}
+
 // Custom helper tasks for scripts
 tasks.register("buildForScripts") {
     description = "Build application JAR for use in scripts (skips tests)"
