@@ -101,6 +101,7 @@ public class QdrantIndexInitializer {
         } catch (RuntimeException indexCreationException) {
             log.warn("Unable to ensure Qdrant payload indexes (exception type: {})",
                 indexCreationException.getClass().getSimpleName());
+            throw new IllegalStateException("Unable to ensure Qdrant payload indexes", indexCreationException);
         }
     }
 
