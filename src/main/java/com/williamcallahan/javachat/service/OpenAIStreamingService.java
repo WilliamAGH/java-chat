@@ -7,11 +7,16 @@ import com.openai.core.Timeout;
 import com.openai.core.http.StreamResponse;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
-import com.openai.models.ChatModel;
+import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
-import com.openai.models.chat.completions.ChatCompletion;
-import com.openai.models.chat.completions.ChatCompletionChunk;
-import com.openai.models.chat.completions.ChatCompletionCreateParams;
+import com.openai.models.ResponsesModel;
+import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseOutputItem;
+import com.openai.models.responses.ResponseOutputMessage;
+import com.openai.models.responses.ResponseOutputText;
+import com.openai.models.responses.ResponseStreamEvent;
+import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.slf4j.Logger;
@@ -136,6 +141,9 @@ public class OpenAIStreamingService {
         }
     }
 
+    /**
+     * Closes OpenAI clients during application shutdown.
+     */
     @PreDestroy
     public void shutdown() {
         closeClientSafely(clientPrimary, "primary");
@@ -176,7 +184,7 @@ public class OpenAIStreamingService {
         
         return Flux.<String>defer(() -> {
             String truncatedPrompt = truncatePromptForModel(prompt);
-            ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature);
             OpenAIClient streamingClient = selectClientForStreaming();
             
             if (streamingClient == null) {
@@ -195,11 +203,10 @@ public class OpenAIStreamingService {
                 .build();
 
             // StreamResponse implements AutoCloseable; explicit type params help inference
-            return Flux.<String, StreamResponse<ChatCompletionChunk>>using(
-                () -> streamingClient.chat().completions().createStreaming(params, requestOptions),
-                (StreamResponse<ChatCompletionChunk> responseStream) -> Flux.fromStream(responseStream.stream())
-                    .concatMap(chunk -> Flux.fromIterable(chunk.choices()))
-                    .concatMap(choice -> Mono.justOrEmpty(choice.delta().content()))
+            return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
+                () -> streamingClient.responses().createStreaming(params, requestOptions),
+                (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
+                    .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event)))
             )
             .doOnComplete(() -> {
                 log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
@@ -236,21 +243,18 @@ public class OpenAIStreamingService {
             RateLimitManager.ApiProvider activeProvider = isPrimaryClient(blockingClient)
                     ? RateLimitManager.ApiProvider.GITHUB_MODELS
                     : RateLimitManager.ApiProvider.OPENAI;
-            ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
+            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature);
             try {
                 log.info("[LLM] [{}] Complete started", activeProvider.getName());
                 RequestOptions requestOptions = RequestOptions.builder()
                     .timeout(completeTimeout())
                     .build();
-                ChatCompletion completion = blockingClient.chat().completions().create(params, requestOptions);
+                Response completion = blockingClient.responses().create(params, requestOptions);
                 if (rateLimitManager != null) {
                     rateLimitManager.recordSuccess(activeProvider);
                 }
                 log.debug("[LLM] [{}] Complete succeeded", activeProvider.getName());
-                String response = completion.choices().stream()
-                        .findFirst()
-                        .flatMap(choice -> choice.message().content())
-                        .orElse("");
+                String response = extractTextFromResponse(completion);
                 return Mono.just(response);
             } catch (RuntimeException completionException) {
                 log.error("[LLM] [{}] Complete failed: {}",
@@ -299,29 +303,55 @@ public class OpenAIStreamingService {
         }
     }
 
-    private ChatCompletionCreateParams buildChatParams(String prompt, double temperature) {
+    private ResponseCreateParams buildResponseParams(String prompt, double temperature) {
         String normalizedModelId = normalizedModelId();
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel = gpt5Family || normalizedModelId.startsWith("o");
 
-        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
-                .addUserMessage(prompt)
-                .model(ChatModel.of(normalizedModelId));
+        ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
+                .input(prompt)
+                .model(ResponsesModel.ofString(normalizedModelId));
 
         if (gpt5Family) {
             // GPT-5.2: omit temperature and set conservative max output tokens
-            builder.maxCompletionTokens(MAX_COMPLETION_TOKENS);
+            builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
             log.debug("Using GPT-5.2 configuration (no regression)");
 
             ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
             if (effort != null) {
-                builder.reasoningEffort(effort);
+                builder.reasoning(Reasoning.builder().effort(effort).build());
             }
         } else if (!reasoningModel && Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
 
         return builder.build();
+    }
+
+    private String extractTextDelta(ResponseStreamEvent event) {
+        return event.outputTextDelta()
+            .map(ResponseTextDeltaEvent::delta)
+            .orElse(null);
+    }
+
+    private String extractTextFromResponse(Response response) {
+        if (response == null) {
+            return "";
+        }
+        StringBuilder outputBuilder = new StringBuilder();
+        for (ResponseOutputItem outputItem : response.output()) {
+            if (!outputItem.isMessage()) {
+                continue;
+            }
+            ResponseOutputMessage message = outputItem.asMessage();
+            for (ResponseOutputMessage.Content content : message.content()) {
+                if (content.isOutputText()) {
+                    ResponseOutputText outputText = content.asOutputText();
+                    outputBuilder.append(outputText.text());
+                }
+            }
+        }
+        return outputBuilder.toString();
     }
     
     // Model mapping removed to prevent unintended regression; use configured model id
