@@ -303,17 +303,24 @@
     50% { opacity: 0; }
   }
 
-  /* Actions */
+  /* Actions - capability-based visibility */
   .bubble-actions {
     position: absolute;
     bottom: var(--space-2);
     right: var(--space-2);
-    opacity: 0;
+    opacity: 1; /* Default visible for touch devices */
     transition: opacity var(--duration-fast) var(--ease-out);
   }
 
-  .bubble:hover .bubble-actions {
-    opacity: 1;
+  /* Only use hover behavior when device supports it */
+  @media (hover: hover) and (pointer: fine) {
+    .bubble-actions {
+      opacity: 0;
+    }
+
+    .bubble:hover .bubble-actions {
+      opacity: 1;
+    }
   }
 
   .action-btn {
@@ -377,10 +384,6 @@
     .avatar svg {
       width: 16px;
       height: 16px;
-    }
-
-    .bubble-actions {
-      opacity: 1;
     }
 
     .assistant-content {
