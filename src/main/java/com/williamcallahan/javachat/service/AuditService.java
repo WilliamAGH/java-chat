@@ -88,13 +88,12 @@ public class AuditService {
         // 1) Enumerate parsed chunks for this URL
         String safeName = localStore.toSafeName(url);
         if (safeName == null || safeName.isEmpty()) {
-            log.warn("Cannot audit URL with invalid safe name mapping");
-            return Set.of();
+            throw new IllegalStateException("Cannot audit URL: invalid safe name mapping for " + url);
         }
         String safeBase = safeName + "_";
         Path parsedRoot = localStore.getParsedDir();
         if (parsedRoot == null || !Files.exists(parsedRoot)) {
-            return Set.of();
+            throw new IllegalStateException("Parsed chunk directory not available: " + parsedRoot);
         }
 
         // pattern: <safeBase><index>_<hash12>.txt
@@ -150,7 +149,9 @@ public class AuditService {
             .map(Map.Entry::getKey)
             .toList();
 
-        boolean auditOk = missingHashes.isEmpty() && duplicateHashes.isEmpty();
+        boolean auditOk = missingHashes.isEmpty()
+            && extraHashes.isEmpty()
+            && duplicateHashes.isEmpty();
         List<String> missingHashesSample = missingHashes.isEmpty()
             ? List.of()
             : missingHashes.stream().limit(20).toList();
