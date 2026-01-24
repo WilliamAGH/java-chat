@@ -216,14 +216,15 @@ public class DocumentProcessor {
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
 
-            final long duplicates = fileCount - processed;
+            final int failureCount = outcome.failures().size();
+            final long duplicates = fileCount - processed - failureCount;
             if (duplicates > 0) {
                 if (LOGGER.isInfoEnabled()) {
                     LOGGER.info(LOG_DUPLICATES_SKIPPED, duplicates);
                 }
             }
-            if (!outcome.failures().isEmpty() && LOGGER.isWarnEnabled()) {
-                LOGGER.warn("Ingestion completed with {} file failures", outcome.failures().size());
+            if (failureCount > 0 && LOGGER.isWarnEnabled()) {
+                LOGGER.warn("Ingestion completed with {} file failures", failureCount);
             }
             return new ProcessingOutcome.Success(processed, duplicates);
 
