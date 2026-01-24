@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
-// TODO: Add DJL-based BGE reranker or LLM rerank; embedding-based MMR removed for now
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
@@ -291,8 +290,8 @@ public class RetrievalService {
                 continue;
             }
             Map<String, Object> metadata = Optional.ofNullable(sourceDoc.getMetadata()).orElse(Map.of());
-            String rawUrl = String.valueOf(metadata.getOrDefault("url", ""));
-            String title = String.valueOf(metadata.getOrDefault("title", ""));
+            String rawUrl = String.valueOf(metadata.getOrDefault(METADATA_URL, ""));
+            String title = String.valueOf(metadata.getOrDefault(METADATA_TITLE, ""));
             String url = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             // Refine Javadoc URLs to nested type pages where the chunk references them
             url =
@@ -301,7 +300,7 @@ public class RetrievalService {
                     sourceDoc.getText()
                 );
             // Append member anchors (methods/constructors) when confidently derivable
-            String pkg = String.valueOf(metadata.getOrDefault("package", ""));
+            String pkg = String.valueOf(metadata.getOrDefault(METADATA_PACKAGE, ""));
             url =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
                     url,
@@ -329,8 +328,6 @@ public class RetrievalService {
         }
         return citations;
     }
-
-    // TODO: Implement MMR and reranker integration
 
     /**
      * Handle vector search failure by logging context and falling back to local keyword search.

@@ -22,7 +22,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import org.springframework.http.codec.ServerSentEvent;
 
 import java.time.Duration;
@@ -91,7 +90,34 @@ public class ChatController extends BaseController {
         this.retrievalService = retrievalService;
     }
 
-    
+    /**
+     * Escapes a string for safe inclusion in JSON, handling quotes, backslashes, and control characters.
+     * Required to preserve whitespace in SSE data which Spring can otherwise trim.
+     */
+    private static String escapeJsonString(String input) {
+        if (input == null) {
+            return "";
+        }
+        StringBuilder escaped = new StringBuilder(input.length() + 16);
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            switch (c) {
+                case '"' -> escaped.append("\\\"");
+                case '\\' -> escaped.append("\\\\");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        escaped.append(c);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
+    }
 
     /**
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
@@ -152,8 +178,12 @@ public class ChatController extends BaseController {
                     .takeUntilOther(dataStream.ignoreElements())
                     .map(tick -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
+            // Wrap chunks in JSON to preserve whitespace - Spring's SSE handling can trim leading spaces
+            // See: https://github.com/spring-projects/spring-framework/issues/27473
             Flux<ServerSentEvent<String>> dataEvents = dataStream
-                    .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build());
+                    .map(chunk -> ServerSentEvent.<String>builder()
+                            .data("{\"text\":\"" + escapeJsonString(chunk) + "\"}")
+                            .build());
 
             return Flux.merge(dataEvents, heartbeats)
                     .doOnComplete(() -> {
@@ -303,7 +333,7 @@ public class ChatController extends BaseController {
      */
     @Deprecated(since = "1.0", forRemoval = true)
     @PostMapping("/process-structured")
-    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody ProcessStructuredRequest request) {
+    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody StructuredMarkdownRequest request) {
         String text = request.text();
         if (text == null || text.trim().isEmpty()) {
             return ResponseEntity.badRequest().build();

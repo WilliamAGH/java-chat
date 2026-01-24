@@ -37,7 +37,7 @@ public class AppProperties {
      * <p>Production deployments should override this via configuration so that robots.txt and sitemap.xml
      * emit absolute URLs for the real public host.
      */
-    private static final String DEFAULT_PUBLIC_BASE_URL = "http://localhost:8080";
+    private static final String DEFAULT_PUBLIC_BASE_URL = "http://localhost:8085";
 
     private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();

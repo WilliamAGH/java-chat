@@ -1,13 +1,13 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.9"
+    id("org.springframework.boot") version "3.5.10"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.github.spotbugs") version "6.4.8"
     id("pmd")
 }
 
 val javaVersion = 21
-val springAiVersion = "1.0.3"
+val springAiVersion = "1.1.2"
 val openaiVersion = "4.16.0"
 val springDotenvVersion = "5.1.0"
 val jsoupVersion = "1.22.1"
@@ -134,6 +134,7 @@ spotbugs {
 tasks.withType<com.github.spotbugs.snom.SpotBugsTask> {
     // Disable buggy FindSecBugs CORS detector that crashes on Spring config
     omitVisitors.add("CorsRegistryCORSDetector")
+    excludeFilter.set(file("spotbugs-exclude.xml"))
     reports.create("html") {
         required.set(true)
     }

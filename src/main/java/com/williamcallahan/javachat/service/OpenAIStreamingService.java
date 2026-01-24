@@ -2,10 +2,10 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
-import com.openai.core.JsonValue;
+import com.openai.core.Timeout;
 import com.openai.core.http.StreamResponse;
-import com.openai.helpers.ChatCompletionAccumulator;
 import com.openai.models.ChatModel;
+import com.openai.models.ReasoningEffort;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionChunk;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
@@ -19,7 +19,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.lang.reflect.Method;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -39,6 +38,8 @@ public class OpenAIStreamingService {
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
     private static final String PARAGRAPH_SEPARATOR = "\n\n";
     private static final int TRUNCATION_SCAN_WINDOW = 2000;
+    private static final int MAX_COMPLETION_TOKENS = 4000;
+    private static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
     
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
@@ -81,20 +82,12 @@ public class OpenAIStreamingService {
             // Initialize both when possible; prefer GitHub Models as primary
             if (githubToken != null && !githubToken.isBlank()) {
                 log.info("Initializing OpenAI client with GitHub Models endpoint");
-                this.clientPrimary = OpenAIOkHttpClient.builder()
-                        .apiKey(githubToken)
-                        .baseUrl(githubModelsBaseUrl)
-                        .timeout(java.time.Duration.ofSeconds(30))
-                        .build();
+                this.clientPrimary = createClient(githubToken, githubModelsBaseUrl);
                 log.info("OpenAI client initialized successfully with GitHub Models");
             }
             if (openaiApiKey != null && !openaiApiKey.isBlank()) {
                 log.info("Initializing OpenAI client with OpenAI API (fallback)");
-                this.clientSecondary = OpenAIOkHttpClient.builder()
-                        .apiKey(openaiApiKey)
-                        .baseUrl("https://api.openai.com/v1")
-                        .timeout(java.time.Duration.ofSeconds(30))
-                        .build();
+                this.clientSecondary = createClient(openaiApiKey, OPENAI_BASE_URL);
                 log.info("OpenAI client initialized successfully with OpenAI API");
             }
             this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
@@ -107,6 +100,13 @@ public class OpenAIStreamingService {
             this.isAvailable = false;
         }
     }
+
+    private OpenAIClient createClient(String apiKey, String baseUrl) {
+        return OpenAIOkHttpClient.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .build();
+    }
     
     /**
      * Stream a response from the OpenAI API using clean, native streaming support.
@@ -118,71 +118,55 @@ public class OpenAIStreamingService {
     public Flux<String> streamResponse(String prompt, double temperature) {
         log.debug("Starting OpenAI stream");
         
-        return Flux.<String>create(sink -> {
-            try {
-                ChatCompletionCreateParams params = buildChatParams(prompt, temperature);
-                OpenAIClient streamingClient = selectClientForStreaming();
-                if (streamingClient == null) {
-                    log.error("No OpenAI-compatible client is configured or available for streaming. "
-                            + "Check API credentials and configuration.");
-                    sink.error(new IllegalStateException(
-                            "No OpenAI-compatible client is configured or available for streaming."));
-                    return;
-                }
-                
-                executeStreamingRequest(streamingClient, params, sink);
-                
-            } catch (RuntimeException exception) {
-                log.error("Error setting up OpenAI stream (exception type: {})",
-                    exception.getClass().getSimpleName());
-                sink.error(exception);
+        return Flux.defer(() -> {
+            String truncatedPrompt = truncatePromptForModel(prompt);
+            ChatCompletionCreateParams params = buildChatParams(truncatedPrompt, temperature);
+            OpenAIClient streamingClient = selectClientForStreaming();
+            
+            if (streamingClient == null) {
+                String error = "No OpenAI-compatible client is configured or available for streaming. Check API credentials and configuration.";
+                log.error(error);
+                return Flux.error(new IllegalStateException(error));
             }
+            
+            log.info("[LLM] Streaming started");
+            RateLimitManager.ApiProvider activeProvider = isPrimaryClient(streamingClient)
+                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                    : RateLimitManager.ApiProvider.OPENAI;
+            
+            // Disable internal retries for streaming to allow application-level failover
+            OpenAIClient client = streamingClient.withOptions(options -> options
+                    .maxRetries(0)
+                    .timeout(Timeout.builder().request(java.time.Duration.ZERO).build()));
+
+            return Flux.using(
+                () -> client.chat().completions().createStreaming(params),
+                responseStream -> Flux.fromStream(responseStream.stream())
+                    .flatMap(chunk -> Flux.fromIterable(chunk.choices()))
+                    .flatMap(choice -> Mono.justOrEmpty(choice.delta().content())),
+                StreamResponse::close
+            )
+            .doOnComplete(() -> {
+                log.debug("Stream completed successfully");
+                if (rateLimitManager != null) {
+                    rateLimitManager.recordSuccess(activeProvider);
+                }
+            })
+            .doOnError(exception -> {
+                log.error("[LLM] Streaming failed (exception type: {})", exception.getClass().getSimpleName());
+                if (isPrimaryClient(streamingClient) && isRetryablePrimaryFailure(exception)) {
+                    markPrimaryBackoff();
+                    if (rateLimitManager != null) {
+                        rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
+                    }
+                }
+            });
         })
         // Move blocking SDK stream consumption off the servlet thread.
         // Prevents thread starvation and aligns with Reactor best practices.
         .subscribeOn(Schedulers.boundedElastic());
     }
 
-    private void executeStreamingRequest(OpenAIClient client, ChatCompletionCreateParams params, reactor.core.publisher.FluxSink<String> sink) {
-        ChatCompletionAccumulator accumulator = ChatCompletionAccumulator.create();
-        RateLimitManager.ApiProvider activeProvider = isPrimaryClient(client)
-                ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                : RateLimitManager.ApiProvider.OPENAI;
-        log.info("[LLM] Streaming started");
-        
-        try (StreamResponse<ChatCompletionChunk> responseStream =
-                client.chat().completions().createStreaming(params)) {
-            
-            responseStream.stream()
-                .peek(accumulator::accumulate)  // Accumulate for final result
-                .forEach(chunk -> {
-                    chunk.choices().forEach(choice -> {
-                        choice.delta().content().ifPresent(sink::next);
-                    });
-                });
-            
-            log.debug("Stream completed successfully");
-            if (rateLimitManager != null) {
-                rateLimitManager.recordSuccess(activeProvider);
-            }
-            sink.complete();
-            
-        } catch (RuntimeException exception) {
-            handleStreamingFailure(exception, client, sink);
-        }
-    }
-
-    private void handleStreamingFailure(RuntimeException exception, OpenAIClient client, reactor.core.publisher.FluxSink<String> sink) {
-        log.error("[LLM] Streaming failed (exception type: {})", exception.getClass().getSimpleName());
-        if (isPrimaryClient(client) && isRetryablePrimaryFailure(exception)) {
-            markPrimaryBackoff();
-            if (rateLimitManager != null) {
-                rateLimitManager.recordRateLimit(RateLimitManager.ApiProvider.GITHUB_MODELS, exception.getMessage());
-            }
-        }
-        sink.error(exception);
-    }
-    
     /**
      * Get a complete (non-streaming) response from OpenAI (async wrapper).
      */
@@ -223,121 +207,28 @@ public class OpenAIStreamingService {
     }
     
     private ChatCompletionCreateParams buildChatParams(String prompt, double temperature) {
-        // Enforce GPT-5; never regress the model
+        String normalizedModelId = normalizedModelId();
+        boolean gpt5Family = isGpt5Family(normalizedModelId);
+
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .addUserMessage(prompt)
-                .model(ChatModel.GPT_5);
+                .model(ChatModel.of(normalizedModelId));
 
-        // GPT-5: omit temperature and set conservative max output tokens
-        builder.maxCompletionTokens(4000);
-        log.debug("Using GPT-5 configuration (no regression)");
+        if (gpt5Family) {
+            // GPT-5: omit temperature and set conservative max output tokens
+            builder.maxCompletionTokens(MAX_COMPLETION_TOKENS);
+            log.debug("Using GPT-5 configuration (no regression)");
 
-        // Set reasoning_effort=minimal; fail fast if unsupported
-        applyReasoningEffort(builder);
+            // Set reasoning_effort=minimal
+            builder.reasoningEffort(ReasoningEffort.MINIMAL);
+        } else if (Double.isFinite(temperature)) {
+            builder.temperature(temperature);
+        }
 
         return builder.build();
     }
-
-    /**
-     * Applies reasoning_effort="minimal" for GPT-5 prompts.
-     * Supports both Java enums and OpenAI SDK's Kotlin sealed classes.
-     *
-     * @throws IllegalStateException if the SDK method exists but MINIMAL value cannot be resolved
-     */
-    private void applyReasoningEffort(ChatCompletionCreateParams.Builder builder) {
-        Method reasoningMethod = findReasoningEffortMethod(builder);
-        if (reasoningMethod == null) {
-            // No SDK method available - use body property as primary approach
-            builder.putAdditionalBodyProperty("reasoning_effort", JsonValue.from("minimal"));
-            log.info("[LLM] reasoning_effort set via additional body property (no SDK method)");
-            return;
-        }
-
-        // SDK method exists - must succeed or fail fast
-        try {
-            Class<?> parameterType = reasoningMethod.getParameterTypes()[0];
-            Object minimal = resolveMinimalReasoningEffort(parameterType);
-            reasoningMethod.invoke(builder, minimal);
-            log.info("[LLM] reasoning_effort=MINIMAL (SDK type: {})", parameterType.getSimpleName());
-        } catch (ReflectiveOperationException | IllegalArgumentException exception) {
-            throw new IllegalStateException("SDK reasoningEffort method exists but invocation failed", exception);
-        }
-    }
-
-    /**
-     * Resolves the MINIMAL reasoning effort value for the given parameter type.
-     * Handles OpenAI SDK Kotlin sealed classes (static field) and Java enums (fallback).
-     *
-     * <p>Resolution order:
-     * <ol>
-     *   <li>Static MINIMAL field (OpenAI SDK Kotlin companion object)</li>
-     *   <li>Enum constant named MINIMAL (Java enum fallback)</li>
-     * </ol>
-     *
-     * @throws IllegalStateException if MINIMAL constant cannot be found via either mechanism
-     */
-    private Object resolveMinimalReasoningEffort(Class<?> parameterType) throws ReflectiveOperationException {
-        // Try static MINIMAL field first (works for OpenAI SDK Kotlin sealed classes)
-        try {
-            java.lang.reflect.Field minimalField = parameterType.getField("MINIMAL");
-            Object minimal = minimalField.get(null);
-            log.debug("[LLM] Resolved MINIMAL from static field on {}", parameterType.getSimpleName());
-            return minimal;
-        } catch (NoSuchFieldException noStaticField) {
-            // Static field not found - expected for non-Kotlin types; fall through to enum check
-            log.info("[LLM] No static MINIMAL field on {} (trying enum fallback)", parameterType.getSimpleName());
-        }
-
-        // Java enum: look up MINIMAL constant by name
-        if (parameterType.isEnum()) {
-            for (Object constant : parameterType.getEnumConstants()) {
-                if (constant instanceof Enum<?> enumConstant && "MINIMAL".equals(enumConstant.name())) {
-                    log.debug("[LLM] Resolved MINIMAL from enum constant on {}", parameterType.getSimpleName());
-                    return constant;
-                }
-            }
-            // Enum exists but has no MINIMAL constant - fail fast with clear error
-            throw new IllegalStateException(
-                "Enum type " + parameterType.getName() + " has no MINIMAL constant; "
-                + "available: " + java.util.Arrays.toString(parameterType.getEnumConstants()));
-        }
-
-        // Neither static field nor enum - fail fast with specific error
-        throw new IllegalStateException(
-            "Unsupported reasoningEffort type: " + parameterType.getName()
-            + " (no static MINIMAL field found and type is not an enum)");
-    }
-
-    /**
-     * Finds the reasoningEffort setter method that accepts a ReasoningEffort (not Optional).
-     * The SDK has two overloads; we need the one accepting the raw type for direct invocation.
-     */
-    private Method findReasoningEffortMethod(ChatCompletionCreateParams.Builder builder) {
-        Method candidate = null;
-        for (Method method : builder.getClass().getMethods()) {
-            if ("reasoningEffort".equals(method.getName()) && method.getParameterCount() == 1) {
-                Class<?> paramType = method.getParameterTypes()[0];
-                // Skip the Optional<ReasoningEffort> overload
-                if (java.util.Optional.class.isAssignableFrom(paramType)) {
-                    continue;
-                }
-                // Skip JsonField<ReasoningEffort> overload
-                if (paramType.getName().contains("JsonField")) {
-                    continue;
-                }
-                candidate = method;
-                // Prefer the non-wrapper overload (ReasoningEffort directly)
-                if (!paramType.getName().contains("Optional")) {
-                    return method;
-                }
-            }
-        }
-        return candidate;
-    }
     
-    
-    
-    // Model mapping removed to prevent unintended regression; GPT-5 is enforced
+    // Model mapping removed to prevent unintended regression; use configured model id
     
     /**
      * Truncate prompt conservatively based on model limits to avoid 413 errors.
@@ -348,8 +239,8 @@ public class OpenAIStreamingService {
         final int MAX_CHARS_GPT5_INPUT = 28_000; // ~7k tokens, under 8k input limit
         final int MAX_CHARS_DEFAULT = 400_000;   // generous for high-context models
 
-        String modelId = AsciiTextNormalizer.toLowerAscii(model == null ? "" : model);
-        int limit = ("gpt-5".equals(modelId) || "gpt-5-chat".equals(modelId))
+        String modelId = normalizedModelId();
+        int limit = (isGpt5Family(modelId) || modelId.startsWith("o")) // Conservative limit for reasoning models
             ? MAX_CHARS_GPT5_INPUT
             : MAX_CHARS_DEFAULT;
 
@@ -371,6 +262,15 @@ public class OpenAIStreamingService {
             return TRUNCATION_NOTICE_GPT5 + recentContext;
         }
         return TRUNCATION_NOTICE_GENERIC + prompt.substring(prompt.length() - limit);
+    }
+
+    private String normalizedModelId() {
+        String rawModelId = model == null ? "" : model.trim();
+        return rawModelId.isEmpty() ? "gpt-5" : AsciiTextNormalizer.toLowerAscii(rawModelId);
+    }
+
+    private boolean isGpt5Family(String modelId) {
+        return modelId != null && modelId.startsWith("gpt-5");
     }
     
     /**
@@ -410,7 +310,7 @@ public class OpenAIStreamingService {
     private boolean isRateLimit(Throwable throwable) {
         if (throwable instanceof RateLimitException) return true;
         String message = throwable.getMessage();
-        return message != null && (message.contains("Rate limit") || message.contains("429"));
+        return message != null && (message.contains("RateLimit") || message.contains("Rate limit") || message.contains("429"));
     }
     
     private boolean isRetryablePrimaryFailure(Throwable throwable) {

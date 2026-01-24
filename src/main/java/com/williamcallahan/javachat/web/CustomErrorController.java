@@ -25,10 +25,21 @@ import java.util.Map;
 @PermitAll
 @PreAuthorize("permitAll()")
 public class CustomErrorController implements ErrorController {
-    
+
     private static final Logger log = LoggerFactory.getLogger(CustomErrorController.class);
     private static final String ERROR_PATH = "/error";
-    
+    private static final String ERROR_VIEW_ACCESS_DENIED = "forward:/errors/access-denied";
+    private static final String ERROR_VIEW_AUTH_REQUIRED = "forward:/errors/authentication-required";
+    private static final String ERROR_VIEW_INTERNAL = "forward:/errors/internal-error";
+    private static final String ERROR_VIEW_INVALID_ARGUMENT = "forward:/errors/invalid-argument";
+    private static final String ERROR_VIEW_METHOD_NOT_ALLOWED = "forward:/errors/method-not-allowed";
+    private static final String ERROR_VIEW_NOT_ACCEPTABLE = "forward:/errors/not-acceptable";
+    private static final String ERROR_VIEW_NOT_FOUND = "forward:/errors/not-found";
+    private static final String ERROR_VIEW_NOT_IMPLEMENTED = "forward:/errors/not-implemented";
+    private static final String ERROR_VIEW_RATE_LIMITED = "forward:/errors/rate-limited";
+    private static final String ERROR_VIEW_SERVICE_UNAVAILABLE = "forward:/errors/service-unavailable";
+    private static final String ERROR_VIEW_UNSUPPORTED_MEDIA = "forward:/errors/unsupported-media-type";
+
     private final ExceptionResponseBuilder exceptionBuilder;
     
     /**
@@ -111,23 +122,11 @@ public class CustomErrorController implements ErrorController {
         model.addAttribute("path", uri);
         model.addAttribute("timestamp", System.currentTimeMillis());
         
-        // Route to appropriate error page based on status code
-        switch (statusCode) {
-            case 404:
-                // Redirect to our beautiful 404 page
-                modelAndView.setViewName("forward:/404.html");
-                break;
-            case 400:
-            case 401:
-            case 403:
-            case 500:
-            case 502:
-            case 503:
-            default:
-                // Redirect to a static error page; status stays in the model for rendering.
-                modelAndView.setViewName("forward:/error.html");
-                break;
+        HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
+        if (resolvedStatus == null) {
+            resolvedStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         }
+        modelAndView.setViewName(resolveErrorViewName(resolvedStatus));
         
         return modelAndView;
     }
@@ -138,6 +137,22 @@ public class CustomErrorController implements ErrorController {
             return status.getReasonPhrase();
         }
         return "Unexpected error";
+    }
+
+    private String resolveErrorViewName(HttpStatus status) {
+        return switch (status) {
+            case NOT_FOUND -> ERROR_VIEW_NOT_FOUND;
+            case BAD_REQUEST -> ERROR_VIEW_INVALID_ARGUMENT;
+            case UNAUTHORIZED -> ERROR_VIEW_AUTH_REQUIRED;
+            case FORBIDDEN -> ERROR_VIEW_ACCESS_DENIED;
+            case METHOD_NOT_ALLOWED -> ERROR_VIEW_METHOD_NOT_ALLOWED;
+            case NOT_ACCEPTABLE -> ERROR_VIEW_NOT_ACCEPTABLE;
+            case UNSUPPORTED_MEDIA_TYPE -> ERROR_VIEW_UNSUPPORTED_MEDIA;
+            case TOO_MANY_REQUESTS -> ERROR_VIEW_RATE_LIMITED;
+            case NOT_IMPLEMENTED -> ERROR_VIEW_NOT_IMPLEMENTED;
+            case BAD_GATEWAY, SERVICE_UNAVAILABLE, GATEWAY_TIMEOUT -> ERROR_VIEW_SERVICE_UNAVAILABLE;
+            default -> ERROR_VIEW_INTERNAL;
+        };
     }
     
     /**

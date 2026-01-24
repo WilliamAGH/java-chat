@@ -33,10 +33,6 @@
     </Match>
     <Match>
         <Bug code="EI2"/>
-        <Class name="com.williamcallahan.javachat.service.MarkdownStreamProcessor"/>
-    </Match>
-    <Match>
-        <Bug code="EI2"/>
         <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
     </Match>
     <Match>

@@ -31,6 +31,17 @@ import java.util.regex.Pattern;
 public class AuditService {
     private static final Logger log = LoggerFactory.getLogger(AuditService.class);
 
+    /**
+     * Maps Qdrant gRPC ports to their corresponding REST API ports.
+     *
+     * <p>Spring AI configures the gRPC port (6334 default, 8086 in docker-compose),
+     * but scroll/REST operations require the REST port (6333 default, 8087 in docker).
+     */
+    private static final Map<Integer, Integer> GRPC_TO_REST_PORT = Map.of(
+        6334, 6333,  // Qdrant default: gRPC -> REST
+        8086, 8087   // Docker compose mapping: gRPC -> REST
+    );
+
     private final LocalStoreService localStore;
     private final ContentHasher hasher;
 
@@ -160,7 +171,10 @@ public class AuditService {
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
         RestTemplate restTemplate = new RestTemplate();
-        String base = (useTls ? "https://" + host : "http://" + host + ":" + port);
+        
+        // Build REST base URL with correct port mapping
+        // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
+        String base = buildQdrantRestBaseUrl();
         String endpoint = base + "/collections/" + collection + "/points/scroll";
 
         HttpHeaders headers = new HttpHeaders();
@@ -191,8 +205,9 @@ public class AuditService {
             );
             hashes.addAll(extractHashes(response.getBody()));
         } catch (Exception requestFailure) {
-            log.warn("Qdrant scroll failed (exception type: {})",
-                requestFailure.getClass().getSimpleName());
+            // Propagate failure so caller knows audit could not complete
+            throw new IllegalStateException(
+                "Qdrant scroll failed for URL audit (endpoint: " + endpoint + ")", requestFailure);
         }
         return hashes;
     }
@@ -230,5 +245,23 @@ public class AuditService {
             return Optional.of(hashText);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Builds the Qdrant REST API base URL with correct port mapping.
+     *
+     * <p>The configured port is typically the gRPC port (6334 default, 8086 docker).
+     * REST API runs on a different port (6333 default, 8087 docker, or 443 for cloud TLS).
+     *
+     * @return base URL for Qdrant REST API calls
+     */
+    private String buildQdrantRestBaseUrl() {
+        if (useTls) {
+            // Cloud deployment: REST via HTTPS on port 443 (gateway handles routing)
+            return "https://" + host;
+        }
+        // Local deployment: map gRPC port to REST port, or use as-is if not a known gRPC port
+        int restPort = GRPC_TO_REST_PORT.getOrDefault(port, port);
+        return "http://" + host + ":" + restPort;
     }
 }

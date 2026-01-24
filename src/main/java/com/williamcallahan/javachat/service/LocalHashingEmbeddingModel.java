@@ -16,7 +16,7 @@ import java.util.List;
  * Minimal CPU-only deterministic hashing embedding to unblock retrieval without remote calls.
  * Not semantically strong; replace with DJL BGE in production.
  */
-public class LocalHashingEmbeddingModel implements EmbeddingModel {
+public final class LocalHashingEmbeddingModel implements EmbeddingModel {
     private static final String HASH_ALGORITHM = "SHA-256";
     private static final int BYTE_OFFSET = 128;
     private static final double BYTE_SCALE = 128.0d;

@@ -39,7 +39,7 @@ help: ## Show available targets
 clean: ## Clean build outputs
 	$(GRADLEW) clean
 
-build: ## Build the project (skip tests)
+build: frontend-build ## Build the project (skip tests)
 	$(GRADLEW) build -x test
 
 test: ## Run tests (loads .env if present)
@@ -63,7 +63,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS) & disown
 
-dev: ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
+dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
 	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
 	@echo "$(CYAN)Frontend: http://localhost:5173/$(NC)"
 	@echo "$(YELLOW)Backend API: http://localhost:8085/api/$(NC)"
