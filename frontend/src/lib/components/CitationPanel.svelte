@@ -29,6 +29,43 @@
     return patterns.some(pattern => url.includes(pattern))
   }
 
+  /** Safe URL schemes for citation links. Rejects javascript:, data:, vbscript:, etc. */
+  const SAFE_URL_SCHEMES = ['http:', 'https:'] as const
+
+  /**
+   * Validates that a URL uses a safe scheme (http/https) or is a relative path.
+   * Returns the URL if safe, or the fallback value for dangerous schemes.
+   */
+  function sanitizeUrlScheme(url: string): string {
+    if (!url) return FALLBACK_LINK_TARGET
+    const trimmedUrl = url.trim()
+
+    // Allow relative paths (start with / but not //)
+    if (trimmedUrl.startsWith(LOCAL_PATH_PREFIX) && !trimmedUrl.startsWith('//')) {
+      return trimmedUrl
+    }
+
+    // Check for safe schemes
+    try {
+      const parsedUrl = new URL(trimmedUrl)
+      const scheme = parsedUrl.protocol.toLowerCase()
+      if (SAFE_URL_SCHEMES.some(safe => scheme === safe)) {
+        return trimmedUrl
+      }
+    } catch {
+      // URL parsing failed - might be a relative path or malformed
+      // Only allow if it doesn't look like a dangerous scheme
+      const lowerUrl = trimmedUrl.toLowerCase()
+      if (lowerUrl.includes(':') && !isHttpUrl(lowerUrl)) {
+        return FALLBACK_LINK_TARGET
+      }
+      return trimmedUrl
+    }
+
+    // Dangerous scheme detected
+    return FALLBACK_LINK_TARGET
+  }
+
   /**
    * Determines citation type from URL for icon and styling.
    */
@@ -59,6 +96,7 @@
   let hasFetched = $state(false)
   let fetchError = $state<string | null>(null)
   let isExpanded = $state(false)
+  let pendingRequestId = $state(0)
 
   /**
    * Extracts display-friendly domain or filename from URL.
@@ -101,20 +139,25 @@
 
   /**
    * Builds the full URL including anchor fragment if present.
+   * Sanitizes the URL scheme to prevent XSS via javascript:, data:, etc.
    */
   function buildFullUrl(citation: Citation): string {
     if (!citation.url) return FALLBACK_LINK_TARGET
-    if (citation.anchor && !citation.url.includes(ANCHOR_SEPARATOR)) {
-      return `${citation.url}${ANCHOR_SEPARATOR}${citation.anchor}`
+
+    const safeUrl = sanitizeUrlScheme(citation.url)
+    if (safeUrl === FALLBACK_LINK_TARGET) return FALLBACK_LINK_TARGET
+
+    if (citation.anchor && !safeUrl.includes(ANCHOR_SEPARATOR)) {
+      return `${safeUrl}${ANCHOR_SEPARATOR}${citation.anchor}`
     }
-    return citation.url
+    return safeUrl
   }
 
   function toggleExpand() {
     isExpanded = !isExpanded
   }
 
-  // Fetch citations when query changes
+  // Fetch citations when query changes, with request tracking to prevent race conditions
   $effect(() => {
     const currentQuery = query
     if (!currentQuery || !currentQuery.trim()) {
@@ -125,12 +168,17 @@
       return
     }
 
+    // Increment request ID to track this specific request
+    const requestId = ++pendingRequestId
     hasFetched = false
     fetchError = null
     isExpanded = false
 
     fetchCitations(currentQuery)
       .then((result) => {
+        // Ignore stale responses from superseded requests
+        if (requestId !== pendingRequestId) return
+
         // Deduplicate by URL
         const seen = new Set<string>()
         citations = result.filter((citation) => {
@@ -141,12 +189,18 @@
         })
       })
       .catch((error: unknown) => {
+        // Ignore errors from superseded requests
+        if (requestId !== pendingRequestId) return
+
         const errorMessage = error instanceof Error ? error.message : 'Failed to fetch citations'
         fetchError = errorMessage
         citations = []
       })
       .finally(() => {
-        hasFetched = true
+        // Only mark as fetched if this is still the current request
+        if (requestId === pendingRequestId) {
+          hasFetched = true
+        }
       })
   })
 </script>

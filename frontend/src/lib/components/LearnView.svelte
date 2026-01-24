@@ -41,6 +41,41 @@
 
   const sessionId = `guided-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
+  /** Safe URL schemes for citation links. */
+  const SAFE_URL_SCHEMES = ['http:', 'https:']
+  const FALLBACK_LINK_TARGET = '#'
+
+  /**
+   * Sanitizes URL to prevent XSS via dangerous schemes (javascript:, data:, etc.).
+   */
+  function sanitizeCitationUrl(url: string | undefined): string {
+    if (!url) return FALLBACK_LINK_TARGET
+    const trimmedUrl = url.trim()
+
+    // Allow relative paths (start with / but not //)
+    if (trimmedUrl.startsWith('/') && !trimmedUrl.startsWith('//')) {
+      return trimmedUrl
+    }
+
+    // Check for safe schemes
+    try {
+      const parsedUrl = new URL(trimmedUrl)
+      const scheme = parsedUrl.protocol.toLowerCase()
+      if (SAFE_URL_SCHEMES.includes(scheme)) {
+        return trimmedUrl
+      }
+    } catch {
+      // URL parsing failed - reject if it contains a colon (possible scheme)
+      const lowerUrl = trimmedUrl.toLowerCase()
+      if (lowerUrl.includes(':') && !lowerUrl.startsWith('http://') && !lowerUrl.startsWith('https://')) {
+        return FALLBACK_LINK_TARGET
+      }
+      return trimmedUrl
+    }
+
+    return FALLBACK_LINK_TARGET
+  }
+
   // Rendered lesson content - safe empty string when no content
   let renderedLesson = $derived(
     lessonMarkdown ? renderMarkdown(lessonMarkdown) : ''
@@ -185,10 +220,12 @@
   }
 
   // Highlight code blocks after lesson content renders
-  // Capture element reference to avoid stale closure
+  // Uses cleanup flag to handle unmount/lesson changes during async load
   $effect(() => {
     const contentElement = lessonContentEl
     if (!renderedLesson || !contentElement) return
+
+    let isCancelled = false
 
     Promise.all([
       import('highlight.js/lib/core'),
@@ -197,8 +234,10 @@
       import('highlight.js/lib/languages/json'),
       import('highlight.js/lib/languages/bash')
     ]).then(([hljs, java, xml, json, bash]) => {
-      // Guard against element becoming null during async load
-      if (!contentElement) return
+      // Skip if effect was cleaned up (lesson changed or component unmounted)
+      if (isCancelled) return
+      // Also verify the element reference is still the current one
+      if (lessonContentEl !== contentElement) return
 
       if (!hljs.default.getLanguage('java')) hljs.default.registerLanguage('java', java.default)
       if (!hljs.default.getLanguage('xml')) hljs.default.registerLanguage('xml', xml.default)
@@ -211,6 +250,11 @@
     }).catch((highlightError) => {
       console.warn('Code highlighting failed:', highlightError)
     })
+
+    // Cleanup function runs when effect re-runs or component unmounts
+    return () => {
+      isCancelled = true
+    }
   })
 </script>
 
@@ -321,7 +365,7 @@
                 <ul class="lesson-citations-list">
                   {#each lessonCitations as citation (citation.url)}
                     <li>
-                      <a href={citation.url} target="_blank" rel="noopener noreferrer">
+                      <a href={sanitizeCitationUrl(citation.url)} target="_blank" rel="noopener noreferrer">
                         {citation.title || citation.url}
                       </a>
                     </li>
