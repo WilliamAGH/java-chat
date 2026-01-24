@@ -19,6 +19,10 @@
         <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
         <Method name="handleError"/>
     </Match>
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+        <Package name="com.williamcallahan.javachat.web"/>
+    </Match>
 
     <!--
         Spring-managed dependencies are intentionally shared; SpotBugs flags these as EI_EXPOSE_REP2,
@@ -50,7 +54,15 @@
     </Match>
     <Match>
         <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.ChatService"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
         <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.web.MarkdownController"/>
     </Match>
     <Match>
         <Bug pattern="EI_EXPOSE_REP2"/>

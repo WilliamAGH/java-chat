@@ -5,6 +5,7 @@ import jakarta.annotation.security.PermitAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/ingest")
 @PermitAll
+@PreAuthorize("permitAll()")
 public class IngestionController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
     private static final int MAX_ALLOWED_PAGES = 10000;
@@ -53,11 +55,11 @@ public class IngestionController extends BaseController {
             return createSuccessResponse(String.format("Ingestion completed for up to %d pages", maxPages));
 
         } catch (IOException ioException) {
-            log.error("IO error during ingestion (exception type: {})", ioException.getClass().getSimpleName(), ioException);
+            log.error("IO error during ingestion (exception type: {})", ioException.getClass().getSimpleName());
             return handleServiceException(ioException, "ingest documents");
         } catch (RuntimeException runtimeException) {
             log.error("Unexpected error during ingestion (exception type: {})",
-                runtimeException.getClass().getSimpleName(), runtimeException);
+                runtimeException.getClass().getSimpleName());
             return handleServiceException(runtimeException, "perform ingestion");
         }
     }
@@ -79,11 +81,11 @@ public class IngestionController extends BaseController {
         } catch (IllegalArgumentException illegalArgumentException) {
             return handleValidationException(illegalArgumentException);
         } catch (IOException ioException) {
-            log.error("Local ingestion IO error (exception type: {})", ioException.getClass().getSimpleName(), ioException);
+            log.error("Local ingestion IO error (exception type: {})", ioException.getClass().getSimpleName());
             return handleServiceException(ioException, "perform local ingestion");
         } catch (RuntimeException runtimeException) {
             log.error("Local ingestion error (exception type: {})",
-                runtimeException.getClass().getSimpleName(), runtimeException);
+                runtimeException.getClass().getSimpleName());
             return handleServiceException(runtimeException, "perform local ingestion");
         }
     }
@@ -96,4 +98,3 @@ public class IngestionController extends BaseController {
         return super.handleValidationException(validationException);
     }
 }
-

@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -19,6 +20,7 @@ import java.util.Map;
 @RequestMapping("/api/markdown")
 @CrossOrigin(origins = "*")
 @PermitAll
+@PreAuthorize("permitAll()")
 public class MarkdownController {
     
     private static final Logger logger = LoggerFactory.getLogger(MarkdownController.class);
@@ -79,7 +81,7 @@ public class MarkdownController {
             
         } catch (RuntimeException renderException) {
             logger.error("Error rendering markdown (exception type: {})",
-                renderException.getClass().getSimpleName(), renderException);
+                renderException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render markdown"
             ));
@@ -125,7 +127,7 @@ public class MarkdownController {
             
         } catch (RuntimeException previewException) {
             logger.error("Error rendering preview markdown (exception type: {})",
-                previewException.getClass().getSimpleName(), previewException);
+                previewException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render preview"
             ));
@@ -153,7 +155,7 @@ public class MarkdownController {
             
         } catch (RuntimeException statsException) {
             logger.error("Error getting cache stats (exception type: {})",
-                statsException.getClass().getSimpleName(), statsException);
+                statsException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to get cache stats"
             ));
@@ -178,7 +180,7 @@ public class MarkdownController {
             
         } catch (RuntimeException clearException) {
             logger.error("Error clearing cache (exception type: {})",
-                clearException.getClass().getSimpleName(), clearException);
+                clearException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(Map.of(
                 "status", "error",
                 "message", "Failed to clear cache"
@@ -228,7 +230,7 @@ public class MarkdownController {
             
         } catch (RuntimeException structuredException) {
             logger.error("Error rendering structured markdown (exception type: {})",
-                structuredException.getClass().getSimpleName(), structuredException);
+                structuredException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render structured markdown",
                 "source", "unified-service"
