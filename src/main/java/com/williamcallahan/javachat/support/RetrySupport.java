@@ -95,6 +95,10 @@ public final class RetrySupport {
             }
         }
         
+        // Guard for static analysis: loop always sets lastException before reaching here
+        if (lastException == null) {
+            throw new IllegalStateException("Retry loop completed without exception - should not happen");
+        }
         throw lastException;
     }
 
