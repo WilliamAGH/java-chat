@@ -31,19 +31,27 @@ public class ProcessingLogger {
      */
     @Around("@annotation(org.springframework.web.bind.annotation.PostMapping) && " +
             "execution(* com.williamcallahan.javachat.service.*EmbeddingModel.embed(..))")
-    public Object logEmbeddingGeneration(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object logEmbeddingGeneration(ProceedingJoinPoint joinPoint) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Starting", requestToken);
 
-        Object result = joinPoint.proceed();
-        long duration = System.currentTimeMillis() - startTime;
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - startTime;
 
-        PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms",
-            requestToken, duration);
+            PIPELINE_LOG.info("[{}] STEP 1: EMBEDDING GENERATION - Completed in {}ms",
+                requestToken, duration);
 
-        return result;
+            return result;
+        } catch (RuntimeException runtimeException) {
+            throw runtimeException;
+        } catch (Error fatalError) {
+            throw fatalError;
+        } catch (Throwable throwable) {
+            throw new IllegalStateException("Embedding generation failed", throwable);
+        }
     }
 
     /**
@@ -65,10 +73,18 @@ public class ProcessingLogger {
      * The ChunkProcessingService processes thousands of documents on startup
      */
     // @Around("execution(* com.williamcallahan.javachat.service.ChunkProcessingService.process*(..))")
-    public Object logDocumentParsing(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object logDocumentParsing(ProceedingJoinPoint joinPoint) {
         // This method is disabled to prevent flooding logs during document processing
         // Uncomment the @Around annotation to re-enable if needed for debugging
-        return joinPoint.proceed();
+        try {
+            return joinPoint.proceed();
+        } catch (RuntimeException runtimeException) {
+            throw runtimeException;
+        } catch (Error fatalError) {
+            throw fatalError;
+        } catch (Throwable throwable) {
+            throw new IllegalStateException("Document parsing failed", throwable);
+        }
     }
     
     /**
@@ -86,24 +102,32 @@ public class ProcessingLogger {
      * Log RAG retrieval
      */
     @Around("execution(* com.williamcallahan.javachat.service.RetrievalService.retrieve*(..))")
-    public Object logRAGRetrieval(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object logRAGRetrieval(ProceedingJoinPoint joinPoint) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
         
         PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Starting vector search", requestToken);
         
-        Object result = joinPoint.proceed();
-        long duration = System.currentTimeMillis() - startTime;
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - startTime;
 
-        PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms",
-            requestToken, duration);
+            PIPELINE_LOG.info("[{}] STEP 4: RAG RETRIEVAL - Retrieved documents in {}ms",
+                requestToken, duration);
 
-        // Log retrieved document count if available
-        if (result instanceof java.util.List) {
-            PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
+            // Log retrieved document count if available
+            if (result instanceof java.util.List) {
+                PIPELINE_LOG.info("[{}] Retrieved documents", requestToken);
+            }
+
+            return result;
+        } catch (RuntimeException runtimeException) {
+            throw runtimeException;
+        } catch (Error fatalError) {
+            throw fatalError;
+        } catch (Throwable throwable) {
+            throw new IllegalStateException("RAG retrieval failed", throwable);
         }
-
-        return result;
     }
 
     /**
@@ -123,19 +147,27 @@ public class ProcessingLogger {
      * Log LLM interaction
      */
     @Around("execution(* com.williamcallahan.javachat.service.ChatService.streamAnswer(..))")
-    public Object logLLMInteraction(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object logLLMInteraction(ProceedingJoinPoint joinPoint) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Sending to LLM", requestToken);
 
-        Object result = joinPoint.proceed();
-        long duration = System.currentTimeMillis() - startTime;
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - startTime;
 
-        PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms",
-            requestToken, duration);
+            PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms",
+                requestToken, duration);
 
-        return result;
+            return result;
+        } catch (RuntimeException runtimeException) {
+            throw runtimeException;
+        } catch (Error fatalError) {
+            throw fatalError;
+        } catch (Throwable throwable) {
+            throw new IllegalStateException("LLM interaction failed", throwable);
+        }
     }
 
     /**
@@ -180,20 +212,28 @@ public class ProcessingLogger {
      * Log citation generation
      */
     @Around("execution(* com.williamcallahan.javachat.service.ChatService.citationsFor(..))")
-    public Object logCitationGeneration(ProceedingJoinPoint joinPoint) throws Throwable {
+    public Object logCitationGeneration(ProceedingJoinPoint joinPoint) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Starting", requestToken);
 
-        Object result = joinPoint.proceed();
-        long duration = System.currentTimeMillis() - startTime;
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - startTime;
 
-        if (result instanceof java.util.List) {
-            PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
+            if (result instanceof java.util.List) {
+                PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
+            }
+
+            return result;
+        } catch (RuntimeException runtimeException) {
+            throw runtimeException;
+        } catch (Error fatalError) {
+            throw fatalError;
+        } catch (Throwable throwable) {
+            throw new IllegalStateException("Citation generation failed", throwable);
         }
-
-        return result;
     }
 
     /**
