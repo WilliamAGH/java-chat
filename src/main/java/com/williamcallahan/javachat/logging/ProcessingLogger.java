@@ -123,27 +123,19 @@ public class ProcessingLogger {
      * Log LLM interaction
      */
     @Around("execution(* com.williamcallahan.javachat.service.ChatService.streamAnswer(..))")
-    public Object logLLMInteraction(ProceedingJoinPoint joinPoint) {
+    public Object logLLMInteraction(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Sending to LLM", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
+        Object llmOutcome = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
 
-            PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms",
-                requestToken, duration);
+        PIPELINE_LOG.info("[{}] STEP 5: LLM INTERACTION - Response streaming started in {}ms",
+            requestToken, duration);
 
-            return result;
-        } catch (RuntimeException runtimeException) {
-            throw runtimeException;
-        } catch (Error fatalError) {
-            throw fatalError;
-        } catch (Throwable throwable) {
-            throw new IllegalStateException("LLM interaction failed", throwable);
-        }
+        return llmOutcome;
     }
 
     /**
@@ -164,17 +156,17 @@ public class ProcessingLogger {
      */
     @AfterReturning(
         pointcut = "execution(* com.williamcallahan.javachat.service.EnrichmentService.enrich*(..))",
-        returning = "result"
+        returning = "responsePayload"
     )
-    public void logResponseCategorization(JoinPoint joinPoint, Object result) {
+    public void logResponseCategorization(JoinPoint joinPoint, Object responsePayload) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
 
         PIPELINE_LOG.info("[{}] STEP 6: RESPONSE CATEGORIZATION - Processing enrichments", requestToken);
 
         try {
-            if (result instanceof com.williamcallahan.javachat.model.Enrichment) {
+            if (responsePayload instanceof com.williamcallahan.javachat.model.Enrichment) {
                 PIPELINE_LOG.info("[{}] Enrichment categories extracted", requestToken);
-            } else if (result != null) {
+            } else if (responsePayload != null) {
                 PIPELINE_LOG.info("[{}] Response categories computed", requestToken);
             }
         } catch (RuntimeException runtimeException) {
@@ -188,28 +180,20 @@ public class ProcessingLogger {
      * Log citation generation
      */
     @Around("execution(* com.williamcallahan.javachat.service.ChatService.citationsFor(..))")
-    public Object logCitationGeneration(ProceedingJoinPoint joinPoint) {
+    public Object logCitationGeneration(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
 
         PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Starting", requestToken);
 
-        try {
-            Object result = joinPoint.proceed();
-            long duration = System.currentTimeMillis() - startTime;
+        Object citationOutcome = joinPoint.proceed();
+        long duration = System.currentTimeMillis() - startTime;
 
-            if (result instanceof java.util.List) {
-                PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
-            }
-
-            return result;
-        } catch (RuntimeException runtimeException) {
-            throw runtimeException;
-        } catch (Error fatalError) {
-            throw fatalError;
-        } catch (Throwable throwable) {
-            throw new IllegalStateException("Citation generation failed", throwable);
+        if (citationOutcome instanceof java.util.List) {
+            PIPELINE_LOG.info("[{}] STEP 7: CITATION GENERATION - Completed in {}ms", requestToken, duration);
         }
+
+        return citationOutcome;
     }
 
     /**
@@ -231,9 +215,9 @@ public class ProcessingLogger {
      */
     @AfterReturning(
         pointcut = "execution(* com.williamcallahan.javachat.web.ChatController.stream(..))",
-        returning = "result"
+        returning = "streamOutcome"
     )
-    public void logPipelineSummary(JoinPoint joinPoint, Object result) {
+    public void logPipelineSummary(JoinPoint joinPoint, Object streamOutcome) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         
         PIPELINE_LOG.info("[{}] ============================================", requestToken);
