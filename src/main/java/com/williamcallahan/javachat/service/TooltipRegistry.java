@@ -9,6 +9,8 @@ import java.util.*;
 @Component
 public class TooltipRegistry {
 
+    private static final String NO_LINK = "";
+
     /**
      * Defines a tooltip entry with a term, short definition, and optional reference link.
      */
@@ -19,11 +21,15 @@ public class TooltipRegistry {
 
         /**
          * Creates a tooltip definition suitable for JSON serialization.
+         *
+         * @param term the tooltip term
+         * @param definition the short definition
+         * @param link the reference link, may be null
          */
         public TooltipDefinition(String term, String definition, String link) {
-            this.term = term;
-            this.definition = definition;
-            this.link = link;
+            this.term = Objects.requireNonNull(term, "term");
+            this.definition = Objects.requireNonNull(definition, "definition");
+            this.link = Objects.requireNonNullElse(link, NO_LINK);
         }
 
         /**
@@ -41,7 +47,7 @@ public class TooltipRegistry {
         }
 
         /**
-         * Returns the reference link for the term, when available.
+         * Returns the reference link for the term, or an empty string when unavailable.
          */
         public String getLink() {
             return link;
