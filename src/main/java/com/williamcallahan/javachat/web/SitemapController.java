@@ -71,7 +71,8 @@ public class SitemapController {
                 xmlWriter.writeStartElement("url");
 
                 xmlWriter.writeStartElement("loc");
-                xmlWriter.writeCharacters(baseUrl + path);
+                xmlWriter.writeCharacters(baseUrl);
+                xmlWriter.writeCharacters(path);
                 xmlWriter.writeEndElement();
 
                 xmlWriter.writeStartElement("lastmod");
