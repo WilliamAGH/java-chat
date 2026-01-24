@@ -285,13 +285,18 @@ class MarkdownServiceTest {
     void testServerEnrichmentRendering() {
         String md = "{{hint:Line A\nLine B}}"; // real newline
         String html = markdownService.processStructured(md).html();
+        System.out.println("[DEBUG testServerEnrichmentRendering] HTML: " + html.replace("\n", "\\n"));
         String normalizedHtml = AsciiTextNormalizer.toLowerAscii(html);
         // Card wrapper
         assertTrue(html.contains("inline-enrichment hint"), "Hint card should render");
         // Header title
         assertTrue(normalizedHtml.contains("helpful hints"), "Card header should show Helpful Hints");
-        // Paragraphized with <br>
-        assertTrue(html.contains("<p>Line A<br>Line B</p>") || html.contains("<p>Line A<br />Line B</p>"), "Line breaks preserved in card");
+        // Paragraphized with <br> - allow for newline after <br /> tag
+        assertTrue(
+            html.contains("<p>Line A<br>Line B</p>") ||
+            html.contains("<p>Line A<br />Line B</p>") ||
+            html.contains("<p>Line A<br />\nLine B</p>"),
+            "Line breaks preserved in card. HTML: " + html.replace("\n", "\\n"));
     }
 
     @Test

@@ -70,8 +70,9 @@ public class UnifiedMarkdownService {
             .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true)
             .set(HtmlRenderer.ESCAPE_HTML, true)
             .set(HtmlRenderer.SUPPRESS_HTML, false)
-            // Preserve soft-breaks as plain newlines so browsers treat them as spaces, avoiding forced <br/>
-            .set(HtmlRenderer.SOFT_BREAK, "\n")
+            // Convert soft-breaks (single newlines) to <br> tags to preserve LLM line structure.
+            // Matches client-side marked.js with breaks: true for consistent streaming/final render.
+            .set(HtmlRenderer.SOFT_BREAK, "<br />\n")
             .set(HtmlRenderer.HARD_BREAK, "<br />\n")
             .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-")
             .set(HtmlRenderer.SUPPRESSED_LINKS, "(?i)^(javascript|data|vbscript):.*")

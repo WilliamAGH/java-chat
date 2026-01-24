@@ -229,9 +229,10 @@ class EnrichmentPlaceholderizer {
         Node doc = parser.parse(normalized);
         MarkdownAstUtils.stripInlineCitationMarkers(doc);
         String innerHtml = renderer.render(doc);
+        // Flexmark now handles soft breaks with SOFT_BREAK = "<br />\n",
+        // so no additional newline-to-br conversion is needed.
         Document parsedDocument = Jsoup.parseBodyFragment(innerHtml);
         parsedDocument.outputSettings().prettyPrint(false);
-        convertNewlinesToBreaks(parsedDocument.body(), false);
         return parsedDocument.body().html();
     }
 
