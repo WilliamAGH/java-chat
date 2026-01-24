@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,6 +14,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+@JsonAutoDetect(
+    fieldVisibility = JsonAutoDetect.Visibility.ANY,
+    getterVisibility = JsonAutoDetect.Visibility.NONE,
+    isGetterVisibility = JsonAutoDetect.Visibility.NONE,
+    setterVisibility = JsonAutoDetect.Visibility.NONE
+)
 @JsonIgnoreProperties(ignoreUnknown = true)
 final class EmbeddingCacheEntry {
     private String id;
