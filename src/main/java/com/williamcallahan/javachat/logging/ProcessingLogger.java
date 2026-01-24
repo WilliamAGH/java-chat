@@ -163,16 +163,10 @@ public class ProcessingLogger {
 
         PIPELINE_LOG.info("[{}] STEP 6: RESPONSE CATEGORIZATION - Processing enrichments", requestToken);
 
-        try {
-            if (responsePayload instanceof com.williamcallahan.javachat.model.Enrichment) {
-                PIPELINE_LOG.info("[{}] Enrichment categories extracted", requestToken);
-            } else if (responsePayload != null) {
-                PIPELINE_LOG.info("[{}] Response categories computed", requestToken);
-            }
-        } catch (RuntimeException runtimeException) {
-            PIPELINE_LOG.error("[{}] STEP 6: RESPONSE CATEGORIZATION - Failed (runtime exception)", requestToken);
-        } catch (Error fatalError) {
-            PIPELINE_LOG.error("[{}] STEP 6: RESPONSE CATEGORIZATION - Failed (error)", requestToken);
+        if (responsePayload instanceof com.williamcallahan.javachat.model.Enrichment) {
+            PIPELINE_LOG.info("[{}] Enrichment categories extracted", requestToken);
+        } else if (responsePayload != null) {
+            PIPELINE_LOG.info("[{}] Response categories computed", requestToken);
         }
     }
     
