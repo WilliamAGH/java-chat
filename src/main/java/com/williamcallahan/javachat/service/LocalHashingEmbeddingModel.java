@@ -60,7 +60,8 @@ public final class LocalHashingEmbeddingModel implements EmbeddingModel {
      */
     @Override
     public float[] embed(String text) {
-        return toFloatArray(hashToVector(text, dimensions));
+        String safeText = (text == null) ? "" : text;
+        return toFloatArray(hashToVector(safeText, dimensions));
     }
 
     /**
