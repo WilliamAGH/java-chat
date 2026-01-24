@@ -33,16 +33,16 @@ Goal: Use Qdrant’s text query (BM42 when supported) over `payload.content`, fu
    - Keep existing index creation pattern (try POST, then PUT, multiple base URLs).
 
 2) New `QdrantQueryService`
-   - Responsibility: call `POST /collections/{collection}/points/query` using `RestTemplate`.
-   - Public API:
-     - `List<Result> queryTextBm42(String text, int limit, @Nullable Map<String,Object> filter)`
+     - Responsibility: call `POST /collections/{collection}/points/query` using `RestTemplate`.
+     - Public API:
+     - `List<Result> queryTextBm42(String text, int limit, @Nullable JsonNode filter)`
        - Sends body:
          ```json
          { "query": { "text": { "text": "<user_query>", "field": "content", "model": "bm42" }},
            "with_payload": true, "limit": 50 }
          ```
        - If BM42 unsupported (400/422), retry without `model` to get BM25 behavior.
-     - `record Result(String id, double score, Map<String,Object> payload)`
+     - `record Result(String id, double score, JsonNode payload)`
 
 3) New `HybridRetrievalService`
    - Parallelize (WebFlux) two branches:
@@ -111,4 +111,3 @@ Goal: Store a named sparse vector (BM42) alongside dense vectors; use Qdrant’s
 - Qdrant BM42: https://qdrant.tech/articles/bm42/
 - Qdrant Hybrid Queries & Query API: https://qdrant.tech/documentation/concepts/hybrid-queries/ and https://qdrant.tech/documentation/concepts/search/
 - LlamaIndex example (shape inspiration): https://docs.llamaindex.ai/en/stable/examples/vector_stores/qdrant_bm42/
-
