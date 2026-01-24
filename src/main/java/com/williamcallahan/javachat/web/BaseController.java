@@ -56,4 +56,14 @@ public abstract class BaseController {
     protected ResponseEntity<ApiSuccessResponse> createSuccessResponse(String message) {
         return exceptionBuilder.buildSuccessResponse(message);
     }
+
+    /**
+     * Describes an exception with HTTP context when available for UI diagnostics.
+     *
+     * @param exception exception to describe
+     * @return formatted exception details or null when no exception is provided
+     */
+    protected String describeException(Exception exception) {
+        return exceptionBuilder.describeException(exception);
+    }
 }

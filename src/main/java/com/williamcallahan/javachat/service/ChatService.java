@@ -181,16 +181,33 @@ public class ChatService {
      * Builds a full prompt with retrieval context and an optional model hint.
      */
     public String buildPromptWithContext(List<Message> history, String latestUserMessage, String modelHint) {
+        return buildPromptWithContextOutcome(history, latestUserMessage, modelHint).prompt();
+    }
+
+    /**
+     * Builds a prompt while returning retrieval notices for UI diagnostics.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param modelHint optional model hint
+     * @return prompt plus retrieval notices
+     */
+    public ChatPromptOutcome buildPromptWithContextOutcome(List<Message> history,
+                                                          String latestUserMessage,
+                                                          String modelHint) {
         // For GPT-5, use fewer RAG documents due to 8K token input limit
-        List<Document> contextDocs;
+        RetrievalService.RetrievalOutcome retrievalOutcome;
         if ("gpt-5".equals(modelHint) || "gpt-5-chat".equals(modelHint)) {
-            // Limit RAG for GPT-5: use fewer, shorter documents
-            contextDocs = retrievalService.retrieveWithLimit(latestUserMessage, RAG_LIMIT_GPT5, RAG_TOKEN_LIMIT_GPT5); // 3 docs, 600 tokens each = ~1800 tokens
-            logger.debug("Using reduced RAG for GPT-5: {} documents with max {} tokens each", contextDocs.size(), RAG_TOKEN_LIMIT_GPT5);
+            retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
+                latestUserMessage, RAG_LIMIT_GPT5, RAG_TOKEN_LIMIT_GPT5
+            );
+            logger.debug("Using reduced RAG for GPT-5: {} documents with max {} tokens each",
+                retrievalOutcome.documents().size(), RAG_TOKEN_LIMIT_GPT5);
         } else {
-            contextDocs = retrievalService.retrieve(latestUserMessage);
+            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
         }
-        
+
+        List<Document> contextDocs = retrievalOutcome.documents();
         String searchQualityNote = determineSearchQuality(contextDocs);
         
         // Build system prompt using centralized configuration
@@ -213,7 +230,7 @@ public class ChatService {
         messages.addAll(history);
         messages.add(new UserMessage(latestUserMessage));
 
-        return buildPromptFromMessages(messages);
+        return new ChatPromptOutcome(buildPromptFromMessages(messages), retrievalOutcome.notices());
     }
 
     /**
@@ -241,40 +258,7 @@ public class ChatService {
     }
 
     /**
-     * Legacy markdown rendering path. Prefer {@link UnifiedMarkdownService}
-     * integration where possible and avoid rendering on the hot path.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public String processResponseWithMarkdown(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-
-        try {
-            // Use new AST-based processing for better compliance
-            var processed = markdownService.processStructured(text);
-            logger.debug("Processed response with AST-based markdown rendering");
-            return processed.html();
-        } catch (Exception exception) {
-            logger.error("Error processing response with markdown", exception);
-            // Fallback to plain text with basic escaping
-            return text.replace("&", "&amp;")
-                      .replace("<", "&lt;")
-                      .replace(">", "&gt;")
-                      .replace("\n", "<br />\n");
-        }
-    }
-    
-    /**
-     * Legacy streaming with optional markdown render. Use OpenAIStreamingService instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public Flux<String> streamAnswerWithMarkdown(List<Message> history, String latestUserMessage, boolean renderMarkdown) {
-        return streamAnswer(history, latestUserMessage);
-    }
-    
-    /**
-     * Determine the quality of search results and provide context to the AI
+     * Determine the quality of search results and provide context to the AI.
      */
     private String determineSearchQuality(List<Document> docs) {
         if (docs.isEmpty()) {
@@ -305,6 +289,21 @@ public class ChatService {
         } else {
             return String.format("Found %d documents (%d high-quality) via search. Some results may be less relevant.", 
                 docs.size(), highQualityDocs);
+        }
+    }
+
+    /**
+     * Captures the prompt and any retrieval notices for UI diagnostics.
+     *
+     * @param prompt generated prompt
+     * @param notices retrieval notices to surface to clients
+     */
+    public record ChatPromptOutcome(String prompt, List<RetrievalService.RetrievalNotice> notices) {
+        public ChatPromptOutcome {
+            if (prompt == null) {
+                throw new IllegalArgumentException("Prompt cannot be null");
+            }
+            notices = notices == null ? List.of() : List.copyOf(notices);
         }
     }
 }

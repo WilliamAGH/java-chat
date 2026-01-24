@@ -35,16 +35,21 @@ public class MarkdownController {
     
     private final MarkdownService markdownService;
     private final UnifiedMarkdownService unifiedMarkdownService;
+    private final ExceptionResponseBuilder exceptionBuilder;
     
     /**
      * Creates a markdown controller with required services.
      *
      * @param markdownService legacy markdown processing service
      * @param unifiedMarkdownService AST-based unified markdown processor
+     * @param exceptionBuilder shared exception response builder
      */
-    public MarkdownController(MarkdownService markdownService, UnifiedMarkdownService unifiedMarkdownService) {
+    public MarkdownController(MarkdownService markdownService,
+                              UnifiedMarkdownService unifiedMarkdownService,
+                              ExceptionResponseBuilder exceptionBuilder) {
         this.markdownService = markdownService;
         this.unifiedMarkdownService = unifiedMarkdownService;
+        this.exceptionBuilder = exceptionBuilder;
     }
     
     /**
@@ -89,7 +94,10 @@ public class MarkdownController {
         } catch (RuntimeException renderException) {
             logger.error("Error rendering markdown (exception type: {})",
                 renderException.getClass().getSimpleName());
-            return ResponseEntity.status(500).body(new MarkdownErrorResponse("Failed to render markdown"));
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to render markdown",
+                exceptionBuilder.describeException(renderException)
+            ));
         }
     }
 
@@ -133,7 +141,10 @@ public class MarkdownController {
         } catch (RuntimeException previewException) {
             logger.error("Error rendering preview markdown (exception type: {})",
                 previewException.getClass().getSimpleName());
-            return ResponseEntity.status(500).body(new MarkdownErrorResponse("Failed to render preview"));
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to render preview",
+                exceptionBuilder.describeException(previewException)
+            ));
         }
     }
     
@@ -159,7 +170,10 @@ public class MarkdownController {
         } catch (RuntimeException statsException) {
             logger.error("Error getting cache stats (exception type: {})",
                 statsException.getClass().getSimpleName());
-            return ResponseEntity.status(500).body(new MarkdownErrorResponse("Failed to get cache stats"));
+            return ResponseEntity.status(500).body(new MarkdownErrorResponse(
+                "Failed to get cache stats",
+                exceptionBuilder.describeException(statsException)
+            ));
         }
     }
     
@@ -184,7 +198,7 @@ public class MarkdownController {
                 clearException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(new MarkdownCacheClearOutcome(
                 "error",
-                "Failed to clear cache"
+                "Failed to clear cache: " + exceptionBuilder.describeException(clearException)
             ));
         }
     }
@@ -234,7 +248,8 @@ public class MarkdownController {
                 structuredException.getClass().getSimpleName());
             return ResponseEntity.status(500).body(new MarkdownStructuredErrorResponse(
                 "Failed to render structured markdown",
-                "unified-service"
+                "unified-service",
+                exceptionBuilder.describeException(structuredException)
             ));
         }
     }

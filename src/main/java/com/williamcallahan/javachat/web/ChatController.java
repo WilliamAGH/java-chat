@@ -49,6 +49,8 @@ public class ChatController extends BaseController {
 
     /** SSE event type for error notifications sent to the client. */
     private static final String SSE_EVENT_ERROR = "error";
+    /** SSE event type for diagnostic status events. */
+    private static final String SSE_EVENT_STATUS = "status";
 
     /**
      * Monotonic request counter for correlating log entries within a single chat request.
@@ -158,7 +160,9 @@ public class ChatController extends BaseController {
 
         // Build the complete prompt using existing ChatService logic
         // Pass model hint to optimize RAG for GPT-5's 8K token input limit
-        String fullPrompt = chatService.buildPromptWithContext(history, userQuery, "gpt-5");
+        ChatService.ChatPromptOutcome promptOutcome =
+            chatService.buildPromptWithContextOutcome(history, userQuery, "gpt-5");
+        String fullPrompt = promptOutcome.prompt();
         
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
@@ -181,6 +185,13 @@ public class ChatController extends BaseController {
                     .takeUntilOther(dataStream.ignoreElements())
                     .map(tick -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
+            Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
+                    .map(notice -> ServerSentEvent.<String>builder()
+                        .event(SSE_EVENT_STATUS)
+                        .data("{\"message\":\"" + escapeJsonString(notice.summary())
+                            + "\",\"details\":\"" + escapeJsonString(notice.details()) + "\"}")
+                        .build());
+
             // Wrap chunks in JSON to preserve whitespace - Spring's SSE handling can trim leading spaces
             // See: https://github.com/spring-projects/spring-framework/issues/27473
             Flux<ServerSentEvent<String>> dataEvents = dataStream
@@ -188,7 +199,7 @@ public class ChatController extends BaseController {
                             .data("{\"text\":\"" + escapeJsonString(chunk) + "\"}")
                             .build());
 
-            return Flux.merge(dataEvents, heartbeats)
+            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats))
                     .doOnComplete(() -> {
                         // Store the full response using AST-based processing
                         ProcessedMarkdown processedResult = unifiedMarkdownService.process(fullResponse.toString());
@@ -199,10 +210,14 @@ public class ChatController extends BaseController {
                     .onErrorResume(error -> {
                         // Log and send error event to client - errors must be communicated, not silently dropped
                         String errorDetail = buildUserFacingErrorMessage(error);
+                        String diagnostics = error instanceof Exception exception
+                            ? describeException(exception)
+                            : error.toString();
                         PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
                         return Flux.just(ServerSentEvent.<String>builder()
                             .event(SSE_EVENT_ERROR)
-                            .data(errorDetail)
+                            .data("{\"message\":\"" + escapeJsonString(errorDetail)
+                                + "\",\"details\":\"" + escapeJsonString(diagnostics) + "\"}")
                             .build());
                     });
 
@@ -211,7 +226,8 @@ public class ChatController extends BaseController {
             PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
             return Flux.just(ServerSentEvent.<String>builder()
                 .event(SSE_EVENT_ERROR)
-                .data("Service temporarily unavailable. The streaming service is not ready.")
+                .data("{\"message\":\"Streaming service unavailable\","
+                    + "\"details\":\"OpenAI streaming service is not ready\"}")
                 .build());
         }
     }
@@ -223,10 +239,17 @@ public class ChatController extends BaseController {
     @GetMapping("/diagnostics/retrieval")
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
         // Mirror GPT-5 constraints used in buildPromptWithContext
-        List<Document> documents = retrievalService.retrieveWithLimit(query, 3, 600);
+        RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(query, 3, 600);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations = retrievalService.toCitations(documents);
-        return RetrievalDiagnosticsResponse.success(citations);
+        List<Citation> citations = retrievalService.toCitations(outcome.documents());
+        if (outcome.notices().isEmpty()) {
+            return RetrievalDiagnosticsResponse.success(citations);
+        }
+        String noticeDetails = outcome.notices().stream()
+            .map(notice -> notice.summary() + ": " + notice.details())
+            .reduce((first, second) -> first + "; " + second)
+            .orElse("Retrieval warnings present");
+        return new RetrievalDiagnosticsResponse(citations, noticeDetails);
     }
 
     /**
@@ -323,31 +346,10 @@ public class ChatController extends BaseController {
             return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(localEmbeddingServerUrl));
         } catch (RestClientException httpError) {
             log.debug("Embedding server health check failed", httpError);
+            String details = describeException(httpError);
             return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
-                localEmbeddingServerUrl, "UNREACHABLE: " + httpError.getClass().getSimpleName()));
+                localEmbeddingServerUrl, "UNREACHABLE: " + details));
         }
-    }
-    
-    /**
-     * Processes text using the new AST-based markdown processing.
-     * This endpoint provides structured output with better list formatting and Unicode bullet support.
-     *
-     * @param request The request containing text to process
-     * @return ProcessedMarkdown with structured citations and enrichments
-     * @deprecated Scheduled for removal; use unified processing instead.
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    @PostMapping("/process-structured")
-    public ResponseEntity<ProcessedMarkdown> processStructured(@RequestBody StructuredMarkdownRequest request) {
-        String text = request.text();
-        if (text == null || text.trim().isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        ProcessedMarkdown processed = unifiedMarkdownService.process(text);
-        PIPELINE_LOG.info("Processed text with AST-based service: {} citations, {} enrichments",
-                         processed.citations().size(), processed.enrichments().size());
-        return ResponseEntity.ok(processed);
     }
 
     /**

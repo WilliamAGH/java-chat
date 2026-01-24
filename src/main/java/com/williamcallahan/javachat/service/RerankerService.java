@@ -58,30 +58,23 @@ public class RerankerService {
 
         log.debug("Reranking {} documents", docs.size());
 
-        try {
-            Optional<String> responseOpt = callLlmForReranking(query, docs);
-            if (responseOpt.isEmpty() || responseOpt.get().isBlank()) {
-                log.debug("LLM reranking unavailable or returned empty; using original order");
-                return limitDocs(docs, returnK);
-            }
-
-            List<Document> reordered = parseRerankResponse(responseOpt.get(), docs);
-            if (reordered.isEmpty()) {
-                log.warn(
-                    "Reranking produced empty results, falling back to original order"
-                );
-                return limitDocs(docs, returnK);
-            }
-
-            log.debug("Successfully reranked {} documents", reordered.size());
-            return limitDocs(reordered, returnK);
-        } catch (JsonProcessingException jsonException) {
-            log.error("Reranking failed to parse response; using original document order", jsonException);
-            return limitDocs(docs, returnK);
-        } catch (RuntimeException unexpectedException) {
-            log.error("Reranking failed; using original document order", unexpectedException);
-            return limitDocs(docs, returnK);
+        Optional<String> responseOpt = callLlmForReranking(query, docs);
+        if (responseOpt.isEmpty() || responseOpt.get().isBlank()) {
+            throw new RerankingFailureException("Reranking response was empty");
         }
+
+        List<Document> reordered;
+        try {
+            reordered = parseRerankResponse(responseOpt.get(), docs);
+        } catch (JsonProcessingException jsonException) {
+            throw new RerankingFailureException("Reranking response parse failed", jsonException);
+        }
+        if (reordered.isEmpty()) {
+            throw new RerankingFailureException("Reranking response produced no valid ordering");
+        }
+
+        log.debug("Successfully reranked {} documents", reordered.size());
+        return limitDocs(reordered, returnK);
     }
 
     /**
@@ -95,7 +88,7 @@ public class RerankerService {
             !openAIStreamingService.isAvailable()
         ) {
             log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
-            return Optional.empty();
+            throw new RerankingFailureException("Reranking service unavailable");
         }
 
         String prompt = buildRerankPrompt(query, docs);
@@ -105,9 +98,7 @@ public class RerankerService {
             .complete(prompt, 0.0)
             .timeout(java.time.Duration.ofSeconds(4))
             .doOnError(timeoutOrApiError ->
-                log.debug("Reranker LLM call timed out or failed; falling back to original order",
-                    timeoutOrApiError))
-            .onErrorResume(timeoutOrApiError -> reactor.core.publisher.Mono.empty())
+                log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
             .blockOptional();
     }
 
@@ -133,8 +124,8 @@ public class RerankerService {
         for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
             Document document = docs.get(docIndex);
             Map<String, ?> metadata = document.getMetadata();
-            String title = metadata == null ? "" : String.valueOf(metadata.get("title") != null ? metadata.get("title") : "");
-            String url = metadata == null ? "" : String.valueOf(metadata.get("url") != null ? metadata.get("url") : "");
+            String title = extractMetadataString(metadata, "title");
+            String url = extractMetadataString(metadata, "url");
             String text = document.getText();
 	            prompt
 	                .append("[")
@@ -180,7 +171,7 @@ public class RerankerService {
     private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
         String jsonObject = extractFirstJsonObject(response);
         if (jsonObject == null || jsonObject.isBlank()) {
-            return null;
+            throw new JsonProcessingException("Rerank response did not contain a JSON object") {};
         }
         try {
             return mapper.readerFor(RerankOrderResponse.class).readValue(jsonObject);
@@ -268,6 +259,17 @@ public class RerankerService {
 
     private String trim(String text, int maxLength) {
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "…";
+    }
+
+    private static String extractMetadataString(Map<String, ?> metadata, String key) {
+        if (metadata == null) {
+            return "";
+        }
+        Object metadataValue = metadata.get(key);
+        if (metadataValue == null) {
+            return "";
+        }
+        return String.valueOf(metadataValue);
     }
 
     /**

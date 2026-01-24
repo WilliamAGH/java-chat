@@ -74,12 +74,48 @@ public class RetrievalService {
     }
 
     /**
+     * Diagnostic notice describing retrieval fallbacks or failures.
+     *
+     * @param summary short human-readable summary
+     * @param details detailed diagnostics suitable for UI display
+     */
+    public static record RetrievalNotice(String summary, String details) {
+        public RetrievalNotice {
+            if (summary == null || summary.isBlank()) {
+                throw new IllegalArgumentException("Summary cannot be null or blank");
+            }
+            details = details == null ? "" : details;
+        }
+    }
+
+    /**
+     * Outcome of a retrieval request, including documents and diagnostic notices.
+     *
+     * @param documents retrieved documents
+     * @param notices diagnostic notices for UI consumption
+     */
+    public static record RetrievalOutcome(List<Document> documents, List<RetrievalNotice> notices) {
+        public RetrievalOutcome {
+            documents = documents == null ? List.of() : List.copyOf(documents);
+            notices = notices == null ? List.of() : List.copyOf(notices);
+        }
+    }
+
+    /**
      * Retrieves documents for a query using vector search and reranking, falling back to local search on failure.
      */
     public List<Document> retrieve(String query) {
+        return retrieveOutcome(query).documents();
+    }
+
+    /**
+     * Retrieves documents and diagnostic notices for a query.
+     */
+    public RetrievalOutcome retrieveOutcome(String query) {
         if (query == null || query.isBlank()) {
-            return List.of();
+            return new RetrievalOutcome(List.of(), List.of());
         }
+        List<RetrievalNotice> notices = new ArrayList<>();
         // Extract version filter patterns if query mentions a specific Java version
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
 
@@ -92,35 +128,13 @@ public class RetrievalService {
             int baseTopK = Math.max(1, props.getRag().getSearchTopK());
             docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
         } catch (RuntimeException exception) {
-            return handleVectorSearchFailure(exception, query);
+            return handleVectorSearchFailureOutcome(
+                exception, query, notices, props.getRag().getSearchTopK(), props.getRag().getSearchReturnK()
+            );
         }
 
-        // MMR re-ranking using embeddings
-        List<Document> uniqueByUrl = docs
-            .stream()
-            .collect(
-                Collectors.toMap(
-                    doc -> String.valueOf(doc.getMetadata().get(METADATA_URL)),
-                    doc -> doc,
-                    (first, dup) -> first
-                )
-            )
-            .values()
-            .stream()
-            .collect(Collectors.toList());
-
-        List<Document> reranked = rerankerService.rerank(
-            query,
-            uniqueByUrl,
-            props.getRag().getSearchReturnK()
-        );
-        // DIAGNOSTIC: Log top reranked doc preview (truncated)
-        if (!reranked.isEmpty()) {
-            String topText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
-            int previewLength = Math.min(DIAGNOSTIC_PREVIEW_LENGTH, topText.length());
-            log.info("[DIAG] RAG top doc (post-rerank) previewLength={}", previewLength);
-        }
-        return reranked;
+        List<Document> reranked = rerankWithDiagnostics(query, docs, props.getRag().getSearchReturnK(), notices);
+        return new RetrievalOutcome(reranked, notices);
     }
 
     /**
@@ -132,6 +146,22 @@ public class RetrievalService {
         int maxDocs,
         int maxTokensPerDoc
     ) {
+        return retrieveWithLimitOutcome(query, maxDocs, maxTokensPerDoc).documents();
+    }
+
+    /**
+     * Retrieves documents with token limits and returns diagnostic notices.
+     */
+    public RetrievalOutcome retrieveWithLimitOutcome(
+        String query,
+        int maxDocs,
+        int maxTokensPerDoc
+    ) {
+        List<RetrievalNotice> notices = new ArrayList<>();
+        if (query == null || query.isBlank()) {
+            return new RetrievalOutcome(List.of(), notices);
+        }
+
         // Extract version filter patterns if query mentions a specific Java version
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
 
@@ -147,13 +177,12 @@ public class RetrievalService {
             );
             docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
         } catch (RuntimeException exception) {
-            docs = executeFallbackSearch(query, maxDocs, exception);
+            return executeFallbackSearchOutcome(query, maxDocs, exception, notices);
         }
 
-        // Early return if no documents to process (fallback also failed or no matches)
         if (docs.isEmpty()) {
             log.info("No documents to process after retrieval/fallback - returning empty list");
-            return List.of();
+            return new RetrievalOutcome(List.of(), notices);
         }
 
         // Truncate documents to token limits and return limited count
@@ -163,21 +192,8 @@ public class RetrievalService {
             .map(doc -> truncateDocumentToTokenLimit(doc, maxTokensPerDoc))
             .collect(Collectors.toList());
 
-        // Apply reranking with limited return count
-        List<Document> uniqueByUrl = truncatedDocs
-            .stream()
-            .collect(
-                Collectors.toMap(
-                    doc -> String.valueOf(doc.getMetadata().get(METADATA_URL)),
-                    doc -> doc,
-                    (first, dup) -> first
-                )
-            )
-            .values()
-            .stream()
-            .collect(Collectors.toList());
-
-        return rerankerService.rerank(query, uniqueByUrl, maxDocs);
+        List<Document> reranked = rerankWithDiagnostics(query, truncatedDocs, maxDocs, notices);
+        return new RetrievalOutcome(reranked, notices);
     }
 
     private List<Document> executeVersionAwareSearch(
@@ -337,30 +353,38 @@ public class RetrievalService {
         return value == null ? "" : String.valueOf(value);
     }
 
-    /**
-     * Handle vector search failure by logging context and falling back to local keyword search.
-     * Documents returned include metadata indicating they came from fallback search.
-     */
-    private List<Document> handleVectorSearchFailure(
+    private RetrievalOutcome handleVectorSearchFailureOutcome(
         RuntimeException exception,
-        String query
+        String query,
+        List<RetrievalNotice> notices,
+        int maxDocs,
+        int returnLimit
     ) {
         String errorType = RetrievalErrorClassifier.determineErrorType(exception);
         log.warn("Vector search unavailable; falling back to local keyword search");
 
         RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
+        notices.add(new RetrievalNotice(
+            "Vector search failed; using keyword fallback",
+            describeFailure(exception)
+        ));
 
         // Use searchTopK (not searchReturnK) to match the primary path's candidate pool size
-        LocalSearchService.SearchOutcome outcome = localSearch.search(query, props.getRag().getSearchTopK());
+        LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
 
         if (outcome.isFailed()) {
+            String outcomeMessage = outcome.errorMessage().orElse("Local keyword search failed");
             log.error("Local keyword search also failed - returning empty hits");
-            return List.of();
+            notices.add(new RetrievalNotice(
+                "Keyword fallback failed; returning empty results",
+                outcomeMessage
+            ));
+            return new RetrievalOutcome(List.of(), notices);
         }
 
         log.info("Local keyword search returned {} hits", outcome.hits().size());
 
-        return outcome.hits()
+        List<Document> fallbackDocs = outcome.hits()
             .stream()
             .map(hit -> {
                 Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
@@ -369,35 +393,68 @@ public class RetrievalService {
                 doc.getMetadata().put(METADATA_FALLBACK_REASON, errorType);
                 return doc;
             })
-            .limit(props.getRag().getSearchReturnK())
+            .limit(returnLimit)
             .collect(Collectors.toList());
+        return new RetrievalOutcome(fallbackDocs, notices);
     }
 
-    private List<Document> executeFallbackSearch(String query, int maxDocs, RuntimeException exception) {
-        String errorType = RetrievalErrorClassifier.determineErrorType(exception);
-        log.warn("Vector search unavailable; falling back to local keyword search with limits");
+    private RetrievalOutcome executeFallbackSearchOutcome(
+        String query,
+        int maxDocs,
+        RuntimeException exception,
+        List<RetrievalNotice> notices
+    ) {
+        return handleVectorSearchFailureOutcome(exception, query, notices, maxDocs, maxDocs);
+    }
 
-        RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
+    private List<Document> rerankWithDiagnostics(
+        String query,
+        List<Document> docs,
+        int returnLimit,
+        List<RetrievalNotice> notices
+    ) {
+        List<Document> uniqueByUrl = docs
+            .stream()
+            .collect(
+                Collectors.toMap(
+                    doc -> String.valueOf(doc.getMetadata().get(METADATA_URL)),
+                    doc -> doc,
+                    (first, dup) -> first
+                )
+            )
+            .values()
+            .stream()
+            .collect(Collectors.toList());
 
-        // Fallback to local search with limits
-        LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
-
-        if (outcome.isFailed()) {
-            log.error("Local keyword search also failed - returning empty hits");
-            return List.of();
+        List<Document> reranked;
+        try {
+            reranked = rerankerService.rerank(query, uniqueByUrl, returnLimit);
+        } catch (RerankingFailureException exception) {
+            log.error("Reranking failed; returning original order", exception);
+            notices.add(new RetrievalNotice(
+                "Reranking failed; using original order",
+                describeFailure(exception)
+            ));
+            reranked = uniqueByUrl;
         }
 
-        log.info("Local keyword search returned {} hits", outcome.hits().size());
+        if (!reranked.isEmpty()) {
+            String topText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
+            int previewLength = Math.min(DIAGNOSTIC_PREVIEW_LENGTH, topText.length());
+            log.info("[DIAG] RAG top doc (post-rerank) previewLength={}", previewLength);
+        }
+        return reranked;
+    }
 
-        return outcome.hits()
-            .stream()
-            .map(hit -> {
-                Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
-                doc.getMetadata().put(METADATA_RETRIEVAL_SOURCE, SOURCE_KEYWORD_FALLBACK);
-                doc.getMetadata().put(METADATA_FALLBACK_REASON, errorType);
-                return doc;
-            })
-            .collect(Collectors.toList());
+    private String describeFailure(Throwable exception) {
+        if (exception == null) {
+            return "Unknown error";
+        }
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return exception.getClass().getSimpleName();
+        }
+        return exception.getClass().getSimpleName() + ": " + message;
     }
 
 }
