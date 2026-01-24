@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ChatMessage } from '../services/chat'
   import { renderMarkdown } from '../services/markdown'
+  import { createDebouncedHighlighter } from '../utils/highlight'
 
   interface Props {
     message: ChatMessage
@@ -11,7 +12,12 @@
   let { message, index, isStreaming = false }: Props = $props()
 
   let contentEl: HTMLElement | null = $state(null)
-  let highlightTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Visual feedback state for clipboard operations. */
+  let copyState = $state<'idle' | 'success' | 'error'>('idle')
+
+  // Debounced highlighter with automatic cleanup
+  const { scheduleHighlight, cleanup: cleanupHighlighter } = createDebouncedHighlighter()
 
   // Render markdown synchronously - no server calls, no async complexity
   let renderedContent = $derived(
@@ -23,45 +29,29 @@
   // Highlight code blocks after render - debounced to avoid flicker during streaming
   $effect(() => {
     if (renderedContent && contentEl) {
-      // Clear any pending highlight
-      if (highlightTimer) {
-        clearTimeout(highlightTimer)
-      }
-
-      // During streaming, delay highlighting to batch updates
-      // After streaming completes, use a small settling delay to avoid flicker
-      const delay = isStreaming ? 300 : 50
-
-      highlightTimer = setTimeout(() => {
-        Promise.all([
-          import('highlight.js/lib/core'),
-          import('highlight.js/lib/languages/java'),
-          import('highlight.js/lib/languages/xml'),
-          import('highlight.js/lib/languages/json'),
-          import('highlight.js/lib/languages/bash')
-        ]).then(([hljs, java, xml, json, bash]) => {
-          if (!hljs.default.getLanguage('java')) hljs.default.registerLanguage('java', java.default)
-          if (!hljs.default.getLanguage('xml')) hljs.default.registerLanguage('xml', xml.default)
-          if (!hljs.default.getLanguage('json')) hljs.default.registerLanguage('json', json.default)
-          if (!hljs.default.getLanguage('bash')) hljs.default.registerLanguage('bash', bash.default)
-          contentEl?.querySelectorAll('pre code:not(.hljs)').forEach((block) => {
-            hljs.default.highlightElement(block as HTMLElement)
-          })
-        })
-      }, delay)
+      scheduleHighlight(contentEl, isStreaming)
     }
-
-    return () => {
-      if (highlightTimer) {
-        clearTimeout(highlightTimer)
-      }
-    }
+    return cleanupHighlighter
   })
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).catch((copyError) => {
-      console.warn('Copy to clipboard failed:', copyError)
-    })
+  /** Duration to show copy feedback before returning to idle. */
+  const COPY_FEEDBACK_DURATION_MS = 1500
+
+  /**
+   * Copies text to clipboard with visual feedback.
+   * Shows success/error state briefly before returning to idle.
+   */
+  async function copyToClipboard(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text)
+      copyState = 'success'
+    } catch {
+      copyState = 'error'
+    }
+
+    setTimeout(() => {
+      copyState = 'idle'
+    }, COPY_FEEDBACK_DURATION_MS)
   }
 
   let animationDelay = $derived(`${Math.min(index * 50, 200)}ms`)
@@ -101,14 +91,26 @@
       <button
         type="button"
         class="action-btn"
+        class:action-btn--success={copyState === 'success'}
+        class:action-btn--error={copyState === 'error'}
         onclick={() => copyToClipboard(message.content)}
-        title="Copy message"
-        aria-label="Copy message"
+        title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
+        aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
       >
-        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
-          <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
-        </svg>
+        {#if copyState === 'success'}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
+          </svg>
+        {:else if copyState === 'error'}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
+          </svg>
+        {:else}
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
+            <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
+          </svg>
+        {/if}
       </button>
     </div>
   </div>
@@ -345,6 +347,28 @@
   .action-btn:hover {
     color: var(--color-text-primary);
     background: var(--color-bg-hover);
+  }
+
+  .action-btn--success {
+    background: var(--color-success);
+    border-color: var(--color-success);
+    color: white;
+  }
+
+  .action-btn--success:hover {
+    background: var(--color-success);
+    color: white;
+  }
+
+  .action-btn--error {
+    background: var(--color-error);
+    border-color: var(--color-error);
+    color: white;
+  }
+
+  .action-btn--error:hover {
+    background: var(--color-error);
+    color: white;
   }
 
   .action-btn svg {

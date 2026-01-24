@@ -84,12 +84,10 @@ public class CitationProcessor {
         }
         
         /**
-         * Processes Text nodes for inline citation markers.
-         * @param text the text node to process
+         * Advances position counter through text content to maintain citation ordering.
+         * Citations extracted from links receive positions reflecting their document order.
          */
         private void visitText(Text text) {
-            // This could be extended to handle inline citation markers like [1], [2]
-            // For now, we focus on explicit links
             position += text.getChars().length();
         }
         
