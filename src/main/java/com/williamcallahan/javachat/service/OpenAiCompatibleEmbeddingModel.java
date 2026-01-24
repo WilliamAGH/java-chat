@@ -135,6 +135,10 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
 
             for (int itemIndex = 0; itemIndex < data.size(); itemIndex++) {
                 com.openai.models.embeddings.Embedding item = data.get(itemIndex);
+                if (item == null) {
+                    throw new EmbeddingApiResponseException(
+                        "Remote embedding response contained null entry at index " + itemIndex);
+                }
                 int targetIndex = safeEmbeddingIndex(itemIndex, item, expectedCount);
                 if (targetIndex < 0 || targetIndex >= expectedCount) {
                     continue;
