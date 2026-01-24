@@ -221,9 +221,21 @@ public class HtmlContentExtractor {
     private String filterNoise(String text) {
         String[] lines = text.split("\n");
         StringBuilder cleaned = new StringBuilder();
+        boolean inCodeFence = false;
         
         for (String line : lines) {
             String trimmed = line.trim();
+
+            if (trimmed.startsWith("```")) {
+                inCodeFence = !inCodeFence;
+                cleaned.append(line).append("\n");
+                continue;
+            }
+
+            if (inCodeFence) {
+                cleaned.append(line).append("\n");
+                continue;
+            }
             
             // Skip empty lines
             if (trimmed.isEmpty()) {
@@ -238,7 +250,7 @@ public class HtmlContentExtractor {
             
             if (!isNoise) {
                 // Also skip very short lines that are likely navigation
-                if (trimmed.length() > 3 || trimmed.matches("^[A-Z].*")) {
+                if (trimmed.length() > 3 || startsWithUppercaseLetter(trimmed)) {
                     cleaned.append(line).append("\n");
                 }
             }
@@ -246,6 +258,14 @@ public class HtmlContentExtractor {
         
         // Clean up excessive whitespace without disturbing code fences
         return normalizeWhitespaceOutsideCodeFences(cleaned.toString()).trim();
+    }
+
+    private boolean startsWithUppercaseLetter(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        char firstCharacter = text.charAt(0);
+        return firstCharacter >= 'A' && firstCharacter <= 'Z';
     }
 
     private String normalizeWhitespaceOutsideCodeFences(String text) {
