@@ -28,13 +28,14 @@ RUN npm run build
 FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
-# Copy Gradle wrapper and build files
+# Copy Gradle wrapper, build files, and static analysis configs
 COPY gradle/ gradle/
 COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
 RUN chmod +x gradlew
 
-# Download dependencies
-RUN ./gradlew dependencies --no-daemon
+# Download dependencies (quiet mode to avoid verbose tree output)
+RUN ./gradlew dependencies --no-daemon -q
 
 # Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
