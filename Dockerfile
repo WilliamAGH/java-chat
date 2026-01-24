@@ -27,16 +27,16 @@ RUN npm run build
 # ================================
 # BACKEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/maven:3.9.9-eclipse-temurin-21 AS builder
+FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
-# Copy Maven wrapper and pom.xml
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-RUN chmod +x mvnw
+# Copy Gradle wrapper and build files
+COPY gradle/ gradle/
+COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
+RUN chmod +x gradlew
 
 # Download dependencies
-RUN ./mvnw dependency:go-offline -B
+RUN ./gradlew dependencies --no-daemon
 
 # Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
@@ -45,7 +45,7 @@ COPY src ./src/
 COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
 
 # Build the application
-RUN ./mvnw clean package -DskipTests -B
+RUN ./gradlew clean build -x test --no-daemon
 
 # ================================
 # RUNTIME STAGE
@@ -61,7 +61,7 @@ RUN useradd -u 1001 -m -s /bin/bash appuser
 WORKDIR /app
 
 # Copy the JAR from builder stage
-COPY --from=builder /app/target/*.jar app.jar
+COPY --from=builder /app/build/libs/*.jar app.jar
 
 # Create logs directory and set permissions
 RUN mkdir -p logs && chown -R appuser:appuser logs app.jar
