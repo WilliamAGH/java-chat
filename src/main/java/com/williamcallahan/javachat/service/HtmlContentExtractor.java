@@ -6,7 +6,6 @@ import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
 
-import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -180,9 +179,9 @@ public class HtmlContentExtractor {
      * Check if element is likely navigation.
      */
     private boolean isNavigationElement(Element element) {
-        String className = element.className().toLowerCase(Locale.ROOT);
-        String id = element.id().toLowerCase(Locale.ROOT);
-        String text = element.text().toLowerCase(Locale.ROOT);
+        String className = normalizeAsciiLower(element.className());
+        String id = normalizeAsciiLower(element.id());
+        String text = normalizeAsciiLower(element.text());
         
         return className.contains("nav") || 
                className.contains("menu") ||
@@ -201,10 +200,10 @@ public class HtmlContentExtractor {
      */
     private boolean containsExcessiveNoise(String text) {
         int noiseCount = 0;
-        String lowerText = text.toLowerCase(Locale.ROOT);
+        String lowerText = normalizeAsciiLower(text);
         
         for (String noise : NOISE_PATTERNS) {
-            if (lowerText.contains(noise.toLowerCase(Locale.ROOT))) {
+            if (lowerText.contains(normalizeAsciiLower(noise))) {
                 noiseCount++;
             }
         }
@@ -230,9 +229,9 @@ public class HtmlContentExtractor {
             }
             
             // Skip lines that are pure noise
-            String trimmedLower = trimmed.toLowerCase(Locale.ROOT);
+            String trimmedLower = normalizeAsciiLower(trimmed);
             boolean isNoise = NOISE_PATTERNS.stream()
-                .anyMatch(noise -> trimmedLower.equals(noise.toLowerCase(Locale.ROOT)));
+                .anyMatch(noise -> trimmedLower.equals(normalizeAsciiLower(noise)));
             
             if (!isNoise) {
                 // Also skip very short lines that are likely navigation
@@ -308,5 +307,18 @@ public class HtmlContentExtractor {
         }
         
         return filterNoise(result);
+    }
+
+    private static String normalizeAsciiLower(String inputText) {
+        StringBuilder normalized = new StringBuilder(inputText.length());
+        for (int index = 0; index < inputText.length(); index++) {
+            char current = inputText.charAt(index);
+            if (current >= 'A' && current <= 'Z') {
+                normalized.append((char) (current + ('a' - 'A')));
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
     }
 }
