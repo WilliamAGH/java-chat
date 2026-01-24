@@ -141,34 +141,82 @@ public class EmbeddingCacheService {
     /**
      * Represents a cached embedding with its content and metadata
      */
-	    public static class CachedEmbedding {
-        public String id;
-        public String content;
-        public float[] embedding;
-        public Map<String, Object> metadata;
-        public LocalDateTime createdAt;
-	        public boolean uploaded;
+	public static class CachedEmbedding {
+        private String id;
+        private String content;
+        private float[] embedding;
+        private Map<String, Object> metadata;
+        private LocalDateTime createdAt;
+        private boolean uploaded;
 	        
 	        /**
 	         * Creates an empty cached embedding for deserialization.
 	         */
-	        public CachedEmbedding() {}
+        public CachedEmbedding() {}
 	        
 	        /**
 	         * Creates a cached embedding with content, vector output, and optional metadata.
 	         */
-	        public CachedEmbedding(String id, String content, float[] embedding, Map<String, Object> metadata) {
-	            this.id = id;
-	            this.content = content;
-	            this.embedding = embedding;
-	            this.metadata = metadata != null ? metadata : new HashMap<>();
-	            this.createdAt = LocalDateTime.now();
-	            this.uploaded = false;
-	        }
+        public CachedEmbedding(String id, String content, float[] embedding, Map<String, Object> metadata) {
+            this.id = id;
+            this.content = content;
+            this.embedding = embedding;
+            this.metadata = metadata != null ? metadata : new HashMap<>();
+            this.createdAt = LocalDateTime.now();
+            this.uploaded = false;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
+        }
+
+        public float[] getEmbedding() {
+            return embedding;
+        }
+
+        public void setEmbedding(float[] embedding) {
+            this.embedding = embedding;
+        }
+
+        public Map<String, Object> getMetadata() {
+            return metadata;
+        }
+
+        public void setMetadata(Map<String, Object> metadata) {
+            this.metadata = metadata != null ? metadata : new HashMap<>();
+        }
+
+        public LocalDateTime getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
+        }
+
+        public boolean isUploaded() {
+            return uploaded;
+        }
+
+        public void setUploaded(boolean uploaded) {
+            this.uploaded = uploaded;
+        }
         
         /** Converts to Spring AI Document */
         public Document toDocument() {
-            return new Document(content, metadata);
+            return new Document(content, metadata != null ? metadata : new HashMap<>());
         }
     }
     
@@ -188,7 +236,7 @@ public class EmbeddingCacheService {
             CachedEmbedding cachedEmbedding = memoryCache.get(cacheKey);
             
             if (cachedEmbedding != null) {
-                embeddings.add(cachedEmbedding.embedding);
+                embeddings.add(cachedEmbedding.getEmbedding());
                 cacheHits.incrementAndGet();
                 CACHE_LOG.debug("Cache HIT for document");
             } else {
@@ -287,7 +335,7 @@ public class EmbeddingCacheService {
      */
     public int uploadPendingToVectorStore(int batchSize) {
         List<CachedEmbedding> pendingEmbeddings = memoryCache.values().stream()
-            .filter(cachedEmbedding -> !cachedEmbedding.uploaded)
+            .filter(cachedEmbedding -> !cachedEmbedding.isUploaded())
             .collect(Collectors.toList());
         
         if (pendingEmbeddings.isEmpty()) {
@@ -311,7 +359,7 @@ public class EmbeddingCacheService {
                 vectorStore.add(documents);
                 
                 for (CachedEmbedding cachedEmbedding : batch) {
-                    cachedEmbedding.uploaded = true;
+                    cachedEmbedding.setUploaded(true);
                 }
                 
                 uploadedCount += batch.size();
@@ -352,8 +400,8 @@ public class EmbeddingCacheService {
     public CacheStats getCacheStats() {
         return new CacheStats(
             memoryCache.size(),
-            memoryCache.values().stream().filter(cachedEmbedding -> cachedEmbedding.uploaded).count(),
-            memoryCache.values().stream().filter(cachedEmbedding -> !cachedEmbedding.uploaded).count(),
+            memoryCache.values().stream().filter(CachedEmbedding::isUploaded).count(),
+            memoryCache.values().stream().filter(cachedEmbedding -> !cachedEmbedding.isUploaded()).count(),
             cacheHits.get(),
             cacheMisses.get(),
             getCacheHitRate(),
@@ -412,7 +460,8 @@ public class EmbeddingCacheService {
     
     private String generateCacheKey(String content, Map<String, ?> metadata) {
         StringBuilder key = new StringBuilder();
-        key.append(content.hashCode());
+        String safeContent = content == null ? "" : content;
+        key.append(safeContent.hashCode());
         if (metadata != null && !metadata.isEmpty()) {
             key.append("_").append(metadata.hashCode());
         }
@@ -435,7 +484,7 @@ public class EmbeddingCacheService {
             }
 
             for (CachedEmbedding cachedEmbedding : importedEmbeddings) {
-                String cacheKey = generateCacheKey(cachedEmbedding.content, cachedEmbedding.metadata);
+                String cacheKey = generateCacheKey(cachedEmbedding.getContent(), cachedEmbedding.getMetadata());
                 memoryCache.put(cacheKey, cachedEmbedding);
             }
 

@@ -43,7 +43,10 @@ public class ProgressTracker {
             if (parsedDir != null && Files.isDirectory(parsedDir)) {
                 try (var pathStream = Files.walk(parsedDir)) {
                     parsed = pathStream.filter(pathCandidate -> !Files.isDirectory(pathCandidate))
-                              .filter(pathCandidate -> pathCandidate.getFileName().toString().endsWith(".txt"))
+                              .filter(pathCandidate -> {
+                                  Path fileName = pathCandidate.getFileName();
+                                  return fileName != null && fileName.toString().endsWith(".txt");
+                              })
                               .count();
                 }
             }

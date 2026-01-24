@@ -111,7 +111,7 @@ public class EnrichmentProcessor {
                 MarkdownEnrichment enrichment = createEnrichment(type, enrichmentContent.trim(), position + matcher.start());
                 if (enrichment != null) {
                     enrichments.add(enrichment);
-                    logger.debug("Found {} enrichment at position {}", type, position + matcher.start());
+                    logger.debug("Found enrichment at position {}", position + matcher.start());
                 }
             }
         }

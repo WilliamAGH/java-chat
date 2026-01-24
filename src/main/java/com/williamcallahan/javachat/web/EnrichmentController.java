@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.Enrichment;
+import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.EnrichmentService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
  * Exposes enrichment marker generation backed by retrieval and enrichment services.
  */
 @RestController
+@PermitAll
 public class EnrichmentController {
     private final RetrievalService retrievalService;
     private final EnrichmentService enrichmentService;
@@ -72,5 +74,4 @@ public class EnrichmentController {
                 .collect(Collectors.toList());
     }
 }
-
 

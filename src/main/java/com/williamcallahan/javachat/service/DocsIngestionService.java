@@ -45,6 +45,17 @@ public class DocsIngestionService {
 
     /**
      * Wires ingestion dependencies and determines whether to upload or cache embeddings.
+     *
+     * @param rootUrl root URL for documentation crawling
+     * @param vectorStore vector store for embeddings
+     * @param chunkProcessingService chunk processing pipeline
+     * @param localStore local snapshot and chunk storage
+     * @param fileOperationsService file IO helper
+     * @param htmlExtractor HTML content extractor
+     * @param pdfExtractor PDF content extractor
+     * @param progressTracker ingestion progress tracker
+     * @param embeddingCache embedding cache for local-only mode
+     * @param uploadMode ingestion upload mode
      */
     public DocsIngestionService(@Value("${app.docs.root-url}") String rootUrl,
                                 VectorStore vectorStore,
@@ -96,8 +107,8 @@ public class DocsIngestionService {
             // Persist raw HTML snapshot
             localStore.saveHtml(url, doc.outerHtml());
 
-            for (Element a : doc.select("a[href]")) {
-                String href = a.attr("abs:href");
+            for (Element anchorElement : doc.select("a[href]")) {
+                String href = anchorElement.attr("abs:href");
                 if (href.startsWith(rootUrl) && !visited.contains(href)) {
                     queue.add(href);
                 }
@@ -123,9 +134,9 @@ public class DocsIngestionService {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
                         }
-                    } catch (RuntimeException e) {
+                    } catch (RuntimeException cacheException) {
                         INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally (exception type: {})",
-                            e.getClass().getSimpleName());
+                            cacheException.getClass().getSimpleName());
                     }
                 } else {
                     // Upload mode: send to Qdrant
@@ -140,10 +151,10 @@ public class DocsIngestionService {
                             String hash = aiDoc.getMetadata().get("hash").toString();
                             localStore.markHashIngested(hash);
                         }
-                    } catch (RuntimeException e) {
+                    } catch (RuntimeException qdrantException) {
                         INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant (exception type: {})",
-                            e.getClass().getSimpleName());
-                        throw e;
+                            qdrantException.getClass().getSimpleName());
+                        throw new IOException("Failed to add documents to Qdrant", qdrantException);
                     }
                 }
             } else {
@@ -170,126 +181,146 @@ public class DocsIngestionService {
         try (Stream<Path> paths = Files.walk(root)) {
             Iterator<Path> pathIterator = paths
                     .filter(pathCandidate -> !Files.isDirectory(pathCandidate))
-                    .filter(pathCandidate -> {
-                        Path fileNamePath = pathCandidate.getFileName();
-                        if (fileNamePath == null) {
-                            return false;
-                        }
-                        String name = fileNamePath.toString().toLowerCase(Locale.ROOT);
-                        return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
-                    })
+                    .filter(this::isIngestableFile)
                     .iterator();
             while (pathIterator.hasNext() && processed[0] < maxFiles) {
                 Path file = pathIterator.next();
-                Path fileNamePath = file.getFileName();
-                if (fileNamePath == null) {
-                    continue;
-                }
-                long fileStartMillis = System.currentTimeMillis();
-                String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
-                String title;
-                String bodyText = null;
-                String url = mapLocalPathToUrl(file);
-                String packageName;
+                if (file.getFileName() == null) continue;
                 
-                if (fileName.endsWith(".pdf")) {
-                    // Process PDF file
-                    try {
-                        // Extract title from PDF metadata or filename
-                        String metadata = pdfExtractor.getPdfMetadata(file);
-                        title = extractTitleFromMetadata(metadata, file.getFileName().toString());
-                        packageName = "";
-                        // For recognized book PDFs, point URL to public /pdfs path
-                        final Optional<String> publicPdfUrl =
-                            com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(
-                                file.toString()
-                            );
-                        url = publicPdfUrl.orElse(url);
-                    } catch (IOException e) {
-                        log.error("Failed to extract PDF content (exception type: {})",
-                            e.getClass().getSimpleName());
-                        continue;
-                    }
-                } else {
-                    // Process HTML file
-                    String html = fileOperationsService.readTextFile(file);
-                    org.jsoup.nodes.Document doc = Jsoup.parse(html);
-                    title = Optional.ofNullable(doc.title()).orElse("");
-                    bodyText = url.contains("/api/") ? 
-                        htmlExtractor.extractJavaApiContent(doc) : 
-                        htmlExtractor.extractCleanContent(doc);
-                    packageName = extractPackage(url, bodyText);
-                }
-
-                // Use ChunkProcessingService to handle chunking and document creation
-                List<org.springframework.ai.document.Document> documents;
-                if (fileName.endsWith(".pdf")) {
-                    try {
-                        documents = chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
-                    } catch (IOException e) {
-                        log.error("PDF chunking failed (exception type: {})", e.getClass().getSimpleName());
-                        continue;
-                    }
-                } else {
-                    documents = chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
-                }
-
-                // Add documents to vector store or cache
-                if (!documents.isEmpty()) {
-                    INDEXING_LOG.info("[INDEXING] Processing file with {} chunks",
-                        documents.size());
-                    
-                    try {
-                        long startTime = System.currentTimeMillis();
-                        
-                        if (localOnlyMode) {
-                            // Local-only mode: compute and cache embeddings
-                            embeddingCache.getOrComputeEmbeddings(documents);
-                            long duration = System.currentTimeMillis() - startTime;
-                            INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
-                                documents.size(), duration, progressTracker.formatPercent());
-                        } else {
-                            // Upload mode: send to Qdrant with fallback to cache
-                            try {
-                                vectorStore.add(documents);
-                                long duration = System.currentTimeMillis() - startTime;
-                                INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
-                                    documents.size(), duration, progressTracker.formatPercent());
-                            } catch (RuntimeException qdrantError) {
-                                // Qdrant failed (could be full or connection issue), fallback to local cache
-                                INDEXING_LOG.warn("[INDEXING] Qdrant upload failed (exception type: {}), falling back to local cache",
-                                    qdrantError.getClass().getSimpleName());
-                                embeddingCache.getOrComputeEmbeddings(documents);
-                                long duration = System.currentTimeMillis() - startTime;
-                                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
-                                    documents.size(), duration, progressTracker.formatPercent());
-                            }
-                        }
-                        
-                        // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
-                        long totalDuration = System.currentTimeMillis() - fileStartMillis;
-                        String destination = localOnlyMode ? "cache" : "Qdrant";
-                        INDEXING_LOG.info("[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
-                            documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
-                        
-                        // Mark hashes as processed after successful addition/caching
-                        for (org.springframework.ai.document.Document aiDoc : documents) {
-                            String hash = aiDoc.getMetadata().get("hash").toString();
-                            localStore.markHashIngested(hash);
-                        }
-                        
-                        processed[0]++;
-                    } catch (RuntimeException e) {
-                        String operation = localOnlyMode ? "cache" : "index";
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to {} file (exception type: {})",
-                            operation, e.getClass().getSimpleName());
-                    }
-                } else {
-                    INDEXING_LOG.debug("[INDEXING] Skipping empty document");
+                if (processLocalFile(file)) {
+                    processed[0]++;
                 }
             }
         }
         return processed[0];
+    }
+
+    private boolean isIngestableFile(Path path) {
+        Path fileNamePath = path.getFileName();
+        if (fileNamePath == null) {
+            return false;
+        }
+        String name = fileNamePath.toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
+    }
+
+    private boolean processLocalFile(Path file) {
+        long fileStartMillis = System.currentTimeMillis();
+        String fileName = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        String title;
+        String bodyText = null;
+        String url = mapLocalPathToUrl(file);
+        String packageName;
+        
+        if (fileName.endsWith(".pdf")) {
+            // Process PDF file
+            try {
+                // Extract title from PDF metadata or filename
+                String metadata = pdfExtractor.getPdfMetadata(file);
+                title = extractTitleFromMetadata(metadata, file.getFileName().toString());
+                packageName = "";
+                // For recognized book PDFs, point URL to public /pdfs path
+                final Optional<String> publicPdfUrl =
+                    com.williamcallahan.javachat.config.DocsSourceRegistry.mapBookLocalToPublic(
+                        file.toString()
+                    );
+                url = publicPdfUrl.orElse(url);
+            } catch (IOException pdfExtractionException) {
+                log.error("Failed to extract PDF content (exception type: {})",
+                    pdfExtractionException.getClass().getSimpleName());
+                return false;
+            }
+        } else {
+            // Process HTML file
+            try {
+                String html = fileOperationsService.readTextFile(file);
+                org.jsoup.nodes.Document doc = Jsoup.parse(html);
+                title = Optional.ofNullable(doc.title()).orElse("");
+                bodyText = url.contains("/api/") ? 
+                    htmlExtractor.extractJavaApiContent(doc) : 
+                    htmlExtractor.extractCleanContent(doc);
+                packageName = extractPackage(url, bodyText);
+            } catch (IOException htmlReadException) {
+                log.error("Failed to read HTML file (exception type: {})", htmlReadException.getClass().getSimpleName());
+                return false;
+            }
+        }
+
+        // Use ChunkProcessingService to handle chunking and document creation
+        List<org.springframework.ai.document.Document> documents;
+        try {
+            if (fileName.endsWith(".pdf")) {
+                documents = chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
+            } else {
+                documents = chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+            }
+        } catch (IOException chunkingException) {
+            log.error("Chunking failed (exception type: {})", chunkingException.getClass().getSimpleName());
+            return false;
+        }
+
+        // Add documents to vector store or cache
+        if (!documents.isEmpty()) {
+            return processDocuments(documents, fileStartMillis);
+        } else {
+            INDEXING_LOG.debug("[INDEXING] Skipping empty document");
+            return false;
+        }
+    }
+
+    private boolean processDocuments(List<org.springframework.ai.document.Document> documents, long fileStartMillis) {
+        INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
+        
+        try {
+            long startTime = System.currentTimeMillis();
+            
+            if (localOnlyMode) {
+                // Local-only mode: compute and cache embeddings
+                embeddingCache.getOrComputeEmbeddings(documents);
+                long duration = System.currentTimeMillis() - startTime;
+                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
+                    documents.size(), duration, progressTracker.formatPercent());
+            } else {
+                // Upload mode: send to Qdrant with fallback to cache
+                try {
+                    vectorStore.add(documents);
+                    long duration = System.currentTimeMillis() - startTime;
+                    INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
+                        documents.size(), duration, progressTracker.formatPercent());
+                } catch (RuntimeException qdrantError) {
+                    // Qdrant failed (could be full or connection issue), fallback to local cache
+                    INDEXING_LOG.warn("[INDEXING] Qdrant upload failed (exception type: {}), falling back to local cache",
+                        qdrantError.getClass().getSimpleName());
+                    embeddingCache.getOrComputeEmbeddings(documents);
+                    long duration = System.currentTimeMillis() - startTime;
+                    INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
+                        documents.size(), duration, progressTracker.formatPercent());
+                }
+            }
+            
+            // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
+            long totalDuration = System.currentTimeMillis() - fileStartMillis;
+            String destination = localOnlyMode ? "cache" : "Qdrant";
+            INDEXING_LOG.info("[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
+                documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
+            
+            // Mark hashes as processed after successful addition/caching
+            for (org.springframework.ai.document.Document aiDoc : documents) {
+                String hash = aiDoc.getMetadata().get("hash").toString();
+                try {
+                    localStore.markHashIngested(hash);
+                } catch (IOException hashMarkException) {
+                    log.error("Failed to mark hash as ingested: {}", hash, hashMarkException);
+                }
+            }
+            
+            return true;
+        } catch (RuntimeException indexingException) {
+            String operation = localOnlyMode ? "cache" : "index";
+            INDEXING_LOG.error("[INDEXING] ✗ Failed to {} file (exception type: {})",
+                operation, indexingException.getClass().getSimpleName());
+            return false;
+        }
     }
 
     private String mapLocalPathToUrl(final Path file) {
@@ -343,10 +374,10 @@ public class DocsIngestionService {
             String tail = url.substring(idx);
             String[] parts = tail.split("/");
             StringBuilder sb = new StringBuilder();
-            for (String p : parts) {
-                if (p.endsWith(".html")) break;
+            for (String pathSegment : parts) {
+                if (pathSegment.endsWith(".html")) break;
                 if (sb.length() > 0) sb.append('.');
-                sb.append(p);
+                sb.append(pathSegment);
             }
             String pkg = sb.toString();
             if (pkg.contains(".")) return pkg;

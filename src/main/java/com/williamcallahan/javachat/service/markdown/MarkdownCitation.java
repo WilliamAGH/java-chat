@@ -55,7 +55,7 @@ public record MarkdownCitation(
     public String getDomain() {
         try {
             return java.net.URI.create(url).getHost();
-        } catch (Exception e) {
+        } catch (Exception urlParseException) {
             return "unknown";
         }
     }

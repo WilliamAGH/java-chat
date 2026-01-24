@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.service.DocsIngestionService;
+import jakarta.annotation.security.PermitAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/ingest")
+@PermitAll
 public class IngestionController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
     private static final int MAX_ALLOWED_PAGES = 10000;
@@ -50,12 +52,13 @@ public class IngestionController extends BaseController {
 
             return createSuccessResponse(String.format("Ingestion completed for up to %d pages", maxPages));
 
-        } catch (IOException e) {
-            log.error("IO error during ingestion: {}", e.getMessage(), e);
-            return handleServiceException(e, "ingest documents");
-        } catch (Exception e) {
-            log.error("Unexpected error during ingestion: {}", e.getMessage(), e);
-            return handleServiceException(e, "perform ingestion");
+        } catch (IOException ioException) {
+            log.error("IO error during ingestion (exception type: {})", ioException.getClass().getSimpleName(), ioException);
+            return handleServiceException(ioException, "ingest documents");
+        } catch (RuntimeException runtimeException) {
+            log.error("Unexpected error during ingestion (exception type: {})",
+                runtimeException.getClass().getSimpleName(), runtimeException);
+            return handleServiceException(runtimeException, "perform ingestion");
         }
     }
     
@@ -73,11 +76,15 @@ public class IngestionController extends BaseController {
                     "processed", processed,
                     "dir", directory
             ));
-        } catch (IllegalArgumentException e) {
-            return handleValidationException(e);
-        } catch (Exception e) {
-            log.error("Local ingestion error: {}", e.getMessage(), e);
-            return handleServiceException(e, "perform local ingestion");
+        } catch (IllegalArgumentException illegalArgumentException) {
+            return handleValidationException(illegalArgumentException);
+        } catch (IOException ioException) {
+            log.error("Local ingestion IO error (exception type: {})", ioException.getClass().getSimpleName(), ioException);
+            return handleServiceException(ioException, "perform local ingestion");
+        } catch (RuntimeException runtimeException) {
+            log.error("Local ingestion error (exception type: {})",
+                runtimeException.getClass().getSimpleName(), runtimeException);
+            return handleServiceException(runtimeException, "perform local ingestion");
         }
     }
     
@@ -85,10 +92,8 @@ public class IngestionController extends BaseController {
      * Returns a standardized validation error response for invalid ingestion request parameters.
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> handleValidationException(IllegalArgumentException e) {
-        return super.handleValidationException(e);
+    public ResponseEntity<Map<String, Object>> handleValidationException(IllegalArgumentException validationException) {
+        return super.handleValidationException(validationException);
     }
 }
-
-
 

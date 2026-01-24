@@ -40,6 +40,17 @@ public class ChatController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
+    private static final double TEMPERATURE = 0.7;
+    private static final int HEARTBEAT_INTERVAL_SECONDS = 20;
+
+    /** SSE event type for error notifications sent to the client. */
+    private static final String SSE_EVENT_ERROR = "error";
+
+    /**
+     * Monotonic request counter for correlating log entries within a single chat request.
+     * Uses AtomicLong (vs timestamp+threadId) to guarantee uniqueness even under high concurrency
+     * where multiple requests could start in the same millisecond on the same thread pool.
+     */
     
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -124,7 +135,7 @@ public class ChatController extends BaseController {
             
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             // Use .share() to hot-share the stream and prevent double API subscription
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
+            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
                     .filter(chunk -> chunk != null && !chunk.isEmpty())
                     .doOnNext(chunk -> {
                         fullResponse.append(chunk);
@@ -135,7 +146,7 @@ public class ChatController extends BaseController {
 
             // Heartbeats terminate when data stream completes (success or error).
             // Errors propagate through dataEvents to onErrorResume below - no duplicate logging here.
-            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(20))
+            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
                     .takeUntilOther(dataStream.ignoreElements())
                     .map(tick -> ServerSentEvent.<String>builder().comment("keepalive").build());
 
@@ -154,7 +165,7 @@ public class ChatController extends BaseController {
                         // Log and send error event to client - errors must be communicated, not silently dropped
                         PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
                         return Flux.just(ServerSentEvent.<String>builder()
-                            .event("error")
+                            .event(SSE_EVENT_ERROR)
                             .data("Streaming error: " + error.getClass().getSimpleName())
                             .build());
                     });
@@ -163,7 +174,7 @@ public class ChatController extends BaseController {
             // Service unavailable - send structured error event so client can handle appropriately
             PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
             return Flux.just(ServerSentEvent.<String>builder()
-                .event("error")
+                .event(SSE_EVENT_ERROR)
                 .data("Service temporarily unavailable. The streaming service is not ready.")
                 .build());
         }

@@ -11,6 +11,7 @@ import org.jsoup.nodes.TextNode;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -19,6 +20,52 @@ import java.util.UUID;
 class EnrichmentPlaceholderizer {
     private final Parser parser;
     private final HtmlRenderer renderer;
+
+    /**
+     * Defines supported enrichment marker kinds and their rendering metadata.
+     */
+    private enum EnrichmentKind {
+        HINT("hint", "Helpful Hints", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>"),
+        BACKGROUND("background", "Background Context", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>"),
+        REMINDER("reminder", "Important Reminders", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>"),
+        WARNING("warning", "Warning", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>"),
+        EXAMPLE("example", "Example", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>");
+
+        private final String token;
+        private final String title;
+        private final String iconHtml;
+
+        EnrichmentKind(String token, String title, String iconHtml) {
+            this.token = token;
+            this.title = title;
+            this.iconHtml = iconHtml;
+        }
+
+        String token() {
+            return token;
+        }
+
+        String title() {
+            return title;
+        }
+
+        String iconHtml() {
+            return iconHtml;
+        }
+
+        static Optional<EnrichmentKind> fromToken(String rawToken) {
+            if (rawToken == null) {
+                return Optional.empty();
+            }
+            String normalized = rawToken.trim().toLowerCase(Locale.ROOT);
+            for (EnrichmentKind kind : EnrichmentKind.values()) {
+                if (kind.token.equals(normalized)) {
+                    return Optional.of(kind);
+                }
+            }
+            return Optional.empty();
+        }
+    }
 
     EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer) {
         this.parser = parser;
@@ -77,8 +124,7 @@ class EnrichmentPlaceholderizer {
                     && Character.isLetter(markdown.charAt(typeEndIndex))) {
                     typeEndIndex++;
                 }
-                String type = markdown.substring(typeStartIndex, Math.min(typeEndIndex, markdown.length()))
-                    .toLowerCase(Locale.ROOT);
+                String type = markdown.substring(typeStartIndex, Math.min(typeEndIndex, markdown.length()));
                 // skip spaces
                 int cursorAfterType = typeEndIndex;
                 while (cursorAfterType < markdown.length()
@@ -86,7 +132,8 @@ class EnrichmentPlaceholderizer {
                     cursorAfterType++;
                 }
                 boolean hasColon = (cursorAfterType < markdown.length() && markdown.charAt(cursorAfterType) == ':');
-                if (hasColon && isKnownEnrichmentType(type)) {
+                Optional<EnrichmentKind> enrichmentKind = EnrichmentKind.fromToken(type);
+                if (hasColon && enrichmentKind.isPresent()) {
                     int contentStartIndex = cursorAfterType + 1;
                     if (contentStartIndex < markdown.length() && markdown.charAt(contentStartIndex) == ' ') {
                         contentStartIndex++;
@@ -95,7 +142,7 @@ class EnrichmentPlaceholderizer {
                         markdown,
                         cursor,
                         contentStartIndex,
-                        type,
+                        enrichmentKind.get(),
                         absolutePosition,
                         enrichments,
                         placeholders,
@@ -124,20 +171,14 @@ class EnrichmentPlaceholderizer {
         return outputBuilder.toString();
     }
 
-    private boolean isKnownEnrichmentType(String type) {
-        return "hint".equals(type)
-            || "reminder".equals(type)
-            || "background".equals(type)
-            || "example".equals(type)
-            || "warning".equals(type);
-    }
-
-    private String buildEnrichmentHtmlUnified(String type, String content) {
+    private String buildEnrichmentHtmlUnified(EnrichmentKind kind, String content) {
         StringBuilder htmlBuilder = new StringBuilder();
-        htmlBuilder.append("<div class=\"inline-enrichment ").append(type).append("\" data-enrichment-type=\"").append(type).append("\">\n");
+        String kindToken = escapeHtml(kind.token());
+        htmlBuilder.append("<div class=\"inline-enrichment ").append(kindToken)
+            .append("\" data-enrichment-type=\"").append(kindToken).append("\">\n");
         htmlBuilder.append("<div class=\"inline-enrichment-header\">");
-        htmlBuilder.append(getIconFor(type));
-        htmlBuilder.append("<span>").append(escapeHtml(getTitleFor(type))).append("</span>");
+        htmlBuilder.append(kind.iconHtml());
+        htmlBuilder.append("<span>").append(escapeHtml(kind.title())).append("</span>");
         htmlBuilder.append("</div>\n");
         htmlBuilder.append("<div class=\"enrichment-text\">\n");
 
@@ -173,7 +214,7 @@ class EnrichmentPlaceholderizer {
             // Enrichment content often uses newlines as intentional line breaks; render those as <br>.
             convertNewlinesToBreaks(parsedDocument.body(), false);
             return parsedDocument.body().html();
-        } catch (Exception processingFailure) {
+        } catch (RuntimeException processingFailure) {
             return "<p>" + escapeHtml(content).replace("\n", "<br>") + "</p>";
         }
     }
@@ -231,28 +272,6 @@ class EnrichmentPlaceholderizer {
         return segments;
     }
 
-    private String getTitleFor(String type) {
-        return switch (type) {
-            case "hint" -> "Helpful Hints";
-            case "warning" -> "Warning";
-            case "background" -> "Background Context";
-            case "example" -> "Example";
-            case "reminder" -> "Important Reminders";
-            default -> "Info";
-        };
-    }
-
-    private String getIconFor(String type) {
-        return switch (type) {
-            case "hint" -> "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>";
-            case "background" -> "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>";
-            case "reminder" -> "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>";
-            case "warning" -> "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>";
-            case "example" -> "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>";
-            default -> "";
-        };
-    }
-
     /**
      * Replaces enrichment placeholders with their HTML content.
      */
@@ -288,14 +307,13 @@ class EnrichmentPlaceholderizer {
         return -1;
     }
 
-    private MarkdownEnrichment createEnrichment(String type, String content, int absolutePosition) {
-        return switch (type) {
-            case "hint" -> Hint.create(content, absolutePosition);
-            case "warning" -> Warning.create(content, absolutePosition);
-            case "background" -> Background.create(content, absolutePosition);
-            case "example" -> Example.create(content, absolutePosition);
-            case "reminder" -> Reminder.create(content, absolutePosition);
-            default -> null;
+    private MarkdownEnrichment createEnrichment(EnrichmentKind kind, String content, int absolutePosition) {
+        return switch (kind) {
+            case HINT -> Hint.create(content, absolutePosition);
+            case WARNING -> Warning.create(content, absolutePosition);
+            case BACKGROUND -> Background.create(content, absolutePosition);
+            case EXAMPLE -> Example.create(content, absolutePosition);
+            case REMINDER -> Reminder.create(content, absolutePosition);
         };
     }
 
@@ -303,7 +321,7 @@ class EnrichmentPlaceholderizer {
         String markdown,
         int openingIndex,
         int contentStartIndex,
-        String type,
+        EnrichmentKind kind,
         int absolutePosition,
         List<MarkdownEnrichment> enrichments,
         Map<String, String> placeholders,
@@ -320,15 +338,11 @@ class EnrichmentPlaceholderizer {
             return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
         }
 
-        MarkdownEnrichment enrichment = createEnrichment(type, content, absolutePosition);
-        if (enrichment != null) {
-            enrichments.add(enrichment);
-            String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
-            placeholders.put(placeholderId, buildEnrichmentHtmlUnified(type, content));
-            outputBuilder.append(placeholderId);
-        } else {
-            outputBuilder.append(markdown, openingIndex, closingIndex + 2);
-        }
+        MarkdownEnrichment enrichment = createEnrichment(kind, content, absolutePosition);
+        enrichments.add(enrichment);
+        String placeholderId = "ENRICHMENT_" + UUID.randomUUID().toString().replace("-", "");
+        placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, content));
+        outputBuilder.append(placeholderId);
 
         int consumedLength = (closingIndex + 2 - openingIndex);
         return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);

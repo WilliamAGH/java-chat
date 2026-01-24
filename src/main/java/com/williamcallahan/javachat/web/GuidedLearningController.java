@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.Citation;
+import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
@@ -25,6 +26,7 @@ import java.time.Duration;
  */
 @RestController
 @RequestMapping("/api/guided")
+@PermitAll
 public class GuidedLearningController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 

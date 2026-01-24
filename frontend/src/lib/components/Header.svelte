@@ -9,17 +9,12 @@
 <header class="header">
   <div class="header-inner">
     <a href="/" class="brand" aria-label="Java Chat Home">
-      <div class="brand-mark">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <!-- Java coffee cup steam -->
-          <path d="M5.5 8.5c0-.5.2-1 .5-1.4.2-.2.2-.5 0-.7-.3-.4-.5-.9-.5-1.4s.2-1 .5-1.4c.2-.2.2-.5 0-.7-.3-.4-.5-.9-.5-1.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          <path d="M9.5 8.5c0-.5.2-1 .5-1.4.2-.2.2-.5 0-.7-.3-.4-.5-.9-.5-1.4s.2-1 .5-1.4c.2-.2.2-.5 0-.7-.3-.4-.5-.9-.5-1.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          <!-- Cup body -->
-          <path d="M2 10h12v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-9Z"/>
-          <!-- Cup handle -->
-          <path d="M14 12h1.5a2.5 2.5 0 0 1 0 5H14" fill="none" stroke="currentColor" stroke-width="2"/>
-        </svg>
-      </div>
+      <img
+        class="brand-mark"
+        src="/assets/javachat_brace_cup_star_1024.png"
+        alt=""
+        aria-hidden="true"
+      />
       <span class="brand-text">Java Chat</span>
     </a>
 
@@ -92,17 +87,8 @@
   .brand-mark {
     width: 32px;
     height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--color-accent);
     border-radius: var(--radius-md);
-    color: white;
-  }
-
-  .brand-mark svg {
-    width: 18px;
-    height: 18px;
+    object-fit: contain;
   }
 
   .brand-text {

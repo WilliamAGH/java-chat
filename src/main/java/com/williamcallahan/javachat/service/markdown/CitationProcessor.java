@@ -74,7 +74,7 @@ public class CitationProcessor {
             if (isValidCitation(url)) {
                 MarkdownCitation citation = MarkdownCitation.create(url, title, "", type, position++);
                 citations.add(citation);
-                logger.debug("Found citation: {} -> {}", title, url);
+                logger.debug("Found citation at position {}", citation.position());
             }
             
             // Continue visiting child nodes

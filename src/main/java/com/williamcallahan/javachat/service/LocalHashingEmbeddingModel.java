@@ -82,7 +82,11 @@ public class LocalHashingEmbeddingModel implements EmbeddingModel {
      */
     @Override
     public float[] embed(Document document) {
-        return embed(document.getText());
+        if (document == null) {
+            return embed("");
+        }
+        String text = document.getText();
+        return embed(text == null ? "" : text);
     }
 
     /**
@@ -105,8 +109,8 @@ public class LocalHashingEmbeddingModel implements EmbeddingModel {
                 vector[index] = (byteValue - BYTE_OFFSET) / BYTE_SCALE;
             }
             return vector;
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("Missing hash algorithm: " + HASH_ALGORITHM, ex);
+        } catch (NoSuchAlgorithmException hashException) {
+            throw new IllegalStateException("Missing hash algorithm: " + HASH_ALGORITHM, hashException);
         }
     }
 

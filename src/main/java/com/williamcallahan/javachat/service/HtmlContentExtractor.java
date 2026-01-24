@@ -230,8 +230,9 @@ public class HtmlContentExtractor {
             }
             
             // Skip lines that are pure noise
+            String trimmedLower = trimmed.toLowerCase(Locale.ROOT);
             boolean isNoise = NOISE_PATTERNS.stream()
-                .anyMatch(noise -> trimmed.equalsIgnoreCase(noise));
+                .anyMatch(noise -> trimmedLower.equals(noise.toLowerCase(Locale.ROOT)));
             
             if (!isNoise) {
                 // Also skip very short lines that are likely navigation

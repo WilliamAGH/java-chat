@@ -312,8 +312,8 @@ public class MarkdownStreamProcessor {
         try {
             ProcessedMarkdown processed = markdownService.process(content);
             return processed.html();
-        } catch (Exception e) {
-            logger.warn("Failed to process markdown, falling back to escaped text", e);
+        } catch (Exception markdownProcessingException) {
+            logger.warn("Failed to process markdown, falling back to escaped text", markdownProcessingException);
             return escapeHtml(content).replace("\n", "<br />\n");
         }
     }

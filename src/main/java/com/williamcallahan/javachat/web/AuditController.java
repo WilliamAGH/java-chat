@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.AuditReport;
+import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.AuditService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,6 +16,7 @@ import java.io.IOException;
  */
 @RestController
 @RequestMapping("/api/audit")
+@PermitAll
 public class AuditController {
     private final AuditService auditService;
 

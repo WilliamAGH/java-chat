@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.MediaType;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
  * Serves a robots.txt that points crawlers to {@code /sitemap.xml} and avoids indexing API endpoints.
  */
 @RestController
+@PermitAll
 public class RobotsController {
 
     private static final int INITIAL_BUFFER_CAPACITY = 256;
@@ -51,4 +53,3 @@ public class RobotsController {
         return robotsTxt.toString();
     }
 }
-

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  * for deep links (e.g., /chat, /guided) without executing JavaScript.
  */
 @RestController
+@PermitAll
 public class SeoController {
 
     private final Resource indexHtml;
@@ -85,7 +87,7 @@ public class SeoController {
 
             return ResponseEntity.ok(doc.html());
 
-        } catch (IOException e) {
+        } catch (IOException contentLoadException) {
             return ResponseEntity.internalServerError().body("Error loading content");
         }
     }

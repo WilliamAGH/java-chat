@@ -85,7 +85,7 @@ public class LocalEmbeddingModel implements EmbeddingModel {
                 );
             }
             serverAvailable = true;
-        } catch (RestClientException ex) {
+        } catch (RestClientException healthCheckException) {
             if (serverAvailable) {
                 log.warn(
                     "[EMBEDDING] Local embedding server not reachable. Using fallback embeddings."
@@ -111,8 +111,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
 
         try {
             return callEmbeddingApi(request);
-        } catch (RestClientException | IllegalStateException ex) {
-            return handleApiFailure(ex, request);
+        } catch (RestClientException | IllegalStateException apiException) {
+            return handleApiFailure(apiException, request);
         }
     }
 
@@ -259,8 +259,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         try {
             MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
             return digest.digest(text.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("Missing hash algorithm: " + HASH_ALGORITHM, ex);
+        } catch (NoSuchAlgorithmException hashException) {
+            throw new IllegalStateException("Missing hash algorithm: " + HASH_ALGORITHM, hashException);
         }
     }
 

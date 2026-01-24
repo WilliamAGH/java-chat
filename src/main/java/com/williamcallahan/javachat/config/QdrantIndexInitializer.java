@@ -98,9 +98,9 @@ public class QdrantIndexInitializer {
             createPayloadIndex("url", "keyword");
             createPayloadIndex("hash", "keyword");
             createPayloadIndex("chunkIndex", "integer");
-        } catch (RuntimeException e) {
+        } catch (RuntimeException indexCreationException) {
             log.warn("Unable to ensure Qdrant payload indexes (exception type: {})",
-                e.getClass().getSimpleName());
+                indexCreationException.getClass().getSimpleName());
         }
     }
 

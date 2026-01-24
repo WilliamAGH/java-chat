@@ -1,10 +1,15 @@
 package com.williamcallahan.javachat.web;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.StringWriter;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamWriter;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,18 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>Most of the UI is a single-page app, but providing a sitemap helps crawlers discover stable entry points.
  */
 @RestController
+@PermitAll
 public class SitemapController {
 
     private static final int INITIAL_BUFFER_CAPACITY = 512;
-    private static final String XML_DECLARATION = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    private static final String URLSET_OPEN = "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
-    private static final String URLSET_CLOSE = "</urlset>\n";
-    private static final String URL_OPEN = "  <url>\n";
-    private static final String URL_CLOSE = "  </url>\n";
-    private static final String LOC_OPEN = "    <loc>";
-    private static final String LOC_CLOSE = "</loc>\n";
-    private static final String LASTMOD_OPEN = "    <lastmod>";
-    private static final String LASTMOD_CLOSE = "</lastmod>\n";
+    private static final String SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9";
 
     private static final List<String> PUBLIC_ROUTES = List.of(
         "/",
@@ -57,17 +55,38 @@ public class SitemapController {
         String baseUrl = siteUrlResolver.resolvePublicBaseUrl(request);
         String lastModified = LocalDate.now(ZoneOffset.UTC).toString();
 
-        StringBuilder xml = new StringBuilder(INITIAL_BUFFER_CAPACITY);
-        xml.append(XML_DECLARATION);
-        xml.append(URLSET_OPEN);
-        for (String path : PUBLIC_ROUTES) {
-            xml.append(URL_OPEN);
-            xml.append(LOC_OPEN).append(baseUrl).append(path).append(LOC_CLOSE);
-            xml.append(LASTMOD_OPEN).append(lastModified).append(LASTMOD_CLOSE);
-            xml.append(URL_CLOSE);
+        return buildSitemapXml(baseUrl, lastModified);
+    }
+
+    private String buildSitemapXml(String baseUrl, String lastModified) {
+        XMLOutputFactory factory = XMLOutputFactory.newFactory();
+        StringWriter stringWriter = new StringWriter(INITIAL_BUFFER_CAPACITY);
+        try {
+            XMLStreamWriter xmlWriter = factory.createXMLStreamWriter(stringWriter);
+            xmlWriter.writeStartDocument("UTF-8", "1.0");
+            xmlWriter.writeStartElement("urlset");
+            xmlWriter.writeDefaultNamespace(SITEMAP_NAMESPACE);
+
+            for (String path : PUBLIC_ROUTES) {
+                xmlWriter.writeStartElement("url");
+
+                xmlWriter.writeStartElement("loc");
+                xmlWriter.writeCharacters(baseUrl + path);
+                xmlWriter.writeEndElement();
+
+                xmlWriter.writeStartElement("lastmod");
+                xmlWriter.writeCharacters(lastModified);
+                xmlWriter.writeEndElement();
+
+                xmlWriter.writeEndElement();
+            }
+
+            xmlWriter.writeEndElement();
+            xmlWriter.writeEndDocument();
+            xmlWriter.close();
+        } catch (XMLStreamException streamException) {
+            throw new IllegalStateException("Failed to render sitemap XML", streamException);
         }
-        xml.append(URLSET_CLOSE);
-        return xml.toString();
+        return stringWriter.toString();
     }
 }
-

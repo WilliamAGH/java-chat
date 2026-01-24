@@ -145,12 +145,10 @@ final class MarkdownNormalizer {
             return false;
         }
         char firstChar = trimmedLine.charAt(0);
-	        if (firstChar == '-' || firstChar == '*' || firstChar == '+' || firstChar == '•') {
-	            return false;
-	        }
-	        // Skip indentation for ordered list markers (1. / 1) / a. / i.)
-	        return !startsWithOrderedMarker(trimmedLine);
-	    }
+        boolean unorderedMarker = firstChar == '-' || firstChar == '*' || firstChar == '+' || firstChar == '•';
+        // Skip indentation for ordered list markers (1. / 1) / a. / i.)
+        return !unorderedMarker && !startsWithOrderedMarker(trimmedLine);
+    }
 
     private static boolean startsWithOrderedMarker(String trimmedLine) {
         int cursor = 0;

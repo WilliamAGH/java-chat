@@ -37,6 +37,13 @@ public class RetrievalService {
     /** Max chars for citation snippets shown to users */
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
 
+    private static final String METADATA_URL = "url";
+    private static final String METADATA_TITLE = "title";
+    private static final String METADATA_PACKAGE = "package";
+    private static final String METADATA_RETRIEVAL_SOURCE = "retrievalSource";
+    private static final String METADATA_FALLBACK_REASON = "fallbackReason";
+    private static final String SOURCE_KEYWORD_FALLBACK = "keyword_fallback";
+
     private final VectorStore vectorStore;
     private final AppProperties props;
     private final RerankerService rerankerService;
@@ -45,6 +52,12 @@ public class RetrievalService {
 
     /**
      * Creates a retrieval service backed by a vector store, reranker, and local fallback search.
+     *
+     * @param vectorStore vector similarity store
+     * @param props application configuration
+     * @param rerankerService reranker for result ordering
+     * @param localSearch local keyword fallback search
+     * @param documentFactory document factory for metadata preservation
      */
     public RetrievalService(
         VectorStore vectorStore,
@@ -84,7 +97,7 @@ public class RetrievalService {
             .stream()
             .collect(
                 Collectors.toMap(
-                    d -> String.valueOf(d.getMetadata().get("url")),
+                    d -> String.valueOf(d.getMetadata().get(METADATA_URL)),
                     d -> d,
                     (first, dup) -> first
                 )
@@ -131,30 +144,7 @@ public class RetrievalService {
             );
             docs = executeVersionAwareSearch(query, boostedQuery, versionFilter, baseTopK);
         } catch (RuntimeException exception) {
-            String errorType = RetrievalErrorClassifier.determineErrorType(exception);
-            log.warn("Vector search unavailable; falling back to local keyword search with limits");
-
-            RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
-
-            // Fallback to local search with limits
-            LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
-
-            if (outcome.isFailed()) {
-                log.error("Local keyword search also failed - returning empty hits");
-                docs = List.of();
-            } else {
-                log.info("Local keyword search returned {} hits", outcome.hits().size());
-
-                docs = outcome.hits()
-                    .stream()
-                    .map(hit -> {
-                        Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
-                        doc.getMetadata().put("retrievalSource", "keyword_fallback");
-                        doc.getMetadata().put("fallbackReason", errorType);
-                        return doc;
-                    })
-                    .collect(Collectors.toList());
-            }
+            docs = executeFallbackSearch(query, maxDocs, exception);
         }
 
         // Early return if no documents to process (fallback also failed or no matches)
@@ -175,7 +165,7 @@ public class RetrievalService {
             .stream()
             .collect(
                 Collectors.toMap(
-                    d -> String.valueOf(d.getMetadata().get("url")),
+                    d -> String.valueOf(d.getMetadata().get(METADATA_URL)),
                     d -> d,
                     (first, dup) -> first
                 )
@@ -207,13 +197,17 @@ public class RetrievalService {
             .build();
 
         List<Document> docs = vectorStore.similaritySearch(searchRequest);
+        if (docs == null) {
+            log.warn("VectorStore returned null documents");
+            return List.of();
+        }
         log.info("VectorStore returned {} documents", docs.size());
 
         // Apply version-based post-filtering if version was detected
         if (versionFilter.isPresent()) {
             VersionFilterPatterns filter = versionFilter.get();
             List<Document> versionMatchedDocs = docs.stream()
-                .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get("url"))))
+                .filter(d -> filter.matchesUrl(String.valueOf(d.getMetadata().get(METADATA_URL))))
                 .collect(Collectors.toList());
 
             log.info("Version filter matched {} of {} documents",
@@ -230,9 +224,9 @@ public class RetrievalService {
 
         if (!docs.isEmpty()) {
             Map<String, Object> metadata = docs.get(0).getMetadata();
-            int metadataSize = metadata == null ? 0 : metadata.size();
+            int metadataSize = metadata.size();
             String docText = docs.get(0).getText();
-            int previewLength = docText == null ? 0 : Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
+            int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
             log.info("First doc metadata size: {}", metadataSize);
             log.info("First doc content preview length: {}", previewLength);
         }
@@ -289,35 +283,33 @@ public class RetrievalService {
      */
     public List<Citation> toCitations(List<Document> docs) {
         List<Citation> citations = new ArrayList<>();
-        for (Document d : docs) {
-            String rawUrl = String.valueOf(
-                d.getMetadata().getOrDefault("url", "")
-            );
-            String title = String.valueOf(
-                d.getMetadata().getOrDefault("title", "")
-            );
+        for (Document sourceDoc : docs) {
+            Map<String, Object> metadata = Optional.ofNullable(sourceDoc.getMetadata()).orElse(Map.of());
+            String rawUrl = String.valueOf(metadata.getOrDefault("url", ""));
+            String title = String.valueOf(metadata.getOrDefault("title", ""));
             String url = normalizeCitationUrl(rawUrl);
             // Refine Javadoc URLs to nested type pages where the chunk references them
             url =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(
                     url,
-                    d.getText()
+                    sourceDoc.getText()
                 );
             // Append member anchors (methods/constructors) when confidently derivable
-            String pkg = String.valueOf(
-                d.getMetadata().getOrDefault("package", "")
-            );
+            String pkg = String.valueOf(metadata.getOrDefault("package", ""));
             url =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
                     url,
-                    d.getText(),
+                    sourceDoc.getText(),
                     pkg
                 );
             // Final canonicalization in case of any accidental duplications
             if (url.startsWith("http://") || url.startsWith("https://")) {
                 url = canonicalizeHttpDocUrl(url);
             }
-            String snippet = d.getText();
+            String snippet = sourceDoc.getText();
+            if (snippet == null) {
+                snippet = "";
+            }
 
             // For book sources, we now link to public /pdfs path (handled by normalizeCitationUrl)
 
@@ -433,6 +425,33 @@ public class RetrievalService {
         String rest = protoIdx >= 0 ? out.substring(protoIdx + 3) : out;
         rest = rest.replaceAll("/+", "/");
         return prefix + rest;
+    }
+
+    private List<Document> executeFallbackSearch(String query, int maxDocs, RuntimeException exception) {
+        String errorType = RetrievalErrorClassifier.determineErrorType(exception);
+        log.warn("Vector search unavailable; falling back to local keyword search with limits");
+
+        RetrievalErrorClassifier.logUserFriendlyErrorContext(log, errorType, exception);
+
+        // Fallback to local search with limits
+        LocalSearchService.SearchOutcome outcome = localSearch.search(query, maxDocs);
+
+        if (outcome.isFailed()) {
+            log.error("Local keyword search also failed - returning empty hits");
+            return List.of();
+        }
+
+        log.info("Local keyword search returned {} hits", outcome.hits().size());
+
+        return outcome.hits()
+            .stream()
+            .map(hit -> {
+                Document doc = documentFactory.createLocalDocument(hit.text(), hit.url());
+                doc.getMetadata().put(METADATA_RETRIEVAL_SOURCE, SOURCE_KEYWORD_FALLBACK);
+                doc.getMetadata().put(METADATA_FALLBACK_REASON, errorType);
+                return doc;
+            })
+            .collect(Collectors.toList());
     }
 
 }

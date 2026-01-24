@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 import org.springframework.core.io.ClassPathResource;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.*;
 import org.apache.pdfbox.Loader;
@@ -263,8 +264,9 @@ To run this program, follow these steps:
                      PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
                     cachedPdfPages = document.getNumberOfPages();
                 }
-            } catch (Exception exception) {
-                cachedPdfPages = 0; // unknown
+            } catch (IOException ioException) {
+                logger.error("Failed to load Think Java PDF for pagination", ioException);
+                throw new IllegalStateException("Unable to read Think Java PDF", ioException);
             }
             return cachedPdfPages;
         }
@@ -274,14 +276,23 @@ To run this program, follow these steps:
         try {
             String safe = localStore.toSafeName(url);
             Path dir = localStore.getParsedDir();
+            if (dir == null) {
+                return 0;
+            }
             try (var stream = Files.list(dir)) {
                 return (int) stream
-                    .filter(path -> path.getFileName().toString().startsWith(safe + "_"))
-                    .filter(path -> path.getFileName().toString().endsWith(".txt"))
+                    .filter(path -> {
+                        Path fileNamePath = path.getFileName();
+                        if (fileNamePath == null) {
+                            return false;
+                        }
+                        String fileName = fileNamePath.toString();
+                        return fileName.startsWith(safe + "_") && fileName.endsWith(".txt");
+                    })
                     .count();
             }
-        } catch (Exception exception) {
-            return 0;
+        } catch (IOException ioException) {
+            throw new IllegalStateException("Unable to count local chunks for URL", ioException);
         }
     }
 
@@ -299,7 +310,9 @@ To run this program, follow these steps:
                 if (chunkIndexValue != null) {
                     chunkIndex = Integer.parseInt(String.valueOf(chunkIndexValue));
                 }
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException chunkIndexParseException) {
+                logger.debug("Failed to parse chunkIndex from metadata: {}", chunkIndexValue);
+            }
             int totalChunks = totalChunksForUrl(url);
             if (pages > 0 && chunkIndex >= 0 && totalChunks > 0) {
                 int page = Math.max(1, Math.min(pages, (int) Math.round(((chunkIndex + 1.0) / totalChunks) * pages)));

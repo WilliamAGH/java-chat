@@ -38,14 +38,14 @@ public abstract class BaseController {
     /**
      * Handles validation exceptions with bad request responses.
      *
-     * @param e The validation exception
+     * @param validationException The validation exception
      * @return Bad request error response
      */
     protected ResponseEntity<Map<String, Object>> handleValidationException(
-            IllegalArgumentException e) {
+            IllegalArgumentException validationException) {
         return exceptionBuilder.buildErrorResponse(
             HttpStatus.BAD_REQUEST,
-            e.getMessage()
+            validationException.getMessage()
         );
     }
 

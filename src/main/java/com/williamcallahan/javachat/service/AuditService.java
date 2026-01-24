@@ -79,6 +79,9 @@ public class AuditService {
         }
         String safeBase = safeName + "_";
         Path parsedRoot = localStore.getParsedDir();
+        if (parsedRoot == null || !Files.exists(parsedRoot)) {
+            return Set.of();
+        }
 
         // pattern: <safeBase><index>_<hash12>.txt
         Pattern chunkPattern = Pattern.compile(

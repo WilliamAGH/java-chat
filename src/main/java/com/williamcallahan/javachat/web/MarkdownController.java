@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.service.MarkdownService;
+import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/markdown")
 @CrossOrigin(origins = "*")
+@PermitAll
 public class MarkdownController {
     
     private static final Logger logger = LoggerFactory.getLogger(MarkdownController.class);
@@ -68,11 +70,11 @@ public class MarkdownController {
                 "enrichments", processed.enrichments().size()
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering markdown", e);
+        } catch (Exception renderException) {
+            logger.error("Error rendering markdown", renderException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render markdown",
-                "message", e.getMessage()
+                "message", renderException.getMessage()
             ));
         }
     }
@@ -114,11 +116,11 @@ public class MarkdownController {
                 "cached", false
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering preview markdown", e);
+        } catch (Exception previewException) {
+            logger.error("Error rendering preview markdown", previewException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render preview",
-                "message", e.getMessage()
+                "message", previewException.getMessage()
             ));
         }
     }
@@ -142,8 +144,8 @@ public class MarkdownController {
                 "hitRate", String.format("%.2f%%", stats.hitRate() * 100)
             ));
             
-        } catch (Exception e) {
-            logger.error("Error getting cache stats", e);
+        } catch (Exception statsException) {
+            logger.error("Error getting cache stats", statsException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to get cache stats"
             ));
@@ -166,8 +168,8 @@ public class MarkdownController {
                 "message", "Cache cleared successfully"
             ));
             
-        } catch (Exception e) {
-            logger.error("Error clearing cache", e);
+        } catch (Exception clearException) {
+            logger.error("Error clearing cache", clearException);
             return ResponseEntity.status(500).body(Map.of(
                 "status", "error",
                 "message", "Failed to clear cache"
@@ -215,11 +217,11 @@ public class MarkdownController {
                 "isClean", processed.isClean()
             ));
             
-        } catch (Exception e) {
-            logger.error("Error rendering structured markdown", e);
+        } catch (Exception structuredException) {
+            logger.error("Error rendering structured markdown", structuredException);
             return ResponseEntity.status(500).body(Map.of(
                 "error", "Failed to render structured markdown",
-                "message", e.getMessage(),
+                "message", structuredException.getMessage(),
                 "source", "unified-service"
             ));
         }

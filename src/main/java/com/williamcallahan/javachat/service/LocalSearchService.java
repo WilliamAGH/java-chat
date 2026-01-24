@@ -98,7 +98,12 @@ public class LocalSearchService {
     private Optional<SearchHit> toSearchHit(Path textPath, double score) {
         try {
             String text = Files.readString(textPath, StandardCharsets.UTF_8);
-            String fileName = textPath.getFileName().toString();
+            Path fileNamePath = textPath.getFileName();
+            if (fileNamePath == null) {
+                log.warn("Skipping chunk with null filename (root path): {}", textPath);
+                return Optional.empty();
+            }
+            String fileName = fileNamePath.toString();
             // Filename pattern: safeUrl_index_hash.txt
             // Defensive: handle files without underscore delimiter
             int underscoreIdx = fileName.indexOf("_");

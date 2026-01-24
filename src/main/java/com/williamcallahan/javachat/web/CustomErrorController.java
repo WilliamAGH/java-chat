@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import java.util.Map;
  * Handles both HTML page requests and API JSON error responses.
  */
 @Controller
+@PermitAll
 public class CustomErrorController implements ErrorController {
     
     private static final Logger log = LoggerFactory.getLogger(CustomErrorController.class);
@@ -74,7 +76,7 @@ public class CustomErrorController implements ErrorController {
             return handleApiError(statusCode, errorMessage, (Exception) exception);
         } else {
             // Return HTML error page for browser requests
-            return handlePageError(statusCode, errorMessage, uri, model);
+            return handlePageError(statusCode, resolveUserFacingMessage(statusCode), uri, model);
         }
     }
     
@@ -127,6 +129,14 @@ public class CustomErrorController implements ErrorController {
         }
         
         return modelAndView;
+    }
+
+    private String resolveUserFacingMessage(int statusCode) {
+        HttpStatus status = HttpStatus.resolve(statusCode);
+        if (status != null) {
+            return status.getReasonPhrase();
+        }
+        return "Unexpected error";
     }
     
     /**

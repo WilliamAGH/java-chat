@@ -62,7 +62,7 @@ public class LocalStoreService {
      */
     public void saveHtml(String url, String html) throws IOException {
         Path snapshotFilePath = snapshotDir.resolve(safeName(url) + ".html");
-        Files.createDirectories(snapshotFilePath.getParent());
+        ensureParentDirectoryExists(snapshotFilePath);
         Files.writeString(snapshotFilePath, html, StandardCharsets.UTF_8);
     }
 
@@ -72,7 +72,7 @@ public class LocalStoreService {
     public void saveChunkText(String url, int index, String text, String hash) throws IOException {
         String shortHash = hash.substring(0, HASH_PREFIX_LENGTH);
         Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + shortHash + ".txt");
-        Files.createDirectories(chunkFilePath.getParent());
+        ensureParentDirectoryExists(chunkFilePath);
         Files.writeString(chunkFilePath, text, StandardCharsets.UTF_8);
         // Update progress after chunk text is saved
         if (progressTracker != null) {
@@ -131,6 +131,20 @@ public class LocalStoreService {
      */
     public Path getIndexDir() {
         return indexDir;
+    }
+
+    /**
+     * Ensures the parent directory exists for a given file path, creating it if necessary.
+     *
+     * @param filePath the file path whose parent directory should exist
+     * @throws IOException if the parent is null (root path) or directory creation fails
+     */
+    private void ensureParentDirectoryExists(Path filePath) throws IOException {
+        Path parentDir = filePath.getParent();
+        if (parentDir == null) {
+            throw new IOException("File path has no parent directory: " + filePath);
+        }
+        Files.createDirectories(parentDir);
     }
 
     private String shortSha256(String input) {

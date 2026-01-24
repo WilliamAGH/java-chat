@@ -8,9 +8,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -34,7 +36,7 @@ public class GuidedTOCProvider {
                     mapper.readValue(tocStream, new TypeReference<List<GuidedLesson>>() {});
                 cache = List.copyOf(loadedLessons);
             }
-        } catch (Exception exception) {
+        } catch (IOException exception) {
             log.warn("Failed to load guided TOC (exceptionType={})", exception.getClass().getName());
             cache = Collections.emptyList();
         }
@@ -46,6 +48,12 @@ public class GuidedTOCProvider {
      */
     public Optional<GuidedLesson> findBySlug(String slug) {
         if (slug == null || slug.isBlank()) return Optional.empty();
-        return getTOC().stream().filter(lesson -> slug.equalsIgnoreCase(lesson.getSlug())).findFirst();
+        String normalizedSlug = slug.toLowerCase(Locale.ROOT);
+        return getTOC().stream()
+            .filter(lesson -> {
+                String lessonSlug = lesson.getSlug();
+                return lessonSlug != null && normalizedSlug.equals(lessonSlug.toLowerCase(Locale.ROOT));
+            })
+            .findFirst();
     }
 }

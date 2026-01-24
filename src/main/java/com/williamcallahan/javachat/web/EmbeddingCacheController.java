@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.service.EmbeddingCacheService;
+import jakarta.annotation.security.PermitAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,7 @@ import java.io.IOException;
  */
 @RestController
 @RequestMapping("/api/embeddings-cache")
+@PermitAll
 public class EmbeddingCacheController {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingCacheController.class);
 

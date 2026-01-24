@@ -13,6 +13,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Builds chat prompts, enriches them with retrieval context, and delegates streaming to the LLM provider.
@@ -20,6 +21,9 @@ import java.util.List;
 @Service
 public class ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
+    private static final double TEMPERATURE = 0.7;
+    private static final int RAG_LIMIT_GPT5 = 3;
+    private static final int RAG_TOKEN_LIMIT_GPT5 = 600;
     
     // OpenAI streaming preferred; ChatService builds prompts and can stream via SDK for internal uses
     private final OpenAIStreamingService openAIStreamingService;
@@ -44,6 +48,7 @@ public class ChatService {
      * Streaming via {@link OpenAIStreamingService}. This builds the prompt and streams with the SDK.
      */
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
+        int queryToken = Objects.hashCode(latestUserMessage);
         logger.debug("ChatService.streamAnswer called");
         
         // Retrieve context and provide user feedback about search quality
@@ -63,7 +68,7 @@ public class ChatService {
             }
         }
         
-        logger.debug("ChatService configured with inline enrichment markers for query: {}", latestUserMessage);
+        logger.debug("ChatService configured with inline enrichment markers for queryToken={}", queryToken);
 
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
             Document contextDoc = contextDocs.get(docIndex);
@@ -88,7 +93,7 @@ public class ChatService {
             return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
         }
 
-        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
+        return openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
                 .onErrorResume(ex -> {
                     logger.error("Streaming failed", ex);
                     return Flux.error(ex);
@@ -174,7 +179,7 @@ public class ChatService {
 
         String fullPrompt = buildPromptFromMessages(messages);
 
-        return openAIStreamingService.streamResponse(fullPrompt, 0.7)
+        return openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
                 .onErrorResume(exception -> {
                     logger.error("Streaming failed", exception);
                     return Flux.error(exception);
@@ -215,8 +220,8 @@ public class ChatService {
         List<Document> contextDocs;
         if ("gpt-5".equals(modelHint) || "gpt-5-chat".equals(modelHint)) {
             // Limit RAG for GPT-5: use fewer, shorter documents
-            contextDocs = retrievalService.retrieveWithLimit(latestUserMessage, 3, 600); // 3 docs, 600 tokens each = ~1800 tokens
-            logger.debug("Using reduced RAG for GPT-5: {} documents with max 600 tokens each", contextDocs.size());
+            contextDocs = retrievalService.retrieveWithLimit(latestUserMessage, RAG_LIMIT_GPT5, RAG_TOKEN_LIMIT_GPT5); // 3 docs, 600 tokens each = ~1800 tokens
+            logger.debug("Using reduced RAG for GPT-5: {} documents with max {} tokens each", contextDocs.size(), RAG_TOKEN_LIMIT_GPT5);
         } else {
             contextDocs = retrievalService.retrieve(latestUserMessage);
         }

@@ -44,12 +44,12 @@ public class ProcessingLogger {
                 requestToken, duration);
             
             return result;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException runtimeException) {
             PIPELINE_LOG.error("[{}] STEP 1: EMBEDDING GENERATION - Failed (runtime exception)", requestToken);
-            throw e;
-        } catch (Error e) {
+            throw runtimeException;
+        } catch (Error fatalError) {
             PIPELINE_LOG.error("[{}] STEP 1: EMBEDDING GENERATION - Failed (error)", requestToken);
-            throw e;
+            throw fatalError;
         }
     }
     
@@ -98,12 +98,12 @@ public class ProcessingLogger {
             }
             
             return result;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException runtimeException) {
             PIPELINE_LOG.error("[{}] STEP 4: RAG RETRIEVAL - Failed (runtime exception)", requestToken);
-            throw e;
-        } catch (Error e) {
+            throw runtimeException;
+        } catch (Error fatalError) {
             PIPELINE_LOG.error("[{}] STEP 4: RAG RETRIEVAL - Failed (error)", requestToken);
-            throw e;
+            throw fatalError;
         }
     }
     
@@ -125,12 +125,12 @@ public class ProcessingLogger {
                 requestToken, duration);
             
             return result;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException runtimeException) {
             PIPELINE_LOG.error("[{}] STEP 5: LLM INTERACTION - Failed (runtime exception)", requestToken);
-            throw e;
-        } catch (Error e) {
+            throw runtimeException;
+        } catch (Error fatalError) {
             PIPELINE_LOG.error("[{}] STEP 5: LLM INTERACTION - Failed (error)", requestToken);
-            throw e;
+            throw fatalError;
         }
     }
     
@@ -152,9 +152,9 @@ public class ProcessingLogger {
             } else if (result != null) {
                 PIPELINE_LOG.info("[{}] Response categories computed", requestToken);
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException runtimeException) {
             PIPELINE_LOG.error("[{}] STEP 6: RESPONSE CATEGORIZATION - Failed (runtime exception)", requestToken);
-        } catch (Error e) {
+        } catch (Error fatalError) {
             PIPELINE_LOG.error("[{}] STEP 6: RESPONSE CATEGORIZATION - Failed (error)", requestToken);
         }
     }
@@ -178,12 +178,12 @@ public class ProcessingLogger {
             }
 
             return result;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException runtimeException) {
             PIPELINE_LOG.error("[{}] STEP 7: CITATION GENERATION - Failed (runtime exception)", requestToken);
-            throw e;
-        } catch (Error e) {
+            throw runtimeException;
+        } catch (Error fatalError) {
             PIPELINE_LOG.error("[{}] STEP 7: CITATION GENERATION - Failed (error)", requestToken);
-            throw e;
+            throw fatalError;
         }
     }
     
