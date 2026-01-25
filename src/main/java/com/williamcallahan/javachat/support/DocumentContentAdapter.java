@@ -15,6 +15,8 @@ import java.util.Optional;
  */
 public final class DocumentContentAdapter implements RetrievedContent {
 
+    private static final String METADATA_URL = "url";
+
     private final Document document;
 
     private DocumentContentAdapter(Document document) {
@@ -57,11 +59,7 @@ public final class DocumentContentAdapter implements RetrievedContent {
 
     @Override
     public Optional<String> getSourceUrl() {
-        Map<String, Object> metadata = document.getMetadata();
-        if (metadata == null) {
-            return Optional.empty();
-        }
-        Object url = metadata.get("url");
-        return url != null ? Optional.of(String.valueOf(url)) : Optional.empty();
+        Map<String, ?> metadata = document.getMetadata();
+        return Optional.ofNullable(metadata.get(METADATA_URL)).map(String::valueOf);
     }
 }
