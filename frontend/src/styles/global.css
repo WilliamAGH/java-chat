@@ -133,6 +133,22 @@
   /* Loading indicator sizes */
   --loading-dot-size: 6px;
   --loading-dot-gap: 4px;
+
+  /* Layout dimensions */
+  --header-height: 57px;
+}
+
+/* Responsive header heights */
+@media (max-width: 640px) {
+  :root {
+    --header-height: 60px; /* 36px brand + 8px*2 padding + borders */
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --header-height: 52px; /* 32px brand + 8px*2 padding + borders */
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -31,6 +31,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-top: 57px; /* Height of fixed header */
+    padding-top: var(--header-height);
   }
 </style>
