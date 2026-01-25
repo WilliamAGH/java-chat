@@ -6,6 +6,8 @@
   import StreamingMessagesList from './StreamingMessagesList.svelte'
   import { streamChat, type ChatMessage, type Citation } from '../services/chat'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
+  import { generateSessionId } from '../utils/session'
+  import { createStreamingState } from '$lib/composables/createStreamingState.svelte'
 
   /** Extended message type that includes inline citations from the stream. */
   interface MessageWithCitations extends ChatMessage {
@@ -13,63 +15,20 @@
     citations?: Citation[]
   }
 
+  // View-specific state
   let messages = $state<MessageWithCitations[]>([])
-  let isStreaming = $state(false)
-  let currentStreamingContent = $state('')
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
-  let streamStatusMessage = $state<string | null>(null)
-  let streamStatusDetails = $state<string | null>(null)
   let pendingCitations = $state<Citation[]>([])
 
-  /** Timer for delayed status message clearing to allow users to read final status. */
-  let statusClearTimer: ReturnType<typeof setTimeout> | null = null
+  // Streaming state from composable (with 800ms status persistence)
+  const streaming = createStreamingState({ statusClearDelayMs: 800 })
 
-  $effect(() => {
-    return () => {
-      if (statusClearTimer) {
-        clearTimeout(statusClearTimer)
-      }
-    }
-  })
+  // Cleanup timer on unmount
+  $effect(() => streaming.cleanup)
 
-  /** Duration to keep status visible after streaming ends so users can read it. */
-  const STATUS_PERSISTENCE_DURATION_MS = 800
-
-  // Session ID for chat continuity - generated client-side only, not rendered in DOM.
-  // Safe for CSR; if SSR is added, move generation to onMount or use server-provided ID.
-  const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
-
-  /**
-   * Cancels any pending status clear timer.
-   */
-  function cancelStatusTimer(): void {
-    if (statusClearTimer) {
-      clearTimeout(statusClearTimer)
-      statusClearTimer = null
-    }
-  }
-
-  /**
-   * Clears status messages immediately.
-   */
-  function clearStatusNow(): void {
-    cancelStatusTimer()
-    streamStatusMessage = null
-    streamStatusDetails = null
-  }
-
-  /**
-   * Clears status messages after a delay to allow users to read final status.
-   */
-  function clearStatusDelayed(): void {
-    cancelStatusTimer()
-    statusClearTimer = setTimeout(() => {
-      streamStatusMessage = null
-      streamStatusDetails = null
-      statusClearTimer = null
-    }, STATUS_PERSISTENCE_DURATION_MS)
-  }
+  // Session ID for chat continuity
+  const sessionId = generateSessionId('chat')
 
   function checkAutoScroll() {
     shouldAutoScroll = isNearBottom(messagesContainer)
@@ -85,18 +44,12 @@
         sessionId,
         userQuery,
         (chunk) => {
-          currentStreamingContent += chunk
+          streaming.appendContent(chunk)
           doScrollToBottom()
         },
         {
-          onStatus: (status) => {
-            streamStatusMessage = status.message
-            streamStatusDetails = status.details ?? null
-          },
-          onError: (streamError) => {
-            streamStatusMessage = streamError.message
-            streamStatusDetails = streamError.details ?? null
-          },
+          onStatus: streaming.updateStatus,
+          onError: streaming.updateStatus,
           onCitations: (citations) => {
             pendingCitations = citations
           }
@@ -106,7 +59,7 @@
       // Add completed assistant message with inline citations
       messages = [...messages, {
         role: 'assistant',
-        content: currentStreamingContent,
+        content: streaming.streamingContent,
         timestamp: Date.now(),
         citations: pendingCitations
       }]
@@ -122,7 +75,7 @@
   }
 
   async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || isStreaming) return
+    if (!message.trim() || streaming.isStreaming) return
 
     const userQuery = message.trim()
 
@@ -136,18 +89,14 @@
     shouldAutoScroll = true
     await doScrollToBottom()
 
-    // Start streaming - clear any persisting status immediately
-    isStreaming = true
-    currentStreamingContent = ''
-    clearStatusNow() // Immediate clear for fresh start
+    // Start streaming
+    streaming.startStream()
     pendingCitations = []
 
     try {
       await executeChatStream(userQuery)
     } finally {
-      isStreaming = false
-      currentStreamingContent = ''
-      clearStatusDelayed() // Delayed clear so users can read final status
+      streaming.finishStream()
       pendingCitations = []
       await doScrollToBottom()
     }
@@ -165,15 +114,15 @@
     onscroll={checkAutoScroll}
   >
     <div class="messages-inner">
-      {#if messages.length === 0 && !isStreaming}
+      {#if messages.length === 0 && !streaming.isStreaming}
         <WelcomeScreen onSuggestionClick={handleSuggestionClick} />
       {:else}
         <StreamingMessagesList
           {messages}
-          {isStreaming}
-          streamingContent={currentStreamingContent}
-          statusMessage={streamStatusMessage}
-          statusDetails={streamStatusDetails}
+          isStreaming={streaming.isStreaming}
+          streamingContent={streaming.streamingContent}
+          statusMessage={streaming.statusMessage}
+          statusDetails={streaming.statusDetails}
           hasContent={false}
         >
           {#snippet messageRenderer({ message, index })}
@@ -190,7 +139,7 @@
     </div>
   </div>
 
-  <ChatInput onSend={handleSend} disabled={isStreaming} />
+  <ChatInput onSend={handleSend} disabled={streaming.isStreaming} />
 </div>
 
 <style>
@@ -204,7 +153,12 @@
   .messages-container {
     flex: 1;
     overflow-y: auto;
-    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .messages-container {
+      scroll-behavior: smooth;
+    }
   }
 
   .messages-inner {
