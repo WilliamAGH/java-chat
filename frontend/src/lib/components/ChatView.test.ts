@@ -55,8 +55,10 @@ describe('ChatView streaming stability', () => {
 
     expect(container.querySelector('.message.assistant .cursor.visible')).not.toBeNull()
 
-    expect(completeStream).not.toBeNull()
-    completeStream?.()
+    if (!completeStream) {
+      throw new Error('Expected stream completion callback to be set')
+    }
+    completeStream()
     await tick()
 
     const assistantTextElementAfter = await findByText('Hello')
@@ -66,4 +68,3 @@ describe('ChatView streaming stability', () => {
     expect(container.querySelector('.message.assistant .cursor.visible')).toBeNull()
   })
 })
-

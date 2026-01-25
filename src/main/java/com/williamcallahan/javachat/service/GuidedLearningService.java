@@ -53,15 +53,15 @@ public class GuidedLearningService {
         "Use ONLY content grounded in this book for factual claims. " +
         "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately. " +
         "Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-        "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.\n\n" +
-        "## Current Lesson Context\n" +
-        "%s\n\n" +
-        "## Topic Handling Rules\n" +
-        "1. Keep all responses focused on the current lesson topic.\n" +
+        "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.%n%n" +
+        "## Current Lesson Context%n" +
+        "%s%n%n" +
+        "## Topic Handling Rules%n" +
+        "1. Keep all responses focused on the current lesson topic.%n" +
         "2. If the user sends a greeting (hi, hello, hey, etc.) or off-topic message, " +
-        "acknowledge it briefly and redirect to the lesson topic with a helpful prompt.\n" +
+        "acknowledge it briefly and redirect to the lesson topic with a helpful prompt.%n" +
         "3. For off-topic Java questions, acknowledge the question and gently steer back to the current lesson, " +
-        "explaining how the lesson topic relates or suggesting they complete this lesson first.\n" +
+        "explaining how the lesson topic relates or suggesting they complete this lesson first.%n" +
         "4. Never ignore the lesson context - every response should reinforce learning the current topic.";
 
     private final String jdkVersion;
