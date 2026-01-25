@@ -64,11 +64,11 @@ final class OrderedMarkerScanner {
         }
         // CommonMark requires whitespace after marker delimiter (. or ))
         // Reject "1.Foo" but accept "1. Foo" or "1." at end of line
-        for (int i = 0; i < trimmedLine.length(); i++) {
-            char c = trimmedLine.charAt(i);
+        for (int cursor = 0; cursor < trimmedLine.length(); cursor++) {
+            char c = trimmedLine.charAt(cursor);
             if (c == '.' || c == ')') {
-                // Found delimiter at position i
-                int posAfterDelimiter = i + 1;
+                // Found delimiter at position cursor
+                int posAfterDelimiter = cursor + 1;
                 // Valid if: at end of line, or next char is whitespace
                 return posAfterDelimiter >= trimmedLine.length()
                     || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
