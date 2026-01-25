@@ -9,58 +9,71 @@ describe('parseMarkdown', () => {
   })
 
   it('parses basic markdown to HTML', () => {
-    const result = parseMarkdown('**bold** and *italic*')
-    expect(result).toContain('<strong>bold</strong>')
-    expect(result).toContain('<em>italic</em>')
+    const renderedHtml = parseMarkdown('**bold** and *italic*')
+    expect(renderedHtml).toContain('<strong>bold</strong>')
+    expect(renderedHtml).toContain('<em>italic</em>')
   })
 
   it('parses code blocks', () => {
     const markdown = '```java\npublic class Test {}\n```'
-    const result = parseMarkdown(markdown)
-    expect(result).toContain('<pre>')
-    expect(result).toContain('<code')
-    expect(result).toContain('public class Test {}')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('<pre>')
+    expect(renderedHtml).toContain('<code')
+    expect(renderedHtml).toContain('public class Test {}')
   })
 
   it('sanitizes dangerous HTML', () => {
     const markdown = '<script>alert("xss")</script>'
-    const result = parseMarkdown(markdown)
-    expect(result).not.toContain('<script>')
-    expect(result).not.toContain('alert')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).not.toContain('<script>')
+    expect(renderedHtml).not.toContain('alert')
   })
 
   it('preserves enrichment data attributes', () => {
     // Enrichment markers are parsed by the extension
     const markdown = '{{hint: This is a hint}}'
-    const result = parseMarkdown(markdown)
-    expect(result).toContain('data-enrichment-type="hint"')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('data-enrichment-type="hint"')
   })
 
   it('strips inline citation markers like [1] in rendered HTML', () => {
     const markdown = 'Hello world. [1]\n\nNext paragraph.'
-    const result = parseMarkdown(markdown)
-    expect(result).toContain('Hello world.')
-    expect(result).not.toContain('[1]')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('Hello world.')
+    expect(renderedHtml).not.toContain('[1]')
+  })
+
+  it('strips multi-digit citation markers up to 3 digits', () => {
+    const markdown = 'Reference [12] and [123] here.'
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).not.toContain('[12]')
+    expect(renderedHtml).not.toContain('[123]')
+  })
+
+  it('preserves 4+ digit bracket numbers', () => {
+    const markdown = 'Error code [1234] is special.'
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('[1234]')
   })
 
   it('does not strip bracket indexing like array[1]', () => {
     const markdown = 'Use array[1] to access the second element.'
-    const result = parseMarkdown(markdown)
-    expect(result).toContain('array[1]')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('array[1]')
   })
 
   it('does not strip bracket markers inside code blocks', () => {
     const markdown = '```java\nSystem.out.println("x"); // [1]\n```'
-    const result = parseMarkdown(markdown)
-    expect(result).toContain('[1]')
+    const renderedHtml = parseMarkdown(markdown)
+    expect(renderedHtml).toContain('[1]')
   })
 
   it('is SSR-safe - does not use document APIs', () => {
     // This test verifies parseMarkdown works without DOM
     // If it used document.createElement, this would fail in Node
-    const result = parseMarkdown('# Heading\n\nParagraph text.')
-    expect(result).toContain('<h1>')
-    expect(result).toContain('<p>')
+    const renderedHtml = parseMarkdown('# Heading\n\nParagraph text.')
+    expect(renderedHtml).toContain('<h1>')
+    expect(renderedHtml).toContain('<p>')
   })
 })
 
@@ -138,16 +151,16 @@ describe('escapeHtml', () => {
 
   it('handles complex mixed content', () => {
     const input = '<script>alert("xss")</script>'
-    const result = escapeHtml(input)
-    expect(result).not.toContain('<')
-    expect(result).not.toContain('>')
-    expect(result).toContain('&lt;')
-    expect(result).toContain('&gt;')
+    const escapedHtml = escapeHtml(input)
+    expect(escapedHtml).not.toContain('<')
+    expect(escapedHtml).not.toContain('>')
+    expect(escapedHtml).toContain('&lt;')
+    expect(escapedHtml).toContain('&gt;')
   })
 
   it('is SSR-safe - uses pure string operations', () => {
     // This works without document APIs
-    const result = escapeHtml('<div class="test">')
-    expect(result).toBe('&lt;div class=&quot;test&quot;&gt;')
+    const escapedHtml = escapeHtml('<div class="test">')
+    expect(escapedHtml).toBe('&lt;div class=&quot;test&quot;&gt;')
   })
 })

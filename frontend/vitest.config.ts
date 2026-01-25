@@ -3,6 +3,12 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
   plugins: [svelte({ hot: !process.env.VITEST })],
+  // Vitest runs modules through Vite's SSR pipeline by default, which can cause
+  // conditional exports to resolve Svelte's server entry (where `mount()` is unavailable).
+  // Force browser conditions so component tests can mount under jsdom.
+  resolve: {
+    conditions: ['module', 'browser', 'development']
+  },
   test: {
     environment: 'jsdom',
     globals: true,
