@@ -23,7 +23,9 @@ describe('ChatView streaming stability', () => {
   })
 
   it('keeps the assistant message DOM node stable when the stream completes', async () => {
-    let completeStream: (() => void) | null = null
+    let completeStream: () => void = () => {
+      throw new Error('Expected stream completion callback to be set')
+    }
 
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
       options?.onStatus?.({ message: 'Searching', details: 'Loading sources' })
@@ -55,9 +57,6 @@ describe('ChatView streaming stability', () => {
 
     expect(container.querySelector('.message.assistant .cursor.visible')).not.toBeNull()
 
-    if (!completeStream) {
-      throw new Error('Expected stream completion callback to be set')
-    }
     completeStream()
     await tick()
 

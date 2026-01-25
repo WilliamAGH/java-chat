@@ -39,7 +39,9 @@ describe('LearnView guided chat streaming stability', () => {
     fetchLessonContentMock.mockResolvedValue({ markdown: '# Lesson', cached: false })
     fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] })
 
-    let completeStream: (() => void) | null = null
+    let completeStream: () => void = () => {
+      throw new Error('Expected guided stream completion callback to be set')
+    }
     streamGuidedChatMock.mockImplementation(async (_sessionId, _slug, _message, callbacks) => {
       callbacks.onStatus?.({ message: 'Searching', details: 'Loading sources' })
 
@@ -73,9 +75,6 @@ describe('LearnView guided chat streaming stability', () => {
 
     expect(container.querySelector('.chat-panel--desktop .message.assistant .cursor.visible')).not.toBeNull()
 
-    if (!completeStream) {
-      throw new Error('Expected guided stream completion callback to be set')
-    }
     completeStream()
     await tick()
 
