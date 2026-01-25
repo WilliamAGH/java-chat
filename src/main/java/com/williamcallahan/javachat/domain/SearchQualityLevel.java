@@ -31,6 +31,12 @@ public enum SearchQualityLevel {
      */
     MIXED_QUALITY("Found %d documents (%d high-quality) via search. Some results may be less relevant.");
 
+    /**
+     * Minimum content length to consider a document as having substantial content.
+     * Documents shorter than this threshold are classified as lower quality.
+     */
+    private static final int SUBSTANTIAL_CONTENT_THRESHOLD = 100;
+
     private final String messageTemplate;
 
     SearchQualityLevel(String messageTemplate) {
@@ -50,6 +56,24 @@ public enum SearchQualityLevel {
             case KEYWORD_SEARCH, HIGH_QUALITY -> String.format(messageTemplate, totalCount);
             case MIXED_QUALITY -> String.format(messageTemplate, totalCount, highQualityCount);
         };
+    }
+
+    /**
+     * Counts documents with substantial content (length exceeds threshold).
+     *
+     * @param docs the documents to evaluate
+     * @return count of high-quality documents with substantial content
+     */
+    private static long countHighQuality(List<Document> docs) {
+        if (docs == null) {
+            return 0;
+        }
+        return docs.stream()
+                .filter(doc -> {
+                    String content = doc.getText();
+                    return content != null && content.length() > SUBSTANTIAL_CONTENT_THRESHOLD;
+                })
+                .count();
     }
 
     /**
@@ -75,12 +99,7 @@ public enum SearchQualityLevel {
         }
 
         // Count high-quality documents (has substantial content)
-        long highQualityCount = docs.stream()
-                .filter(doc -> {
-                    String content = doc.getText();
-                    return content != null && content.length() > 100;
-                })
-                .count();
+        long highQualityCount = countHighQuality(docs);
 
         if (highQualityCount == docs.size()) {
             return HIGH_QUALITY;
@@ -98,11 +117,7 @@ public enum SearchQualityLevel {
     public static String describeQuality(List<Document> docs) {
         SearchQualityLevel level = determine(docs);
         int totalCount = docs != null ? docs.size() : 0;
-        long highQualityCount = docs != null
-                ? docs.stream()
-                        .filter(doc -> doc.getText() != null && doc.getText().length() > 100)
-                        .count()
-                : 0;
+        long highQualityCount = countHighQuality(docs);
 
         return level.formatMessage(totalCount, (int) highQualityCount);
     }
