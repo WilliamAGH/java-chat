@@ -196,37 +196,6 @@ final class MarkdownNormalizer {
     }
 
     private static boolean startsWithOrderedMarker(String trimmedLine) {
-        int cursor = 0;
-        while (cursor < trimmedLine.length() && Character.isDigit(trimmedLine.charAt(cursor))) {
-            cursor++;
-        }
-        if (cursor > 0 && cursor < trimmedLine.length()) {
-            char marker = trimmedLine.charAt(cursor);
-            if ((marker == '.' || marker == ')') && cursor + 1 < trimmedLine.length()) {
-                return true;
-            }
-        }
-        // Lowercase letter marker: a. / a)
-        if (trimmedLine.length() > 1) {
-            char firstChar = trimmedLine.charAt(0);
-            char secondChar = trimmedLine.charAt(1);
-            if (firstChar >= 'a' && firstChar <= 'z' && (secondChar == '.' || secondChar == ')')) {
-                return true;
-            }
-        }
-        // Basic lowercase roman markers (i., ii., iii., iv., v.)
-        int romanCursor = 0;
-        while (romanCursor < trimmedLine.length() && romanCursor < 6) {
-            char romanChar = trimmedLine.charAt(romanCursor);
-            if (romanChar != 'i' && romanChar != 'v' && romanChar != 'x') {
-                break;
-            }
-            romanCursor++;
-        }
-        if (romanCursor > 0 && romanCursor < trimmedLine.length()) {
-            char marker = trimmedLine.charAt(romanCursor);
-            return marker == '.' || marker == ')';
-        }
-        return false;
+        return OrderedMarkerScanner.startsWithOrderedMarker(trimmedLine);
     }
 }
