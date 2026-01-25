@@ -2,9 +2,10 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
-import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
+import com.williamcallahan.javachat.domain.SearchQualityLevel;
+import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
@@ -299,38 +300,12 @@ public class ChatService {
     }
 
     /**
-     * Determine the quality of search results and provide context to the AI.
+     * Determines the quality of search results and provides context to the AI.
+     *
+     * <p>Delegates to {@link SearchQualityLevel} enum for self-describing quality categorization.</p>
      */
     private String determineSearchQuality(List<Document> docs) {
-        if (docs.isEmpty()) {
-            return "No relevant documents found. Using general knowledge only.";
-        }
-        
-        // Check if documents seem to be from keyword search (less semantic relevance)
-        boolean likelyKeywordSearch = docs.stream()
-            .anyMatch(doc -> {
-                String url = String.valueOf(doc.getMetadata().getOrDefault("url", ""));
-                return url.contains("local-search") || url.contains("keyword");
-            });
-        
-        if (likelyKeywordSearch) {
-            return String.format("Found %d documents via keyword search (embedding service unavailable). Results may be less semantically relevant.", docs.size());
-        }
-        
-        // Check document relevance quality
-        long highQualityDocs = docs.stream()
-            .filter(doc -> {
-                String content = doc.getText(); // Use getText() instead of getContent()
-                return content != null && content.length() > 100; // Basic quality check
-            })
-            .count();
-        
-        if (highQualityDocs == docs.size()) {
-            return String.format("Found %d high-quality relevant documents via semantic search.", docs.size());
-        } else {
-            return String.format("Found %d documents (%d high-quality) via search. Some results may be less relevant.", 
-                docs.size(), highQualityDocs);
-        }
+        return SearchQualityLevel.describeQuality(docs);
     }
 
     /**

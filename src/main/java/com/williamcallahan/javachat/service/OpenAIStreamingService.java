@@ -191,45 +191,6 @@ public class OpenAIStreamingService {
     }
     
     /**
-     * Stream a response from the OpenAI API using clean, native streaming support.
-     *
-     * @param prompt The complete prompt to send to the model
-     * @param temperature The temperature setting for response generation
-     * @return A Flux of content strings as they arrive from the model
-     * @deprecated Use {@link #streamResponse(StructuredPrompt, double)} for structure-aware truncation.
-     */
-    @Deprecated
-    public Flux<String> streamResponse(String prompt, double temperature) {
-        log.debug("Starting OpenAI stream");
-
-        return Flux.<String>defer(() -> {
-            // Select client first to determine which provider's model name to use
-            OpenAIClient streamingClient = selectClientForStreaming();
-
-            if (streamingClient == null) {
-                String error = "All LLM providers unavailable - check rate limits and API credentials";
-                log.error("[LLM] {}", error);
-                return Flux.<String>error(new IllegalStateException(error));
-            }
-
-            boolean useGitHubModels = isPrimaryClient(streamingClient);
-            RateLimitManager.ApiProvider activeProvider = useGitHubModels
-                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                    : RateLimitManager.ApiProvider.OPENAI;
-
-            // Build params with provider-specific model after client selection
-            String truncatedPrompt = truncatePromptForModel(prompt);
-            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
-            log.info("[LLM] [{}] Streaming started", activeProvider.getName());
-
-            return executeStreamingRequest(streamingClient, params, activeProvider);
-        })
-        // Move blocking SDK stream consumption off the servlet thread.
-        // Prevents thread starvation and aligns with Reactor best practices.
-        .subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
      * Stream a response using a structured prompt with intelligent truncation.
      *
      * <p>Truncates the prompt segment-by-segment to preserve semantic boundaries.
