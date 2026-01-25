@@ -1,12 +1,13 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
-import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import jakarta.annotation.security.PermitAll;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -194,12 +195,13 @@ public class GuidedLearningController extends BaseController {
 
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
-            // Build the complete prompt using GuidedLearningService logic
-            String fullPrompt = guidedService.buildGuidedPromptWithContext(history, lessonSlug, userQuery);
+            // Build structured prompt for intelligent truncation
+            StructuredPrompt structuredPrompt =
+                    guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-            // Clean OpenAI streaming with shared stream to prevent duplicate API calls
+            // Stream with structure-aware truncation - preserves semantic boundaries
             Flux<String> dataStream = sseSupport.prepareDataStream(
-                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    openAIStreamingService.streamResponse(structuredPrompt, DEFAULT_TEMPERATURE),
                     chunk -> fullResponse.append(chunk));
 
             // Heartbeats terminate when data stream completes

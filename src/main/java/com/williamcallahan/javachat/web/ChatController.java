@@ -125,20 +125,18 @@ public class ChatController extends BaseController {
         StringBuilder fullResponse = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
 
-        // Build the complete prompt using existing ChatService logic
+        // Build structured prompt for intelligent truncation
         // Pass model hint to optimize RAG for token-constrained models
-        ChatService.ChatPromptOutcome promptOutcome =
-            chatService.buildPromptWithContextOutcome(history, userQuery, ModelConfiguration.DEFAULT_MODEL);
-        String fullPrompt = promptOutcome.prompt();
-        
+        ChatService.StructuredPromptOutcome promptOutcome =
+            chatService.buildStructuredPromptWithContextOutcome(history, userQuery, ModelConfiguration.DEFAULT_MODEL);
+
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
-            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestToken);
+            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
-            // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
-            // Use .share() to hot-share the stream and prevent double API subscription
+            // Stream with structure-aware truncation - preserves semantic boundaries
             Flux<String> dataStream = sseSupport.prepareDataStream(
-                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    openAIStreamingService.streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE),
                     chunk -> {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
