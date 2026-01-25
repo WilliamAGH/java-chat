@@ -7,12 +7,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Optional: centralized source URLs
-if [ -f "$SCRIPT_DIR/docs_sources.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$SCRIPT_DIR/docs_sources.sh"
-fi
-# Also allow sourcing from the Java resources properties to keep a single source of truth
+# Centralized source URLs (single source of truth)
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
 if [ -f "$RES_PROPS" ]; then
   # Export variables defined as KEY=VALUE in the properties file
