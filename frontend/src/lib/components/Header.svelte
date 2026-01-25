@@ -53,10 +53,8 @@
 
 <style>
   .header {
-    position: fixed;
+    position: sticky;
     top: 0;
-    left: 0;
-    right: 0;
     z-index: 100;
     background: var(--color-bg-primary);
     border-bottom: 1px solid var(--color-border-subtle);
