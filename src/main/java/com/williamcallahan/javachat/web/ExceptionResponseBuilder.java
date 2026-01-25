@@ -87,7 +87,7 @@ public class ExceptionResponseBuilder {
     private void appendRestClientDetails(StringBuilder details, RestClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (!statusText.isBlank()) {
+        if (statusText != null && !statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
@@ -105,7 +105,7 @@ public class ExceptionResponseBuilder {
     private void appendWebClientDetails(StringBuilder details, WebClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (!statusText.isBlank()) {
+        if (statusText != null && !statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
@@ -124,7 +124,13 @@ public class ExceptionResponseBuilder {
         if (!exception.headers().isEmpty()) {
             details.append(", headers=").append(exception.headers());
         }
-        details.append(", body=").append(exception.body());
+        var bodyJson = exception.body();
+        if (bodyJson != null) {
+            String body = bodyJson.toString();
+            if (!body.isBlank()) {
+                details.append(", body=").append(body);
+            }
+        }
         exception.code().ifPresent(code -> details.append(", code=").append(code));
         exception.param().ifPresent(param -> details.append(", param=").append(param));
         exception.type().ifPresent(type -> details.append(", type=").append(type));
