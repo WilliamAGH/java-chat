@@ -1,0 +1,70 @@
+name: Build & Test
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Temurin JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      
+      - name: Log system & Java info (drift detection)
+        run: |
+          echo "=== Environment Info ==="
+          uname -a
+          echo "=== Java Version ==="
+          java -version
+          echo "=== Gradle Version ==="
+          ./gradlew --version
+      
+      - name: Run tests
+        run: ./gradlew test --no-daemon
+      
+      - name: Build application
+        run: ./gradlew build -x test --no-daemon
+      
+      - name: Run static analysis
+        run: ./gradlew spotbugsMain pmdMain --no-daemon
+      
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/test-results/
+          retention-days: 7
+      
+      - name: Upload SpotBugs report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotbugs-report
+          path: build/reports/spotbugs/
+          retention-days: 7
+      
+      - name: Upload PMD report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmd-report
+          path: build/reports/pmd/
+          retention-days: 7

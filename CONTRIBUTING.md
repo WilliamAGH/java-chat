@@ -21,6 +21,10 @@ make lint
 
 ## Guidelines
 
+- Use the deterministic toolchain: Gradle Wrapper + Gradle Toolchains + Temurin.
+- Local Java is managed by mise/asdf via `.tool-versions` (see below). The CI uses the same vendor.
+- We pin major Java version in Gradle toolchain and CI; patch is logged in CI and bumped intentionally.
+
 - Keep PRs focused (one change per PR when possible).
 - Add tests for new behavior.
 - Update docs when you change workflows or endpoints.
