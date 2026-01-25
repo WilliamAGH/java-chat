@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.domain;
 
-import org.springframework.ai.document.Document;
-
 import java.util.List;
 
 /**
@@ -61,36 +59,36 @@ public enum SearchQualityLevel {
     /**
      * Counts documents with substantial content (length exceeds threshold).
      *
-     * @param docs the documents to evaluate
+     * @param contents the retrieved contents to evaluate
      * @return count of high-quality documents with substantial content
      */
-    private static long countHighQuality(List<Document> docs) {
-        if (docs == null) {
+    private static long countHighQuality(List<? extends RetrievedContent> contents) {
+        if (contents == null) {
             return 0;
         }
-        return docs.stream()
-                .filter(doc -> {
-                    String content = doc.getText();
-                    return content != null && content.length() > SUBSTANTIAL_CONTENT_THRESHOLD;
+        return contents.stream()
+                .filter(content -> {
+                    String text = content.getText();
+                    return text != null && text.length() > SUBSTANTIAL_CONTENT_THRESHOLD;
                 })
                 .count();
     }
 
     /**
-     * Determines the search quality level for a set of retrieved documents.
+     * Determines the search quality level for a set of retrieved contents.
      *
-     * @param docs the retrieved documents
+     * @param contents the retrieved contents
      * @return the appropriate quality level
      */
-    public static SearchQualityLevel determine(List<Document> docs) {
-        if (docs == null || docs.isEmpty()) {
+    public static SearchQualityLevel determine(List<? extends RetrievedContent> contents) {
+        if (contents == null || contents.isEmpty()) {
             return NONE;
         }
 
         // Check if documents came from keyword/fallback search
-        boolean likelyKeywordSearch = docs.stream()
-                .anyMatch(doc -> {
-                    String url = String.valueOf(doc.getMetadata().getOrDefault("url", ""));
+        boolean likelyKeywordSearch = contents.stream()
+                .anyMatch(content -> {
+                    String url = String.valueOf(content.getMetadata().getOrDefault("url", ""));
                     return url.contains("local-search") || url.contains("keyword");
                 });
 
@@ -99,9 +97,9 @@ public enum SearchQualityLevel {
         }
 
         // Count high-quality documents (has substantial content)
-        long highQualityCount = countHighQuality(docs);
+        long highQualityCount = countHighQuality(contents);
 
-        if (highQualityCount == docs.size()) {
+        if (highQualityCount == contents.size()) {
             return HIGH_QUALITY;
         }
 
@@ -109,15 +107,15 @@ public enum SearchQualityLevel {
     }
 
     /**
-     * Generates the complete search quality note for the documents.
+     * Generates the complete search quality note for the contents.
      *
-     * @param docs the retrieved documents
+     * @param contents the retrieved contents
      * @return formatted quality message
      */
-    public static String describeQuality(List<Document> docs) {
-        SearchQualityLevel level = determine(docs);
-        int totalCount = docs != null ? docs.size() : 0;
-        long highQualityCount = countHighQuality(docs);
+    public static String describeQuality(List<? extends RetrievedContent> contents) {
+        SearchQualityLevel level = determine(contents);
+        int totalCount = contents != null ? contents.size() : 0;
+        long highQualityCount = countHighQuality(contents);
 
         return level.formatMessage(totalCount, (int) highQualityCount);
     }
