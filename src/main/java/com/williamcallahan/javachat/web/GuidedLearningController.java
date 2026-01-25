@@ -184,8 +184,10 @@ public class GuidedLearningController extends BaseController {
         sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
-        String userQuery = request.userQuery();
-        String lessonSlug = request.lessonSlug();
+        String userQuery = request.userQuery()
+                .orElseThrow(() -> new IllegalArgumentException("User query is required"));
+        String lessonSlug = request.lessonSlug()
+                .orElseThrow(() -> new IllegalArgumentException("Lesson slug is required"));
 
         // Load history BEFORE adding user message to avoid duplication in prompt
         // (buildGuidedPromptWithContext adds latestUserMessage separately)
