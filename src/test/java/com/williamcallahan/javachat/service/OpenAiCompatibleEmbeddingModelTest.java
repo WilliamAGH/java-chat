@@ -16,6 +16,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Verifies OpenAI embedding responses preserve request ordering.
+ */
 class OpenAiCompatibleEmbeddingModelTest {
 
     @Test

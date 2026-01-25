@@ -426,7 +426,7 @@ public class OpenAIStreamingService {
     }
 
     private String normalizeBaseUrl(String baseUrl) {
-        return OpenAiSdkUrlNormalizer.normalizeOrNull(baseUrl);
+        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
     }
     
     /**
@@ -483,13 +483,9 @@ public class OpenAIStreamingService {
     }
 
     private boolean isRateLimit(Throwable throwable) {
-        if (throwable instanceof RateLimitException) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            return serviceException.statusCode() == 429;
-        }
-        return false;
+        return throwable instanceof RateLimitException
+            || (throwable instanceof OpenAIServiceException serviceException
+                && serviceException.statusCode() == 429);
     }
     
     private boolean isRetryablePrimaryFailure(Throwable throwable) {

@@ -9,6 +9,12 @@ package com.williamcallahan.javachat.support;
  */
 public final class OpenAiSdkUrlNormalizer {
 
+    private static final String TRAILING_SLASH = "/";
+    private static final String V1_SUFFIX = "/v1";
+    private static final String EMBEDDINGS_SUFFIX = "/embeddings";
+    private static final String V1_EMBEDDINGS_SUFFIX = V1_SUFFIX + EMBEDDINGS_SUFFIX;
+    private static final String INFERENCE_SUFFIX = "/inference";
+
     private OpenAiSdkUrlNormalizer() {}
 
     /**
@@ -25,35 +31,21 @@ public final class OpenAiSdkUrlNormalizer {
         return normalizeInternal(baseUrl.trim());
     }
 
-    /**
-     * Nullable-safe variant that returns input unchanged if blank.
-     * Use when null URLs indicate "provider not configured" rather than error.
-     *
-     * @param baseUrl raw base URL from configuration, may be null
-     * @return normalized URL, or null/blank if input was null/blank
-     */
-    public static String normalizeOrNull(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return baseUrl;
-        }
-        return normalizeInternal(baseUrl.trim());
-    }
-
     private static String normalizeInternal(String trimmed) {
-        if (trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        if (trimmed.endsWith(TRAILING_SLASH)) {
+            trimmed = trimmed.substring(0, trimmed.length() - TRAILING_SLASH.length());
         }
-        if (trimmed.endsWith("/v1/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
-        } else if (trimmed.endsWith("/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
+        if (trimmed.endsWith(V1_EMBEDDINGS_SUFFIX)) {
+            trimmed = trimmed.substring(0, trimmed.length() - EMBEDDINGS_SUFFIX.length());
+        } else if (trimmed.endsWith(EMBEDDINGS_SUFFIX)) {
+            trimmed = trimmed.substring(0, trimmed.length() - EMBEDDINGS_SUFFIX.length());
         }
-        if (trimmed.endsWith("/inference")) {
-            return trimmed + "/v1";
+        if (trimmed.endsWith(INFERENCE_SUFFIX)) {
+            return trimmed + V1_SUFFIX;
         }
-        if (trimmed.endsWith("/v1")) {
+        if (trimmed.endsWith(V1_SUFFIX)) {
             return trimmed;
         }
-        return trimmed + "/v1";
+        return trimmed + V1_SUFFIX;
     }
 }

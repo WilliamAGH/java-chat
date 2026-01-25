@@ -11,6 +11,9 @@ import java.lang.reflect.Method;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies retry classification decisions for OpenAI streaming failures.
+ */
 class OpenAIStreamingServiceTest {
 
     @Test
@@ -52,4 +55,3 @@ class OpenAIStreamingServiceTest {
         return (boolean) result;
     }
 }
-

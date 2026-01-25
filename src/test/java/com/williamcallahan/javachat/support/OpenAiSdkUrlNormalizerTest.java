@@ -7,9 +7,11 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies OpenAI SDK base URL normalization stays deterministic across formats.
+ */
 class OpenAiSdkUrlNormalizerTest {
 
     @ParameterizedTest(name = "normalize(\"{0}\") = \"{1}\"")
@@ -30,13 +32,16 @@ class OpenAiSdkUrlNormalizerTest {
         "https://example.com/embeddings, https://example.com/v1",
 
         // No /v1 suffix: appends /v1
-        "https://example.com, https://example.com/v1",
-
-        // Whitespace trimmed
-        "  https://api.openai.com/v1  , https://api.openai.com/v1"
+        "https://example.com, https://example.com/v1"
     })
     void normalizeHandlesVariousFormats(String input, String expected) {
         assertEquals(expected, OpenAiSdkUrlNormalizer.normalize(input));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"  https://api.openai.com/v1  "})
+    void normalizeTrimsWhitespace(String input) {
+        assertEquals("https://api.openai.com/v1", OpenAiSdkUrlNormalizer.normalize(input));
     }
 
     @ParameterizedTest
@@ -50,26 +55,4 @@ class OpenAiSdkUrlNormalizerTest {
         assertEquals("OpenAI SDK base URL is not configured", ex.getMessage());
     }
 
-    @Test
-    void normalizeOrNullReturnsNullForNull() {
-        assertNull(OpenAiSdkUrlNormalizer.normalizeOrNull(null));
-    }
-
-    @Test
-    void normalizeOrNullReturnsBlankForBlank() {
-        assertEquals("", OpenAiSdkUrlNormalizer.normalizeOrNull(""));
-    }
-
-    @Test
-    void normalizeOrNullNormalizesValidUrl() {
-        assertEquals(
-            "https://models.github.ai/inference/v1",
-            OpenAiSdkUrlNormalizer.normalizeOrNull("https://models.github.ai/inference")
-        );
-    }
-
-    @Test
-    void normalizeOrNullReturnsWhitespaceAsIs() {
-        assertEquals("   ", OpenAiSdkUrlNormalizer.normalizeOrNull("   "));
-    }
 }
