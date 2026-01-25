@@ -30,6 +30,9 @@
   // Debounced to avoid flicker during streaming
   $effect(() => {
     if (renderedContent && contentEl) {
+      if (isStreaming) {
+        return cleanupHighlighter
+      }
       // Apply Java language detection before highlighting (client-side DOM operation)
       applyJavaLanguageDetection(contentEl)
       scheduleHighlight(contentEl, isStreaming)

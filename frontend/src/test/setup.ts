@@ -14,3 +14,14 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: () => false
   })
 })
+
+// jsdom doesn't implement scrollTo on elements; components use it for chat auto-scroll.
+Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+  writable: true,
+  value: () => {}
+})
+
+// requestAnimationFrame is used for post-update DOM adjustments; provide a safe fallback.
+if (typeof window.requestAnimationFrame !== 'function') {
+  window.requestAnimationFrame = (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0)
+}
