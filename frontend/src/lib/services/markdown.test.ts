@@ -36,6 +36,25 @@ describe('parseMarkdown', () => {
     expect(result).toContain('data-enrichment-type="hint"')
   })
 
+  it('strips inline citation markers like [1] in rendered HTML', () => {
+    const markdown = 'Hello world. [1]\n\nNext paragraph.'
+    const result = parseMarkdown(markdown)
+    expect(result).toContain('Hello world.')
+    expect(result).not.toContain('[1]')
+  })
+
+  it('does not strip bracket indexing like array[1]', () => {
+    const markdown = 'Use array[1] to access the second element.'
+    const result = parseMarkdown(markdown)
+    expect(result).toContain('array[1]')
+  })
+
+  it('does not strip bracket markers inside code blocks', () => {
+    const markdown = '```java\nSystem.out.println("x"); // [1]\n```'
+    const result = parseMarkdown(markdown)
+    expect(result).toContain('[1]')
+  })
+
   it('is SSR-safe - does not use document APIs', () => {
     // This test verifies parseMarkdown works without DOM
     // If it used document.createElement, this would fail in Node
@@ -132,4 +151,3 @@ describe('escapeHtml', () => {
     expect(result).toBe('&lt;div class=&quot;test&quot;&gt;')
   })
 })
-
