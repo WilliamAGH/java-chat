@@ -28,6 +28,7 @@ import org.springframework.http.codec.ServerSentEvent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -323,7 +324,7 @@ public class ChatController extends BaseController {
         if (error instanceof OpenAIIoException ioError) {
             Throwable cause = ioError.getCause();
             if (cause != null && cause.getMessage() != null
-                    && cause.getMessage().toLowerCase().contains("interrupt")) {
+                    && cause.getMessage().toLowerCase(Locale.ROOT).contains("interrupt")) {
                 return "Request cancelled - LLM provider did not respond in time";
             }
             return "LLM provider connection failed - " + error.getClass().getSimpleName();

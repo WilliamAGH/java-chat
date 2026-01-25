@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import org.springframework.stereotype.Service;
 
@@ -286,7 +287,8 @@ public class UnifiedMarkdownService {
 
             // Track <pre> and <code> tags to preserve whitespace inside them
             if (currentChar == '<' && cursor + 4 < html.length()) {
-                String ahead = html.substring(cursor, Math.min(cursor + 6, html.length())).toLowerCase();
+                String ahead = html.substring(cursor, Math.min(cursor + 6, html.length()))
+                    .toLowerCase(Locale.ROOT);
                 if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
                     depth = depth.incrementPre();
                 } else if (ahead.startsWith("</pre>")) {
