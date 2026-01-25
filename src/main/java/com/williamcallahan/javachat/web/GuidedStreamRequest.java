@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import java.util.Optional;
+
 /**
  * Request body for guided learning streaming endpoint.
  *
@@ -23,16 +25,23 @@ public record GuidedStreamRequest(
     }
 
     /**
-     * Returns the user query, defaulting to empty string if null.
+     * Returns the user query when present and non-blank.
+     *
+     * <p>Callers should use {@link Optional#orElseThrow} or {@link Optional#orElse}
+     * to handle the missing case explicitly, avoiding silent empty-string defaults.</p>
+     *
+     * @return the user's query if present and non-blank
      */
-    public String userQuery() {
-        return latest != null ? latest : "";
+    public Optional<String> userQuery() {
+        return Optional.ofNullable(latest).filter(s -> !s.isBlank());
     }
 
     /**
-     * Returns the lesson slug, defaulting to empty string if null.
+     * Returns the lesson slug when present and non-blank.
+     *
+     * @return the lesson slug if present and non-blank
      */
-    public String lessonSlug() {
-        return slug != null ? slug : "";
+    public Optional<String> lessonSlug() {
+        return Optional.ofNullable(slug).filter(s -> !s.isBlank());
     }
 }

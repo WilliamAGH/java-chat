@@ -49,8 +49,22 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
-  // Session ID for chat continuity
-  const sessionId = generateSessionId('guided')
+  // Session IDs per lesson for backend conversation isolation
+  // Each lesson gets its own session ID to prevent conversation bleeding across topics
+  const sessionIdsByLesson = new Map<string, string>()
+
+  /**
+   * Gets or creates a session ID for a specific lesson.
+   * Each lesson gets its own backend session to prevent conversation bleeding.
+   */
+  function getSessionIdForLesson(slug: string): string {
+    let lessonSessionId = sessionIdsByLesson.get(slug)
+    if (!lessonSessionId) {
+      lessonSessionId = generateSessionId(`guided-${slug}`)
+      sessionIdsByLesson.set(slug, lessonSessionId)
+    }
+    return lessonSessionId
+  }
 
   // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
@@ -196,6 +210,7 @@
 
     const streamLessonSlug = selectedLesson.slug
     const userQuery = message.trim()
+    const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
 
     messages = [...messages, {
       role: 'user',
@@ -209,7 +224,7 @@
     streaming.startStream()
 
     try {
-      await streamGuidedChat(sessionId, selectedLesson.slug, userQuery, {
+      await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
         onChunk: (chunk) => {
           // Guard: ignore chunks if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
