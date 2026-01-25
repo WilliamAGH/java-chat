@@ -25,7 +25,9 @@
   const streaming = createStreamingState({ statusClearDelayMs: 800 })
 
   // Cleanup timer on unmount
-  $effect(() => streaming.cleanup)
+  $effect(() => {
+    return streaming.cleanup
+  })
 
   // Session ID for chat continuity
   const sessionId = generateSessionId('chat')
