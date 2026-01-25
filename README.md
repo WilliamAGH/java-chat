@@ -16,7 +16,7 @@ Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 
 ```bash
 cp .env.example .env
-# edit .env and set GITHUB_TOKEN (and optionally OPENAI_API_KEY)
+# edit .env and set GITHUB_TOKEN or OPENAI_API_KEY
 make compose-up   # optional local Qdrant
 make dev
 ```
@@ -37,4 +37,8 @@ Start with `docs/README.md`.
 
 ## Contributing
 
-Issues and PRs welcome.
+See `CONTRIBUTING.md`.
+
+## License
+
+See `LICENSE`.

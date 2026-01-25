@@ -32,6 +32,7 @@ Common variables:
 ### Provider notes
 
 - GitHub Models uses `https://models.github.ai/inference` (the OpenAI SDK requires `/v1`, so the default is `.../inference/v1`).
+- OpenAI uses `https://api.openai.com` (the OpenAI SDK requires `/v1`; the app normalizes URLs when needed).
 - Avoid `azure.com`-style endpoints unless you are explicitly running an Azure OpenAI-compatible gateway; this project does not configure Azure by default.
 
 ### Rate limiting

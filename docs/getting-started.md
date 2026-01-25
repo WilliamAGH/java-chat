@@ -15,7 +15,7 @@
 cp .env.example .env
 ```
 
-2) Edit `.env` and set at least `GITHUB_TOKEN` (GitHub Models).
+2) Edit `.env` and set `GITHUB_TOKEN` (GitHub Models) or `OPENAI_API_KEY` (OpenAI).
 
 3) Start local Qdrant (optional but recommended for full RAG):
 
@@ -71,4 +71,3 @@ make test
 make lint
 make dev-backend
 ```
-

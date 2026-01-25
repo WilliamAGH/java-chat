@@ -21,18 +21,6 @@ export RED GREEN YELLOW CYAN NC
 export PROJECT_ROOT := $(shell pwd)
 export JAR_PATH = $(call get_jar)
 
-
-# Runtime arguments mapped from GitHub Models env vars
-# - Requires GITHUB_TOKEN (PAT with models:read)
-# - Base URL and model names have sensible defaults
-# - CRITICAL: GitHub Models endpoint is https://models.github.ai/inference (NOT azure.com)
-# - Model names differ by provider: GitHub Models uses gpt-5, OpenAI uses gpt-5.2
-RUN_ARGS := \
-  --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-  --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-  --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-  --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}"
-
 .PHONY: help clean build test lint run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 help: ## Show available targets
@@ -54,16 +42,28 @@ lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
+	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
+	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
+	    exit 1; \
+	  fi; \
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
 	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
 	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
 	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT 2>/dev/null || true); echo "Found PIDs on port $$SERVER_PORT: '$$PIDS'" >&2; if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 2; fi; \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
+	  APP_ARGS=(--server.port=$$SERVER_PORT); \
+	  if [ -n "$$GITHUB_TOKEN" ]; then \
+	    APP_ARGS+=( \
+	      --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
+	      --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
+	      --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
+	      --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
+	    ); \
+	  fi; \
 	  # Add conservative JVM memory limits to prevent OS-level SIGKILL (exit 137) under memory pressure
 	  # Tuned for local dev: override via JAVA_OPTS env if needed
 	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true}"; \
-	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) --server.port=$$SERVER_PORT $(RUN_ARGS) & disown
+	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
 dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
 	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
@@ -71,19 +71,34 @@ dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops
 	@echo "$(YELLOW)Backend API: http://localhost:8085/api/$(NC)"
 	@echo ""
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
+	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
+	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
+	    exit 1; \
+	  fi; \
 	  trap 'kill 0' INT TERM; \
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
 	  (if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	   APP_ARGS=(--server.port=8085); \
+	   if [ -n "$$GITHUB_TOKEN" ]; then \
+	     APP_ARGS+=( \
+	       --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
+	       --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
+	       --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
+	       --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
+	     ); \
+	   fi; \
 	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
-	   --args="--server.port=8085 $(RUN_ARGS)" \
+	   --args="$${APP_ARGS[*]}" \
 	   -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" 2>&1 \
 	   | awk '{print "\033[33m[java]\033[0m " $$0; fflush()}') & \
 	  wait
 
 dev-backend: ## Run only Spring Boot backend (dev profile)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  [ -n "$$GITHUB_TOKEN" ] || (echo "ERROR: GITHUB_TOKEN is not set. See README for setup." >&2; exit 1); \
+	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
+	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
+	    exit 1; \
+	  fi; \
 	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
 	  LIVERELOAD_PORT=$${LIVERELOAD_PORT:-35730}; \
 	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
@@ -93,8 +108,17 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 	    if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$port: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 1; fi; \
 	  done; \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
+	  APP_ARGS=(--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT); \
+	  if [ -n "$$GITHUB_TOKEN" ]; then \
+	    APP_ARGS+=( \
+	      --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
+	      --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
+	      --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
+	      --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
+	    ); \
+	  fi; \
 	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
-	    --args="--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT $(RUN_ARGS)" \
+	    --args="$${APP_ARGS[*]}" \
 	    -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
 
 frontend-install: ## Install frontend dependencies

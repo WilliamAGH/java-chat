@@ -20,7 +20,6 @@ make fetch-all
 This runs `scripts/fetch_all_docs.sh` (requires `wget`). Source URLs live in:
 
 - `src/main/resources/docs-sources.properties`
-- `scripts/docs_sources.sh` (legacy mirror of the same values)
 
 ## Process + upload to Qdrant
 
