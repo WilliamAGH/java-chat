@@ -39,8 +39,9 @@
   // Mobile chat drawer state
   let isChatDrawerOpen = $state(false)
 
-  // Element ref for syntax highlighting
+  // Element refs
   let lessonContentEl: HTMLElement | null = $state(null)
+  let lessonContentPanelEl: HTMLElement | null = $state(null)
 
   const sessionId = `guided-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
@@ -100,12 +101,22 @@
         // Guard against stale citation response
         if (selectedLesson?.slug !== targetSlug) return
 
+        // Preserve scroll position before updating citations
+        const scrollTop = lessonContentPanelEl?.scrollTop ?? 0
+
         if (result.success) {
           lessonCitations = deduplicateCitations(result.citations)
         } else {
           lessonCitationsError = result.error
         }
         lessonCitationsLoaded = true
+
+        // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
+        requestAnimationFrame(() => {
+          if (lessonContentPanelEl && scrollTop > 0) {
+            lessonContentPanelEl.scrollTop = scrollTop
+          }
+        })
       })
     } catch (error) {
       if (selectedLesson?.slug !== targetSlug) return
@@ -320,7 +331,7 @@
       <!-- Two-column layout: Content + Chat (desktop) -->
       <div class="lesson-layout">
         <!-- Lesson Content Panel -->
-        <div class="lesson-content-panel">
+        <div class="lesson-content-panel" bind:this={lessonContentPanelEl}>
           {#if loadingLesson}
             <div class="loading-state">
               <ThinkingIndicator statusMessage="Loading lesson" />
@@ -736,6 +747,7 @@
   /* Lesson Content Panel */
   .lesson-content-panel {
     overflow-y: auto;
+    overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
     padding: var(--space-6);
     border-right: 1px solid var(--color-border-subtle);
   }
