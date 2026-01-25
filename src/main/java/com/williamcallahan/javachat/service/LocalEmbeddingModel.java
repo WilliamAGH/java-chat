@@ -15,17 +15,15 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 /**
  * Embedding model wrapper that calls a local service with safe fallbacks.
  */
 public class LocalEmbeddingModel implements EmbeddingModel {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        LocalEmbeddingModel.class
-    );
+    private static final Logger log = LoggerFactory.getLogger(LocalEmbeddingModel.class);
 
     private final String baseUrl;
     private final String modelName;
@@ -52,18 +50,14 @@ public class LocalEmbeddingModel implements EmbeddingModel {
      * @param restTemplateBuilder RestTemplate builder
      */
     public LocalEmbeddingModel(
-        String baseUrl,
-        String modelName,
-        int dimensions,
-        RestTemplateBuilder restTemplateBuilder
-    ) {
+            String baseUrl, String modelName, int dimensions, RestTemplateBuilder restTemplateBuilder) {
         this.baseUrl = baseUrl;
         this.modelName = modelName;
         this.dimensions = dimensions;
         this.restTemplate = restTemplateBuilder
-            .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-            .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
-            .build();
+                .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
+                .build();
         // Check server availability on startup
         checkServerAvailability();
     }
@@ -79,16 +73,12 @@ public class LocalEmbeddingModel implements EmbeddingModel {
             String healthUrl = baseUrl + "/v1/models";
             restTemplate.getForObject(healthUrl, String.class);
             if (!serverAvailable) {
-                log.info(
-                    "[EMBEDDING] Local embedding server is now available"
-                );
+                log.info("[EMBEDDING] Local embedding server is now available");
             }
             serverAvailable = true;
         } catch (RestClientException healthCheckException) {
             if (serverAvailable) {
-                log.warn(
-                    "[EMBEDDING] Local embedding server not reachable. Using fallback embeddings."
-                );
+                log.warn("[EMBEDDING] Local embedding server not reachable. Using fallback embeddings.");
             }
             serverAvailable = false;
         }
@@ -121,9 +111,8 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     private EmbeddingResponse createFallbackResponse(EmbeddingRequest request) {
         if (log.isTraceEnabled()) {
             log.trace(
-                "[EMBEDDING] Server unavailable, returning fallback embeddings for {} texts",
-                request.getInstructions().size()
-            );
+                    "[EMBEDDING] Server unavailable, returning fallback embeddings for {} texts",
+                    request.getInstructions().size());
         }
 
         List<Embedding> embeddings = new ArrayList<>();
@@ -138,9 +127,7 @@ public class LocalEmbeddingModel implements EmbeddingModel {
      * Call the embedding API for all texts in the request.
      */
     private EmbeddingResponse callEmbeddingApi(EmbeddingRequest request) {
-        log.debug(
-            "[EMBEDDING] Generating embeddings for request payload"
-        );
+        log.debug("[EMBEDDING] Generating embeddings for request payload");
 
         List<Embedding> embeddings = new ArrayList<>();
 
@@ -149,12 +136,7 @@ public class LocalEmbeddingModel implements EmbeddingModel {
             if (vector.length > 0) {
                 embeddings.add(new Embedding(vector, embeddings.size()));
             } else {
-                embeddings.add(
-                    new Embedding(
-                        createFallbackEmbedding(text),
-                        embeddings.size()
-                    )
-                );
+                embeddings.add(new Embedding(createFallbackEmbedding(text), embeddings.size()));
             }
         }
 
@@ -175,15 +157,9 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(requestBody, headers);
 
-        log.debug(
-            "[EMBEDDING] Calling embedding API"
-        );
+        log.debug("[EMBEDDING] Calling embedding API");
 
-        EmbeddingResponsePayload response = restTemplate.postForObject(
-            url,
-            entity,
-            EmbeddingResponsePayload.class
-        );
+        EmbeddingResponsePayload response = restTemplate.postForObject(url, entity, EmbeddingResponsePayload.class);
 
         return parseEmbeddingResponse(response);
     }
@@ -222,14 +198,10 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     /**
      * Handle API failure by marking server unavailable and returning fallback embeddings.
      */
-    private EmbeddingResponse handleApiFailure(
-        RuntimeException exception,
-        EmbeddingRequest request
-    ) {
+    private EmbeddingResponse handleApiFailure(RuntimeException exception, EmbeddingRequest request) {
         log.warn(
-            "[EMBEDDING] Failed to get embeddings from server, using fallback (exceptionType={})",
-            exception.getClass().getName()
-        );
+                "[EMBEDDING] Failed to get embeddings from server, using fallback (exceptionType={})",
+                exception.getClass().getName());
         serverAvailable = false;
         lastCheckTime = System.currentTimeMillis();
 
@@ -281,10 +253,7 @@ public class LocalEmbeddingModel implements EmbeddingModel {
      */
     @Override
     public float[] embed(org.springframework.ai.document.Document document) {
-        EmbeddingRequest request = new EmbeddingRequest(
-            List.of(document.getText()),
-            null
-        );
+        EmbeddingRequest request = new EmbeddingRequest(List.of(document.getText()), null);
         EmbeddingResponse response = call(request);
         if (!response.getResults().isEmpty()) {
             return response.getResults().get(0).getOutput();
@@ -293,12 +262,9 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         return createFallbackEmbedding(document.getText());
     }
 
-    private record EmbeddingRequestPayload(String model, String input) {
-    }
+    private record EmbeddingRequestPayload(String model, String input) {}
 
-    private record EmbeddingResponsePayload(List<EmbeddingData> data) {
-    }
+    private record EmbeddingResponsePayload(List<EmbeddingData> data) {}
 
-    private record EmbeddingData(List<Double> embedding) {
-    }
+    private record EmbeddingData(List<Double> embedding) {}
 }

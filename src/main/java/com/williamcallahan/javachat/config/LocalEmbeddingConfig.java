@@ -24,7 +24,7 @@ public class LocalEmbeddingConfig {
     public RestTemplateBuilder restTemplateBuilder() {
         return new RestTemplateBuilder();
     }
-    
+
     /**
      * Creates the local embedding model backed by the configured local server.
      *
@@ -44,4 +44,3 @@ public class LocalEmbeddingConfig {
         return new LocalEmbeddingModel(baseUrl, modelName, dimensions, restTemplateBuilder);
     }
 }
-

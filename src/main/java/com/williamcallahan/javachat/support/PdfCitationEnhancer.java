@@ -2,15 +2,6 @@ package com.williamcallahan.javachat.support;
 
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.LocalStoreService;
-
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.document.Document;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -18,6 +9,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
 
 /**
  * Enhances PDF citations with page number anchors based on chunk position heuristics.
@@ -67,8 +65,10 @@ public class PdfCitationEnhancer {
      */
     public List<Citation> enhanceWithPageAnchors(List<Document> docs, List<Citation> citations) {
         if (docs.size() != citations.size()) {
-            logger.warn("Skipping PDF anchor enhancement because docs/citations sizes differ (docs={}, citations={})",
-                    docs.size(), citations.size());
+            logger.warn(
+                    "Skipping PDF anchor enhancement because docs/citations sizes differ (docs={}, citations={})",
+                    docs.size(),
+                    citations.size());
             return citations;
         }
 
@@ -125,7 +125,7 @@ public class PdfCitationEnhancer {
             try {
                 ClassPathResource pdfResource = new ClassPathResource(THINK_JAVA_PDF_CLASSPATH);
                 try (InputStream pdfStream = pdfResource.getInputStream();
-                     PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
+                        PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
                     cachedThinkJavaPdfPages = document.getNumberOfPages();
                 }
             } catch (IOException ioException) {
@@ -151,8 +151,7 @@ public class PdfCitationEnhancer {
             }
 
             try (var stream = Files.list(dir)) {
-                return (int) stream
-                        .filter(path -> {
+                return (int) stream.filter(path -> {
                             Path fileNamePath = path.getFileName();
                             if (fileNamePath == null) {
                                 return false;
@@ -182,7 +181,8 @@ public class PdfCitationEnhancer {
         try {
             return Integer.parseInt(String.valueOf(chunkIndexMetadata));
         } catch (NumberFormatException parseException) {
-            logger.debug("Failed to parse chunkIndex from metadata: {}",
+            logger.debug(
+                    "Failed to parse chunkIndex from metadata: {}",
                     sanitizeForLogText(String.valueOf(chunkIndexMetadata)));
             return -1;
         }
@@ -217,7 +217,6 @@ public class PdfCitationEnhancer {
      */
     private static boolean isThinkJavaPdf(String url) {
         String normalized = url.toLowerCase(Locale.ROOT);
-        return normalized.contains(THINK_JAVA_PDF_FILENAME)
-                || normalized.contains(THINK_JAVA_PDF_FILENAME_ENCODED);
+        return normalized.contains(THINK_JAVA_PDF_FILENAME) || normalized.contains(THINK_JAVA_PDF_FILENAME_ENCODED);
     }
 }

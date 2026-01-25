@@ -45,11 +45,13 @@ public enum SearchQualityLevel {
     public String formatMessage(int totalCount, int highQualityCount) {
         return switch (this) {
             case NONE -> "No relevant documents found. Using general knowledge only.";
-            case KEYWORD_SEARCH -> "Found " + totalCount + " documents via keyword search (embedding service unavailable). "
-                    + "Results may be less semantically relevant.";
+            case KEYWORD_SEARCH ->
+                "Found " + totalCount + " documents via keyword search (embedding service unavailable). "
+                        + "Results may be less semantically relevant.";
             case HIGH_QUALITY -> "Found " + totalCount + " high-quality relevant documents via semantic search.";
-            case MIXED_QUALITY -> "Found " + totalCount + " documents (" + highQualityCount + " high-quality) via search. "
-                    + "Some results may be less relevant.";
+            case MIXED_QUALITY ->
+                "Found " + totalCount + " documents (" + highQualityCount + " high-quality) via search. "
+                        + "Some results may be less relevant.";
         };
     }
 
@@ -82,10 +84,9 @@ public enum SearchQualityLevel {
         }
 
         // Check if documents came from keyword/fallback search
-        boolean likelyKeywordSearch = contents.stream()
-                .anyMatch(content -> content.getSourceUrl()
-                        .filter(url -> url.contains("local-search") || url.contains("keyword"))
-                        .isPresent());
+        boolean likelyKeywordSearch = contents.stream().anyMatch(content -> content.getSourceUrl()
+                .filter(url -> url.contains("local-search") || url.contains("keyword"))
+                .isPresent());
 
         if (likelyKeywordSearch) {
             return KEYWORD_SEARCH;

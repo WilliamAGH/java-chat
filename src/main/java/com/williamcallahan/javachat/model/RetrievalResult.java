@@ -1,19 +1,14 @@
 package com.williamcallahan.javachat.model;
 
-import org.springframework.ai.document.Document;
-
 import java.util.List;
+import org.springframework.ai.document.Document;
 
 /**
  * Encapsulates retrieval results with quality metadata.
  * Enables callers to distinguish between successful retrieval, degraded retrieval,
  * and failed retrieval, allowing appropriate handling and LLM context adjustment.
  */
-public record RetrievalResult(
-    List<Document> documents,
-    RetrievalQuality quality,
-    String qualityReason
-) {
+public record RetrievalResult(List<Document> documents, RetrievalQuality quality, String qualityReason) {
 
     public RetrievalResult {
         documents = documents == null ? List.of() : List.copyOf(documents);
@@ -55,48 +50,49 @@ public record RetrievalResult(
      * Create a successful vector search result.
      */
     public static RetrievalResult vectorSearch(List<Document> documents) {
-        return new RetrievalResult(documents, RetrievalQuality.VECTOR_SEARCH,
-            "Semantic vector search completed successfully");
+        return new RetrievalResult(
+                documents, RetrievalQuality.VECTOR_SEARCH, "Semantic vector search completed successfully");
     }
 
     /**
      * Create a version-filtered vector search result.
      */
     public static RetrievalResult versionFiltered(List<Document> documents, String version) {
-        return new RetrievalResult(documents, RetrievalQuality.VECTOR_SEARCH_VERSION_FILTERED,
-            "Semantic vector search with Java " + version + " version filtering");
+        return new RetrievalResult(
+                documents,
+                RetrievalQuality.VECTOR_SEARCH_VERSION_FILTERED,
+                "Semantic vector search with Java " + version + " version filtering");
     }
 
     /**
      * Create a fallback keyword search result.
      */
     public static RetrievalResult keywordFallback(List<Document> documents, String failureReason) {
-        return new RetrievalResult(documents, RetrievalQuality.LOCAL_KEYWORD_FALLBACK,
-            "Fell back to local keyword search: " + failureReason);
+        return new RetrievalResult(
+                documents,
+                RetrievalQuality.LOCAL_KEYWORD_FALLBACK,
+                "Fell back to local keyword search: " + failureReason);
     }
 
     /**
      * Create a failed search result.
      */
     public static RetrievalResult failed(String reason) {
-        return new RetrievalResult(List.of(), RetrievalQuality.SEARCH_FAILED,
-            "Search failed: " + reason);
+        return new RetrievalResult(List.of(), RetrievalQuality.SEARCH_FAILED, "Search failed: " + reason);
     }
 
     /**
      * Returns true if retrieval used semantic vector search (not keyword fallback).
      */
     public boolean isSemanticSearch() {
-        return quality == RetrievalQuality.VECTOR_SEARCH
-            || quality == RetrievalQuality.VECTOR_SEARCH_VERSION_FILTERED;
+        return quality == RetrievalQuality.VECTOR_SEARCH || quality == RetrievalQuality.VECTOR_SEARCH_VERSION_FILTERED;
     }
 
     /**
      * Returns true if retrieval degraded to a fallback mode.
      */
     public boolean isDegraded() {
-        return quality == RetrievalQuality.LOCAL_KEYWORD_FALLBACK
-            || quality == RetrievalQuality.SEARCH_FAILED;
+        return quality == RetrievalQuality.LOCAL_KEYWORD_FALLBACK || quality == RetrievalQuality.SEARCH_FAILED;
     }
 
     /**
@@ -112,14 +108,12 @@ public record RetrievalResult(
     public String getLlmContextNote() {
         return switch (quality) {
             case VECTOR_SEARCH -> "";
-            case VECTOR_SEARCH_VERSION_FILTERED ->
-                "Note: Results filtered to match requested Java version.";
+            case VECTOR_SEARCH_VERSION_FILTERED -> "Note: Results filtered to match requested Java version.";
             case LOCAL_KEYWORD_FALLBACK ->
-                "IMPORTANT: Using keyword-based fallback search with limited semantic understanding. " +
-                "Results may be less relevant. " + qualityReason;
+                "IMPORTANT: Using keyword-based fallback search with limited semantic understanding. "
+                        + "Results may be less relevant. " + qualityReason;
             case SEARCH_FAILED ->
-                "WARNING: Document retrieval failed. Responding based on training knowledge only. " +
-                qualityReason;
+                "WARNING: Document retrieval failed. Responding based on training knowledge only. " + qualityReason;
         };
     }
 }

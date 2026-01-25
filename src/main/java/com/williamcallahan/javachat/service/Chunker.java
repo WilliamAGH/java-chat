@@ -1,14 +1,13 @@
 package com.williamcallahan.javachat.service;
 
-import com.knuddels.jtokkit.api.Encoding;
-import com.knuddels.jtokkit.api.EncodingType;
-import com.knuddels.jtokkit.api.EncodingRegistry;
 import com.knuddels.jtokkit.Encodings;
+import com.knuddels.jtokkit.api.Encoding;
+import com.knuddels.jtokkit.api.EncodingRegistry;
+import com.knuddels.jtokkit.api.EncodingType;
 import com.knuddels.jtokkit.api.IntArrayList;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.stereotype.Component;
 
 /**
  * Splits text into token-aware chunks using the shared encoding registry.
@@ -69,4 +68,3 @@ public class Chunker {
         return encoding.decode(lastTokens);
     }
 }
-

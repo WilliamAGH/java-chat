@@ -9,10 +9,7 @@ package com.williamcallahan.javachat.domain.prompt;
  * @param systemPrompt the complete system instruction text
  * @param estimatedTokens approximate token count for budget calculations
  */
-public record SystemSegment(
-        String systemPrompt,
-        int estimatedTokens
-) implements PromptSegment {
+public record SystemSegment(String systemPrompt, int estimatedTokens) implements PromptSegment {
 
     /**
      * Creates a system segment with validation.

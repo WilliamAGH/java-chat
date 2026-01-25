@@ -1,9 +1,6 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.LinkedHashMap;
@@ -11,6 +8,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Central registry for documentation source URL mappings.
@@ -26,12 +25,11 @@ public final class DocsSourceRegistry {
     private static final Logger LOGGER = LoggerFactory.getLogger(DocsSourceRegistry.class);
 
     private static final String DOCS_SOURCES_RESOURCE = "/docs-sources.properties";
-    private static final String LOG_DOCS_SOURCES_LOADED =
-        "Loaded docs-sources.properties with {} entries";
+    private static final String LOG_DOCS_SOURCES_LOADED = "Loaded docs-sources.properties with {} entries";
     private static final String LOG_DOCS_SOURCES_MISSING =
-        "docs-sources.properties not found on classpath; using default URL mappings";
+            "docs-sources.properties not found on classpath; using default URL mappings";
     private static final String LOG_DOCS_SOURCES_LOAD_FAILED =
-        "Failed to load docs-sources.properties (exceptionType={}) - using default URL mappings";
+            "Failed to load docs-sources.properties (exceptionType={}) - using default URL mappings";
 
     private static final String JAVA24_API_BASE_KEY = "JAVA24_API_BASE";
     private static final String JAVA25_API_BASE_KEY = "JAVA25_API_BASE";
@@ -43,12 +41,10 @@ public final class DocsSourceRegistry {
 
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
     private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/docs/api/";
-    private static final String DEFAULT_SPRING_BOOT_API_BASE =
-        "https://docs.spring.io/spring-boot/docs/current/api/";
+    private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/docs/current/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
-        "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
-    private static final String DEFAULT_SPRING_AI_API_BASE =
-        "https://docs.spring.io/spring-ai/reference/1.0/api/";
+            "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
+    private static final String DEFAULT_SPRING_AI_API_BASE = "https://docs.spring.io/spring-ai/reference/1.0/api/";
 
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
     private static final String LOCAL_DOCS_JAVA24 = LOCAL_DOCS_ROOT + "java24/";
@@ -79,20 +75,16 @@ public final class DocsSourceRegistry {
     public static final String JAVA24_API_BASE = resolveSetting(JAVA24_API_BASE_KEY, DEFAULT_JAVA24);
     public static final String JAVA25_API_BASE = resolveSetting(JAVA25_API_BASE_KEY, DEFAULT_JAVA25);
     public static final String SPRING_BOOT_API_BASE =
-        resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
+            resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
-        resolveSetting(SPRING_FRAMEWORK_API_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_API_BASE);
+            resolveSetting(SPRING_FRAMEWORK_API_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_API_BASE);
     public static final String SPRING_AI_API_BASE = resolveSetting(SPRING_AI_API_BASE_KEY, DEFAULT_SPRING_AI_API_BASE);
 
-    private static final String[] EMBEDDED_HOST_MARKERS = {
-        DOCS_ORACLE_HOST_MARKER,
-        SPRING_DOCS_HOST_MARKER
-    };
+    private static final String[] EMBEDDED_HOST_MARKERS = {DOCS_ORACLE_HOST_MARKER, SPRING_DOCS_HOST_MARKER};
 
     private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
 
-    private DocsSourceRegistry() {
-    }
+    private DocsSourceRegistry() {}
 
     private static Properties loadDocsSourceProperties() {
         final Properties docsSourceProperties = new Properties();
@@ -107,7 +99,8 @@ public final class DocsSourceRegistry {
             }
         } catch (IOException configLoadError) {
             if (LOGGER.isWarnEnabled()) {
-                LOGGER.warn(LOG_DOCS_SOURCES_LOAD_FAILED, configLoadError.getClass().getName());
+                LOGGER.warn(
+                        LOG_DOCS_SOURCES_LOAD_FAILED, configLoadError.getClass().getName());
             }
         }
         return docsSourceProperties;
@@ -163,8 +156,8 @@ public final class DocsSourceRegistry {
                     final String candidateUrl = HTTPS_PREFIX + normalizedPath.substring(markerIndex);
                     // Fix Spring URLs using proper string parsing
                     final String normalizedUrl = candidateUrl.startsWith(SPRING_DOCS_HTTPS_PREFIX)
-                        ? SpringDocsUrlNormalizer.normalize(candidateUrl)
-                        : candidateUrl;
+                            ? SpringDocsUrlNormalizer.normalize(candidateUrl)
+                            : candidateUrl;
                     reconstructedUrl = Optional.of(normalizedUrl);
                     break;
                 }
@@ -203,9 +196,7 @@ public final class DocsSourceRegistry {
                     final String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
                     // Only map the basename to avoid subfolder leakage
                     final int lastSlash = fileName.lastIndexOf('/');
-                    final String baseName = lastSlash >= 0
-                        ? fileName.substring(lastSlash + 1)
-                        : fileName;
+                    final String baseName = lastSlash >= 0 ? fileName.substring(lastSlash + 1) : fileName;
                     publicPdfUrl = Optional.of(PUBLIC_PDFS_BASE + baseName);
                 }
             }
@@ -230,14 +221,9 @@ public final class DocsSourceRegistry {
         result = result.replace("/api/api/", "/api/");
         // Fix malformed Spring docs paths that accidentally include '/java/' segment
         if (result.contains(SPRING_DOCS_HTTPS_PREFIX)) {
+            result = result.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
             result = result.replace(
-                "/spring-boot/docs/current/api/java/",
-                "/spring-boot/docs/current/api/"
-            );
-            result = result.replace(
-                "/spring-framework/docs/current/javadoc-api/java/",
-                "/spring-framework/docs/current/javadoc-api/"
-            );
+                    "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
         }
         // Remove accidental double slashes (but keep protocol)
         int protoIdx = result.indexOf("://");
@@ -260,8 +246,8 @@ public final class DocsSourceRegistry {
             return Optional.empty();
         }
         return mapBookLocalToPublic(absolutePath)
-            .or(() -> reconstructFromEmbeddedHost(absolutePath))
-            .or(() -> mapLocalPrefixToRemote(absolutePath));
+                .or(() -> reconstructFromEmbeddedHost(absolutePath))
+                .or(() -> mapLocalPrefixToRemote(absolutePath));
     }
 
     /**
@@ -283,9 +269,7 @@ public final class DocsSourceRegistry {
         }
 
         // Map book PDFs to public server path
-        String resolvedPath = trimmedUrl.startsWith("file://")
-            ? trimmedUrl.substring("file://".length())
-            : trimmedUrl;
+        String resolvedPath = trimmedUrl.startsWith("file://") ? trimmedUrl.substring("file://".length()) : trimmedUrl;
         Optional<String> publicPdf = mapBookLocalToPublic(resolvedPath);
         if (publicPdf.isPresent()) {
             return publicPdf.get();

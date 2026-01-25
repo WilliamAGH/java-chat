@@ -1,10 +1,9 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.stereotype.Component;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import org.springframework.stereotype.Component;
 
 /**
  * Computes stable hashes for content and chunk metadata.
@@ -46,4 +45,3 @@ public class ContentHasher {
         return sha256(hashInput);
     }
 }
-

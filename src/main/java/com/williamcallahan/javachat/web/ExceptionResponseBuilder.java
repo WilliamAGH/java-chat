@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import com.openai.errors.OpenAIServiceException;
+import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -8,7 +9,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
-import java.util.Optional;
 
 /**
  * Centralized utility for building consistent error responses across controllers.
@@ -25,8 +25,7 @@ public class ExceptionResponseBuilder {
      * @return ResponseEntity with error details
      */
     public ResponseEntity<ApiErrorResponse> buildErrorResponse(HttpStatus status, String message) {
-        return ResponseEntity.status(status)
-            .body(ApiErrorResponse.error(message));
+        return ResponseEntity.status(status).body(ApiErrorResponse.error(message));
     }
 
     /**
@@ -38,8 +37,7 @@ public class ExceptionResponseBuilder {
      * @return ResponseEntity with error details
      */
     public ResponseEntity<ApiErrorResponse> buildErrorResponse(HttpStatus status, String message, Exception exception) {
-        return ResponseEntity.status(status)
-            .body(ApiErrorResponse.error(message, describeException(exception)));
+        return ResponseEntity.status(status).body(ApiErrorResponse.error(message, describeException(exception)));
     }
 
     /**
@@ -94,8 +92,8 @@ public class ExceptionResponseBuilder {
         if (!responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
-        HttpHeaders headers = Optional.ofNullable(exception.getResponseHeaders())
-            .orElseGet(HttpHeaders::new);
+        HttpHeaders headers =
+                Optional.ofNullable(exception.getResponseHeaders()).orElseGet(HttpHeaders::new);
         if (!headers.isEmpty()) {
             details.append(", headers=").append(headers);
         }
@@ -137,6 +135,8 @@ public class ExceptionResponseBuilder {
     }
 
     private void appendStatusExceptionDetails(StringBuilder details, ResponseStatusException exception) {
-        details.append(" [httpStatus=").append(exception.getStatusCode().value()).append("]");
+        details.append(" [httpStatus=")
+                .append(exception.getStatusCode().value())
+                .append("]");
     }
 }

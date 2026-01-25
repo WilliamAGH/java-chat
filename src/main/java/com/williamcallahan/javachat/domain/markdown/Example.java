@@ -5,7 +5,7 @@ package com.williamcallahan.javachat.domain.markdown;
  * Provides code examples and demonstrations.
  */
 public record Example(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
-    
+
     public Example {
         if (content == null || content.trim().isEmpty()) {
             throw new IllegalArgumentException("Example content cannot be null or empty");
@@ -17,7 +17,7 @@ public record Example(String content, EnrichmentPriority priority, int position)
             throw new IllegalArgumentException("Example position must be non-negative");
         }
     }
-    
+
     /**
      * Creates an example with medium priority.
      * @param content the example content
@@ -27,7 +27,7 @@ public record Example(String content, EnrichmentPriority priority, int position)
     public static Example create(String content, int position) {
         return new Example(content, EnrichmentPriority.MEDIUM, position);
     }
-    
+
     @Override
     public String type() {
         return "example";

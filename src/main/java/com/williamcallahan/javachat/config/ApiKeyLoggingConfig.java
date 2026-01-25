@@ -31,7 +31,7 @@ public class ApiKeyLoggingConfig {
     private static final String LOG_CHAT_GITHUB_FALLBACK = "Chat API: Using GitHub Models (fallback)";
     private static final String LOG_CHAT_OPENAI_FALLBACK = "Chat API: Using OpenAI API (fallback)";
     private static final String LOG_CHAT_MISSING =
-        "Chat API: No API key configured - chat functionality will not work!";
+            "Chat API: No API key configured - chat functionality will not work!";
     private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
     private static final String OPENAI_API_KEY_PROPERTY = "${OPENAI_API_KEY:}";
     private static final String QDRANT_API_KEY_PROPERTY = "${QDRANT_API_KEY:}";

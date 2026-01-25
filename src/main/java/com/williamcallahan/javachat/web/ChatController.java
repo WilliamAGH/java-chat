@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.*;
+
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.config.AppProperties;
@@ -7,32 +9,29 @@ import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.service.ChatService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
+import com.williamcallahan.javachat.service.RetrievalService;
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
-import reactor.core.publisher.Flux;
-import org.springframework.http.codec.ServerSentEvent;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
-import static com.williamcallahan.javachat.web.SseConstants.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
+import reactor.core.publisher.Flux;
 
 /**
  * Exposes chat endpoints for streaming responses, session history management, and diagnostics.
@@ -66,13 +65,15 @@ public class ChatController extends BaseController {
      * @param exceptionBuilder shared exception response builder
      * @param appProperties centralized application configuration
      */
-    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
-                         OpenAIStreamingService openAIStreamingService,
-                         RetrievalService retrievalService,
-                         SseSupport sseSupport,
-                         RestTemplateBuilder restTemplateBuilder,
-                         ExceptionResponseBuilder exceptionBuilder,
-                         AppProperties appProperties) {
+    public ChatController(
+            ChatService chatService,
+            ChatMemoryService chatMemory,
+            OpenAIStreamingService openAIStreamingService,
+            RetrievalService retrievalService,
+            SseSupport sseSupport,
+            RestTemplateBuilder restTemplateBuilder,
+            ExceptionResponseBuilder exceptionBuilder,
+            AppProperties appProperties) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
@@ -88,10 +89,9 @@ public class ChatController extends BaseController {
      */
     private String normalizeRole(ChatTurn turn) {
         return turn.getRole() == null
-            ? ""
-            : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
+                ? ""
+                : AsciiTextNormalizer.toLowerAscii(turn.getRole().trim());
     }
-
 
     /**
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
@@ -117,18 +117,18 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] ============================================", requestToken);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
         PIPELINE_LOG.info("[{}] ============================================", requestToken);
-        
+
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
-        
+
         chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
         AtomicInteger chunkCount = new AtomicInteger(0);
 
         // Build structured prompt for intelligent truncation
         // Pass model hint to optimize RAG for token-constrained models
-        ChatService.StructuredPromptOutcome promptOutcome =
-            chatService.buildStructuredPromptWithContextOutcome(history, userQuery, ModelConfiguration.DEFAULT_MODEL);
+        ChatService.StructuredPromptOutcome promptOutcome = chatService.buildStructuredPromptWithContextOutcome(
+                history, userQuery, ModelConfiguration.DEFAULT_MODEL);
 
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
@@ -170,9 +170,8 @@ public class ChatController extends BaseController {
                     .onErrorResume(error -> {
                         // Log and send error event to client - errors must be communicated, not silently dropped
                         String errorDetail = buildUserFacingErrorMessage(error);
-                        String diagnostics = error instanceof Exception exception
-                            ? describeException(exception)
-                            : error.toString();
+                        String diagnostics =
+                                error instanceof Exception exception ? describeException(exception) : error.toString();
                         PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
                         return sseSupport.sseError(errorDetail, diagnostics);
                     });
@@ -192,19 +191,16 @@ public class ChatController extends BaseController {
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
         // Mirror token-constrained model constraints used in buildPromptWithContext
         RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
-            query,
-            ModelConfiguration.RAG_LIMIT_CONSTRAINED,
-            ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
-        );
+                query, ModelConfiguration.RAG_LIMIT_CONSTRAINED, ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         // Normalize URLs the same way as citations so we never emit file:// links
         List<Citation> citations = retrievalService.toCitations(outcome.documents());
         if (outcome.notices().isEmpty()) {
             return RetrievalDiagnosticsResponse.success(citations);
         }
         String noticeDetails = outcome.notices().stream()
-            .map(notice -> notice.summary() + ": " + notice.details())
-            .reduce((first, second) -> first + "; " + second)
-            .orElse("Retrieval warnings present");
+                .map(notice -> notice.summary() + ": " + notice.details())
+                .reduce((first, second) -> first + "; " + second)
+                .orElse("Retrieval warnings present");
         return new RetrievalDiagnosticsResponse(citations, noticeDetails);
     }
 
@@ -258,12 +254,16 @@ public class ChatController extends BaseController {
         StringBuilder formatted = new StringBuilder();
         for (var turn : turns) {
             String role = "user".equals(normalizeRole(turn)) ? "User" : "Assistant";
-            formatted.append("### ").append(role).append("\n\n").append(turn.getText()).append("\n\n");
+            formatted
+                    .append("### ")
+                    .append(role)
+                    .append("\n\n")
+                    .append(turn.getText())
+                    .append("\n\n");
         }
         return ResponseEntity.ok(formatted.toString());
     }
 
-    
     /**
      * Clears the chat history for a given session.
      *
@@ -291,16 +291,16 @@ public class ChatController extends BaseController {
     public ResponseEntity<SessionValidationResponse> validateSession(
             @RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest().body(
-                new SessionValidationResponse("", 0, false, "Session ID is required"));
+            return ResponseEntity.badRequest()
+                    .body(new SessionValidationResponse("", 0, false, "Session ID is required"));
         }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
         boolean exists = turnCount > 0;
         return ResponseEntity.ok(new SessionValidationResponse(
-            sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
+                sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
     }
-    
+
     /**
      * Reports whether the configured local embedding server is reachable when the feature is enabled.
      */
@@ -319,8 +319,7 @@ public class ChatController extends BaseController {
         } catch (RestClientException httpError) {
             log.debug("Embedding server health check failed", httpError);
             String details = describeException(httpError);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
-                serverUrl, "UNREACHABLE: " + details));
+            return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(serverUrl, "UNREACHABLE: " + details));
         }
     }
 
@@ -340,14 +339,16 @@ public class ChatController extends BaseController {
 
         if (error instanceof OpenAIIoException ioError) {
             Throwable cause = ioError.getCause();
-            if (cause != null && cause.getMessage() != null
+            if (cause != null
+                    && cause.getMessage() != null
                     && cause.getMessage().toLowerCase(Locale.ROOT).contains("interrupt")) {
                 return "Request cancelled - LLM provider did not respond in time";
             }
             return "LLM provider connection failed - " + error.getClass().getSimpleName();
         }
 
-        if (error instanceof IllegalStateException && error.getMessage() != null
+        if (error instanceof IllegalStateException
+                && error.getMessage() != null
                 && error.getMessage().contains("providers unavailable")) {
             return error.getMessage();
         }

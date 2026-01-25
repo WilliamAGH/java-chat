@@ -11,11 +11,7 @@ package com.williamcallahan.javachat.domain.prompt;
  * @param messageText the message content
  * @param estimatedTokens approximate token count for budget calculations
  */
-public record ConversationTurnSegment(
-        String role,
-        String messageText,
-        int estimatedTokens
-) implements PromptSegment {
+public record ConversationTurnSegment(String role, String messageText, int estimatedTokens) implements PromptSegment {
 
     /** Prefix for assistant messages in the rendered prompt. */
     public static final String ASSISTANT_PREFIX = "Assistant: ";

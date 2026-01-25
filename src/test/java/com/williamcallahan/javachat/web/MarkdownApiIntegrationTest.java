@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.domain.markdown.MarkdownRenderRequest;
 import com.williamcallahan.javachat.service.MarkdownService;
@@ -12,13 +14,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Integration coverage for markdown rendering endpoints with WebMvcTest wiring.
  */
-@org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest(controllers = MarkdownApiIntegrationTest.TestMarkdownController.class)
-@org.springframework.test.context.ContextConfiguration(classes = {MarkdownApiIntegrationTest.TestMarkdownController.class, com.williamcallahan.javachat.service.MarkdownService.class, com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService.class})
+@org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest(
+        controllers = MarkdownApiIntegrationTest.TestMarkdownController.class)
+@org.springframework.test.context.ContextConfiguration(
+        classes = {
+            MarkdownApiIntegrationTest.TestMarkdownController.class,
+            com.williamcallahan.javachat.service.MarkdownService.class,
+            com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService.class
+        })
 @org.springframework.security.test.context.support.WithMockUser
 class MarkdownApiIntegrationTest {
 
@@ -32,12 +38,17 @@ class MarkdownApiIntegrationTest {
     void closingFenceProseIsOutsideCode_viaApi() throws Exception {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
         String payload = objectMapper.writeValueAsString(MarkdownRenderRequest.create(input));
-        String html = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/__test/markdown")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String html = mvc.perform(
+                        org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/__test/markdown")
+                                .with(org.springframework.security.test.web.servlet.request
+                                        .SecurityMockMvcRequestPostProcessors.csrf())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(payload))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                        .isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
         assertTrue(html.contains("<pre>"));
         int codeClose = html.indexOf("</code></pre>");

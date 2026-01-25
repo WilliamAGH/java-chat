@@ -67,7 +67,3 @@ public class ChatTurn {
         this.text = Objects.requireNonNull(text, "text must not be null");
     }
 }
-
-
-
-

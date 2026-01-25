@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.config;
 
-import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * Centralized system prompt configuration for DRY principle.
@@ -18,7 +18,7 @@ public class SystemPromptConfig {
             When answering questions, follow this priority:
             1. Use provided context from our RAG retrievals (Qdrant vector embeddings) containing:
                - Official Java JDK documentation
-               - Spring Framework documentation  
+               - Spring Framework documentation
                - Think Java 2nd edition textbook
                - Related Java ecosystem documentation
             2. If RAG data is unavailable or insufficient for the query, provide the most accurate answer based on your training knowledge
@@ -51,27 +51,27 @@ public class SystemPromptConfig {
             - When RAG data is unavailable, clearly state you're using knowledge from your training cutoff
             - Be explicit about version-specific features when relevant
             """;
-    
+
     @Value("${DOCS_JDK_VERSION:24}")
     private String jdkVersion;
-    
+
     /**
      * Core system prompt shared by all models (OpenAI, GitHub Models, etc.)
      */
     public String getCoreSystemPrompt() {
         return CORE_PROMPT_TEMPLATE.replace(JDK_VERSION_PLACEHOLDER, jdkVersion);
     }
-    
+
     /**
      * Get prompt for when search quality is poor
      */
     public String getLowQualitySearchPrompt() {
         return """
-            Note: Search results may be less relevant than usual. 
+            Note: Search results may be less relevant than usual.
             Feel free to supplement with general Java knowledge while maintaining accuracy.
             """;
     }
-    
+
     /**
      * Get prompt for guided/structured learning mode
      */
@@ -81,7 +81,7 @@ public class SystemPromptConfig {
             Break down complex concepts into digestible parts and build understanding progressively.
             """;
     }
-    
+
     /**
      * Get prompt for code review/analysis mode
      */
@@ -95,7 +95,7 @@ public class SystemPromptConfig {
             Use the learning markers to highlight key insights.
             """;
     }
-    
+
     /**
      * Combine base prompt with context-specific additions
      */

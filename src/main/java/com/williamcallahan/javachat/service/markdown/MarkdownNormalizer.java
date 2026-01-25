@@ -16,7 +16,7 @@ final class MarkdownNormalizer {
         StringBuilder normalizedBuilder = new StringBuilder(markdownText.length() + 64);
         CodeFenceStateTracker fenceTracker = new CodeFenceStateTracker();
 
-        for (int cursor = 0; cursor < markdownText.length();) {
+        for (int cursor = 0; cursor < markdownText.length(); ) {
             boolean isStartOfLine = cursor == 0 || markdownText.charAt(cursor - 1) == '\n';
             CodeFenceStateTracker.FenceMarker fenceMarker = CodeFenceStateTracker.scanFenceMarker(markdownText, cursor);
             boolean isAttachedFenceStart = isAttachedFenceStart(markdownText, cursor);
@@ -59,7 +59,8 @@ final class MarkdownNormalizer {
                 }
             }
             if (!fenceTracker.isInsideFence()) {
-                CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdownText, cursor);
+                CodeFenceStateTracker.BacktickRun backtickRun =
+                        CodeFenceStateTracker.scanBacktickRun(markdownText, cursor);
                 if (backtickRun != null) {
                     fenceTracker.processCharacter(markdownText, cursor, isStartOfLine);
                     appendBacktickRun(normalizedBuilder, markdownText, cursor, backtickRun.length());
@@ -72,8 +73,8 @@ final class MarkdownNormalizer {
         }
         if (fenceTracker.isInsideFence()) {
             char closingChar = fenceTracker.getFenceChar() == 0
-                ? CodeFenceStateTracker.DEFAULT_FENCE_CHAR
-                : fenceTracker.getFenceChar();
+                    ? CodeFenceStateTracker.DEFAULT_FENCE_CHAR
+                    : fenceTracker.getFenceChar();
             int closingLength = Math.max(CodeFenceStateTracker.FENCE_MIN_LENGTH, fenceTracker.getFenceLength());
             normalizedBuilder.append('\n').append(String.valueOf(closingChar).repeat(closingLength));
         }
@@ -171,8 +172,8 @@ final class MarkdownNormalizer {
         return digitIndex + 1 < trimmedLine.length() && trimmedLine.charAt(digitIndex + 1) == ' ';
     }
 
-    private static void appendFenceMarker(StringBuilder builder, CodeFenceStateTracker.FenceMarker marker,
-                                          String text, int index) {
+    private static void appendFenceMarker(
+            StringBuilder builder, CodeFenceStateTracker.FenceMarker marker, String text, int index) {
         for (int offset = 0; offset < marker.length(); offset++) {
             builder.append(text.charAt(index + offset));
         }

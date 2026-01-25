@@ -1,15 +1,14 @@
 package com.williamcallahan.javachat.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 /**
  * Searches locally parsed documents using simple keyword scoring as a fallback when vector retrieval is unavailable.
@@ -51,9 +50,10 @@ public class LocalSearchService {
         Map<Path, Double> scores = new HashMap<>();
 
         try (var files = Files.walk(parsedDir)) {
-            List<Path> textFiles = files.filter(pathCandidate -> pathCandidate.toString().endsWith(".txt"))
-                .limit(MAX_FILES_TO_SCAN)
-                .collect(Collectors.toList());
+            List<Path> textFiles = files.filter(
+                            pathCandidate -> pathCandidate.toString().endsWith(".txt"))
+                    .limit(MAX_FILES_TO_SCAN)
+                    .collect(Collectors.toList());
 
             log.debug("Local search scanning {} files", textFiles.size());
 
@@ -68,29 +68,29 @@ public class LocalSearchService {
                     }
                     if (score > 0) {
                         scores.put(
-                            textFile,
-                            score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, normalizedContent.length())
-                        );
+                                textFile, score / Math.max(MIN_CONTENT_LENGTH_FOR_SCORING, normalizedContent.length()));
                     }
                 } catch (IOException fileReadError) {
-                    log.debug("Skipping unreadable file (exception type: {})",
-                        fileReadError.getClass().getSimpleName());
+                    log.debug(
+                            "Skipping unreadable file (exception type: {})",
+                            fileReadError.getClass().getSimpleName());
                 }
             }
 
             List<SearchHit> searchHits = scores.entrySet().stream()
-                .sorted(Map.Entry.<Path, Double>comparingByValue().reversed())
-                .limit(topK)
-                .map(scoreEntry -> toSearchHit(scoreEntry.getKey(), scoreEntry.getValue()))
-                .flatMap(Optional::stream)
-                .collect(Collectors.toList());
+                    .sorted(Map.Entry.<Path, Double>comparingByValue().reversed())
+                    .limit(topK)
+                    .map(scoreEntry -> toSearchHit(scoreEntry.getKey(), scoreEntry.getValue()))
+                    .flatMap(Optional::stream)
+                    .collect(Collectors.toList());
 
             log.info("Local search found {} hits", searchHits.size());
             return SearchOutcome.success(searchHits);
 
         } catch (IOException walkError) {
-            log.error("Local search failed to walk directory (exception type: {})",
-                walkError.getClass().getSimpleName());
+            log.error(
+                    "Local search failed to walk directory (exception type: {})",
+                    walkError.getClass().getSimpleName());
             return SearchOutcome.ioError(walkError.getMessage());
         }
     }
@@ -108,14 +108,13 @@ public class LocalSearchService {
             // Filename pattern: safeUrl_index_hash.txt
             // Defensive: handle files without underscore delimiter
             int underscoreIdx = fileName.indexOf("_");
-            String safeName = underscoreIdx > 0
-                ? fileName.substring(0, underscoreIdx)
-                : fileName.replace(".txt", "");
+            String safeName = underscoreIdx > 0 ? fileName.substring(0, underscoreIdx) : fileName.replace(".txt", "");
             String url = fromSafeName(safeName);
             return Optional.of(new SearchHit(url, text, score));
         } catch (IOException readError) {
-            log.warn("Failed to read result file (exception type: {})",
-                readError.getClass().getSimpleName());
+            log.warn(
+                    "Failed to read result file (exception type: {})",
+                    readError.getClass().getSimpleName());
             return Optional.empty();
         }
     }
@@ -211,8 +210,8 @@ public class LocalSearchService {
          * Builds a failure outcome for a missing parsed document directory.
          */
         public static SearchOutcome directoryNotFound(String path) {
-            return new SearchOutcome(List.of(), Status.DIRECTORY_NOT_FOUND,
-                Optional.of("Search directory not found: " + path));
+            return new SearchOutcome(
+                    List.of(), Status.DIRECTORY_NOT_FOUND, Optional.of("Search directory not found: " + path));
         }
 
         /**

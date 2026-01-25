@@ -1,8 +1,9 @@
 package com.williamcallahan.javachat.service;
 
+import static java.io.ObjectInputFilter.Status;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,8 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-
-import static java.io.ObjectInputFilter.Status;
 
 /**
  * Reads embedding cache files in JSON or legacy serialized formats.
@@ -112,18 +111,18 @@ final class EmbeddingCacheFileImporter {
 
         String className = serializedClass.getName();
         if (Objects.equals(className, EmbeddingCacheService.CachedEmbedding.class.getName())
-            || Objects.equals(className, "java.util.ArrayList")
-            || Objects.equals(className, "java.util.HashMap")
-            || Objects.equals(className, "java.util.LinkedHashMap")
-            || Objects.equals(className, "java.util.Collections$UnmodifiableMap")
-            || Objects.equals(className, "java.lang.String")
-            || Objects.equals(className, "java.lang.Integer")
-            || Objects.equals(className, "java.lang.Long")
-            || Objects.equals(className, "java.lang.Double")
-            || Objects.equals(className, "java.lang.Float")
-            || Objects.equals(className, "java.lang.Boolean")
-            || Objects.equals(className, "java.time.LocalDateTime")
-            || Objects.equals(className, "java.time.Ser")) {
+                || Objects.equals(className, "java.util.ArrayList")
+                || Objects.equals(className, "java.util.HashMap")
+                || Objects.equals(className, "java.util.LinkedHashMap")
+                || Objects.equals(className, "java.util.Collections$UnmodifiableMap")
+                || Objects.equals(className, "java.lang.String")
+                || Objects.equals(className, "java.lang.Integer")
+                || Objects.equals(className, "java.lang.Long")
+                || Objects.equals(className, "java.lang.Double")
+                || Objects.equals(className, "java.lang.Float")
+                || Objects.equals(className, "java.lang.Boolean")
+                || Objects.equals(className, "java.time.LocalDateTime")
+                || Objects.equals(className, "java.time.Ser")) {
             return Status.ALLOWED;
         }
 
@@ -140,23 +139,24 @@ final class EmbeddingCacheFileImporter {
             }
             if (!(deserialized instanceof List<?> legacyList)) {
                 throw new IOException("Unexpected legacy cache format; expected a List but got: "
-                    + deserialized.getClass().getName());
+                        + deserialized.getClass().getName());
             }
 
             List<EmbeddingCacheEntry> converted = new ArrayList<>(legacyList.size());
             for (Object legacyEntry : legacyList) {
                 if (!(legacyEntry instanceof EmbeddingCacheService.CachedEmbedding cachedEmbedding)) {
                     throw new IOException("Unexpected legacy cache entry type: "
-                        + (legacyEntry == null ? "null" : legacyEntry.getClass().getName()));
+                            + (legacyEntry == null
+                                    ? "null"
+                                    : legacyEntry.getClass().getName()));
                 }
                 EmbeddingCacheEntry convertedEntry = new EmbeddingCacheEntry(
-                    cachedEmbedding.id == null || cachedEmbedding.id.isBlank()
-                        ? UUID.randomUUID().toString()
-                        : cachedEmbedding.id,
-                    cachedEmbedding.content,
-                    cachedEmbedding.embedding,
-                    EmbeddingCacheMetadata.fromLegacyMetadataMap(cachedEmbedding.metadata)
-                );
+                        cachedEmbedding.id == null || cachedEmbedding.id.isBlank()
+                                ? UUID.randomUUID().toString()
+                                : cachedEmbedding.id,
+                        cachedEmbedding.content,
+                        cachedEmbedding.embedding,
+                        EmbeddingCacheMetadata.fromLegacyMetadataMap(cachedEmbedding.metadata));
                 convertedEntry.setCreatedAt(cachedEmbedding.createdAt);
                 convertedEntry.setUploaded(cachedEmbedding.uploaded);
                 converted.add(convertedEntry);

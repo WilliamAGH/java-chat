@@ -1,13 +1,13 @@
 package com.williamcallahan.javachat.service;
 
+import com.openai.core.http.Headers;
+import com.openai.errors.OpenAIServiceException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import com.openai.core.http.Headers;
-import com.openai.errors.OpenAIServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -21,26 +21,20 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 @Component
 public class RateLimitManager {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        RateLimitManager.class
-    );
+    private static final Logger log = LoggerFactory.getLogger(RateLimitManager.class);
 
     /**
      * Encapsulates rate limit information parsed from HTTP headers or error messages.
      * Eliminates data clump where resetTime and retrySeconds travel together.
      */
-    private record ParsedRateLimitInfo(
-        Instant resetTime,
-        long retryAfterSeconds
-    ) {
+    private record ParsedRateLimitInfo(Instant resetTime, long retryAfterSeconds) {
         boolean hasResetTime() {
             return resetTime != null;
         }
     }
 
     private final RateLimitState rateLimitState;
-    private final Map<String, ApiEndpointState> endpointStates =
-        new ConcurrentHashMap<>();
+    private final Map<String, ApiEndpointState> endpointStates = new ConcurrentHashMap<>();
     private final Environment env;
     private final RateLimitHeaderParser headerParser;
 
@@ -58,11 +52,7 @@ public class RateLimitManager {
         private final int dailyLimit;
         private final String typicalRateLimitWindow;
 
-        ApiProvider(
-            String name,
-            int dailyLimit,
-            String typicalRateLimitWindow
-        ) {
+        ApiProvider(String name, int dailyLimit, String typicalRateLimitWindow) {
             this.name = name;
             this.dailyLimit = dailyLimit;
             this.typicalRateLimitWindow = typicalRateLimitWindow;
@@ -99,9 +89,7 @@ public class RateLimitManager {
 
         private volatile int backoffMultiplier = 1;
         private final AtomicInteger requestsToday = new AtomicInteger(0);
-        private volatile Instant dayReset = Instant.now().plus(
-            Duration.ofDays(1)
-        );
+        private volatile Instant dayReset = Instant.now().plus(Duration.ofDays(1));
 
         /**
          * Reports whether the provider is eligible for requests based on the current circuit state.
@@ -177,10 +165,7 @@ public class RateLimitManager {
     }
 
     private ApiEndpointState getOrCreateEndpointState(ApiProvider provider) {
-        return endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
+        return endpointStates.computeIfAbsent(provider.getName(), providerKey -> new ApiEndpointState());
     }
 
     private boolean hasText(String valueText) {
@@ -200,9 +185,7 @@ public class RateLimitManager {
 
         // Then check persistent rate limit state
         if (!rateLimitState.isAvailable(provider.getName())) {
-            Duration remaining = rateLimitState.getRemainingWaitTime(
-                provider.getName()
-            );
+            Duration remaining = rateLimitState.getRemainingWaitTime(provider.getName());
             if (!remaining.isZero()) {
                 log.debug("[{}] Rate limited (persistent state)", providerName);
                 return false;
@@ -262,11 +245,7 @@ public class RateLimitManager {
         state.recordRateLimit(retryAfterSeconds);
 
         // Update persistent state with proper window
-        rateLimitState.recordRateLimit(
-            provider.getName(),
-            resetTime,
-            provider.getTypicalRateLimitWindow()
-        );
+        rateLimitState.recordRateLimit(provider.getName(), resetTime, provider.getTypicalRateLimitWindow());
 
         log.warn("[{}] Rate limited (errorMessage={})", providerName, safeErrorMessage);
     }
@@ -286,7 +265,10 @@ public class RateLimitManager {
         }
         ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
         if (rateLimitInfo.retryAfterSeconds > 0) {
-            applyRateLimit(provider, Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds), rateLimitInfo.retryAfterSeconds);
+            applyRateLimit(
+                    provider,
+                    Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds),
+                    rateLimitInfo.retryAfterSeconds);
             return;
         }
 
@@ -302,10 +284,7 @@ public class RateLimitManager {
     /**
      * Parse rate limit reset time from WebClientResponseException
      */
-    public void recordRateLimitFromException(
-        ApiProvider provider,
-        Throwable error
-    ) {
+    public void recordRateLimitFromException(ApiProvider provider, Throwable error) {
         if (error instanceof WebClientResponseException webError) {
             ParsedRateLimitInfo info = parseRateLimitHeaders(webError);
 
@@ -322,15 +301,10 @@ public class RateLimitManager {
     /**
      * Parse rate limit information from HTTP response headers.
      */
-    private ParsedRateLimitInfo parseRateLimitHeaders(
-        WebClientResponseException webError
-    ) {
-        Instant resetTime = headerParser.parseResetHeader(
-            webError.getHeaders().getFirst("X-RateLimit-Reset")
-        );
-        long retrySeconds = headerParser.parseRetryAfterHeader(
-            webError.getHeaders().getFirst("Retry-After")
-        );
+    private ParsedRateLimitInfo parseRateLimitHeaders(WebClientResponseException webError) {
+        Instant resetTime = headerParser.parseResetHeader(webError.getHeaders().getFirst("X-RateLimit-Reset"));
+        long retrySeconds =
+                headerParser.parseRetryAfterHeader(webError.getHeaders().getFirst("Retry-After"));
 
         // If we have retry seconds but no reset time, compute reset time from retry
         if (resetTime == null && retrySeconds > 0) {
@@ -339,7 +313,6 @@ public class RateLimitManager {
 
         return new ParsedRateLimitInfo(resetTime, retrySeconds);
     }
-
 
     /**
      * Applies a rate limit using reset time and optional explicit retry-after seconds.
@@ -357,20 +330,16 @@ public class RateLimitManager {
         if (retryAfterSecondsOverride > 0) {
             retryAfterSeconds = retryAfterSecondsOverride;
         } else if (resetTime != null) {
-            retryAfterSeconds = Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
+            retryAfterSeconds =
+                    Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
         } else {
             retryAfterSeconds = 0;
         }
 
         state.recordRateLimit(retryAfterSeconds);
-        rateLimitState.recordRateLimit(
-            provider.getName(),
-            resetTime,
-            provider.getTypicalRateLimitWindow()
-        );
+        rateLimitState.recordRateLimit(provider.getName(), resetTime, provider.getTypicalRateLimitWindow());
 
-        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})",
-                 providerName, resetTime, retryAfterSeconds);
+        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})", providerName, resetTime, retryAfterSeconds);
     }
 
     private long extractRetryAfter(String errorMessage) {
@@ -419,9 +388,7 @@ public class RateLimitManager {
     public Optional<ApiProvider> selectBestProvider() {
         // Priority order: OpenAI > GitHub Models > Local
         for (ApiProvider provider : new ApiProvider[] {
-            ApiProvider.OPENAI,
-            ApiProvider.GITHUB_MODELS,
-            ApiProvider.LOCAL,
+            ApiProvider.OPENAI, ApiProvider.GITHUB_MODELS, ApiProvider.LOCAL,
         }) {
             String providerName = sanitizeLogValue(provider.getName());
             if (!isProviderConfigured(provider)) {
@@ -441,9 +408,7 @@ public class RateLimitManager {
                 log.warn("[{}] Unavailable - missing configuration (API key/token)", providerName);
                 continue;
             }
-            Duration remaining = rateLimitState.getRemainingWaitTime(
-                provider.getName()
-            );
+            Duration remaining = rateLimitState.getRemainingWaitTime(provider.getName());
             if (!remaining.isZero()) {
                 log.warn("[{}] Unavailable - rate limited for {} more", providerName, formatDuration(remaining));
             }

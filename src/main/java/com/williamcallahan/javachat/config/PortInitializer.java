@@ -7,7 +7,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 
-
 /**
  * Ensures a usable server port is selected before Spring Boot starts.
  */
@@ -31,7 +30,8 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         // Disable port manipulation entirely when running under the 'test' profile
         for (String activeProfileName : environment.getActiveProfiles()) {
-            String normalizedProfile = AsciiTextNormalizer.toLowerAscii(activeProfileName == null ? "" : activeProfileName.trim());
+            String normalizedProfile =
+                    AsciiTextNormalizer.toLowerAscii(activeProfileName == null ? "" : activeProfileName.trim());
             if (PROFILE_TEST.equals(normalizedProfile)) {
                 System.err.println("[startup] PortInitializer disabled under 'test' profile");
                 return;
@@ -68,9 +68,9 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
             preferred = min;
         }
 
-        environment.getPropertySources().addFirst(
-            new ServerPortPropertySource(PORT_SOURCE_NAME, Integer.toString(preferred))
-        );
+        environment
+                .getPropertySources()
+                .addFirst(new ServerPortPropertySource(PORT_SOURCE_NAME, Integer.toString(preferred)));
 
         System.err.println("[startup] Using server.port=" + preferred + " (allowed range " + min + "-" + max + ")");
     }

@@ -2,36 +2,32 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
-import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
-import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
+import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
+import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
+import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension;
+import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
-import com.vladsch.flexmark.ext.tables.TablesExtension;
-import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
-import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension;
-import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
-
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
+import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
+import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
  * Unified markdown service that uses AST-based processing instead of regex.
  * This is the AGENTS.md compliant replacement for regex-based markdown processing.
- * 
+ *
  * Key improvements:
  * - Uses Flexmark AST visitors instead of regex for structured data extraction
  * - Provides type-safe citation and enrichment objects
@@ -40,12 +36,12 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class UnifiedMarkdownService {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(UnifiedMarkdownService.class);
     private static final int MAX_INPUT_LENGTH = 100000; // 100KB max
     private static final int CACHE_SIZE = 500;
     private static final Duration CACHE_DURATION = Duration.ofMinutes(30);
-    
+
     private final Parser parser;
     private final HtmlRenderer renderer;
     private final CitationProcessor citationProcessor;
@@ -53,58 +49,59 @@ public class UnifiedMarkdownService {
     private final Cache<String, ProcessedMarkdown> processCache;
 
     // Enrichment marker parsing is handled by a streaming scanner (not regex)
-    
+
     /**
      * Creates the unified markdown processor with AST parsing and caching.
      */
     public UnifiedMarkdownService() {
         // Configure Flexmark with optimal settings
         MutableDataSet options = new MutableDataSet()
-            .set(Parser.EXTENSIONS, Arrays.asList(
-                TablesExtension.create(),
-                StrikethroughExtension.create(),
-                TaskListExtension.create(),
-                AutolinkExtension.create()
-            ))
-            .set(Parser.BLANK_LINES_IN_AST, false)
-            .set(Parser.HTML_BLOCK_DEEP_PARSER, false)
-            .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true)
-            .set(HtmlRenderer.ESCAPE_HTML, true)
-            .set(HtmlRenderer.SUPPRESS_HTML, false)
-            // Convert soft-breaks (single newlines) to <br> tags to preserve LLM line structure.
-            // Matches client-side marked.js with breaks: true for consistent streaming/final render.
-            .set(HtmlRenderer.SOFT_BREAK, "<br />\n")
-            .set(HtmlRenderer.HARD_BREAK, "<br />\n")
-            .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-")
-            .set(HtmlRenderer.SUPPRESSED_LINKS, "(?i)^(javascript|data|vbscript):.*")
-            .set(HtmlRenderer.INDENT_SIZE, 2)
-            // Strict blank line control: never allow consecutive blank lines in output
-            .set(HtmlRenderer.MAX_BLANK_LINES, 0)
-            .set(HtmlRenderer.MAX_TRAILING_BLANK_LINES, 0)
-            .set(TablesExtension.COLUMN_SPANS, false)
-            .set(TablesExtension.APPEND_MISSING_COLUMNS, true)
-            .set(TablesExtension.DISCARD_EXTRA_COLUMNS, true)
-            .set(TablesExtension.HEADER_SEPARATOR_COLUMN_MATCH, true);
-        
+                .set(
+                        Parser.EXTENSIONS,
+                        Arrays.asList(
+                                TablesExtension.create(),
+                                StrikethroughExtension.create(),
+                                TaskListExtension.create(),
+                                AutolinkExtension.create()))
+                .set(Parser.BLANK_LINES_IN_AST, false)
+                .set(Parser.HTML_BLOCK_DEEP_PARSER, false)
+                .set(Parser.INDENTED_CODE_NO_TRAILING_BLANK_LINES, true)
+                .set(HtmlRenderer.ESCAPE_HTML, true)
+                .set(HtmlRenderer.SUPPRESS_HTML, false)
+                // Convert soft-breaks (single newlines) to <br> tags to preserve LLM line structure.
+                // Matches client-side marked.js with breaks: true for consistent streaming/final render.
+                .set(HtmlRenderer.SOFT_BREAK, "<br />\n")
+                .set(HtmlRenderer.HARD_BREAK, "<br />\n")
+                .set(HtmlRenderer.FENCED_CODE_LANGUAGE_CLASS_PREFIX, "language-")
+                .set(HtmlRenderer.SUPPRESSED_LINKS, "(?i)^(javascript|data|vbscript):.*")
+                .set(HtmlRenderer.INDENT_SIZE, 2)
+                // Strict blank line control: never allow consecutive blank lines in output
+                .set(HtmlRenderer.MAX_BLANK_LINES, 0)
+                .set(HtmlRenderer.MAX_TRAILING_BLANK_LINES, 0)
+                .set(TablesExtension.COLUMN_SPANS, false)
+                .set(TablesExtension.APPEND_MISSING_COLUMNS, true)
+                .set(TablesExtension.DISCARD_EXTRA_COLUMNS, true)
+                .set(TablesExtension.HEADER_SEPARATOR_COLUMN_MATCH, true);
+
         this.parser = Parser.builder(options).build();
         this.renderer = HtmlRenderer.builder(options).build();
         this.citationProcessor = new CitationProcessor();
         this.enrichmentPlaceholderizer = new EnrichmentPlaceholderizer(parser, renderer); // init
-        
+
         // Initialize cache
         this.processCache = Caffeine.newBuilder()
-            .maximumSize(CACHE_SIZE)
-            .expireAfterWrite(CACHE_DURATION)
-            .recordStats()
-            .build();
-        
+                .maximumSize(CACHE_SIZE)
+                .expireAfterWrite(CACHE_DURATION)
+                .recordStats()
+                .build();
+
         logger.info("UnifiedMarkdownService initialized with AST-based processing");
     }
-    
+
     /**
      * Processes markdown using AST-based approach instead of regex.
      * This is the main entry point for AGENTS.md compliant markdown processing.
-     * 
+     *
      * @param markdown the markdown text to process
      * @return structured ProcessedMarkdown result
      */
@@ -126,8 +123,7 @@ public class UnifiedMarkdownService {
         long startTime = System.currentTimeMillis();
 
         if (markdown.length() > MAX_INPUT_LENGTH) {
-            logger.warn("Markdown input exceeds maximum length: {} > {}",
-                       markdown.length(), MAX_INPUT_LENGTH);
+            logger.warn("Markdown input exceeds maximum length: {} > {}", markdown.length(), MAX_INPUT_LENGTH);
             markdown = markdown.substring(0, MAX_INPUT_LENGTH);
         }
 
@@ -137,46 +133,49 @@ public class UnifiedMarkdownService {
         // Replace enrichment markers with placeholders to prevent cross-node splits (e.g., example code fences)
         java.util.Map<String, String> placeholders = new java.util.HashMap<>();
         java.util.List<MarkdownEnrichment> placeholderEnrichments = new java.util.ArrayList<>();
-        String placeholderMarkdown = enrichmentPlaceholderizer.extractAndPlaceholderizeEnrichments(markdown, placeholderEnrichments, placeholders);
-        
+        String placeholderMarkdown = enrichmentPlaceholderizer.extractAndPlaceholderizeEnrichments(
+                markdown, placeholderEnrichments, placeholders);
+
         try {
             // Parse markdown to AST - this is the foundation of AGENTS.md compliance
             Node document = parser.parse(placeholderMarkdown);
-            
+
             // AST-level cleanups prior to HTML rendering
             transformAst(document);
-            
+
             // Extract structured data using AST visitors (not regex)
             List<MarkdownCitation> citations = citationProcessor.extractCitations(document);
             List<MarkdownEnrichment> enrichments = new java.util.ArrayList<>(placeholderEnrichments);
-            
+
             // Render HTML from AST
             String html = renderer.render(document);
 
             // Reinsert enrichment cards from placeholders (handles example blocks)
             html = enrichmentPlaceholderizer.renderEnrichmentBlocksFromPlaceholders(html, placeholders);
-            
+
             // Post-process HTML using DOM-safe methods
             html = postProcessHtml(html);
-            
+
             long processingTime = System.currentTimeMillis() - startTime;
-            
+
             ProcessedMarkdown processedMarkdown = new ProcessedMarkdown(
-                html, 
-                citations, 
-                enrichments, 
-                List.of(), // No warnings for now - will be added in future iterations
-                processingTime
-            );
-            
+                    html,
+                    citations,
+                    enrichments,
+                    List.of(), // No warnings for now - will be added in future iterations
+                    processingTime);
+
             // Cache the result using the original input key for consistency
             processCache.put(cacheKey, processedMarkdown);
-            
-            logger.debug("Processed markdown in {}ms: {} citations, {} enrichments", 
-                        processingTime, citations.size(), enrichments.size());
-            
+
+            logger.debug(
+                    "Processed markdown in {}ms: {} citations, {} enrichments",
+                    processingTime,
+                    citations.size(),
+                    enrichments.size());
+
             return processedMarkdown;
-            
+
         } catch (Exception processingFailure) {
             logger.error("Error processing markdown with AST approach", processingFailure);
             throw new MarkdownProcessingException("Markdown processing failed", processingFailure);
@@ -196,7 +195,7 @@ public class UnifiedMarkdownService {
     /**
      * Post-processes HTML using safe string operations.
      * This replaces regex-based post-processing with safer alternatives.
-     * 
+     *
      * @param html the HTML to post-process
      * @return cleaned HTML
      */
@@ -214,7 +213,10 @@ public class UnifiedMarkdownService {
         }
         // Remove orphan brace-only paragraphs left by fragmented generations
         for (Element paragraphElement : new java.util.ArrayList<>(document.select("p"))) {
-            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            if (!paragraphElement
+                    .parents()
+                    .select("pre, code, .inline-enrichment")
+                    .isEmpty()) continue;
             String paragraphText = paragraphElement.text();
             if (paragraphText != null) {
                 String trimmedParagraphText = paragraphText.trim();
@@ -288,7 +290,7 @@ public class UnifiedMarkdownService {
             // Track <pre> and <code> tags to preserve whitespace inside them
             if (currentChar == '<' && cursor + 4 < html.length()) {
                 String ahead = html.substring(cursor, Math.min(cursor + 6, html.length()))
-                    .toLowerCase(Locale.ROOT);
+                        .toLowerCase(Locale.ROOT);
                 if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
                     depth = depth.incrementPre();
                 } else if (ahead.startsWith("</pre>")) {
@@ -325,7 +327,10 @@ public class UnifiedMarkdownService {
         }
         java.util.List<Element> paragraphElements = new java.util.ArrayList<>(document.select("p"));
         for (Element paragraphElement : paragraphElements) {
-            if (!paragraphElement.parents().select("pre, code, .inline-enrichment").isEmpty()) continue;
+            if (!paragraphElement
+                    .parents()
+                    .select("pre, code, .inline-enrichment")
+                    .isEmpty()) continue;
             // Only transform plain-text paragraphs to avoid breaking links/code spans.
             if (!paragraphElement.children().isEmpty()) continue;
 
@@ -350,23 +355,18 @@ public class UnifiedMarkdownService {
     }
 
     // === Pre-normalization and paragraph utilities (no regex) ===
-    
+
     // fixSentenceSpacing and splitLongParagraphs removed to ensure clean rendering
-    
+
     /**
      * Gets cache statistics for monitoring.
      * @return cache statistics
      */
     public CacheStats getCacheStats() {
         var stats = processCache.stats();
-        return new CacheStats(
-            stats.hitCount(),
-            stats.missCount(),
-            stats.evictionCount(),
-            processCache.estimatedSize()
-        );
+        return new CacheStats(stats.hitCount(), stats.missCount(), stats.evictionCount(), processCache.estimatedSize());
     }
-    
+
     /**
      * Clears the processing cache.
      */
@@ -374,23 +374,17 @@ public class UnifiedMarkdownService {
         processCache.invalidateAll();
         logger.info("Unified markdown processing cache cleared");
     }
-    
+
     /**
      * Cache statistics record.
      */
-	    public record CacheStats(
-	        long hitCount,
-	        long missCount,
-	        long evictionCount,
-	        long size
-	    ) {
-	        /**
-	         * Computes the cache hit rate as a fraction between 0.0 and 1.0.
-	         */
-	        public double hitRate() {
-	            long total = hitCount + missCount;
-	            return total == 0 ? 0.0 : (double) hitCount / total;
-	        }
-	    }
-
+    public record CacheStats(long hitCount, long missCount, long evictionCount, long size) {
+        /**
+         * Computes the cache hit rate as a fraction between 0.0 and 1.0.
+         */
+        public double hitRate() {
+            long total = hitCount + missCount;
+            return total == 0 ? 0.0 : (double) hitCount / total;
+        }
+    }
 }

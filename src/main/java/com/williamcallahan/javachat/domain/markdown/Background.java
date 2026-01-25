@@ -5,7 +5,7 @@ package com.williamcallahan.javachat.domain.markdown;
  * Provides contextual information and explanations.
  */
 public record Background(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
-    
+
     public Background {
         if (content == null || content.trim().isEmpty()) {
             throw new IllegalArgumentException("Background content cannot be null or empty");
@@ -17,7 +17,7 @@ public record Background(String content, EnrichmentPriority priority, int positi
             throw new IllegalArgumentException("Background position must be non-negative");
         }
     }
-    
+
     /**
      * Creates a background element with low priority.
      * @param content the background content
@@ -27,7 +27,7 @@ public record Background(String content, EnrichmentPriority priority, int positi
     public static Background create(String content, int position) {
         return new Background(content, EnrichmentPriority.LOW, position);
     }
-    
+
     @Override
     public String type() {
         return "background";

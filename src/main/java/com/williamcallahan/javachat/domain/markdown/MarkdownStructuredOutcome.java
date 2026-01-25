@@ -7,15 +7,15 @@ import java.util.Objects;
  * Represents structured markdown rendering with typed citations and enrichments.
  */
 public record MarkdownStructuredOutcome(
-    String html,
-    List<MarkdownCitation> citations,
-    List<MarkdownEnrichment> enrichments,
-    List<ProcessingWarning> warnings,
-    long processingTimeMs,
-    String source,
-    int structuredElementCount,
-    boolean isClean
-) implements MarkdownStructuredResponse {
+        String html,
+        List<MarkdownCitation> citations,
+        List<MarkdownEnrichment> enrichments,
+        List<ProcessingWarning> warnings,
+        long processingTimeMs,
+        String source,
+        int structuredElementCount,
+        boolean isClean)
+        implements MarkdownStructuredResponse {
     public MarkdownStructuredOutcome {
         Objects.requireNonNull(html, "Rendered HTML cannot be null");
         Objects.requireNonNull(citations, "Citations cannot be null");

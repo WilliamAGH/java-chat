@@ -1,9 +1,9 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,8 +55,7 @@ public class AppProperties {
     /**
      * Creates configuration sections with default values.
      */
-    public AppProperties() {
-    }
+    public AppProperties() {}
 
     @PostConstruct
     void validateConfiguration() {
@@ -92,11 +91,7 @@ public class AppProperties {
 
     private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
         if (configuredPublicBaseUrl == null || configuredPublicBaseUrl.isBlank()) {
-            log.warn(
-                "{} is not configured; defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+            log.warn("{} is not configured; defaulting to {}", PUBLIC_BASE_URL_KEY, DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
 
@@ -107,64 +102,42 @@ public class AppProperties {
         } catch (URISyntaxException syntaxError) {
             String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
             log.warn(
-                "{} is invalid ({}); defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                sanitizedMessage,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+                    "{} is invalid ({}); defaulting to {}",
+                    PUBLIC_BASE_URL_KEY,
+                    sanitizedMessage,
+                    DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
 
         final String scheme = parsed.getScheme();
         if (scheme == null || scheme.isBlank()) {
-            log.warn(
-                "{} is missing a scheme; defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+            log.warn("{} is missing a scheme; defaulting to {}", PUBLIC_BASE_URL_KEY, DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
 
         final String normalizedScheme = AsciiTextNormalizer.toLowerAscii(scheme);
         if (!"http".equals(normalizedScheme) && !"https".equals(normalizedScheme)) {
-            log.warn(
-                "{} must use http/https scheme; defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+            log.warn("{} must use http/https scheme; defaulting to {}", PUBLIC_BASE_URL_KEY, DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
 
         final String host = parsed.getHost();
         if (host == null || host.isBlank()) {
-            log.warn(
-                "{} is missing a host; defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+            log.warn("{} is missing a host; defaulting to {}", PUBLIC_BASE_URL_KEY, DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
 
         final int port = parsed.getPort();
         try {
             // Strip any path/query/fragment; keep scheme/host/port only.
-            return new URI(
-                normalizedScheme,
-                null,
-                host,
-                port,
-                null,
-                null,
-                null
-            ).toString();
+            return new URI(normalizedScheme, null, host, port, null, null, null).toString();
         } catch (URISyntaxException syntaxError) {
             String sanitizedMessage = sanitizeLogMessage(syntaxError.getMessage());
             log.warn(
-                "{} could not be normalized ({}); defaulting to {}",
-                PUBLIC_BASE_URL_KEY,
-                sanitizedMessage,
-                DEFAULT_PUBLIC_BASE_URL
-            );
+                    "{} could not be normalized ({}); defaulting to {}",
+                    PUBLIC_BASE_URL_KEY,
+                    sanitizedMessage,
+                    DEFAULT_PUBLIC_BASE_URL);
             return DEFAULT_PUBLIC_BASE_URL;
         }
     }
@@ -176,32 +149,77 @@ public class AppProperties {
         return message.replace("\r", "").replace("\n", "");
     }
 
-    public RetrievalAugmentationConfig getRag() { return rag; }
-    public void setRag(RetrievalAugmentationConfig rag) { this.rag = requireConfiguredSection(rag, RAG_KEY); }
+    public RetrievalAugmentationConfig getRag() {
+        return rag;
+    }
 
-    public LocalEmbedding getLocalEmbedding() { return localEmbedding; }
-    public void setLocalEmbedding(LocalEmbedding localEmbedding) { this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY); }
+    public void setRag(RetrievalAugmentationConfig rag) {
+        this.rag = requireConfiguredSection(rag, RAG_KEY);
+    }
 
-    public RemoteEmbedding getRemoteEmbedding() { return remoteEmbedding; }
-    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) { this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY); }
+    public LocalEmbedding getLocalEmbedding() {
+        return localEmbedding;
+    }
 
-    public DocumentationConfig getDocs() { return docs; }
-    public void setDocs(DocumentationConfig docs) { this.docs = requireConfiguredSection(docs, DOCS_KEY); }
+    public void setLocalEmbedding(LocalEmbedding localEmbedding) {
+        this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY);
+    }
 
-    public Diagnostics getDiagnostics() { return diagnostics; }
-    public void setDiagnostics(Diagnostics diagnostics) { this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY); }
+    public RemoteEmbedding getRemoteEmbedding() {
+        return remoteEmbedding;
+    }
 
-    public Qdrant getQdrant() { return qdrant; }
-    public void setQdrant(Qdrant qdrant) { this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY); }
+    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) {
+        this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY);
+    }
 
-    public CorsConfig getCors() { return cors; }
-    public void setCors(CorsConfig cors) { this.cors = requireConfiguredSection(cors, CORS_KEY); }
+    public DocumentationConfig getDocs() {
+        return docs;
+    }
 
-    public Embeddings getEmbeddings() { return embeddings; }
-    public void setEmbeddings(Embeddings embeddings) { this.embeddings = requireConfiguredSection(embeddings, EMBEDDINGS_KEY); }
+    public void setDocs(DocumentationConfig docs) {
+        this.docs = requireConfiguredSection(docs, DOCS_KEY);
+    }
 
-    public Llm getLlm() { return llm; }
-    public void setLlm(Llm llm) { this.llm = requireConfiguredSection(llm, LLM_KEY); }
+    public Diagnostics getDiagnostics() {
+        return diagnostics;
+    }
+
+    public void setDiagnostics(Diagnostics diagnostics) {
+        this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY);
+    }
+
+    public Qdrant getQdrant() {
+        return qdrant;
+    }
+
+    public void setQdrant(Qdrant qdrant) {
+        this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY);
+    }
+
+    public CorsConfig getCors() {
+        return cors;
+    }
+
+    public void setCors(CorsConfig cors) {
+        this.cors = requireConfiguredSection(cors, CORS_KEY);
+    }
+
+    public Embeddings getEmbeddings() {
+        return embeddings;
+    }
+
+    public void setEmbeddings(Embeddings embeddings) {
+        this.embeddings = requireConfiguredSection(embeddings, EMBEDDINGS_KEY);
+    }
+
+    public Llm getLlm() {
+        return llm;
+    }
+
+    public void setLlm(Llm llm) {
+        this.llm = requireConfiguredSection(llm, LLM_KEY);
+    }
 
     private static <T> T requireConfiguredSection(T section, String sectionKey) {
         if (section == null) {
@@ -213,18 +231,36 @@ public class AppProperties {
     /** Qdrant vector store settings. */
     public static class Qdrant {
         private boolean ensurePayloadIndexes = true;
-        public boolean isEnsurePayloadIndexes() { return ensurePayloadIndexes; }
-        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) { this.ensurePayloadIndexes = ensurePayloadIndexes; }
+
+        public boolean isEnsurePayloadIndexes() {
+            return ensurePayloadIndexes;
+        }
+
+        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) {
+            this.ensurePayloadIndexes = ensurePayloadIndexes;
+        }
     }
 
     /** Embedding vector configuration. */
     public static class Embeddings {
         private int dimensions = 1536;
         private String cacheDir = "./data/embeddings-cache";
-        public int getDimensions() { return dimensions; }
-        public void setDimensions(int dimensions) { this.dimensions = dimensions; }
-        public String getCacheDir() { return cacheDir; }
-        public void setCacheDir(String cacheDir) { this.cacheDir = cacheDir; }
+
+        public int getDimensions() {
+            return dimensions;
+        }
+
+        public void setDimensions(int dimensions) {
+            this.dimensions = dimensions;
+        }
+
+        public String getCacheDir() {
+            return cacheDir;
+        }
+
+        public void setCacheDir(String cacheDir) {
+            this.cacheDir = cacheDir;
+        }
 
         Embeddings validateConfiguration() {
             if (dimensions <= 0) {
@@ -240,15 +276,23 @@ public class AppProperties {
         private static final double MAX_TEMPERATURE = 2.0;
 
         private double temperature = 0.7;
-        public double getTemperature() { return temperature; }
-        public void setTemperature(double temperature) { this.temperature = temperature; }
+
+        public double getTemperature() {
+            return temperature;
+        }
+
+        public void setTemperature(double temperature) {
+            this.temperature = temperature;
+        }
 
         Llm validateConfiguration() {
             if (temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
-                throw new IllegalArgumentException(
-                    String.format(Locale.ROOT,
+                throw new IllegalArgumentException(String.format(
+                        Locale.ROOT,
                         "app.llm.temperature must be in range [%.1f, %.1f], got: %.2f",
-                        MIN_TEMPERATURE, MAX_TEMPERATURE, temperature));
+                        MIN_TEMPERATURE,
+                        MAX_TEMPERATURE,
+                        temperature));
             }
             return this;
         }

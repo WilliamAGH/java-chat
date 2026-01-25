@@ -1,28 +1,26 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.*;
+
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import jakarta.annotation.security.PermitAll;
-
+import jakarta.servlet.http.HttpServletResponse;
+import java.time.Duration;
+import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
-import com.williamcallahan.javachat.service.MarkdownService;
-
-import java.util.*;
-import java.time.Duration;
-
-import static com.williamcallahan.javachat.web.SseConstants.*;
 
 /**
  * Exposes guided learning endpoints for lesson metadata, citations, enrichment, and streaming lesson content.
@@ -46,12 +44,13 @@ public class GuidedLearningController extends BaseController {
     /**
      * Creates the guided learning controller wired to the guided learning orchestration services.
      */
-    public GuidedLearningController(GuidedLearningService guidedService,
-                                    ChatMemoryService chatMemory,
-                                    OpenAIStreamingService openAIStreamingService,
-                                    ExceptionResponseBuilder exceptionBuilder,
-                                    MarkdownService markdownService,
-                                    SseSupport sseSupport) {
+    public GuidedLearningController(
+            GuidedLearningService guidedService,
+            ChatMemoryService chatMemory,
+            OpenAIStreamingService openAIStreamingService,
+            ExceptionResponseBuilder exceptionBuilder,
+            MarkdownService markdownService,
+            SseSupport sseSupport) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
@@ -79,7 +78,9 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping("/lesson")
     public GuidedLesson lesson(@RequestParam("slug") String slug) {
-        return guidedService.getLesson(slug).orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: " + slug));
+        return guidedService
+                .getLesson(slug)
+                .orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: " + slug));
     }
 
     /**
@@ -120,7 +121,7 @@ public class GuidedLearningController extends BaseController {
             // Return raw content and let Spring handle SSE formatting automatically
             return Flux.just(payload);
         }
-        
+
         // Stream raw content and let Spring handle SSE formatting automatically
         return guidedService.streamLessonContent(slug);
     }
@@ -164,9 +165,8 @@ public class GuidedLearningController extends BaseController {
      * @throws IllegalStateException if generation times out or returns empty
      */
     private String generateAndCacheLessonContent(String slug) {
-        List<String> chunks = guidedService.streamLessonContent(slug)
-                .collectList()
-                .block(LESSON_CONTENT_TIMEOUT);
+        List<String> chunks =
+                guidedService.streamLessonContent(slug).collectList().block(LESSON_CONTENT_TIMEOUT);
         if (chunks == null || chunks.isEmpty()) {
             log.error("Content generation timed out or returned empty for lesson");
             throw new IllegalStateException("Content generation failed for lesson");
@@ -184,14 +184,15 @@ public class GuidedLearningController extends BaseController {
      * @return A {@link Flux} of ServerSentEvents with JSON-wrapped text chunks.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> stream(@RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> stream(
+            @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
-        String userQuery = request.userQuery()
-                .orElseThrow(() -> new IllegalArgumentException("User query is required"));
-        String lessonSlug = request.lessonSlug()
-                .orElseThrow(() -> new IllegalArgumentException("Lesson slug is required"));
+        String userQuery =
+                request.userQuery().orElseThrow(() -> new IllegalArgumentException("User query is required"));
+        String lessonSlug =
+                request.lessonSlug().orElseThrow(() -> new IllegalArgumentException("Lesson slug is required"));
 
         if (!openAIStreamingService.isAvailable()) {
             log.warn("OpenAI streaming service unavailable for guided session");
@@ -235,9 +236,8 @@ public class GuidedLearningController extends BaseController {
                     String errorType = error.getClass().getSimpleName();
                     log.error("Guided streaming error");
                     return sseSupport.sseError(
-                        "Streaming error: " + errorType,
-                        "The response stream encountered an error. Please try again."
-                    );
+                            "Streaming error: " + errorType,
+                            "The response stream encountered an error. Please try again.");
                 });
     }
 

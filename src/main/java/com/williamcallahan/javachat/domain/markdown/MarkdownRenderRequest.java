@@ -2,7 +2,6 @@ package com.williamcallahan.javachat.domain.markdown;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-
 import java.util.Objects;
 
 /**

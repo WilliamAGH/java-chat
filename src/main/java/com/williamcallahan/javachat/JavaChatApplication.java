@@ -26,7 +26,5 @@ public class JavaChatApplication {
         SpringApplication.run(JavaChatApplication.class, args);
     }
 
-    private JavaChatApplication() {
-    }
-
+    private JavaChatApplication() {}
 }

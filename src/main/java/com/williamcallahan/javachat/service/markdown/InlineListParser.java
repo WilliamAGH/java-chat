@@ -1,8 +1,8 @@
 package com.williamcallahan.javachat.service.markdown;
 
-import org.jsoup.nodes.Element;
 import java.util.ArrayList;
 import java.util.List;
+import org.jsoup.nodes.Element;
 
 /**
  * Parses inline list markers from flat text into structured list elements.
@@ -82,11 +82,10 @@ final class InlineListParser {
      * @param trailingText text after the last list item
      */
     record Conversion(
-        String leadingText,
-        Element primaryListElement,
-        List<Element> additionalListElements,
-        String trailingText
-    ) {}
+            String leadingText,
+            Element primaryListElement,
+            List<Element> additionalListElements,
+            String trailingText) {}
 
     /**
      * Represents a parsed inline list with its items and structure.
@@ -104,12 +103,7 @@ final class InlineListParser {
      * @param nestedSegments segments that may contain nested lists
      * @param trailingText text after the last item
      */
-    record Parse(
-        String leadingText,
-        Block primaryBlock,
-        List<String> nestedSegments,
-        String trailingText
-    ) {
+    record Parse(String leadingText, Block primaryBlock, List<String> nestedSegments, String trailingText) {
         static Parse tryParse(String input) {
             if (input == null) return null;
             String text = input.strip();
@@ -142,16 +136,20 @@ final class InlineListParser {
             String trailingText = "";
             for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
                 int contentStart = markers.get(markerIndex).contentStartIndex();
-                int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
-                String rawEntryText = text.substring(contentStart, nextMarkerStart).trim();
+                int nextMarkerStart = markerIndex + 1 < markers.size()
+                        ? markers.get(markerIndex + 1).markerStartIndex()
+                        : text.length();
+                String rawEntryText =
+                        text.substring(contentStart, nextMarkerStart).trim();
                 if (rawEntryText.isEmpty()) continue;
 
                 boolean isLastMarker = markerIndex == markers.size() - 1;
-                EntryTextSplit entryTextSplit = isLastMarker ? extractTrailingText(rawEntryText)
-                    : new EntryTextSplit(rawEntryText, "");
+                EntryTextSplit entryTextSplit =
+                        isLastMarker ? extractTrailingText(rawEntryText) : new EntryTextSplit(rawEntryText, "");
                 ParsedEntry parsedEntry = splitNestedList(entryTextSplit.entryText());
                 entryLabels.add(parsedEntry.label());
-                if (parsedEntry.nestedSegment() != null && !parsedEntry.nestedSegment().isBlank()) {
+                if (parsedEntry.nestedSegment() != null
+                        && !parsedEntry.nestedSegment().isBlank()) {
                     nestedSegments.add(parsedEntry.nestedSegment());
                 }
                 if (!entryTextSplit.trailingText().isBlank()) {
@@ -180,15 +178,19 @@ final class InlineListParser {
             String trailingText = "";
             for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
                 int contentStart = markers.get(markerIndex).contentStartIndex();
-                int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
-                String rawEntryText = text.substring(contentStart, nextMarkerStart).trim();
+                int nextMarkerStart = markerIndex + 1 < markers.size()
+                        ? markers.get(markerIndex + 1).markerStartIndex()
+                        : text.length();
+                String rawEntryText =
+                        text.substring(contentStart, nextMarkerStart).trim();
                 if (rawEntryText.isEmpty()) continue;
                 boolean isLastMarker = markerIndex == markers.size() - 1;
-                EntryTextSplit entryTextSplit = isLastMarker ? extractTrailingText(rawEntryText)
-                    : new EntryTextSplit(rawEntryText, "");
+                EntryTextSplit entryTextSplit =
+                        isLastMarker ? extractTrailingText(rawEntryText) : new EntryTextSplit(rawEntryText, "");
                 ParsedEntry parsedEntry = splitNestedList(entryTextSplit.entryText());
                 entryLabels.add(parsedEntry.label());
-                if (parsedEntry.nestedSegment() != null && !parsedEntry.nestedSegment().isBlank()) {
+                if (parsedEntry.nestedSegment() != null
+                        && !parsedEntry.nestedSegment().isBlank()) {
                     nestedSegments.add(parsedEntry.nestedSegment());
                 }
                 if (!entryTextSplit.trailingText().isBlank()) {
@@ -237,15 +239,16 @@ final class InlineListParser {
             if (markerIndex == 0) return true;
             char previousChar = text.charAt(markerIndex - 1);
             return previousChar == ':'
-                || previousChar == '\n'
-                || (previousChar == ' ' && markerIndex >= COLON_BACKTRACK_OFFSET
-                && text.charAt(markerIndex - COLON_BACKTRACK_OFFSET) == ':');
+                    || previousChar == '\n'
+                    || (previousChar == ' '
+                            && markerIndex >= COLON_BACKTRACK_OFFSET
+                            && text.charAt(markerIndex - COLON_BACKTRACK_OFFSET) == ':');
         }
 
         private static boolean isBulletMarker(String text, int markerIndex, InlineListBulletKind kind) {
             return text.charAt(markerIndex) == kind.markerChar()
-                && markerIndex + 1 < text.length()
-                && text.charAt(markerIndex + 1) == ' ';
+                    && markerIndex + 1 < text.length()
+                    && text.charAt(markerIndex + 1) == ' ';
         }
 
         private static List<Marker> findBulletMarkers(String text, InlineListBulletKind kind) {
@@ -286,7 +289,8 @@ final class InlineListParser {
             if (index < 0 || index >= text.length()) return null;
             if (!isMarkerBoundary(text, index)) return null;
 
-            OrderedMarkerScanner.MarkerMatch match = OrderedMarkerScanner.scanAt(text, index, kind).orElse(null);
+            OrderedMarkerScanner.MarkerMatch match =
+                    OrderedMarkerScanner.scanAt(text, index, kind).orElse(null);
             if (match == null) return null;
             if (!isContentStartValid(text, match.afterIndex())) return null;
 
@@ -355,7 +359,7 @@ final class InlineListParser {
                         int candidateStart = index + 1;
                         boolean sawWhitespace = false;
                         while (candidateStart < rawEntryText.length()
-                            && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
+                                && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
                             sawWhitespace = true;
                             candidateStart++;
                         }

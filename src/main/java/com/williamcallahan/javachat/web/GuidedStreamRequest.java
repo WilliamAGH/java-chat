@@ -9,11 +9,7 @@ import java.util.Optional;
  * @param slug The lesson slug identifier
  * @param latest The user's chat message
  */
-public record GuidedStreamRequest(
-    String sessionId,
-    String slug,
-    String latest
-) {
+public record GuidedStreamRequest(String sessionId, String slug, String latest) {
     /**
      * Returns a valid session ID, using default if not provided.
      */

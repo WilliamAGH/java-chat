@@ -1,6 +1,11 @@
 package com.williamcallahan.javachat.web;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import com.williamcallahan.javachat.TestConfiguration;
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,12 +15,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.Objects;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration coverage for guided lesson SSE responses and plain text aggregation.
@@ -36,22 +35,26 @@ class GuidedSseIntegrationTest {
 
         String slug = "introduction-to-java";
 
-        Flux<String> body = webTestClient.post()
+        Flux<String> body = webTestClient
+                .post()
                 .uri("/api/guided/stream")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue("{\"sessionId\":\"guided:" + slug + "\", \"slug\":\"" + slug + "\", \"latest\":\"In one sentence, say hello.\"}")
+                .bodyValue("{\"sessionId\":\"guided:" + slug + "\", \"slug\":\"" + slug
+                        + "\", \"latest\":\"In one sentence, say hello.\"}")
                 .exchange()
-                .expectStatus().isOk()
+                .expectStatus()
+                .isOk()
                 .returnResult(String.class)
                 .getResponseBody()
                 .timeout(Duration.ofSeconds(30));
 
         // Collect SSE events until terminal [DONE] or timeout
-        List<String> sseChunks = Objects.requireNonNull(body
-                .takeUntil(chunk -> chunk.contains("[DONE]"))
-                .take(Duration.ofSeconds(10))
-                .collectList()
-                .block(Duration.ofSeconds(15)), "Expected SSE chunks");
+        List<String> sseChunks = Objects.requireNonNull(
+                body.takeUntil(chunk -> chunk.contains("[DONE]"))
+                        .take(Duration.ofSeconds(10))
+                        .collectList()
+                        .block(Duration.ofSeconds(15)),
+                "Expected SSE chunks");
         String aggregated = sseChunks.stream().reduce("", (a, b) -> a + b);
 
         assertNotNull(aggregated);
@@ -67,4 +70,3 @@ class GuidedSseIntegrationTest {
         assertTrue(plain.trim().length() > 0);
     }
 }
-

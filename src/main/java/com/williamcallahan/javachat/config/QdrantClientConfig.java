@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.config;
 
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
 import java.util.concurrent.TimeUnit;
@@ -63,12 +63,15 @@ public class QdrantClientConfig {
         }
 
         channelBuilder
-            .keepAliveTime(KEEPALIVE_TIME_SECONDS, TimeUnit.SECONDS)
-            .keepAliveTimeout(KEEPALIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .keepAliveWithoutCalls(true)
-            .idleTimeout(IDLE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
-        log.debug("gRPC keepalive configured: time={}s, timeout={}s, idleTimeout={}m",
-            KEEPALIVE_TIME_SECONDS, KEEPALIVE_TIMEOUT_SECONDS, IDLE_TIMEOUT_MINUTES);
+                .keepAliveTime(KEEPALIVE_TIME_SECONDS, TimeUnit.SECONDS)
+                .keepAliveTimeout(KEEPALIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(true)
+                .idleTimeout(IDLE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+        log.debug(
+                "gRPC keepalive configured: time={}s, timeout={}s, idleTimeout={}m",
+                KEEPALIVE_TIME_SECONDS,
+                KEEPALIVE_TIMEOUT_SECONDS,
+                IDLE_TIMEOUT_MINUTES);
 
         ManagedChannel channel = channelBuilder.build();
         QdrantGrpcClient.Builder grpcClientBuilder = QdrantGrpcClient.newBuilder(channel, true);

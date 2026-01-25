@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.config;
 
+import java.util.List;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,7 +10,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import java.util.List;
 
 /**
  * Security configuration for API endpoints and static resources.
@@ -50,19 +50,16 @@ public class SecurityConfig {
      */
     @Bean
     @Order(0)
-    public SecurityFilterChain managementSecurityFilterChain(HttpSecurity http,
-            CorsConfigurationSource corsConfigurationSource) throws Exception {
-        http
-            .securityMatcher(EndpointRequest.toAnyEndpoint())
-            .cors(c -> c.configurationSource(corsConfigurationSource))
-            .authorizeHttpRequests(auth -> auth
-                .anyRequest().permitAll()
-            )
-            // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
-            .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
-            .csrf(csrf -> csrf.ignoringRequestMatchers(EndpointRequest.toAnyEndpoint()))
-            .httpBasic(b -> b.disable())
-            .formLogin(f -> f.disable());
+    public SecurityFilterChain managementSecurityFilterChain(
+            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+        http.securityMatcher(EndpointRequest.toAnyEndpoint())
+                .cors(c -> c.configurationSource(corsConfigurationSource))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
+                .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
+                .csrf(csrf -> csrf.ignoringRequestMatchers(EndpointRequest.toAnyEndpoint()))
+                .httpBasic(b -> b.disable())
+                .formLogin(f -> f.disable());
         return http.build();
     }
 
@@ -71,29 +68,28 @@ public class SecurityConfig {
      */
     @Bean
     @Order(1)
-    public SecurityFilterChain appSecurityFilterChain(HttpSecurity http,
-            CorsConfigurationSource corsConfigurationSource) throws Exception {
-        http
-            .cors(c -> c.configurationSource(corsConfigurationSource))
-            .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/",
-                    "/index.html",
-                    "/chat.html",
-                    "/guided.html",
-                    "/favicon.ico",
-                    "/app/**",
-                    "/assets/**",
-                    "/static/**"
-                ).permitAll()
-                .requestMatchers("/api/**").permitAll()
-                .anyRequest().permitAll()
-            )
-            // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
-            .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
-            .httpBasic(b -> b.disable())
-            .formLogin(f -> f.disable());
+    public SecurityFilterChain appSecurityFilterChain(
+            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+        http.cors(c -> c.configurationSource(corsConfigurationSource))
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
+                .authorizeHttpRequests(auth -> auth.requestMatchers(
+                                "/",
+                                "/index.html",
+                                "/chat.html",
+                                "/guided.html",
+                                "/favicon.ico",
+                                "/app/**",
+                                "/assets/**",
+                                "/static/**")
+                        .permitAll()
+                        .requestMatchers("/api/**")
+                        .permitAll()
+                        .anyRequest()
+                        .permitAll())
+                // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
+                .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
+                .httpBasic(b -> b.disable())
+                .formLogin(f -> f.disable());
         return http.build();
     }
 }

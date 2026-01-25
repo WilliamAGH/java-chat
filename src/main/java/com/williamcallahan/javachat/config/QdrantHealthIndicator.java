@@ -27,20 +27,16 @@ public class QdrantHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        ExternalServiceHealth.ServiceInfo info = externalServiceHealth.getServiceInfo(
-            ExternalServiceHealth.SERVICE_QDRANT
-        );
+        ExternalServiceHealth.ServiceInfo info =
+                externalServiceHealth.getServiceInfo(ExternalServiceHealth.SERVICE_QDRANT);
 
         if (info.isHealthy()) {
-            return Health.up()
-                .withDetail("status", info.message())
-                .build();
+            return Health.up().withDetail("status", info.message()).build();
         }
 
         // Include time until next check for debugging
-        Health.Builder builder = Health.down()
-            .withDetail("status", info.message());
-        
+        Health.Builder builder = Health.down().withDetail("status", info.message());
+
         if (info.timeUntilNextCheck() != null) {
             builder.withDetail("nextCheckIn", info.timeUntilNextCheck().toString());
         }

@@ -1,10 +1,10 @@
 package com.williamcallahan.javachat.config;
 
+import java.util.List;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-import java.util.List;
 
 /**
  * MVC configuration for CORS and SPA routing.
@@ -52,11 +52,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
         } else {
             mapping.allowedOrigins(origins.toArray(String[]::new));
         }
-        mapping
-            .allowedMethods(allowedMethods.toArray(String[]::new))
-            .allowedHeaders(allowedHeaders.toArray(String[]::new))
-            .allowCredentials(allowCredentials)
-            .maxAge(maxAgeSeconds);
+        mapping.allowedMethods(allowedMethods.toArray(String[]::new))
+                .allowedHeaders(allowedHeaders.toArray(String[]::new))
+                .allowCredentials(allowCredentials)
+                .maxAge(maxAgeSeconds);
     }
 
     /**

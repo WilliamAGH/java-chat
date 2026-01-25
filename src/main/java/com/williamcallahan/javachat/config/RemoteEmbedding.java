@@ -28,8 +28,7 @@ public class RemoteEmbedding {
     /**
      * Creates remote embedding configuration.
      */
-    public RemoteEmbedding() {
-    }
+    public RemoteEmbedding() {}
 
     /**
      * Validates remote embedding settings.

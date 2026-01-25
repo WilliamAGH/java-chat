@@ -22,9 +22,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class RerankerService {
 
-	    private static final Logger log = LoggerFactory.getLogger(
-	        RerankerService.class
-	    );
+    private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
 
@@ -44,14 +42,10 @@ public class RerankerService {
      * Cache key includes document URLs to prevent returning results for wrong document sets.
      */
     @Cacheable(
-        value = "reranker-cache",
-        key = "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#docs) + ':' + #returnK"
-    )
-    public List<Document> rerank(
-        String query,
-        List<Document> docs,
-        int returnK
-    ) {
+            value = "reranker-cache",
+            key =
+                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#docs) + ':' + #returnK")
+    public List<Document> rerank(String query, List<Document> docs, int returnK) {
         if (docs.size() <= 1) {
             return docs;
         }
@@ -83,10 +77,7 @@ public class RerankerService {
      * @return reranking response, or empty if service unavailable or times out
      */
     private Optional<String> callLlmForReranking(String query, List<Document> docs) {
-        if (
-            openAIStreamingService == null ||
-            !openAIStreamingService.isAvailable()
-        ) {
+        if (openAIStreamingService == null || !openAIStreamingService.isAvailable()) {
             log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
             throw new RerankingFailureException("Reranking service unavailable");
         }
@@ -95,11 +86,10 @@ public class RerankerService {
 
         // Cap reranker latency aggressively; fall back on original order fast
         return openAIStreamingService
-            .complete(prompt, 0.0)
-            .timeout(java.time.Duration.ofSeconds(4))
-            .doOnError(timeoutOrApiError ->
-                log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
-            .blockOptional();
+                .complete(prompt, 0.0)
+                .timeout(java.time.Duration.ofSeconds(4))
+                .doOnError(timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
+                .blockOptional();
     }
 
     /**
@@ -107,19 +97,11 @@ public class RerankerService {
      */
     private String buildRerankPrompt(String query, List<Document> docs) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append(
-            "You are a document re-ranker for the Java learning assistant system.\n"
-        );
-        prompt.append(
-            "Reorder the following documents by relevance to the query.\n"
-        );
-        prompt.append(
-            "Consider Java-specific context, version relevance, and learning value.\n"
-        );
-        prompt.append(
-            "Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n"
-        );
-	        prompt.append("Query: ").append(query).append("\n\n");
+        prompt.append("You are a document re-ranker for the Java learning assistant system.\n");
+        prompt.append("Reorder the following documents by relevance to the query.\n");
+        prompt.append("Consider Java-specific context, version relevance, and learning value.\n");
+        prompt.append("Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n");
+        prompt.append("Query: ").append(query).append("\n\n");
 
         for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
             Document document = docs.get(docIndex);
@@ -127,16 +109,15 @@ public class RerankerService {
             String title = extractMetadataString(metadata, "title");
             String url = extractMetadataString(metadata, "url");
             String text = document.getText();
-	            prompt
-	                .append("[")
-	                .append(docIndex)
-                .append("] ")
-                .append(title)
-                .append(" | ")
-                .append(url)
-                .append("\n")
-                .append(trim(text == null ? "" : text, 500))
-                .append("\n\n");
+            prompt.append("[")
+                    .append(docIndex)
+                    .append("] ")
+                    .append(title)
+                    .append(" | ")
+                    .append(url)
+                    .append("\n")
+                    .append(trim(text == null ? "" : text, 500))
+                    .append("\n\n");
         }
 
         return prompt.toString();
@@ -145,10 +126,7 @@ public class RerankerService {
     /**
      * Parse the LLM response to extract document ordering.
      */
-    private List<Document> parseRerankResponse(
-        String response,
-        List<Document> docs
-    ) throws JsonProcessingException {
+    private List<Document> parseRerankResponse(String response, List<Document> docs) throws JsonProcessingException {
         List<Document> reordered = new ArrayList<>();
         RerankOrderResponse orderResponse = parseRerankOrderResponse(response);
         if (orderResponse == null || orderResponse.order() == null) {
@@ -248,7 +226,8 @@ public class RerankerService {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record RerankOrderResponse(@JsonProperty("order") List<Integer> order) {}
+    private record RerankOrderResponse(
+            @JsonProperty("order") List<Integer> order) {}
 
     /**
      * Limit document list to returnK elements.

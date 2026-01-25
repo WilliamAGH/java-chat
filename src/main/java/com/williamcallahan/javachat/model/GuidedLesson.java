@@ -14,8 +14,7 @@ public class GuidedLesson {
     /**
      * Creates an empty guided lesson container.
      */
-    public GuidedLesson() {
-    }
+    public GuidedLesson() {}
 
     /**
      * Creates a guided lesson with the supplied metadata.

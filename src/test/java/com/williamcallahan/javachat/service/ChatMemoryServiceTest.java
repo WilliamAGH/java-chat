@@ -1,15 +1,14 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Validates chat memory and conversation context handling.

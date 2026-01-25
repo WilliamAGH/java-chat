@@ -3,13 +3,12 @@ package com.williamcallahan.javachat.application.prompt;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 /**
  * Truncates structured prompts to fit within model token limits while preserving semantic boundaries.
@@ -30,12 +29,10 @@ public class PromptTruncator {
     private static final Logger log = LoggerFactory.getLogger(PromptTruncator.class);
 
     /** Truncation notice for GPT-5 family models with 8K input limit. */
-    private static final String TRUNCATION_NOTICE_GPT5 =
-            "[Context truncated due to GPT-5 8K input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
 
     /** Truncation notice for other models with larger limits. */
-    private static final String TRUNCATION_NOTICE_GENERIC =
-            "[Context truncated due to model input limit]\n\n";
+    private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
 
     /**
      * Truncates a structured prompt to fit within the specified token limit.
@@ -50,20 +47,18 @@ public class PromptTruncator {
      * @return truncation result with the fitted prompt and truncation metadata
      */
     public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens, boolean isGpt5Family) {
-        int reservedTokens = prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
+        int reservedTokens =
+                prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
 
         if (reservedTokens >= maxTokens) {
-            log.warn("System prompt ({} tokens) + query ({} tokens) exceed limit ({} tokens)",
+            log.warn(
+                    "System prompt ({} tokens) + query ({} tokens) exceed limit ({} tokens)",
                     prompt.system().estimatedTokens(),
                     prompt.currentQuery().estimatedTokens(),
                     maxTokens);
             // Return prompt with only system and query - no room for context or history
-            StructuredPrompt minimalPrompt = new StructuredPrompt(
-                    prompt.system(),
-                    List.of(),
-                    List.of(),
-                    prompt.currentQuery()
-            );
+            StructuredPrompt minimalPrompt =
+                    new StructuredPrompt(prompt.system(), List.of(), List.of(), prompt.currentQuery());
             return new TruncatedPrompt(minimalPrompt, true, isGpt5Family);
         }
 
@@ -73,38 +68,33 @@ public class PromptTruncator {
         int originalTurnCount = prompt.conversationHistory().size();
 
         // Fit conversation history (newest first - reverse to prioritize recent)
-        List<ConversationTurnSegment> fittingTurns = fitSegmentsNewestFirst(
-                prompt.conversationHistory(), available);
+        List<ConversationTurnSegment> fittingTurns = fitSegmentsNewestFirst(prompt.conversationHistory(), available);
         int turnsTokens = sumTokens(fittingTurns);
         available -= turnsTokens;
 
         if (fittingTurns.size() < prompt.conversationHistory().size()) {
             wasTruncated = true;
-            log.debug("Truncated conversation history from {} to {} turns",
-                    originalTurnCount, fittingTurns.size());
+            log.debug("Truncated conversation history from {} to {} turns", originalTurnCount, fittingTurns.size());
         }
 
         // Fit context documents with remaining budget (most relevant first)
-        List<ContextDocumentSegment> fittingDocs = fitDocumentsByRelevance(
-                prompt.contextDocuments(), available);
+        List<ContextDocumentSegment> fittingDocs = fitDocumentsByRelevance(prompt.contextDocuments(), available);
 
         if (fittingDocs.size() < prompt.contextDocuments().size()) {
             wasTruncated = true;
-            log.debug("Truncated context documents from {} to {}",
-                    originalDocCount, fittingDocs.size());
+            log.debug("Truncated context documents from {} to {}", originalDocCount, fittingDocs.size());
         }
 
-        StructuredPrompt truncated = new StructuredPrompt(
-                prompt.system(),
-                fittingDocs,
-                fittingTurns,
-                prompt.currentQuery()
-        );
+        StructuredPrompt truncated =
+                new StructuredPrompt(prompt.system(), fittingDocs, fittingTurns, prompt.currentQuery());
 
         if (wasTruncated) {
-            log.info("Prompt truncated: {} docs → {}, {} turns → {} (limit: {} tokens)",
-                    originalDocCount, fittingDocs.size(),
-                    originalTurnCount, fittingTurns.size(),
+            log.info(
+                    "Prompt truncated: {} docs → {}, {} turns → {} (limit: {} tokens)",
+                    originalDocCount,
+                    fittingDocs.size(),
+                    originalTurnCount,
+                    fittingTurns.size(),
                     maxTokens);
         }
 
@@ -174,11 +164,7 @@ public class PromptTruncator {
         for (int newIndex = 0; newIndex < fitting.size(); newIndex++) {
             ContextDocumentSegment original = fitting.get(newIndex);
             reindexed.add(new ContextDocumentSegment(
-                    newIndex + 1,
-                    original.sourceUrl(),
-                    original.documentContent(),
-                    original.estimatedTokens()
-            ));
+                    newIndex + 1, original.sourceUrl(), original.documentContent(), original.estimatedTokens()));
         }
 
         return List.copyOf(reindexed);
@@ -199,11 +185,7 @@ public class PromptTruncator {
      * @param wasTruncated true if any segments were removed
      * @param isGpt5Family true if targeting GPT-5 family models
      */
-    public record TruncatedPrompt(
-            StructuredPrompt prompt,
-            boolean wasTruncated,
-            boolean isGpt5Family
-    ) {
+    public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGpt5Family) {
         /**
          * Renders the prompt to a string, prepending truncation notice if needed.
          *

@@ -17,8 +17,7 @@ public class Diagnostics {
     /**
      * Creates diagnostics configuration.
      */
-    public Diagnostics() {
-    }
+    public Diagnostics() {}
 
     /**
      * Validates diagnostics settings.

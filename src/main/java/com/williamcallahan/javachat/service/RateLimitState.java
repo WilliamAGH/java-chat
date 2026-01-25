@@ -2,16 +2,12 @@ package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.File;
 import java.io.IOException;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -19,6 +15,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 /**
  * Persistent rate limit state manager that survives application restarts.
@@ -67,11 +66,11 @@ public class RateLimitState {
         } catch (Exception shutdownException) {
             // Use stderr during teardown - logging framework may be partially unloaded
             System.err.println("[RateLimitState] Failed to save state on shutdown: "
-                + shutdownException.getClass().getName() + ": " + shutdownException.getMessage());
+                    + shutdownException.getClass().getName() + ": " + shutdownException.getMessage());
         } catch (NoClassDefFoundError classLoadError) {
             // Explicitly handle classloading issues during shutdown (expected in some JVM teardown scenarios)
-            System.err.println("[RateLimitState] Classloader issue during shutdown (expected): "
-                + classLoadError.getMessage());
+            System.err.println(
+                    "[RateLimitState] Classloader issue during shutdown (expected): " + classLoadError.getMessage());
         }
         scheduler.shutdown();
     }
@@ -104,8 +103,11 @@ public class RateLimitState {
             }
 
             state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
-            log.warn("[{}] Consecutive failures (count={}). Extended backoff until {}",
-                    sanitizeLogValue(provider), failures, state.rateLimitedUntil);
+            log.warn(
+                    "[{}] Consecutive failures (count={}). Extended backoff until {}",
+                    sanitizeLogValue(provider),
+                    failures,
+                    state.rateLimitedUntil);
         }
 
         safeSaveState();
@@ -188,9 +190,13 @@ public class RateLimitState {
             return true;
         } catch (IOException exception) {
             String safeMessage = sanitizeLogValue(exception.getMessage());
-            log.error("Failed to load rate limit state from {}: {} - {}",
-                STATE_FILE, exception.getClass().getSimpleName(), safeMessage);
-            log.warn("Continuing with empty rate limit state; previously rate-limited providers may be retried prematurely");
+            log.error(
+                    "Failed to load rate limit state from {}: {} - {}",
+                    STATE_FILE,
+                    exception.getClass().getSimpleName(),
+                    safeMessage);
+            log.warn(
+                    "Continuing with empty rate limit state; previously rate-limited providers may be retried prematurely");
             return false;
         }
     }
@@ -199,8 +205,7 @@ public class RateLimitState {
         for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
             if (!isAvailable(entry.getKey())) {
                 Duration remaining = getRemainingWaitTime(entry.getKey());
-                log.warn("[{}] Rate limited for {} more",
-                    sanitizeLogValue(entry.getKey()), formatDuration(remaining));
+                log.warn("[{}] Rate limited for {} more", sanitizeLogValue(entry.getKey()), formatDuration(remaining));
             }
         }
     }
@@ -217,13 +222,18 @@ public class RateLimitState {
             return true;
         } catch (IOException ioException) {
             String safeMessage = sanitizeLogValue(ioException.getMessage());
-            log.error("Failed to persist rate limit state to {}: {} - {}",
-                STATE_FILE, ioException.getClass().getSimpleName(), safeMessage);
+            log.error(
+                    "Failed to persist rate limit state to {}: {} - {}",
+                    STATE_FILE,
+                    ioException.getClass().getSimpleName(),
+                    safeMessage);
             return false;
         } catch (RuntimeException runtimeException) {
             String safeMessage = sanitizeLogValue(runtimeException.getMessage());
-            log.error("Unexpected error persisting rate limit state: {} - {}",
-                runtimeException.getClass().getSimpleName(), safeMessage);
+            log.error(
+                    "Unexpected error persisting rate limit state: {} - {}",
+                    runtimeException.getClass().getSimpleName(),
+                    safeMessage);
             return false;
         }
     }

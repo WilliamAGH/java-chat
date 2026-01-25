@@ -3,7 +3,6 @@ package com.williamcallahan.javachat.web;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -36,9 +35,8 @@ public class ErrorDocumentationController {
      * @return HTML for the error catalog
      */
     @GetMapping(
-        value = {ROOT_PATH, ROOT_SLASH},
-        produces = MediaType.TEXT_HTML_VALUE
-    )
+            value = {ROOT_PATH, ROOT_SLASH},
+            produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> index() {
         return serveHtmlFile(INDEX_FILE);
     }

@@ -110,7 +110,3 @@ public class Citation {
         this.snippet = Objects.requireNonNullElse(snippet, DEFAULT_SNIPPET);
     }
 }
-
-
-
-

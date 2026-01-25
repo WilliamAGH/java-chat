@@ -26,9 +26,8 @@ final class JavadocNestedTypeResolver {
 
         String fileName = url.substring(url.lastIndexOf('/') + 1);
         String basePath = url.substring(0, url.length() - fileName.length());
-        String outerTypeName = fileName.endsWith(".html")
-            ? fileName.substring(0, fileName.length() - ".html".length())
-            : fileName;
+        String outerTypeName =
+                fileName.endsWith(".html") ? fileName.substring(0, fileName.length() - ".html".length()) : fileName;
 
         // Already a nested type page
         if (outerTypeName.contains(".")) {
@@ -38,8 +37,7 @@ final class JavadocNestedTypeResolver {
         // Look for Outer.Inner or deeper in the text
         // Pattern: Outer.(Inner(.Deep)*) where Outer is the current page type name
         Pattern nestedTypePattern = Pattern.compile(
-            "\\b" + Pattern.quote(outerTypeName) + "\\.([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)\\b"
-        );
+                "\\b" + Pattern.quote(outerTypeName) + "\\.([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)\\b");
         Matcher nestedTypeMatcher = nestedTypePattern.matcher(text);
         if (nestedTypeMatcher.find()) {
             String nestedSuffix = nestedTypeMatcher.group(1); // e.g., "Operator" or "Inner.Deep"

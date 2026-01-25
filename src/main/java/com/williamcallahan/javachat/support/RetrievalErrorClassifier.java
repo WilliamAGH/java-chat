@@ -59,29 +59,29 @@ public final class RetrievalErrorClassifier {
      */
     public static boolean isTransientVectorStoreError(Throwable error) {
         String errorType = determineErrorType(error);
-        
+
         // Connection errors and rate limits are transient
         if ("Connection Error".equals(errorType) || "429 Rate Limited".equals(errorType)) {
             return true;
         }
-        
+
         // Check for specific Qdrant/gRPC error patterns in exception chain
         Throwable current = error;
         while (current != null) {
             String exceptionName = current.getClass().getName().toLowerCase(Locale.ROOT);
             String message = current.getMessage();
             String lowerMessage = message != null ? message.toLowerCase(Locale.ROOT) : "";
-            
+
             // gRPC errors from Qdrant client
             if (exceptionName.contains("grpc") || exceptionName.contains("qdrant")) {
                 // Service unavailable, deadline exceeded are transient
-                if (lowerMessage.contains("unavailable") 
-                    || lowerMessage.contains("deadline exceeded")
-                    || lowerMessage.contains("resource exhausted")) {
+                if (lowerMessage.contains("unavailable")
+                        || lowerMessage.contains("deadline exceeded")
+                        || lowerMessage.contains("resource exhausted")) {
                     return true;
                 }
             }
-            
+
             // ExecutionException wrapping gRPC failures
             if (current instanceof java.util.concurrent.ExecutionException) {
                 // Check the cause for gRPC issues
@@ -93,16 +93,15 @@ public final class RetrievalErrorClassifier {
                     }
                 }
             }
-            
+
             // IllegalArgumentException for UUID parsing is NOT transient (programming error)
-            if (current instanceof IllegalArgumentException 
-                && lowerMessage.contains("uuid")) {
+            if (current instanceof IllegalArgumentException && lowerMessage.contains("uuid")) {
                 return false;
             }
-            
+
             current = current.getCause();
         }
-        
+
         // Default: unknown errors are not assumed to be transient
         return false;
     }
@@ -115,22 +114,17 @@ public final class RetrievalErrorClassifier {
      * @param error original exception
      */
     public static void logUserFriendlyErrorContext(Logger log, String errorType, Throwable error) {
-        if (error.getCause() instanceof com.williamcallahan.javachat.service.GracefulEmbeddingModel.EmbeddingServiceUnavailableException) {
+        if (error.getCause()
+                instanceof
+                com.williamcallahan.javachat.service.GracefulEmbeddingModel.EmbeddingServiceUnavailableException) {
             log.info(
-                "Embedding services are unavailable. Using keyword-based search with limited semantic understanding."
-            );
+                    "Embedding services are unavailable. Using keyword-based search with limited semantic understanding.");
         } else if (errorType.contains("404")) {
-            log.info(
-                "Embedding API endpoint not found. Check configuration for spring.ai.openai.embedding.base-url"
-            );
+            log.info("Embedding API endpoint not found. Check configuration for spring.ai.openai.embedding.base-url");
         } else if (errorType.contains("401") || errorType.contains("403")) {
-            log.info(
-                "Embedding API authentication failed. Check OPENAI_API_KEY or GITHUB_TOKEN configuration"
-            );
+            log.info("Embedding API authentication failed. Check OPENAI_API_KEY or GITHUB_TOKEN configuration");
         } else if (errorType.contains("429")) {
-            log.info(
-                "Embedding API rate limit exceeded. Consider using local embeddings or upgrading API tier"
-            );
+            log.info("Embedding API rate limit exceeded. Consider using local embeddings or upgrading API tier");
         }
     }
 }

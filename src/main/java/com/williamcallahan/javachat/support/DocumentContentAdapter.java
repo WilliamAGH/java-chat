@@ -1,11 +1,10 @@
 package com.williamcallahan.javachat.support;
 
 import com.williamcallahan.javachat.domain.RetrievedContent;
-import org.springframework.ai.document.Document;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.ai.document.Document;
 
 /**
  * Adapts Spring AI Document to the domain RetrievedContent interface.
@@ -47,9 +46,7 @@ public final class DocumentContentAdapter implements RetrievedContent {
         if (documents == null) {
             return List.of();
         }
-        return documents.stream()
-                .map(DocumentContentAdapter::fromDocument)
-                .toList();
+        return documents.stream().map(DocumentContentAdapter::fromDocument).toList();
     }
 
     @Override

@@ -1,20 +1,19 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.*;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import jakarta.servlet.http.HttpServletResponse;
+import java.time.Duration;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-
-import java.time.Duration;
-import java.util.function.Consumer;
-
-import static com.williamcallahan.javachat.web.SseConstants.*;
 
 /**
  * Shared SSE support utilities for streaming controllers.
@@ -30,7 +29,7 @@ public class SseSupport {
 
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
-        "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
+            "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
     private final ObjectWriter jsonWriter;
 
@@ -63,11 +62,10 @@ public class SseSupport {
      * @return a shared flux configured for SSE streaming
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
-        return source
-            .filter(chunk -> chunk != null && !chunk.isEmpty())
-            .doOnNext(chunkConsumer)
-            .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
-            .share();
+        return source.filter(chunk -> chunk != null && !chunk.isEmpty())
+                .doOnNext(chunkConsumer)
+                .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
+                .share();
     }
 
     /**
@@ -100,10 +98,8 @@ public class SseSupport {
             log.error("Failed to serialize SSE error payload", e);
             json = ERROR_FALLBACK_JSON;
         }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(EVENT_ERROR)
-            .data(json)
-            .build());
+        return Flux.just(
+                ServerSentEvent.<String>builder().event(EVENT_ERROR).data(json).build());
     }
 
     /**
@@ -122,10 +118,8 @@ public class SseSupport {
             log.error("Failed to serialize SSE status payload", e);
             json = ERROR_FALLBACK_JSON;
         }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(EVENT_STATUS)
-            .data(json)
-            .build());
+        return Flux.just(
+                ServerSentEvent.<String>builder().event(EVENT_STATUS).data(json).build());
     }
 
     /**
@@ -137,8 +131,10 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> heartbeats(Flux<?> terminateOn) {
         return Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
-            .takeUntilOther(terminateOn.ignoreElements())
-            .map(tick -> ServerSentEvent.<String>builder().comment(COMMENT_KEEPALIVE).build());
+                .takeUntilOther(terminateOn.ignoreElements())
+                .map(tick -> ServerSentEvent.<String>builder()
+                        .comment(COMMENT_KEEPALIVE)
+                        .build());
     }
 
     /**
@@ -150,9 +146,9 @@ public class SseSupport {
      */
     public ServerSentEvent<String> textEvent(String chunk) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_TEXT)
-            .data(jsonSerialize(new ChunkPayload(chunk)))
-            .build();
+                .event(EVENT_TEXT)
+                .data(jsonSerialize(new ChunkPayload(chunk)))
+                .build();
     }
 
     /**
@@ -164,9 +160,9 @@ public class SseSupport {
      */
     public ServerSentEvent<String> statusEvent(String summary, String details) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_STATUS)
-            .data(jsonSerialize(new StatusPayload(summary, details)))
-            .build();
+                .event(EVENT_STATUS)
+                .data(jsonSerialize(new StatusPayload(summary, details)))
+                .build();
     }
 
     /**
@@ -177,9 +173,9 @@ public class SseSupport {
      */
     public ServerSentEvent<String> citationEvent(Object citations) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_CITATION)
-            .data(jsonSerialize(citations))
-            .build();
+                .event(EVENT_CITATION)
+                .data(jsonSerialize(citations))
+                .build();
     }
 
     /** Payload record for text chunks - preserves whitespace in JSON. */

@@ -12,7 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * Test controller for demonstrating error pages.
  * This controller provides endpoints to test different error scenarios.
- * 
+ *
  * IMPORTANT: This controller should be removed or disabled in production.
  */
 @Controller
@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 @PermitAll
 @PreAuthorize("permitAll()")
 public class ErrorTestController {
-    
+
     /**
      * Test 404 error by accessing a non-existent page.
      * URL: /test-errors/404
@@ -29,7 +29,7 @@ public class ErrorTestController {
     public String test404() {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Test 404 error page");
     }
-    
+
     /**
      * Test 500 internal server error.
      * URL: /test-errors/500
@@ -38,7 +38,7 @@ public class ErrorTestController {
     public String test500() {
         throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Test internal server error");
     }
-    
+
     /**
      * Test 400 bad request error.
      * URL: /test-errors/400
@@ -47,7 +47,7 @@ public class ErrorTestController {
     public String test400() {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Test bad request error");
     }
-    
+
     /**
      * Test 403 forbidden error.
      * URL: /test-errors/403
@@ -56,7 +56,7 @@ public class ErrorTestController {
     public String test403() {
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Test forbidden access error");
     }
-    
+
     /**
      * Test 503 service unavailable error.
      * URL: /test-errors/503
@@ -65,7 +65,7 @@ public class ErrorTestController {
     public String test503() {
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Test service unavailable error");
     }
-    
+
     /**
      * Test generic error with custom status code.
      * URL: /test-errors/{statusCode}
@@ -78,16 +78,17 @@ public class ErrorTestController {
         }
         throw new ResponseStatusException(status, "Test error with status code " + statusCode);
     }
-    
+
     /**
      * Test runtime exception (will result in 500 error).
      * URL: /test-errors/runtime-exception
      */
     @GetMapping("/runtime-exception")
     public String testRuntimeException() {
-        throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Test runtime exception for error handling");
+        throw new ResponseStatusException(
+                HttpStatus.INTERNAL_SERVER_ERROR, "Test runtime exception for error handling");
     }
-    
+
     /**
      * Test null pointer exception (will result in 500 error).
      * URL: /test-errors/null-pointer

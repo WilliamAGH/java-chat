@@ -18,8 +18,7 @@ public record StructuredPrompt(
         SystemSegment system,
         List<ContextDocumentSegment> contextDocuments,
         List<ConversationTurnSegment> conversationHistory,
-        CurrentQuerySegment currentQuery
-) {
+        CurrentQuerySegment currentQuery) {
 
     /** Separator between prompt segments. */
     public static final String SEGMENT_SEPARATOR = "\n\n";
@@ -112,10 +111,6 @@ public record StructuredPrompt(
      */
     public static StructuredPrompt fromRawPrompt(String rawPrompt, int estimatedTokens) {
         return new StructuredPrompt(
-                new SystemSegment(rawPrompt, estimatedTokens),
-                List.of(),
-                List.of(),
-                new CurrentQuerySegment("", 0)
-        );
+                new SystemSegment(rawPrompt, estimatedTokens), List.of(), List.of(), new CurrentQuerySegment("", 0));
     }
 }

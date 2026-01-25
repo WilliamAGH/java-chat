@@ -1,17 +1,19 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.SearchQualityLevel;
-import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
+import java.util.ArrayList;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -20,9 +22,6 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Builds chat prompts, enriches them with retrieval context, and delegates streaming to the LLM provider.
@@ -44,10 +43,11 @@ public class ChatService {
      * @param systemPromptConfig system prompt configuration
      * @param appProperties application configuration for LLM settings
      */
-    public ChatService(OpenAIStreamingService openAIStreamingService,
-                       RetrievalService retrievalService,
-                       SystemPromptConfig systemPromptConfig,
-                       AppProperties appProperties) {
+    public ChatService(
+            OpenAIStreamingService openAIStreamingService,
+            RetrievalService retrievalService,
+            SystemPromptConfig systemPromptConfig,
+            AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.systemPromptConfig = systemPromptConfig;
@@ -67,15 +67,15 @@ public class ChatService {
     public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
         logger.debug("ChatService.streamAnswer called");
 
-        StructuredPromptOutcome outcome = buildStructuredPromptWithContextOutcome(
-                history, latestUserMessage, null);
+        StructuredPromptOutcome outcome = buildStructuredPromptWithContextOutcome(history, latestUserMessage, null);
 
         if (!openAIStreamingService.isAvailable()) {
             logger.error("OpenAI streaming service is not available - check API credentials");
             return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
         }
 
-        return openAIStreamingService.streamResponse(outcome.structuredPrompt(), temperature)
+        return openAIStreamingService
+                .streamResponse(outcome.structuredPrompt(), temperature)
                 .onErrorResume(streamingException -> {
                     logger.error("Streaming failed", streamingException);
                     return Flux.error(streamingException);
@@ -94,16 +94,15 @@ public class ChatService {
      * @param guidance custom system guidance to append
      * @return streaming response chunks
      */
-    public Flux<String> streamAnswerWithContext(List<Message> history,
-                                                String latestUserMessage,
-                                                List<Document> contextDocs,
-                                                String guidance) {
+    public Flux<String> streamAnswerWithContext(
+            List<Message> history, String latestUserMessage, List<Document> contextDocs, String guidance) {
         if (contextDocs == null) contextDocs = List.of();
 
-        StructuredPrompt structuredPrompt = buildStructuredPromptWithContextAndGuidance(
-                history, latestUserMessage, contextDocs, guidance);
+        StructuredPrompt structuredPrompt =
+                buildStructuredPromptWithContextAndGuidance(history, latestUserMessage, contextDocs, guidance);
 
-        return openAIStreamingService.streamResponse(structuredPrompt, temperature)
+        return openAIStreamingService
+                .streamResponse(structuredPrompt, temperature)
                 .onErrorResume(exception -> {
                     logger.error("Streaming failed", exception);
                     return Flux.error(exception);
@@ -131,10 +130,7 @@ public class ChatService {
      * @return structured prompt for intelligent truncation
      */
     public StructuredPrompt buildStructuredPromptWithContextAndGuidance(
-            List<Message> history,
-            String latestUserMessage,
-            List<Document> contextDocs,
-            String guidance) {
+            List<Message> history, String latestUserMessage, List<Document> contextDocs, String guidance) {
 
         // Build system prompt with guidance
         String basePrompt = systemPromptConfig.getCoreSystemPrompt();
@@ -142,28 +138,17 @@ public class ChatService {
                 ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
                 : basePrompt;
 
-        SystemSegment systemSegment = new SystemSegment(
-                completePrompt,
-                estimateTokens(completePrompt)
-        );
+        SystemSegment systemSegment = new SystemSegment(completePrompt, estimateTokens(completePrompt));
 
-        List<ContextDocumentSegment> contextSegments = buildContextSegments(
-                contextDocs != null ? contextDocs : List.of()
-        );
+        List<ContextDocumentSegment> contextSegments =
+                buildContextSegments(contextDocs != null ? contextDocs : List.of());
 
         List<ConversationTurnSegment> conversationSegments = buildConversationSegments(history);
 
-        CurrentQuerySegment querySegment = new CurrentQuerySegment(
-                latestUserMessage,
-                estimateTokens(latestUserMessage)
-        );
+        CurrentQuerySegment querySegment =
+                new CurrentQuerySegment(latestUserMessage, estimateTokens(latestUserMessage));
 
-        return new StructuredPrompt(
-                systemSegment,
-                contextSegments,
-                conversationSegments,
-                querySegment
-        );
+        return new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
     }
 
     /**
@@ -178,21 +163,19 @@ public class ChatService {
      * @return structured prompt outcome with segments and retrieval metadata
      */
     public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
-            List<Message> history,
-            String latestUserMessage,
-            String modelHint) {
+            List<Message> history, String latestUserMessage, String modelHint) {
 
         // Use reduced RAG for token-constrained models (GPT-5.x family)
         RetrievalService.RetrievalOutcome retrievalOutcome;
         if (ModelConfiguration.isTokenConstrained(modelHint)) {
             retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
-                latestUserMessage,
-                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
-                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
-            );
-            logger.debug("Using reduced RAG: {} documents with max {} tokens each",
-                retrievalOutcome.documents().size(),
-                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
+                    latestUserMessage,
+                    ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
+            logger.debug(
+                    "Using reduced RAG: {} documents with max {} tokens each",
+                    retrievalOutcome.documents().size(),
+                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {
             retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
         }
@@ -211,31 +194,18 @@ public class ChatService {
         String systemPromptText = systemPromptBuilder.toString();
 
         // Build structured segments
-        SystemSegment systemSegment = new SystemSegment(
-                systemPromptText,
-                estimateTokens(systemPromptText)
-        );
+        SystemSegment systemSegment = new SystemSegment(systemPromptText, estimateTokens(systemPromptText));
 
         List<ContextDocumentSegment> contextSegments = buildContextSegments(contextDocs);
         List<ConversationTurnSegment> conversationSegments = buildConversationSegments(history);
 
-        CurrentQuerySegment querySegment = new CurrentQuerySegment(
-                latestUserMessage,
-                estimateTokens(latestUserMessage)
-        );
+        CurrentQuerySegment querySegment =
+                new CurrentQuerySegment(latestUserMessage, estimateTokens(latestUserMessage));
 
-        StructuredPrompt structuredPrompt = new StructuredPrompt(
-                systemSegment,
-                contextSegments,
-                conversationSegments,
-                querySegment
-        );
+        StructuredPrompt structuredPrompt =
+                new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
 
-        return new StructuredPromptOutcome(
-                structuredPrompt,
-                retrievalOutcome.notices(),
-                retrievalOutcome.documents()
-        );
+        return new StructuredPromptOutcome(structuredPrompt, retrievalOutcome.notices(), retrievalOutcome.documents());
     }
 
     /**
@@ -250,12 +220,7 @@ public class ChatService {
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             String content = doc.getText();
 
-            segments.add(new ContextDocumentSegment(
-                    docIndex + 1,
-                    normalizedUrl,
-                    content,
-                    estimateTokens(content)
-            ));
+            segments.add(new ContextDocumentSegment(docIndex + 1, normalizedUrl, content, estimateTokens(content)));
         }
         return segments;
     }

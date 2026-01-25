@@ -39,7 +39,7 @@ public class CustomErrorController implements ErrorController {
     private static final String ERROR_VIEW_UNSUPPORTED_MEDIA = "forward:/errors/unsupported-media-type";
 
     private final ExceptionResponseBuilder exceptionBuilder;
-    
+
     /**
      * Creates the error controller backed by the shared exception response builder.
      *
@@ -48,40 +48,47 @@ public class CustomErrorController implements ErrorController {
     public CustomErrorController(ExceptionResponseBuilder exceptionBuilder) {
         this.exceptionBuilder = exceptionBuilder;
     }
-    
+
     /**
      * Handles error requests and returns appropriate error pages or JSON responses.
-     * 
+     *
      * @param request The HTTP request
      * @param model Spring MVC model for template rendering
      * @return ModelAndView for HTML requests or ResponseEntity for API requests
      */
     // Explicitly specify all HTTP methods - error handlers must respond to any request type
     // that might generate an error. This is intentional, not a CSRF risk.
-    @RequestMapping(value = ERROR_PATH, method = {
-        RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT,
-        RequestMethod.DELETE, RequestMethod.PATCH, RequestMethod.HEAD, RequestMethod.OPTIONS
-    })
+    @RequestMapping(
+            value = ERROR_PATH,
+            method = {
+                RequestMethod.GET,
+                RequestMethod.POST,
+                RequestMethod.PUT,
+                RequestMethod.DELETE,
+                RequestMethod.PATCH,
+                RequestMethod.HEAD,
+                RequestMethod.OPTIONS
+            })
     public Object handleError(HttpServletRequest request, Model model) {
         // Get error details from request attributes
         Object status = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
         Object message = request.getAttribute(RequestDispatcher.ERROR_MESSAGE);
         Object exception = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
         Object requestUri = request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
-        
+
         int statusCode = status != null ? (Integer) status : 500;
         String errorMessage = message != null ? message.toString() : "An unexpected error occurred";
         String uri = requestUri != null ? requestUri.toString() : request.getRequestURI();
-        
+
         // Log the error for monitoring without echoing request-derived strings
         log.error("Error {} occurred while handling request", statusCode);
         if (exception instanceof Exception exceptionInstance) {
             log.error("Exception type: {}", exceptionInstance.getClass().getSimpleName());
         }
-        
+
         // Determine if this is an API request or a page request
         boolean isApiRequest = uri.startsWith("/api/");
-        
+
         if (isApiRequest) {
             // Return JSON error response for API requests
             return handleApiError(statusCode, errorMessage, (Exception) exception);
@@ -90,7 +97,7 @@ public class CustomErrorController implements ErrorController {
             return handlePageError(statusCode, resolveUserFacingMessage(statusCode), uri, model);
         }
     }
-    
+
     /**
      * Handles API error responses with JSON format.
      */
@@ -99,33 +106,33 @@ public class CustomErrorController implements ErrorController {
         if (httpStatus == null) {
             httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         }
-        
+
         if (exception != null) {
             return exceptionBuilder.buildErrorResponse(httpStatus, message, exception);
         } else {
             return exceptionBuilder.buildErrorResponse(httpStatus, message);
         }
     }
-    
+
     /**
      * Handles page error responses with HTML error pages.
      */
     private ModelAndView handlePageError(int statusCode, String message, String uri, Model model) {
         ModelAndView modelAndView = new ModelAndView();
-        
+
         // Add error details to model for potential template use
         model.addAttribute("status", statusCode);
         model.addAttribute("error", HttpStatus.resolve(statusCode));
         model.addAttribute("message", message);
         model.addAttribute("path", uri);
         model.addAttribute("timestamp", System.currentTimeMillis());
-        
+
         HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
         if (resolvedStatus == null) {
             resolvedStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         }
         modelAndView.setViewName(resolveErrorViewName(resolvedStatus));
-        
+
         return modelAndView;
     }
 
@@ -152,7 +159,7 @@ public class CustomErrorController implements ErrorController {
             default -> ERROR_VIEW_INTERNAL;
         };
     }
-    
+
     /**
      * Returns the error path for Spring Boot's ErrorController interface.
      */

@@ -9,10 +9,7 @@ import java.util.List;
  * @param docs The list of retrieved citations
  * @param error Optional error message if retrieval failed
  */
-public record RetrievalDiagnosticsResponse(
-    List<Citation> docs,
-    String error
-) {
+public record RetrievalDiagnosticsResponse(List<Citation> docs, String error) {
     public RetrievalDiagnosticsResponse {
         docs = docs == null ? List.of() : List.copyOf(docs);
     }

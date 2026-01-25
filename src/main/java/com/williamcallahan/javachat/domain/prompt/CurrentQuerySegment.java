@@ -10,10 +10,7 @@ package com.williamcallahan.javachat.domain.prompt;
  * @param queryText the user's current question
  * @param estimatedTokens approximate token count for budget calculations
  */
-public record CurrentQuerySegment(
-        String queryText,
-        int estimatedTokens
-) implements PromptSegment {
+public record CurrentQuerySegment(String queryText, int estimatedTokens) implements PromptSegment {
 
     /**
      * Creates a current query segment with validation.

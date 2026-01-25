@@ -1,17 +1,17 @@
 package com.williamcallahan.javachat.web;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.TestPropertySource;
-
-import static org.hamcrest.Matchers.containsString;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies robots.txt output and sitemap link generation.
@@ -28,10 +28,10 @@ class RobotsControllerTest {
     @Test
     void robots_points_to_sitemap_and_disallows_api_paths() throws Exception {
         mvc.perform(get("/robots.txt"))
-            .andExpect(status().isOk())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
-            .andExpect(content().string(containsString("Disallow: /api/")))
-            .andExpect(content().string(containsString("Disallow: /actuator/")))
-            .andExpect(content().string(containsString("Sitemap: https://java-chat.example/sitemap.xml")));
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(content().string(containsString("Disallow: /api/")))
+                .andExpect(content().string(containsString("Disallow: /actuator/")))
+                .andExpect(content().string(containsString("Sitemap: https://java-chat.example/sitemap.xml")));
     }
 }

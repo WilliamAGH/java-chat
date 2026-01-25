@@ -1,16 +1,15 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.Embedding;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.ai.embedding.EmbeddingResponse;
 
 /**
  * Minimal CPU-only deterministic hashing embedding to unblock retrieval without remote calls.

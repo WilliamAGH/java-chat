@@ -1,15 +1,14 @@
 package com.williamcallahan.javachat.service;
 
-import com.williamcallahan.javachat.model.Enrichment;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.model.Enrichment;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
 
 /**
  * Generates enrichment metadata by prompting the LLM with contextual snippets.
@@ -24,8 +23,7 @@ public class EnrichmentService {
     /**
      * Creates the enrichment service with JSON handling and LLM access.
      */
-    public EnrichmentService(ObjectMapper objectMapper,
-                             OpenAIStreamingService openAIStreamingService) {
+    public EnrichmentService(ObjectMapper objectMapper, OpenAIStreamingService openAIStreamingService) {
         this.objectMapper = objectMapper.copy();
         this.openAIStreamingService = openAIStreamingService;
     }
@@ -69,7 +67,9 @@ public class EnrichmentService {
                 json = "{}";
             }
         } catch (RuntimeException exception) {
-            logger.warn("Enrichment service failed (exception type: {})", exception.getClass().getSimpleName());
+            logger.warn(
+                    "Enrichment service failed (exception type: {})",
+                    exception.getClass().getSimpleName());
             json = "{}"; // Return empty JSON for graceful degradation
         }
 
@@ -95,9 +95,6 @@ public class EnrichmentService {
             return fallback;
         }
     }
-
-
-
 
     private String cleanJson(String raw) {
         if (raw == null) return "{}";

@@ -24,8 +24,7 @@ public class CacheConfig {
     /**
      * Creates cache configuration.
      */
-    public CacheConfig() {
-    }
+    public CacheConfig() {}
 
     /**
      * Registers the cache manager with configured cache names.
@@ -34,11 +33,7 @@ public class CacheConfig {
      */
     @Bean
     public CacheManager cacheManager() {
-        return new ConcurrentMapCacheManager(
-            RERANKER_CACHE,
-            ENRICHMENT_CACHE,
-            CHAT_CACHE
-        );
+        return new ConcurrentMapCacheManager(RERANKER_CACHE, ENRICHMENT_CACHE, CHAT_CACHE);
     }
 
     /**
@@ -47,12 +42,11 @@ public class CacheConfig {
     @Scheduled(fixedRate = EVICT_INTERVAL)
     public void evictAllCachesAtIntervals() {
         final CacheManager manager = cacheManager();
-        manager.getCacheNames()
-            .forEach(cacheName -> {
-                final Cache cache = manager.getCache(cacheName);
-                if (cache != null) {
-                    cache.clear();
-                }
-            });
+        manager.getCacheNames().forEach(cacheName -> {
+            final Cache cache = manager.getCache(cacheName);
+            if (cache != null) {
+                cache.clear();
+            }
+        });
     }
 }

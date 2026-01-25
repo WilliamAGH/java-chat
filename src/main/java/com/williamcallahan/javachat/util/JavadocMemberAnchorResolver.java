@@ -32,9 +32,7 @@ final class JavadocMemberAnchorResolver {
 
         String classFileName = url.substring(url.lastIndexOf('/') + 1);
         String className = classFileName.substring(0, classFileName.length() - ".html".length());
-        String outerSimpleName = className.contains(".")
-            ? className.substring(0, className.indexOf('.'))
-            : className;
+        String outerSimpleName = className.contains(".") ? className.substring(0, className.indexOf('.')) : className;
 
         String constructorAnchor = findConstructorAnchor(outerSimpleName, text, packageName, className);
         if (constructorAnchor != null) {
@@ -49,7 +47,8 @@ final class JavadocMemberAnchorResolver {
         return url;
     }
 
-    private static String findConstructorAnchor(String classSimpleName, String text, String packageName, String fullClassName) {
+    private static String findConstructorAnchor(
+            String classSimpleName, String text, String packageName, String fullClassName) {
         Pattern constructorPattern = Pattern.compile("\\b" + Pattern.quote(classSimpleName) + "\\s*\\(([^)]*)\\)");
         Matcher constructorMatcher = constructorPattern.matcher(text);
         if (constructorMatcher.find()) {
@@ -128,5 +127,4 @@ final class JavadocMemberAnchorResolver {
         }
         return tokens.toArray(new String[0]);
     }
-
 }

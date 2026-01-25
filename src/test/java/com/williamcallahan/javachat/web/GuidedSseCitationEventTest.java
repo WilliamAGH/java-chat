@@ -1,24 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
-import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.config.WebMvcConfig;
-import com.williamcallahan.javachat.model.Citation;
-import com.williamcallahan.javachat.service.ChatMemoryService;
-import com.williamcallahan.javachat.service.GuidedLearningService;
-import com.williamcallahan.javachat.service.MarkdownService;
-import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
-import reactor.core.publisher.Flux;
-
-import java.util.List;
-
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +12,24 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.WebMvcConfig;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import reactor.core.publisher.Flux;
 
 /**
  * Verifies guided chat SSE streams emit a terminal citation event for the UI citation panel.
@@ -69,9 +68,7 @@ class GuidedSseCitationEventTest {
                 .willReturn(Flux.just("Hello"));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1),
-                        List.of()
-                ));
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         given(guidedLearningService.citationsForBookDocuments(anyList()))
                 .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
 
@@ -88,9 +85,11 @@ class GuidedSseCitationEventTest {
                 .getResponse()
                 .getContentAsString();
 
-        assertTrue(aggregated.contains("event:" + EVENT_CITATION) || aggregated.contains("event: " + EVENT_CITATION),
+        assertTrue(
+                aggregated.contains("event:" + EVENT_CITATION) || aggregated.contains("event: " + EVENT_CITATION),
                 "SSE stream should include a citation event. Response was:\n" + aggregated);
-        assertTrue(aggregated.contains("https://example.com"),
+        assertTrue(
+                aggregated.contains("https://example.com"),
                 "Citation payload should include the citation URL. Response was:\n" + aggregated);
     }
 }

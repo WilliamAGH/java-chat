@@ -1,13 +1,5 @@
 package com.williamcallahan.javachat.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,6 +7,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 /**
  * Monitors external service health with exponential backoff for failed services.
@@ -127,18 +126,18 @@ public class ExternalServiceHealth {
         Duration timeUntilNextCheck = null;
 
         if (status.isHealthy.get()) {
-            message = String.format("Healthy (checked %s ago)",
-                formatDuration(Duration.between(status.lastCheck, Instant.now())));
+            message = String.format(
+                    "Healthy (checked %s ago)", formatDuration(Duration.between(status.lastCheck, Instant.now())));
         } else {
-            timeUntilNextCheck = Duration.between(Instant.now(),
-                status.lastCheck.plus(status.currentBackoff));
+            timeUntilNextCheck = Duration.between(Instant.now(), status.lastCheck.plus(status.currentBackoff));
 
             if (timeUntilNextCheck.isNegative()) {
                 message = "Unhealthy (checking now...)";
                 timeUntilNextCheck = Duration.ZERO;
             } else {
-                message = String.format("Unhealthy (failed %d times, next check in %s)",
-                    status.consecutiveFailures.get(), formatDuration(timeUntilNextCheck));
+                message = String.format(
+                        "Unhealthy (failed %d times, next check in %s)",
+                        status.consecutiveFailures.get(), formatDuration(timeUntilNextCheck));
             }
         }
 
@@ -184,20 +183,22 @@ public class ExternalServiceHealth {
         }
 
         requestSpec
-            .retrieve()
-            .toBodilessEntity()
-            .timeout(Duration.ofSeconds(5))
-            .doOnSuccess(response -> {
-                status.markHealthy();
-                log.debug("Qdrant health check succeeded");
-            })
-            .doOnError(error -> {
-                status.markUnhealthy();
-                log.warn("Qdrant health check failed (exception type: {}) - Will retry in {}",
-                    error.getClass().getSimpleName(), formatDuration(status.currentBackoff));
-            })
-            .onErrorResume(error -> Mono.empty())
-            .subscribe();
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(Duration.ofSeconds(5))
+                .doOnSuccess(response -> {
+                    status.markHealthy();
+                    log.debug("Qdrant health check succeeded");
+                })
+                .doOnError(error -> {
+                    status.markUnhealthy();
+                    log.warn(
+                            "Qdrant health check failed (exception type: {}) - Will retry in {}",
+                            error.getClass().getSimpleName(),
+                            formatDuration(status.currentBackoff));
+                })
+                .onErrorResume(error -> Mono.empty())
+                .subscribe();
     }
 
     /**

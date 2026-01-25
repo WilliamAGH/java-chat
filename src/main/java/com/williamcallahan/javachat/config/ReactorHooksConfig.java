@@ -1,14 +1,13 @@
 package com.williamcallahan.javachat.config;
 
+import java.io.InterruptedIOException;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import reactor.core.publisher.Hooks;
-
-import java.io.InterruptedIOException;
-import java.util.Locale;
 
 /**
  * Configures Reactor hooks to handle dropped errors gracefully.
@@ -31,7 +30,8 @@ public class ReactorHooksConfig {
     public void configureDroppedErrorHandler() {
         Hooks.onErrorDropped(error -> {
             if (isExpectedCancellationError(error)) {
-                log.debug("Dropped expected cancellation error (exceptionType={})",
+                log.debug(
+                        "Dropped expected cancellation error (exceptionType={})",
                         error.getClass().getSimpleName());
             } else {
                 log.warn("Dropped unexpected error", error);

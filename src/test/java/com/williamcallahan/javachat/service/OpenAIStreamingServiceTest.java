@@ -1,16 +1,15 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
-import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Method;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 /**
  * Verifies retry classification decisions for OpenAI streaming failures.
@@ -32,7 +31,8 @@ class OpenAIStreamingServiceTest {
     void isRetryablePrimaryFailureTreats401AsRetryableForPrimaryFailover() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
-        UnauthorizedException unauthorized = UnauthorizedException.builder().headers(headers).build();
+        UnauthorizedException unauthorized =
+                UnauthorizedException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, unauthorized);
         assertTrue(retryable);
     }
@@ -41,7 +41,8 @@ class OpenAIStreamingServiceTest {
     void isRetryablePrimaryFailureTreats429AsRetryable() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
-        RateLimitException rateLimit = RateLimitException.builder().headers(headers).build();
+        RateLimitException rateLimit =
+                RateLimitException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, rateLimit);
         assertTrue(retryable);
     }
@@ -54,7 +55,7 @@ class OpenAIStreamingServiceTest {
     }
 
     private boolean invokeIsRetryablePrimaryFailure(OpenAIStreamingService service, Throwable throwable)
-        throws ReflectiveOperationException {
+            throws ReflectiveOperationException {
         Method method = OpenAIStreamingService.class.getDeclaredMethod("isRetryablePrimaryFailure", Throwable.class);
         method.setAccessible(true);
         Object result = method.invoke(service, throwable);

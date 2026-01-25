@@ -17,10 +17,8 @@ final class DocsLocalPathMapper {
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
     private static final String SPRING_BOOT_MARKER = "spring-boot";
 
-    private static final String SPRING_FRAMEWORK_DUPLICATE_JAVADOC_PREFIX =
-        "docs/current/api/current/javadoc-api/";
-    private static final String SPRING_FRAMEWORK_DUPLICATE_JAVADOC_BASE =
-        "docs/current/api/current/";
+    private static final String SPRING_FRAMEWORK_DUPLICATE_JAVADOC_PREFIX = "docs/current/api/current/javadoc-api/";
+    private static final String SPRING_FRAMEWORK_DUPLICATE_JAVADOC_BASE = "docs/current/api/current/";
     private static final String SPRING_FRAMEWORK_API_CURRENT_PREFIX = "api/current/javadoc-api/";
     private static final String SPRING_FRAMEWORK_DOCS_JAVADOC_PREFIX = "docs/current/javadoc-api/";
     private static final String SPRING_FRAMEWORK_JAVADOC_JAVA_PREFIX = "javadoc-api/java/";
@@ -35,22 +33,18 @@ final class DocsLocalPathMapper {
     private static final String API_SUFFIX = "/api";
     private static final String API_PREFIX = "api/";
 
-    private DocsLocalPathMapper() {
-    }
+    private DocsLocalPathMapper() {}
 
     static Optional<String> mapLocalPrefixToRemote(
-        final String localPath,
-        final Map<String, String> localPrefixLookup
-    ) {
+            final String localPath, final Map<String, String> localPrefixLookup) {
         Optional<String> mappedUrl = Optional.empty();
         if (localPath != null) {
             final String normalizedPath = localPath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
             for (final Map.Entry<String, String> prefixEntry : localPrefixLookup.entrySet()) {
                 final String localPrefix = prefixEntry.getKey();
                 if (normalizedPath.contains(localPrefix)) {
-                    final String relativePath = normalizedPath.substring(
-                        normalizedPath.indexOf(localPrefix) + localPrefix.length()
-                    );
+                    final String relativePath =
+                            normalizedPath.substring(normalizedPath.indexOf(localPrefix) + localPrefix.length());
                     final String adjustedPath = normalizeRelativePath(localPrefix, relativePath);
                     mappedUrl = joinBaseAndRel(prefixEntry.getValue(), adjustedPath);
                     break;
@@ -82,7 +76,7 @@ final class DocsLocalPathMapper {
         }
         if (adjustedPath.startsWith(SPRING_FRAMEWORK_JAVADOC_JAVA_PREFIX)) {
             adjustedPath = SPRING_FRAMEWORK_JAVADOC_PREFIX
-                + adjustedPath.substring(SPRING_FRAMEWORK_JAVADOC_JAVA_PREFIX.length());
+                    + adjustedPath.substring(SPRING_FRAMEWORK_JAVADOC_JAVA_PREFIX.length());
         }
         return adjustedPath;
     }
@@ -93,8 +87,7 @@ final class DocsLocalPathMapper {
             adjustedPath = adjustedPath.substring(SPRING_BOOT_DOCS_API_PREFIX.length());
         }
         if (adjustedPath.startsWith(SPRING_BOOT_API_JAVA_PREFIX)) {
-            adjustedPath = SPRING_BOOT_API_PREFIX
-                + adjustedPath.substring(SPRING_BOOT_API_JAVA_PREFIX.length());
+            adjustedPath = SPRING_BOOT_API_PREFIX + adjustedPath.substring(SPRING_BOOT_API_JAVA_PREFIX.length());
         }
         return adjustedPath;
     }
@@ -104,8 +97,8 @@ final class DocsLocalPathMapper {
         if (baseUrl != null) {
             final String normalizedBase = trimTrailingSlashes(baseUrl);
             String normalizedRel = relativePath == null
-                ? EMPTY_TEXT
-                : relativePath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+                    ? EMPTY_TEXT
+                    : relativePath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
             normalizedRel = trimLeadingSlashes(normalizedRel);
 
             // Avoid duplicate 'docs/api' or 'api' in path
