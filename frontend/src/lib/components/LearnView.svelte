@@ -651,9 +651,12 @@
   /* Loading/Error States */
   .loading-state,
   .error-state {
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: var(--space-4);
     padding: var(--space-12);
     color: var(--color-text-secondary);
@@ -710,6 +713,7 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
+    line-height: 1;
     color: var(--color-text-secondary);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
@@ -734,6 +738,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1;
+    margin: 0;
+    padding-bottom: 2px;
   }
 
   /* Two-column Layout */
@@ -741,11 +748,13 @@
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 400px;
+    grid-template-rows: 1fr; /* Explicit single row fills height */
     overflow: hidden;
   }
 
   /* Lesson Content Panel */
   .lesson-content-panel {
+    position: relative; /* For absolute positioning of loading state */
     overflow-y: auto;
     overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
     padding: var(--space-6);
