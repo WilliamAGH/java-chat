@@ -117,6 +117,11 @@
             lessonContentPanelEl.scrollTop = scrollTop
           }
         })
+      }).catch((error) => {
+        // Guard against stale citation error
+        if (selectedLesson?.slug !== targetSlug) return
+        lessonCitationsError = error instanceof Error ? error.message : 'Failed to load lesson sources'
+        lessonCitationsLoaded = true
       })
     } catch (error) {
       if (selectedLesson?.slug !== targetSlug) return
@@ -747,18 +752,19 @@
   .lesson-layout {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 400px;
-    grid-template-rows: 1fr; /* Explicit single row fills height */
+    grid-template-columns: 1fr 460px;
+    grid-template-rows: 1fr;
     overflow: hidden;
+    min-height: 0; /* Critical for flex-in-grid scrolling */
   }
 
   /* Lesson Content Panel */
   .lesson-content-panel {
     position: relative; /* For absolute positioning of loading state */
+    min-height: 0; /* Critical for grid/flex scrolling */
     overflow-y: auto;
     overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
     padding: var(--space-6);
-    border-right: 1px solid var(--color-border-subtle);
   }
 
   .lesson-content {
@@ -907,19 +913,40 @@
     border-color: var(--color-accent-muted);
   }
 
-  /* Chat Panel */
+  /* Chat Panel - Pinned Frame */
   .chat-panel {
     display: flex;
     flex-direction: column;
+    height: 100%;
+    min-height: 0; /* Critical: allows flex children to shrink for scrolling */
+    overflow: hidden; /* Contains scrolling to messages-container only */
     background: var(--color-bg-primary);
+    border-left: 1px solid var(--color-border-default);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+    position: relative;
+  }
+
+  /* Subtle pinned indicator line at top */
+  .chat-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent-muted) 0%, var(--color-accent) 50%, var(--color-accent-muted) 100%);
+    opacity: 0.6;
+    z-index: 1;
   }
 
   .chat-panel-header {
+    flex-shrink: 0; /* Never shrink - stays at top */
     display: flex;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--color-border-subtle);
+    background: var(--color-bg-secondary);
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-text-secondary);
@@ -963,9 +990,12 @@
   }
 
   .messages-container {
-    flex: 1;
+    flex: 1; /* Takes all remaining space between header and input */
+    min-height: 0; /* Critical: allows overflow scroll to work in flexbox */
     overflow-y: auto;
+    overflow-x: hidden;
     padding: var(--space-4);
+    scroll-behavior: smooth;
   }
 
   .messages-list {
@@ -993,6 +1023,22 @@
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
     margin-top: var(--space-2);
+  }
+
+  /* ChatInput pinned within chat-panel - the :global selector targets ChatInput's wrapper */
+  .chat-panel :global(.input-area) {
+    flex-shrink: 0; /* Never shrink - stays pinned at bottom */
+    border-top: 1px solid var(--color-border-subtle);
+    background: var(--color-bg-secondary);
+    padding: var(--space-3);
+  }
+
+  .chat-panel :global(.input-container) {
+    max-width: none; /* Use full width within panel */
+  }
+
+  .chat-panel :global(.input-hint) {
+    display: none; /* Hide hints in compact panel view */
   }
 
   /* Mobile Chat FAB - hidden on desktop */
@@ -1165,6 +1211,13 @@
     flex-shrink: 0;
     border-top: 1px solid var(--color-border-subtle);
     padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  /* Intermediate breakpoint: narrower chat panel on medium screens */
+  @media (max-width: 1280px) and (min-width: 1025px) {
+    .lesson-layout {
+      grid-template-columns: 1fr 400px;
+    }
   }
 
   /* Responsive: Stack on smaller screens with flexible heights */

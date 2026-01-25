@@ -109,7 +109,7 @@ public class ExceptionResponseBuilder {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
-        if (!responseBody.isBlank()) {
+        if (responseBody != null && !responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
         HttpHeaders headers = exception.getHeaders();
@@ -121,8 +121,9 @@ public class ExceptionResponseBuilder {
 
     private void appendOpenAiDetails(StringBuilder details, OpenAIServiceException exception) {
         details.append(" [httpStatus=").append(exception.statusCode());
-        if (!exception.headers().isEmpty()) {
-            details.append(", headers=").append(exception.headers());
+        var headers = exception.headers();
+        if (headers != null && !headers.isEmpty()) {
+            details.append(", headers=").append(headers);
         }
         var bodyJson = exception.body();
         if (bodyJson != null) {
