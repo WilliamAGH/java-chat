@@ -239,7 +239,7 @@ public class RetrievalService {
 
         if (!docs.isEmpty()) {
             Map<String, ?> metadata = docs.get(0).getMetadata();
-            int metadataSize = metadata.size();
+            int metadataSize = metadata == null ? 0 : metadata.size();
             String docText = Optional.ofNullable(docs.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
             log.info("First doc metadata size: {}", metadataSize);
