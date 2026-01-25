@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ChatMessage } from '../services/chat'
-  import { renderMarkdown } from '../services/markdown'
+  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
   import { createDebouncedHighlighter } from '../utils/highlight'
 
   interface Props {
@@ -19,16 +19,19 @@
   // Debounced highlighter with automatic cleanup
   const { scheduleHighlight, cleanup: cleanupHighlighter } = createDebouncedHighlighter()
 
-  // Render markdown synchronously - no server calls, no async complexity
+  // Render markdown synchronously - SSR-safe parsing without DOM operations
   let renderedContent = $derived(
     message.role === 'assistant' && message.content
-      ? renderMarkdown(message.content)
+      ? parseMarkdown(message.content)
       : ''
   )
 
-  // Highlight code blocks after render - debounced to avoid flicker during streaming
+  // Apply Java language detection and highlight code blocks after render
+  // Debounced to avoid flicker during streaming
   $effect(() => {
     if (renderedContent && contentEl) {
+      // Apply Java language detection before highlighting (client-side DOM operation)
+      applyJavaLanguageDetection(contentEl)
       scheduleHighlight(contentEl, isStreaming)
     }
     return cleanupHighlighter

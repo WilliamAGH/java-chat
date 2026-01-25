@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -125,17 +126,27 @@ public class GuidedLearningService {
     }
     
     /**
-     * Build a complete prompt for OpenAI streaming service for guided learning.
-     * This reuses the same logic as streamGuidedAnswer but returns the prompt instead of streaming.
+     * Builds a structured prompt for guided learning with intelligent truncation support.
+     *
+     * <p>Retrieves Think Java book context and builds a structured prompt that can be
+     * truncated segment-by-segment rather than character-by-character.</p>
+     *
+     * @param history conversation history
+     * @param slug lesson slug for context retrieval
+     * @param userMessage user's question
+     * @return structured prompt for the OpenAI streaming service
      */
-    public String buildGuidedPromptWithContext(List<Message> history, String slug, String userMessage) {
+    public StructuredPrompt buildStructuredGuidedPromptWithContext(
+            List<Message> history,
+            String slug,
+            String userMessage) {
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        // Build the complete prompt using ChatService's prompt building logic
-        return chatService.buildPromptWithContextAndGuidance(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
+        return chatService.buildStructuredPromptWithContextAndGuidance(
+                history, userMessage, filtered, THINK_JAVA_GUIDANCE);
     }
 
     /**

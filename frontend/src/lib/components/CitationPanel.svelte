@@ -12,14 +12,32 @@
     citations: Citation[]
     /** Whether to show the panel (controls visibility without unmounting). */
     visible?: boolean
+    /** Optional explicit ID for ARIA association. If not provided, derived from citations. */
+    panelId?: string
   }
 
-  let { citations, visible = true }: Props = $props()
+  let { citations, visible = true, panelId }: Props = $props()
 
   let isExpanded = $state(false)
 
-  /** Unique ID for ARIA association between trigger and list (avoids duplicate IDs on page). */
-  const citationListId = `citation-list-${Math.random().toString(36).slice(2, 9)}`
+  /**
+   * Simple hash for deterministic ID generation from citation content.
+   * Creates consistent IDs across server and client renders.
+   */
+  function hashCitations(citationList: Citation[]): string {
+    if (citationList.length === 0) return 'empty'
+    const firstUrl = citationList[0]?.url ?? ''
+    let hash = 0
+    for (let charIndex = 0; charIndex < firstUrl.length; charIndex++) {
+      const char = firstUrl.charCodeAt(charIndex)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(36)
+  }
+
+  /** Deterministic ID for ARIA association between trigger and list. */
+  let citationListId = $derived(panelId ?? `citation-list-${hashCitations(citations)}`)
 
   /** Deduplicated citations for display, with defensive validation. */
   let uniqueCitations = $derived(deduplicateCitations(citations))
@@ -217,10 +235,7 @@
     border-color: var(--color-accent-muted);
   }
 
-  .citation-link:hover .citation-arrow {
-    opacity: 1;
-    transform: translateX(2px);
-  }
+  /* Arrow visibility handled in capability media query below */
 
   /* Type badge - small colored dot/icon */
   .citation-type-badge {
@@ -287,11 +302,23 @@
     width: var(--citation-icon-size-md);
     height: var(--citation-icon-size-md);
     color: var(--color-text-muted);
-    opacity: 0;
+    opacity: 0.5; /* Default visible for touch devices */
     transition: all var(--citation-transition-fast) ease-out;
   }
 
-  /* Mobile */
+  /* Only use hover behavior when device supports it */
+  @media (hover: hover) and (pointer: fine) {
+    .citation-arrow {
+      opacity: 0;
+    }
+
+    .citation-link:hover .citation-arrow {
+      opacity: 1;
+      transform: translateX(2px);
+    }
+  }
+
+  /* Mobile spacing adjustments */
   @media (max-width: 640px) {
     .citation-trigger {
       padding: var(--space-2) var(--space-3);
@@ -300,10 +327,6 @@
 
     .citation-link {
       padding: var(--space-2) var(--space-3);
-    }
-
-    .citation-arrow {
-      opacity: 0.5;
     }
   }
 

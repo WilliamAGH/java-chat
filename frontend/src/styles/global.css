@@ -174,24 +174,26 @@ body {
   line-height: var(--leading-normal);
   color: var(--color-text-primary);
   background-color: var(--color-bg-primary);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
-@supports (min-height: 100dvh) {
+@supports (height: 100dvh) {
   body {
-    min-height: 100dvh;
+    height: 100dvh;
   }
 }
 
 #app {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-@supports (min-height: 100dvh) {
+@supports (height: 100dvh) {
   #app {
-    min-height: 100dvh;
+    height: 100dvh;
   }
 }
 

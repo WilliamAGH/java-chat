@@ -192,11 +192,22 @@ marked.use({
   extensions: [createEnrichmentExtension()]
 })
 
+/** Keywords indicating Java code for auto-detection. */
+const JAVA_KEYWORDS = ['public', 'private', 'class', 'import', 'void', 'String', 'int', 'boolean'] as const
+
+/** CSS class applied to detected Java code blocks for syntax highlighting. */
+const JAVA_LANGUAGE_CLASS = 'language-java'
+
+/** Selector for unmarked code blocks eligible for language detection. */
+const UNMARKED_CODE_SELECTOR = 'pre > code:not([class])'
+
 /**
- * Render markdown to sanitized HTML with enrichment support.
- * All rendering is client-side for consistent streaming and final display.
+ * Parse markdown to sanitized HTML. SSR-safe - no DOM APIs used.
+ * Uses DOMPurify for sanitization. Use this in `$derived` for reactive markdown rendering.
+ *
+ * @throws Never throws - returns empty string on parse failure and logs error in dev mode
  */
-export function renderMarkdown(content: string): string {
+export function parseMarkdown(content: string): string {
   if (!content) {
     return ''
   }
@@ -213,35 +224,51 @@ export function renderMarkdown(content: string): string {
     }
   }
 
-  const rawHtml = marked.parse(content, { async: false }) as string
+  try {
+    const rawHtml = marked.parse(content, { async: false }) as string
 
-  const sanitizedHtml = DOMPurify.sanitize(rawHtml, {
-    USE_PROFILES: { html: true },
-    ADD_ATTR: ['class', 'data-enrichment-type']
-  })
-
-  // Use DOM API to add language classes for code highlighting
-  const template = document.createElement('template')
-  template.innerHTML = sanitizedHtml
-
-  // Auto-detect Java code blocks that weren't explicitly marked
-  const codeBlocks = template.content.querySelectorAll('pre > code:not([class])')
-  codeBlocks.forEach(code => {
-    const text = code.textContent ?? ''
-    const javaKeywords = ['public', 'private', 'class', 'import', 'void', 'String', 'int', 'boolean']
-    if (javaKeywords.some(kw => text.includes(kw))) {
-      code.className = 'language-java'
-    }
-  })
-
-  return template.innerHTML
+    return DOMPurify.sanitize(rawHtml, {
+      USE_PROFILES: { html: true },
+      ADD_ATTR: ['class', 'data-enrichment-type']
+    })
+  } catch (parseError) {
+    console.error('[markdown] Failed to parse markdown content:', parseError)
+    return ''
+  }
 }
 
 /**
- * Simple text escaping for safety
+ * Auto-detect Java code blocks and add language class for highlighting.
+ * Client-side only - call this in `$effect` after content is mounted.
+ *
+ * @param container - DOM element containing rendered markdown. Must be a valid HTMLElement.
+ * @throws Never throws - logs warning if container is invalid and returns early
+ */
+export function applyJavaLanguageDetection(container: HTMLElement | null | undefined): void {
+  if (!container || typeof container.querySelectorAll !== 'function') {
+    if (import.meta.env.DEV) {
+      console.warn('[markdown] applyJavaLanguageDetection called with invalid container:', container)
+    }
+    return
+  }
+
+  const codeBlocks = container.querySelectorAll(UNMARKED_CODE_SELECTOR)
+  codeBlocks.forEach(code => {
+    const text = code.textContent ?? ''
+    if (JAVA_KEYWORDS.some(kw => text.includes(kw))) {
+      code.className = JAVA_LANGUAGE_CLASS
+    }
+  })
+}
+
+/**
+ * Escape text for safe HTML insertion. SSR-safe - pure string operations.
  */
 export function escapeHtml(text: string): string {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }

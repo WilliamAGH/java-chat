@@ -1,14 +1,17 @@
 <script lang="ts">
   import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
   import { fetchCitations, type Citation } from '../services/chat'
-  import { renderMarkdown } from '../services/markdown'
+  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
   import type { ChatMessage } from '../services/chat'
-  import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
+  import StreamingMessagesList from './StreamingMessagesList.svelte'
+  import MobileChatDrawer from './MobileChatDrawer.svelte'
   import { sanitizeUrl, deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
+  import { generateSessionId } from '../utils/session'
+  import { createStreamingState } from '../composables/createStreamingState.svelte'
 
   // TOC state
   let lessons = $state<GuidedLesson[]>([])
@@ -29,12 +32,15 @@
   // Chat state - per-lesson persistence
   const chatHistoryByLesson = new Map<string, ChatMessage[]>()
   let messages = $state<ChatMessage[]>([])
-  let isStreaming = $state(false)
-  let currentStreamingContent = $state('')
-  let streamStatusMessage = $state('')
-  let streamStatusDetails = $state('')
-  let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
+
+  // Streaming state from composable (immediate status clear for LearnView)
+  const streaming = createStreamingState()
+
+  // Desktop container ref for scroll management
+  let desktopMessagesContainer: HTMLElement | null = $state(null)
+  // Component ref for mobile drawer to access its scroll container
+  let mobileDrawer: MobileChatDrawer | null = $state(null)
 
   // Mobile chat drawer state
   let isChatDrawerOpen = $state(false)
@@ -43,11 +49,12 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
-  const sessionId = `guided-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
+  // Session ID for chat continuity
+  const sessionId = generateSessionId('guided')
 
-  // Rendered lesson content - safe empty string when no content
+  // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
-    lessonMarkdown ? renderMarkdown(lessonMarkdown) : ''
+    lessonMarkdown ? parseMarkdown(lessonMarkdown) : ''
   )
 
   // Load TOC on mount
@@ -140,11 +147,8 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-    // Cancel any in-flight stream by clearing streaming state
-    isStreaming = false
-    currentStreamingContent = ''
-    streamStatusMessage = ''
-    streamStatusDetails = ''
+    // Cancel any in-flight stream
+    streaming.reset()
     isChatDrawerOpen = false
     selectedLesson = null
     lessonMarkdown = ''
@@ -174,16 +178,21 @@
     shouldAutoScroll = true
   }
 
+  /** Returns the currently active messages container based on drawer state. */
+  function getActiveMessagesContainer(): HTMLElement | null {
+    return isChatDrawerOpen ? mobileDrawer?.getMessagesContainer() ?? null : desktopMessagesContainer
+  }
+
   function checkAutoScroll(): void {
-    shouldAutoScroll = isNearBottom(messagesContainer)
+    shouldAutoScroll = isNearBottom(getActiveMessagesContainer())
   }
 
   async function doScrollToBottom(): Promise<void> {
-    await scrollToBottom(messagesContainer, shouldAutoScroll)
+    await scrollToBottom(getActiveMessagesContainer(), shouldAutoScroll)
   }
 
   async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || isStreaming || !selectedLesson) return
+    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
 
     const streamLessonSlug = selectedLesson.slug
     const userQuery = message.trim()
@@ -197,24 +206,20 @@
     shouldAutoScroll = true
     await doScrollToBottom()
 
-    isStreaming = true
-    currentStreamingContent = ''
-    streamStatusMessage = ''
-    streamStatusDetails = ''
+    streaming.startStream()
 
     try {
       await streamGuidedChat(sessionId, selectedLesson.slug, userQuery, {
         onChunk: (chunk) => {
           // Guard: ignore chunks if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          currentStreamingContent += chunk
+          streaming.appendContent(chunk)
           doScrollToBottom()
         },
         onStatus: (status) => {
           // Guard: ignore status if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          streamStatusMessage = status.message
-          streamStatusDetails = status.details ?? ''
+          streaming.updateStatus(status)
         },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
@@ -225,7 +230,7 @@
       if (selectedLesson?.slug !== streamLessonSlug) return
       messages = [...messages, {
         role: 'assistant',
-        content: currentStreamingContent,
+        content: streaming.streamingContent,
         timestamp: Date.now()
       }]
     } catch (error) {
@@ -240,22 +245,22 @@
     } finally {
       // Guard: only reset streaming state if still on same lesson
       if (selectedLesson?.slug === streamLessonSlug) {
-        isStreaming = false
-        currentStreamingContent = ''
-        streamStatusMessage = ''
-        streamStatusDetails = ''
+        streaming.finishStream()
         await doScrollToBottom()
       }
     }
   }
 
-  // Highlight code blocks after lesson content renders
+  // Apply Java language detection and highlight code blocks after lesson content renders
   // Uses shared utility with cancellation support
   $effect(() => {
     const contentElement = lessonContentEl
     if (!renderedLesson || !contentElement) return
 
     let isCancelled = false
+
+    // Apply Java language detection before highlighting (client-side DOM operation)
+    applyJavaLanguageDetection(contentElement)
 
     highlightCodeBlocks(contentElement).catch((highlightError) => {
       if (!isCancelled) {
@@ -398,126 +403,47 @@
 
           <div
             class="messages-container"
-            bind:this={messagesContainer}
+            bind:this={desktopMessagesContainer}
             onscroll={checkAutoScroll}
           >
-            {#if messages.length === 0 && !isStreaming}
+            {#if messages.length === 0 && !streaming.isStreaming}
               <div class="chat-empty">
                 <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
                 <p class="hint">Ask anything about the concepts in this lesson.</p>
               </div>
             {:else}
-              <div class="messages-list">
-                {#each messages as message, i (message.timestamp)}
-                  <MessageBubble {message} index={i} />
-                {/each}
-
-                {#if isStreaming && currentStreamingContent}
-                  <MessageBubble
-                    message={{
-                      role: 'assistant',
-                      content: currentStreamingContent,
-                      timestamp: Date.now()
-                    }}
-                    index={messages.length}
-                    isStreaming={true}
-                  />
-                {:else if isStreaming}
-                  <ThinkingIndicator
-                    statusMessage={streamStatusMessage}
-                    statusDetails={streamStatusDetails}
-                  />
-                {/if}
-              </div>
+              <StreamingMessagesList
+                {messages}
+                isStreaming={streaming.isStreaming}
+                streamingContent={streaming.streamingContent}
+                statusMessage={streaming.statusMessage}
+                statusDetails={streaming.statusDetails}
+              />
             {/if}
           </div>
 
-          <ChatInput onSend={handleSend} disabled={isStreaming} placeholder="Ask about this lesson..." />
+          <ChatInput onSend={handleSend} disabled={streaming.isStreaming} placeholder="Ask about this lesson..." />
         </div>
       </div>
 
-      <!-- Mobile Chat FAB -->
-      <button
-        type="button"
-        class="chat-fab"
-        onclick={toggleChatDrawer}
-        aria-label="Ask questions about this lesson"
-        aria-expanded={isChatDrawerOpen}
-      >
-        {#if isStreaming}
-          <div class="fab-streaming-indicator"></div>
-        {:else if messages.length > 0}
-          <span class="fab-badge">{messages.length}</span>
-        {/if}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/>
-        </svg>
-      </button>
-
-      <!-- Mobile Chat Drawer -->
-      {#if isChatDrawerOpen}
-        <div class="chat-drawer-backdrop" onclick={closeChatDrawer} aria-hidden="true"></div>
-        <div class="chat-drawer" role="dialog" aria-label="Lesson chat">
-          <div class="chat-drawer-header">
-            <div class="chat-drawer-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/>
-              </svg>
-              <span>Ask about this lesson</span>
-            </div>
-            <div class="chat-drawer-actions">
-              {#if messages.length > 0}
-                <button type="button" class="drawer-action-btn" onclick={clearChat} title="Clear chat">
-                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd"/>
-                  </svg>
-                </button>
-              {/if}
-              <button type="button" class="drawer-close-btn" onclick={closeChatDrawer} aria-label="Close chat">
-                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div class="chat-drawer-messages" bind:this={messagesContainer} onscroll={checkAutoScroll}>
-            {#if messages.length === 0 && !isStreaming}
-              <div class="chat-empty">
-                <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
-                <p class="hint">Ask anything about the concepts in this lesson.</p>
-              </div>
-            {:else}
-              <div class="messages-list">
-                {#each messages as message, i (message.timestamp)}
-                  <MessageBubble {message} index={i} />
-                {/each}
-
-                {#if isStreaming && currentStreamingContent}
-                  <MessageBubble
-                    message={{
-                      role: 'assistant',
-                      content: currentStreamingContent,
-                      timestamp: Date.now()
-                    }}
-                    index={messages.length}
-                    isStreaming={true}
-                  />
-                {:else if isStreaming}
-                  <ThinkingIndicator
-                    statusMessage={streamStatusMessage}
-                    statusDetails={streamStatusDetails}
-                  />
-                {/if}
-              </div>
-            {/if}
-          </div>
-
-          <div class="chat-drawer-input">
-            <ChatInput onSend={handleSend} disabled={isStreaming} placeholder="Ask about this lesson..." />
-          </div>
-        </div>
-      {/if}
+      <!-- Mobile Chat FAB + Drawer -->
+      <MobileChatDrawer
+        bind:this={mobileDrawer}
+        isOpen={isChatDrawerOpen}
+        {messages}
+        isStreaming={streaming.isStreaming}
+        streamingContent={streaming.streamingContent}
+        statusMessage={streaming.statusMessage}
+        statusDetails={streaming.statusDetails}
+        title="Ask about this lesson"
+        emptyStateSubject={selectedLesson.title}
+        placeholder="Ask about this lesson..."
+        onToggle={toggleChatDrawer}
+        onClose={closeChatDrawer}
+        onClear={clearChat}
+        onSend={handleSend}
+        onScroll={checkAutoScroll}
+      />
     </div>
   {/if}
 </div>
@@ -595,15 +521,18 @@
     animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
   }
 
-  .lesson-card:hover {
-    background: var(--color-bg-tertiary);
-    border-color: var(--color-border-default);
-    transform: translateX(4px);
-  }
+  /* Hover effects only for devices with hover capability */
+  @media (hover: hover) and (pointer: fine) {
+    .lesson-card:hover {
+      background: var(--color-bg-tertiary);
+      border-color: var(--color-border-default);
+      transform: translateX(4px);
+    }
 
-  .lesson-card:hover .lesson-arrow {
-    opacity: 1;
-    transform: translateX(0);
+    .lesson-card:hover .lesson-arrow {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   .lesson-number {
@@ -648,9 +577,16 @@
     width: 20px;
     height: 20px;
     color: var(--color-accent);
-    opacity: 0;
-    transform: translateX(-8px);
+    opacity: 0.6; /* Default visible for touch devices */
     transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  /* Only hide arrow by default on hover-capable devices */
+  @media (hover: hover) and (pointer: fine) {
+    .lesson-arrow {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
   }
 
   /* Loading/Error States */
@@ -756,6 +692,7 @@
     grid-template-rows: 1fr;
     overflow: hidden;
     min-height: 0; /* Critical for flex-in-grid scrolling */
+    max-height: 100%; /* Prevent grid from expanding beyond parent */
   }
 
   /* Lesson Content Panel */
@@ -1003,12 +940,6 @@
     }
   }
 
-  .messages-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
   .chat-empty {
     display: flex;
     flex-direction: column;
@@ -1046,178 +977,6 @@
     display: none; /* Hide hints in compact panel view */
   }
 
-  /* Mobile Chat FAB - hidden on desktop */
-  .chat-fab {
-    display: none;
-    position: fixed;
-    bottom: var(--space-6);
-    right: var(--space-6);
-    width: 56px;
-    height: 56px;
-    padding: 0;
-    background: var(--color-accent);
-    border: none;
-    border-radius: 50%;
-    color: white;
-    cursor: pointer;
-    box-shadow: var(--shadow-lg);
-    transition: all var(--duration-fast) var(--ease-out);
-    z-index: 50;
-  }
-
-  .chat-fab:hover {
-    background: var(--color-accent-hover);
-    transform: scale(1.05);
-  }
-
-  .chat-fab:active {
-    transform: scale(0.95);
-  }
-
-  .chat-fab svg {
-    width: 24px;
-    height: 24px;
-  }
-
-  .fab-badge {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 6px;
-    background: var(--color-error);
-    border-radius: 10px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .fab-streaming-indicator {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    width: 16px;
-    height: 16px;
-    background: var(--color-success);
-    border-radius: 50%;
-    animation: pulse 1.5s infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.7; transform: scale(1.2); }
-  }
-
-  /* Mobile Chat Drawer */
-  .chat-drawer-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 60;
-    animation: fade-in var(--duration-fast) var(--ease-out);
-  }
-
-  @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  .chat-drawer {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 85vh;
-    max-height: 85vh;
-    background: var(--color-bg-primary);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    box-shadow: var(--shadow-xl);
-    z-index: 70;
-    flex-direction: column;
-    animation: slide-up var(--duration-normal) var(--ease-out);
-  }
-
-  @keyframes slide-up {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-
-  .chat-drawer-header {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-4);
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-
-  .chat-drawer-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-base);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .chat-drawer-title svg {
-    width: 20px;
-    height: 20px;
-    color: var(--color-accent);
-  }
-
-  .chat-drawer-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .drawer-action-btn,
-  .drawer-close-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-md);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  .drawer-action-btn:hover,
-  .drawer-close-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .drawer-action-btn svg,
-  .drawer-close-btn svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .chat-drawer-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--space-4);
-  }
-
-  .chat-drawer-input {
-    flex-shrink: 0;
-    border-top: 1px solid var(--color-border-subtle);
-    padding-bottom: env(safe-area-inset-bottom, 0);
-  }
-
   /* Intermediate breakpoint: narrower chat panel on medium screens */
   @media (max-width: 1280px) and (min-width: 1025px) {
     .lesson-layout {
@@ -1227,23 +986,9 @@
 
   /* Responsive: Stack on smaller screens with flexible heights */
   @media (max-width: 1024px) {
-    /* Hide desktop chat panel, show FAB */
+    /* Hide desktop chat panel (mobile uses MobileChatDrawer component) */
     .chat-panel--desktop {
       display: none;
-    }
-
-    .chat-fab {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .chat-drawer-backdrop {
-      display: block;
-    }
-
-    .chat-drawer {
-      display: flex;
     }
 
     /* Lesson content takes full height on mobile */
@@ -1310,23 +1055,6 @@
 
     .back-btn span {
       display: none;
-    }
-
-    .chat-fab {
-      bottom: var(--space-4);
-      right: var(--space-4);
-      width: 52px;
-      height: 52px;
-    }
-
-    .chat-fab svg {
-      width: 22px;
-      height: 22px;
-    }
-
-    .chat-drawer {
-      height: 90vh;
-      max-height: 90vh;
     }
   }
 </style>
