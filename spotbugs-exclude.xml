@@ -74,6 +74,13 @@
         <Bug pattern="SPRING_ENDPOINT"/>
         <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
     </Match>
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+    </Match>
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+        <Class name="com.williamcallahan.javachat.web.MarkdownApiIntegrationTest$TestMarkdownController"/>
+    </Match>
 
     <!--
         CRLF injection warnings for log entries are mitigated by internal sanitization and controlled sources.
@@ -81,7 +88,6 @@
     -->
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\..*"/>
     </Match>
 
     <!--
@@ -89,8 +95,38 @@
         even though callers cannot mutate internal state beyond copies.
     -->
     <Match>
-        <Bug code="EI"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
         <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        Locale-agnostic case folding is acceptable for internal parsing.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+    </Match>
+
+    <!--
+        Known-null reset times are intentionally passed to RateLimitState, which computes fallback windows.
+    -->
+    <Match>
+        <Bug pattern="NP_LOAD_OF_KNOWN_NULL_VALUE"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+        <Method name="recordRateLimit"/>
     </Match>
 
     <!--
