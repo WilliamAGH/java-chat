@@ -276,18 +276,19 @@
     ]
   }
 
-	  async function handleSend(message: string): Promise<void> {
-	    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
-	
-	    guidedChatStreamVersion++
-	    const activeStreamVersion = guidedChatStreamVersion
-	    guidedChatAbortController?.abort()
-	    guidedChatAbortController = new AbortController()
-	    const abortSignal = guidedChatAbortController.signal
+  async function handleSend(message: string): Promise<void> {
+    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
 
-	    const streamLessonSlug = selectedLesson.slug
-	    const userQuery = message.trim()
-	    const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
+    guidedChatStreamVersion++
+    const activeStreamVersion = guidedChatStreamVersion
+
+    guidedChatAbortController?.abort()
+    guidedChatAbortController = new AbortController()
+    const abortSignal = guidedChatAbortController.signal
+
+    const streamLessonSlug = selectedLesson.slug
+    const userQuery = message.trim()
+    const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
 
     messages = [
       ...messages,
@@ -304,73 +305,73 @@
 
     streaming.startStream()
     const assistantMessageId = createChatMessageId('guided', lessonSessionId)
-	    activeStreamingMessageId = assistantMessageId
-	
-	    try {
-	      await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
-	        signal: abortSignal,
-	        onChunk: (chunk) => {
-	          // Guard: ignore chunks if user navigated away
-	          if (selectedLesson?.slug !== streamLessonSlug) return
-	          if (guidedChatStreamVersion !== activeStreamVersion) return
-	          if (abortSignal.aborted) return
-	          ensureAssistantMessage(assistantMessageId)
-	          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-	            ...existingMessage,
-	            content: existingMessage.content + chunk
+    activeStreamingMessageId = assistantMessageId
+
+    try {
+      await streamGuidedChat(lessonSessionId, streamLessonSlug, userQuery, {
+        signal: abortSignal,
+        onChunk: (chunk) => {
+          // Guard: ignore chunks if user navigated away
+          if (selectedLesson?.slug !== streamLessonSlug) return
+          if (guidedChatStreamVersion !== activeStreamVersion) return
+          if (abortSignal.aborted) return
+          ensureAssistantMessage(assistantMessageId)
+          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+            ...existingMessage,
+            content: existingMessage.content + chunk
           }))
-          doScrollToBottom()
+          void doScrollToBottom()
         },
-	        onStatus: (status) => {
-	          // Guard: ignore status if user navigated away
-	          if (selectedLesson?.slug !== streamLessonSlug) return
-	          if (guidedChatStreamVersion !== activeStreamVersion) return
-	          if (abortSignal.aborted) return
-	          streaming.updateStatus(status)
-	        },
-	        onCitations: (citations) => {
-	          // Guard: ignore citations if user navigated away
-	          if (selectedLesson?.slug !== streamLessonSlug) return
-	          if (guidedChatStreamVersion !== activeStreamVersion) return
-	          if (abortSignal.aborted) return
-	          ensureAssistantMessage(assistantMessageId)
-	          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-	            ...existingMessage,
-	            citations
+        onStatus: (status) => {
+          // Guard: ignore status if user navigated away
+          if (selectedLesson?.slug !== streamLessonSlug) return
+          if (guidedChatStreamVersion !== activeStreamVersion) return
+          if (abortSignal.aborted) return
+          streaming.updateStatus(status)
+        },
+        onCitations: (citations) => {
+          // Guard: ignore citations if user navigated away
+          if (selectedLesson?.slug !== streamLessonSlug) return
+          if (guidedChatStreamVersion !== activeStreamVersion) return
+          if (abortSignal.aborted) return
+          ensureAssistantMessage(assistantMessageId)
+          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+            ...existingMessage,
+            citations
           }))
         },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
         }
-	      })
-	    } catch (error) {
-	      if (selectedLesson?.slug !== streamLessonSlug) return
-	      if (guidedChatStreamVersion !== activeStreamVersion) return
-	      if (abortSignal.aborted) return
-	      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
-	      ensureAssistantMessage(assistantMessageId)
-	      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+      })
+    } catch (error) {
+      if (selectedLesson?.slug !== streamLessonSlug) return
+      if (guidedChatStreamVersion !== activeStreamVersion) return
+      if (abortSignal.aborted) return
+      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
+      ensureAssistantMessage(assistantMessageId)
+      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
         ...existingMessage,
         content: errorMessage,
         isError: true
       }))
-	    } finally {
-	      // Guard: only reset streaming state if still on same lesson
-	      if (
-	        selectedLesson?.slug === streamLessonSlug &&
-	        guidedChatStreamVersion === activeStreamVersion &&
-	        !abortSignal.aborted
-	      ) {
-	        streaming.finishStream()
-	        activeStreamingMessageId = null
-	        await doScrollToBottom()
-	      }
+    } finally {
+      // Guard: only reset streaming state if still on same lesson
+      if (
+        selectedLesson?.slug === streamLessonSlug &&
+        guidedChatStreamVersion === activeStreamVersion &&
+        !abortSignal.aborted
+      ) {
+        streaming.finishStream()
+        activeStreamingMessageId = null
+        await doScrollToBottom()
+      }
 
-	      if (guidedChatStreamVersion === activeStreamVersion) {
-	        guidedChatAbortController = null
-	      }
-	    }
-	  }
+      if (guidedChatStreamVersion === activeStreamVersion) {
+        guidedChatAbortController = null
+      }
+    }
+  }
 
   // Apply Java language detection and highlight code blocks after lesson content renders
   // Uses shared utility with cancellation support
@@ -479,14 +480,14 @@
               {@html renderedLesson}
             </div>
 
-	            <LessonCitations
-	              citations={lessonCitations}
-	              loaded={lessonCitationsLoaded}
-	              error={lessonCitationsError}
-	              slug={selectedLesson.slug}
-	            />
-	          {/if}
-	        </div>
+            <LessonCitations
+              citations={lessonCitations}
+              loaded={lessonCitationsLoaded}
+              error={lessonCitationsError}
+              slug={selectedLesson.slug}
+            />
+          {/if}
+        </div>
 
         <!-- Chat Panel (Desktop only) -->
         <GuidedLessonChatPanel
@@ -505,36 +506,36 @@
       </div>
 
       <!-- Mobile Chat FAB + Drawer -->
-		      <MobileChatDrawer
-		        bind:this={mobileDrawer}
-		        isOpen={isChatDrawerOpen}
-		        {messages}
-		        isStreaming={streaming.isStreaming}
-		        statusMessage={streaming.statusMessage}
-		        statusDetails={streaming.statusDetails}
-		        hasContent={hasStreamingContent}
-		        streamingMessageId={activeStreamingMessageId}
-		        title="Ask about this lesson"
-		        emptyStateSubject={selectedLesson.title}
-		        placeholder="Ask about this lesson..."
-	        onToggle={toggleChatDrawer}
-	        onClose={closeChatDrawer}
-	        onClear={clearChat}
-	        onSend={handleSend}
-	        onScroll={checkAutoScroll}
-	      >
-		        {#snippet messageRenderer({ message, index, isStreaming })}
-		          {@const typedMessage = message as MessageWithCitations}
-		          <div class="message-with-citations">
-		            <MessageBubble message={typedMessage} index={index} isStreaming={isStreaming} />
-		            {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
-		              <CitationPanel citations={typedMessage.citations} />
-		            {/if}
-		          </div>
-		        {/snippet}
-	      </MobileChatDrawer>
-	    </div>
-	  {/if}
+      <MobileChatDrawer
+        bind:this={mobileDrawer}
+        isOpen={isChatDrawerOpen}
+        {messages}
+        isStreaming={streaming.isStreaming}
+        statusMessage={streaming.statusMessage}
+        statusDetails={streaming.statusDetails}
+        hasContent={hasStreamingContent}
+        streamingMessageId={activeStreamingMessageId}
+        title="Ask about this lesson"
+        emptyStateSubject={selectedLesson.title}
+        placeholder="Ask about this lesson..."
+        onToggle={toggleChatDrawer}
+        onClose={closeChatDrawer}
+        onClear={clearChat}
+        onSend={handleSend}
+        onScroll={checkAutoScroll}
+      >
+        {#snippet messageRenderer({ message, index, isStreaming })}
+          {@const typedMessage = message as MessageWithCitations}
+          <div class="message-with-citations">
+            <MessageBubble message={typedMessage} index={index} isStreaming={isStreaming} />
+            {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+              <CitationPanel citations={typedMessage.citations} />
+            {/if}
+          </div>
+        {/snippet}
+      </MobileChatDrawer>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -866,19 +867,19 @@
     color: var(--color-text-secondary);
   }
 
-	  /* Intermediate breakpoint: narrower chat panel on medium screens */
-	  @media (max-width: 1280px) and (min-width: 1025px) {
-	    .lesson-layout {
-	      grid-template-columns: 1fr 400px;
+  /* Intermediate breakpoint: narrower chat panel on medium screens */
+  @media (max-width: 1280px) and (min-width: 1025px) {
+    .lesson-layout {
+      grid-template-columns: 1fr 400px;
     }
   }
 
-	  /* Responsive: Stack on smaller screens with flexible heights */
-	  @media (max-width: 1024px) {
-	    /* Lesson content takes full height on mobile */
-	    .lesson-layout {
-	      display: block;
-	    }
+  /* Responsive: Stack on smaller screens with flexible heights */
+  @media (max-width: 1024px) {
+    /* Lesson content takes full height on mobile */
+    .lesson-layout {
+      display: block;
+    }
 
     .lesson-content-panel {
       height: 100%;
