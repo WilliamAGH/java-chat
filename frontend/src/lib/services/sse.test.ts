@@ -32,10 +32,15 @@ describe('streamSse abort handling', () => {
   it('treats AbortError during read as a cancellation (no onError)', async () => {
     const encoder = new TextEncoder()
     const abortError = Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    let didEnqueue = false
 
     const responseBody = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('data: {"text":"Hello"}\n\n'))
+      pull(controller) {
+        if (!didEnqueue) {
+          didEnqueue = true
+          controller.enqueue(encoder.encode('data: {"text":"Hello"}\n\n'))
+          return
+        }
         controller.error(abortError)
       }
     })
@@ -52,4 +57,3 @@ describe('streamSse abort handling', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 })
-
