@@ -12,7 +12,6 @@ import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.Duration;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -31,6 +30,7 @@ public class RateLimitState {
     private static final String STATE_FILE = "./data/rate-limit-state.json";
 
     private final ObjectMapper objectMapper;
+    private final RateLimitHeaderParser headerParser;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final Object saveLock = new Object();
 
@@ -42,6 +42,7 @@ public class RateLimitState {
      */
     public RateLimitState(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper.copy();
+        this.headerParser = new RateLimitHeaderParser();
     }
 
     /**
@@ -158,70 +159,78 @@ public class RateLimitState {
     }
 
     /**
-     * Parse rate limit window strings like "24h", "1d", "6h"
+     * Parses rate limit window strings like "24h", "1d", "6h", defaulting to 1 hour.
      */
     private Duration parseRateLimitWindow(String window) {
-        if (window == null || window.isEmpty()) {
-            return Duration.ofHours(1); // Default to 1 hour
-        }
+        return headerParser.parseDurationOrDefault(window, Duration.ofHours(1));
+    }
 
-        window = window.toLowerCase(Locale.ROOT).trim();
+    /**
+     * Loads persisted state from disk. Returns false if loading fails, allowing caller to decide
+     * whether to proceed with empty state or surface the error.
+     *
+     * @return true if state was loaded successfully or file doesn't exist, false on parse/IO error
+     */
+    private boolean loadState() {
+        File file = new File(STATE_FILE);
+        if (!file.exists()) {
+            log.info("No persisted rate limit state found, starting fresh");
+            return true;
+        }
 
         try {
-            if (window.endsWith("d")) {
-                int days = Integer.parseInt(window.substring(0, window.length() - 1));
-                return Duration.ofDays(days);
-            } else if (window.endsWith("h")) {
-                int hours = Integer.parseInt(window.substring(0, window.length() - 1));
-                return Duration.ofHours(hours);
-            } else if (window.endsWith("m")) {
-                int minutes = Integer.parseInt(window.substring(0, window.length() - 1));
-                return Duration.ofMinutes(minutes);
-            } else {
-                // Try to parse as hours by default
-                return Duration.ofHours(Long.parseLong(window));
+            StateData data = objectMapper.readValue(file, StateData.class);
+            if (data != null && data.getProviders() != null) {
+                providerStates = new ConcurrentHashMap<>(data.getProviders());
+                log.info("Loaded rate limit state for {} providers", providerStates.size());
+                logCurrentRateLimitStatus();
             }
-        } catch (NumberFormatException exception) {
-            log.warn("Failed to parse rate limit window, using 1 hour default");
-            return Duration.ofHours(1);
+            return true;
+        } catch (IOException exception) {
+            log.error("Failed to load rate limit state from {}: {} - {}",
+                STATE_FILE, exception.getClass().getSimpleName(), exception.getMessage());
+            log.warn("Continuing with empty rate limit state; previously rate-limited providers may be retried prematurely");
+            return false;
         }
     }
 
-    private void loadState() {
-        File file = new File(STATE_FILE);
-        if (file.exists()) {
-            try {
-                StateData data = objectMapper.readValue(file, StateData.class);
-                if (data != null && data.getProviders() != null) {
-                    providerStates = new ConcurrentHashMap<>(data.getProviders());
-                    log.info("Loaded rate limit state for {} providers", providerStates.size());
-
-                    // Log current state
-                    for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
-                        if (!isAvailable(entry.getKey())) {
-                            Duration remaining = getRemainingWaitTime(entry.getKey());
-                            log.warn("[{}] Rate limited for {} more", entry.getKey(), formatDuration(remaining));
-                        }
-                    }
-                }
-            } catch (IOException exception) {
-                log.warn("Failed to load rate limit state, starting fresh (exception type: {})",
-                    exception.getClass().getSimpleName());
+    private void logCurrentRateLimitStatus() {
+        for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
+            if (!isAvailable(entry.getKey())) {
+                Duration remaining = getRemainingWaitTime(entry.getKey());
+                log.warn("[{}] Rate limited for {} more", entry.getKey(), formatDuration(remaining));
             }
         }
     }
 
-    private void safeSaveState() {
+    /**
+     * Persists state to disk with explicit failure tracking. Returns false if save fails,
+     * allowing callers to track persistence health.
+     *
+     * @return true if save succeeded, false if persistence failed
+     */
+    private boolean trySaveState() {
         try {
             saveState();
+            return true;
         } catch (IOException ioException) {
-            // Persistence failures are non-fatal; state will be rebuilt on next startup
-            log.error("Failed to save rate limit state to disk (exception type: {})",
-                ioException.getClass().getSimpleName());
+            log.error("Failed to persist rate limit state to {}: {} - {}",
+                STATE_FILE, ioException.getClass().getSimpleName(), ioException.getMessage());
+            return false;
         } catch (RuntimeException runtimeException) {
-            // Catch unexpected runtime errors but let Errors (OOM, etc.) propagate
-            log.error("Unexpected error saving rate limit state (exception type: {})",
-                runtimeException.getClass().getSimpleName());
+            log.error("Unexpected error persisting rate limit state: {} - {}",
+                runtimeException.getClass().getSimpleName(), runtimeException.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Saves state without throwing. Used for scheduled/lifecycle saves where failures are non-fatal.
+     * Logs errors with full context but continues execution.
+     */
+    private void safeSaveState() {
+        if (!trySaveState()) {
+            log.warn("Rate limit state not persisted; will be rebuilt from scratch on next startup");
         }
     }
 
@@ -242,17 +251,7 @@ public class RateLimitState {
     }
 
     private String formatDuration(Duration duration) {
-        long days = duration.toDays();
-        long hours = duration.toHours() % 24;
-        long minutes = duration.toMinutes() % 60;
-
-        if (days > 0) {
-            return String.format("%dd %dh %dm", days, hours, minutes);
-        } else if (hours > 0) {
-            return String.format("%dh %dm", hours, minutes);
-        } else {
-            return String.format("%dm", minutes);
-        }
+        return RateLimitHeaderParser.formatDuration(duration);
     }
 
     /**

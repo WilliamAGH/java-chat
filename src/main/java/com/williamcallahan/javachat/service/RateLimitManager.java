@@ -2,8 +2,6 @@ package com.williamcallahan.javachat.service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -184,6 +182,13 @@ public class RateLimitManager {
         };
     }
 
+    private ApiEndpointState getOrCreateEndpointState(ApiProvider provider) {
+        return endpointStates.computeIfAbsent(
+            provider.getName(),
+            providerKey -> new ApiEndpointState()
+        );
+    }
+
     private boolean hasText(String valueText) {
         return valueText != null && !valueText.trim().isEmpty();
     }
@@ -210,10 +215,7 @@ public class RateLimitManager {
         }
 
         // Then check in-memory circuit breaker state
-        ApiEndpointState state = endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
+        ApiEndpointState state = getOrCreateEndpointState(provider);
 
         if (!state.isAvailable()) {
             log.debug("[{}] In circuit breaker state", provider.getName());
@@ -233,10 +235,7 @@ public class RateLimitManager {
      */
     public void recordSuccess(ApiProvider provider) {
         // Update both in-memory and persistent state
-        ApiEndpointState state = endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
+        ApiEndpointState state = getOrCreateEndpointState(provider);
         state.recordSuccess();
         rateLimitState.recordSuccess(provider.getName());
 
@@ -261,10 +260,7 @@ public class RateLimitManager {
         }
 
         // Update in-memory state
-        ApiEndpointState state = endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
+        ApiEndpointState state = getOrCreateEndpointState(provider);
         state.recordRateLimit(retryAfterSeconds);
 
         // Update persistent state with proper window
@@ -292,13 +288,12 @@ public class RateLimitManager {
         }
         ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
         if (rateLimitInfo.retryAfterSeconds > 0) {
-            recordRateLimitInternal(provider, Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds), rateLimitInfo.retryAfterSeconds);
+            applyRateLimit(provider, Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds), rateLimitInfo.retryAfterSeconds);
             return;
         }
 
         if (rateLimitInfo.resetTime != null) {
-            long retryAfterSeconds = Math.max(0, Duration.between(Instant.now(), rateLimitInfo.resetTime).getSeconds());
-            recordRateLimitInternal(provider, rateLimitInfo.resetTime, retryAfterSeconds);
+            applyRateLimit(provider, rateLimitInfo.resetTime, 0);
             return;
         }
 
@@ -317,7 +312,7 @@ public class RateLimitManager {
             ParsedRateLimitInfo info = parseRateLimitHeaders(webError);
 
             if (info.hasResetTime()) {
-                applyRateLimitWithResetTime(provider, info.resetTime());
+                applyRateLimit(provider, info.resetTime(), 0);
             } else {
                 recordRateLimit(provider, webError.getMessage());
             }
@@ -349,30 +344,29 @@ public class RateLimitManager {
 
 
     /**
-     * Apply rate limit when we have a specific reset time from headers.
-     * Updates both persistent state and in-memory circuit breaker.
+     * Applies a rate limit using reset time and optional explicit retry-after seconds.
+     * Updates both persistent state and in-memory circuit breaker, then logs the event.
+     *
+     * @param provider the rate-limited provider
+     * @param resetTime the timestamp when the rate limit resets
+     * @param retryAfterSecondsOverride explicit retry-after seconds (0 to compute from resetTime)
      */
-    private void applyRateLimitWithResetTime(
-        ApiProvider provider,
-        Instant resetTime
-    ) {
-        // Update persistent state
+    private void applyRateLimit(ApiProvider provider, Instant resetTime, long retryAfterSecondsOverride) {
+        ApiEndpointState state = getOrCreateEndpointState(provider);
+
+        long retryAfterSeconds = retryAfterSecondsOverride > 0
+            ? retryAfterSecondsOverride
+            : Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
+
+        state.recordRateLimit(retryAfterSeconds);
         rateLimitState.recordRateLimit(
             provider.getName(),
             resetTime,
             provider.getTypicalRateLimitWindow()
         );
 
-        // Update in-memory circuit breaker state
-        ApiEndpointState state = endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
-        long secondsUntilReset = Math.max(
-            0,
-            Duration.between(Instant.now(), resetTime).getSeconds()
-        );
-        state.recordRateLimit(secondsUntilReset);
+        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})",
+                 provider.getName(), resetTime, retryAfterSeconds);
     }
 
     private Instant parseResetTimeFromError(String errorMessage) {
@@ -422,24 +416,6 @@ public class RateLimitManager {
         return new ParsedRateLimitInfo(resetInstant, 0);
     }
 
-    private void recordRateLimitInternal(ApiProvider provider, Instant resetTime, long retryAfterSeconds) {
-        ApiEndpointState state = endpointStates.computeIfAbsent(
-            provider.getName(),
-            providerKey -> new ApiEndpointState()
-        );
-        state.recordRateLimit(retryAfterSeconds);
-
-        rateLimitState.recordRateLimit(
-            provider.getName(),
-            resetTime,
-            provider.getTypicalRateLimitWindow()
-        );
-
-        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})",
-                provider.getName(), resetTime, retryAfterSeconds);
-    }
-
-
     /**
      * Selects the highest-priority configured provider that is currently available.
      */
@@ -478,17 +454,7 @@ public class RateLimitManager {
     }
 
     private String formatDuration(Duration duration) {
-        long days = duration.toDays();
-        long hours = duration.toHours() % 24;
-        long minutes = duration.toMinutes() % 60;
-
-        if (days > 0) {
-            return String.format("%dd %dh %dm", days, hours, minutes);
-        } else if (hours > 0) {
-            return String.format("%dh %dm", hours, minutes);
-        } else {
-            return String.format("%dm", minutes);
-        }
+        return RateLimitHeaderParser.formatDuration(duration);
     }
 
     /**
