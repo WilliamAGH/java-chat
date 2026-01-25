@@ -7,6 +7,7 @@
 
 import { streamSse } from './sse'
 import type { StreamStatus } from './stream-types'
+import type { Citation, CitationFetchResult } from './chat'
 
 export type { StreamStatus }
 
@@ -29,6 +30,7 @@ export interface GuidedStreamCallbacks {
   onChunk: (chunk: string) => void
   onStatus?: (status: StreamStatus) => void
   onError?: (error: Error) => void
+  onCitations?: (citations: Citation[]) => void
 }
 
 /**
@@ -65,6 +67,24 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
 }
 
 /**
+ * Fetch Think Java-only citations for a guided lesson slug.
+ * Used by LearnView to render lesson sources with proper PDF page anchors.
+ */
+export async function fetchGuidedLessonCitations(slug: string): Promise<CitationFetchResult> {
+  try {
+    const response = await fetch(`/api/guided/citations?slug=${encodeURIComponent(slug)}`)
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` }
+    }
+    const citations: Citation[] = await response.json()
+    return { success: true, citations }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Network error fetching lesson sources'
+    return { success: false, error: errorMessage }
+  }
+}
+
+/**
  * Stream a chat response within the guided lesson context.
  * Uses the same JSON-wrapped SSE format as the main chat for consistent whitespace handling.
  * Errors are propagated via both the onError callback and thrown promise rejection.
@@ -75,7 +95,7 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
-  const { onChunk, onStatus, onError } = callbacks
+  const { onChunk, onStatus, onError, onCitations } = callbacks
   let errorNotified = false
 
   try {
@@ -85,6 +105,7 @@ export async function streamGuidedChat(
       {
         onText: onChunk,
         onStatus,
+        onCitations,
         onError: (streamError) => {
           errorNotified = true
           onError?.(new Error(streamError.message))

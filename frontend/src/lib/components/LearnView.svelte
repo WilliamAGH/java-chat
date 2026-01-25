@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
-  import { fetchCitations, type Citation } from '../services/chat'
+  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
+  import type { Citation, ChatMessage } from '../services/chat'
   import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
-  import type { ChatMessage } from '../services/chat'
   import ChatInput from './ChatInput.svelte'
+  import CitationPanel from './CitationPanel.svelte'
+  import LessonCitations from './LessonCitations.svelte'
+  import MessageBubble from './MessageBubble.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
   import StreamingMessagesList from './StreamingMessagesList.svelte'
   import MobileChatDrawer from './MobileChatDrawer.svelte'
-  import { sanitizeUrl, deduplicateCitations } from '../utils/url'
+  import { deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
   import { generateSessionId } from '../utils/session'
@@ -29,9 +31,15 @@
   let lessonCitationsError = $state<string | null>(null)
   let lessonCitationsLoaded = $state(false)
 
+  /** Chat message type enriched with streamed citations. */
+  interface MessageWithCitations extends ChatMessage {
+    citations?: Citation[]
+  }
+
   // Chat state - per-lesson persistence
-  const chatHistoryByLesson = new Map<string, ChatMessage[]>()
-  let messages = $state<ChatMessage[]>([])
+  const chatHistoryByLesson = new Map<string, MessageWithCitations[]>()
+  let messages = $state<MessageWithCitations[]>([])
+  let pendingChatCitations = $state<Citation[]>([])
   let shouldAutoScroll = $state(true)
 
   // Streaming state from composable (immediate status clear for LearnView)
@@ -117,8 +125,8 @@
       if (selectedLesson?.slug !== targetSlug) return
       lessonMarkdown = response.markdown
 
-      // Fetch citations for the lesson topic (non-blocking, with explicit error tracking)
-      fetchCitations(lesson.title).then((result) => {
+      // Fetch citations for the lesson topic (Think Java-only, with explicit error tracking)
+      fetchGuidedLessonCitations(lesson.slug).then((result) => {
         // Guard against stale citation response
         if (selectedLesson?.slug !== targetSlug) return
 
@@ -161,10 +169,11 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-    // Cancel any in-flight stream
-    streaming.reset()
-    isChatDrawerOpen = false
-    selectedLesson = null
+	    // Cancel any in-flight stream
+	    streaming.reset()
+	    pendingChatCitations = []
+	    isChatDrawerOpen = false
+	    selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
     lessonCitations = []
@@ -173,12 +182,13 @@
     messages = []
   }
 
-  function clearChat(): void {
-    if (selectedLesson) {
-      chatHistoryByLesson.delete(selectedLesson.slug)
-    }
-    messages = []
-  }
+	  function clearChat(): void {
+	    if (selectedLesson) {
+	      chatHistoryByLesson.delete(selectedLesson.slug)
+	    }
+	    pendingChatCitations = []
+	    messages = []
+	  }
 
   function toggleChatDrawer(): void {
     isChatDrawerOpen = !isChatDrawerOpen
@@ -222,6 +232,7 @@
     await doScrollToBottom()
 
     streaming.startStream()
+    pendingChatCitations = []
 
     try {
       await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
@@ -236,6 +247,11 @@
           if (selectedLesson?.slug !== streamLessonSlug) return
           streaming.updateStatus(status)
         },
+        onCitations: (citations) => {
+          // Guard: ignore citations if user navigated away
+          if (selectedLesson?.slug !== streamLessonSlug) return
+          pendingChatCitations = citations
+        },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
         }
@@ -246,10 +262,12 @@
       messages = [...messages, {
         role: 'assistant',
         content: streaming.streamingContent,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        citations: pendingChatCitations
       }]
     } catch (error) {
       if (selectedLesson?.slug !== streamLessonSlug) return
+      pendingChatCitations = []
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
       messages = [...messages, {
         role: 'assistant',
@@ -261,6 +279,7 @@
       // Guard: only reset streaming state if still on same lesson
       if (selectedLesson?.slug === streamLessonSlug) {
         streaming.finishStream()
+        pendingChatCitations = []
         await doScrollToBottom()
       }
     }
@@ -373,32 +392,14 @@
               {@html renderedLesson}
             </div>
 
-            <!-- Lesson-level citations -->
-            {#if lessonCitationsLoaded && lessonCitationsError}
-              <div class="lesson-citations lesson-citations--error">
-                <span class="lesson-citations-error">Unable to load lesson sources</span>
-              </div>
-            {:else if lessonCitationsLoaded && lessonCitations.length > 0}
-              <div class="lesson-citations">
-                <div class="lesson-citations-header">
-                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd"/>
-                  </svg>
-                  <span>Lesson Sources ({lessonCitations.length})</span>
-                </div>
-                <ul class="lesson-citations-list">
-                  {#each lessonCitations as citation (citation.url)}
-                    <li>
-                      <a href={sanitizeUrl(citation.url)} target="_blank" rel="noopener noreferrer">
-                        {citation.title || citation.url}
-                      </a>
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/if}
-          {/if}
-        </div>
+	            <LessonCitations
+	              citations={lessonCitations}
+	              loaded={lessonCitationsLoaded}
+	              error={lessonCitationsError}
+	              slug={selectedLesson.slug}
+	            />
+	          {/if}
+	        </div>
 
         <!-- Chat Panel (Desktop only) -->
         <div class="chat-panel chat-panel--desktop">
@@ -426,41 +427,61 @@
                 <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
                 <p class="hint">Ask anything about the concepts in this lesson.</p>
               </div>
-            {:else}
-              <StreamingMessagesList
-                {messages}
-                isStreaming={streaming.isStreaming}
-                streamingContent={streaming.streamingContent}
-                statusMessage={streaming.statusMessage}
-                statusDetails={streaming.statusDetails}
-              />
-            {/if}
-          </div>
+	            {:else}
+	              <StreamingMessagesList
+	                {messages}
+	                isStreaming={streaming.isStreaming}
+	                streamingContent={streaming.streamingContent}
+	                statusMessage={streaming.statusMessage}
+	                statusDetails={streaming.statusDetails}
+	              >
+	                {#snippet messageRenderer({ message, index })}
+	                  {@const typedMessage = message as MessageWithCitations}
+	                  <div class="message-with-citations">
+	                    <MessageBubble message={typedMessage} {index} />
+	                    {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+	                      <CitationPanel citations={typedMessage.citations} />
+	                    {/if}
+	                  </div>
+	                {/snippet}
+	              </StreamingMessagesList>
+	            {/if}
+	          </div>
 
           <ChatInput onSend={handleSend} disabled={streaming.isStreaming} placeholder="Ask about this lesson..." />
         </div>
       </div>
 
       <!-- Mobile Chat FAB + Drawer -->
-      <MobileChatDrawer
-        bind:this={mobileDrawer}
-        isOpen={isChatDrawerOpen}
-        {messages}
-        isStreaming={streaming.isStreaming}
-        streamingContent={streaming.streamingContent}
-        statusMessage={streaming.statusMessage}
-        statusDetails={streaming.statusDetails}
-        title="Ask about this lesson"
-        emptyStateSubject={selectedLesson.title}
-        placeholder="Ask about this lesson..."
-        onToggle={toggleChatDrawer}
-        onClose={closeChatDrawer}
-        onClear={clearChat}
-        onSend={handleSend}
-        onScroll={checkAutoScroll}
-      />
-    </div>
-  {/if}
+	      <MobileChatDrawer
+	        bind:this={mobileDrawer}
+	        isOpen={isChatDrawerOpen}
+	        {messages}
+	        isStreaming={streaming.isStreaming}
+	        streamingContent={streaming.streamingContent}
+	        statusMessage={streaming.statusMessage}
+	        statusDetails={streaming.statusDetails}
+	        title="Ask about this lesson"
+	        emptyStateSubject={selectedLesson.title}
+	        placeholder="Ask about this lesson..."
+	        onToggle={toggleChatDrawer}
+	        onClose={closeChatDrawer}
+	        onClear={clearChat}
+	        onSend={handleSend}
+	        onScroll={checkAutoScroll}
+	      >
+	        {#snippet messageRenderer({ message, index })}
+	          {@const typedMessage = message as MessageWithCitations}
+	          <div class="message-with-citations">
+	            <MessageBubble message={typedMessage} {index} />
+	            {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+	              <CitationPanel citations={typedMessage.citations} />
+	            {/if}
+	          </div>
+	        {/snippet}
+	      </MobileChatDrawer>
+	    </div>
+	  {/if}
 </div>
 
 <style>
@@ -790,79 +811,6 @@
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
     font-style: italic;
     color: var(--color-text-secondary);
-  }
-
-  /* Lesson-level Citations */
-  .lesson-citations {
-    max-width: 720px;
-    margin: var(--space-8) auto 0;
-    padding: var(--space-4);
-    background: var(--color-surface-subtle);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-  }
-
-  .lesson-citations--error {
-    padding: var(--space-3);
-  }
-
-  .lesson-citations-error {
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-    font-style: italic;
-  }
-
-  .lesson-citations-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--color-border-subtle);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-text-secondary);
-  }
-
-  .lesson-citations-header svg {
-    width: 16px;
-    height: 16px;
-    color: var(--color-accent);
-  }
-
-  .lesson-citations-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .lesson-citations-list li {
-    margin: 0;
-  }
-
-  .lesson-citations-list a {
-    display: block;
-    padding: var(--space-2);
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    color: var(--color-accent);
-    text-decoration: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  .lesson-citations-list a:hover {
-    background: var(--color-bg-secondary);
-    border-color: var(--color-accent-muted);
   }
 
   /* Chat Panel - Pinned Frame */

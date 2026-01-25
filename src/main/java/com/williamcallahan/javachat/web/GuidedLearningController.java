@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -215,17 +214,22 @@ public class GuidedLearningController extends BaseController {
         chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
 
-        StructuredPrompt structuredPrompt =
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
         Flux<String> dataStream = sseSupport.prepareDataStream(
-                openAIStreamingService.streamResponse(structuredPrompt, DEFAULT_TEMPERATURE),
-                chunk -> fullResponse.append(chunk));
+                openAIStreamingService.streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE),
+                fullResponse::append);
 
         Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
         Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
-        return Flux.merge(dataEvents, heartbeats)
+        Flux<ServerSentEvent<String>> citationEvent = Flux.defer(() -> {
+            List<Citation> citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+            return Flux.just(sseSupport.citationEvent(citations));
+        });
+
+        return Flux.concat(Flux.merge(dataEvents, heartbeats), citationEvent)
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();

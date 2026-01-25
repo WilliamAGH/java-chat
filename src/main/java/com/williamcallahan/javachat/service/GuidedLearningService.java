@@ -51,7 +51,8 @@ public class GuidedLearningService {
     private static final String THINK_JAVA_GUIDANCE_TEMPLATE =
         "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
         "Use ONLY content grounded in this book for factual claims. " +
-        "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
+        "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately. " +
+        "Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
         "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.\n\n" +
         "## Current Lesson Context\n" +
         "%s\n\n" +
@@ -147,9 +148,9 @@ public class GuidedLearningService {
      * @param history conversation history
      * @param slug lesson slug for context retrieval
      * @param userMessage user's question
-     * @return structured prompt for the OpenAI streaming service
+     * @return guided prompt outcome including structured prompt and context documents
      */
-    public StructuredPrompt buildStructuredGuidedPromptWithContext(
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
             List<Message> history,
             String slug,
             String userMessage) {
@@ -159,8 +160,56 @@ public class GuidedLearningService {
         List<Document> filtered = filterToBook(docs);
 
         String guidance = buildLessonGuidance(lesson);
-        return chatService.buildStructuredPromptWithContextAndGuidance(
+        StructuredPrompt structuredPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
                 history, userMessage, filtered, guidance);
+        return new GuidedChatPromptOutcome(structuredPrompt, filtered);
+    }
+
+    /**
+     * Builds UI-ready citations from Think Java context documents, with best-effort PDF page anchors.
+     *
+     * <p>This method is designed for guided chat streaming: citation generation must never break the
+     * response stream. If citation conversion or page anchor enrichment fails, it returns a best-effort
+     * result and logs diagnostics.</p>
+     *
+     * @param bookContextDocuments retrieved Think Java documents used to ground the response
+     * @return list of citations for display in the UI citation panel
+     */
+    public List<Citation> citationsForBookDocuments(List<Document> bookContextDocuments) {
+        if (bookContextDocuments == null || bookContextDocuments.isEmpty()) {
+            return List.of();
+        }
+        List<Citation> baseCitations;
+        try {
+            baseCitations = retrievalService.toCitations(bookContextDocuments);
+        } catch (RuntimeException conversionFailure) {
+            logger.warn("Unable to convert guided context documents into citations: {}",
+                    conversionFailure.getMessage());
+            return List.of();
+        }
+
+        try {
+            return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
+        } catch (RuntimeException anchorFailure) {
+            logger.warn("Unable to enhance guided citations with PDF page anchors: {}",
+                    anchorFailure.getMessage());
+            return baseCitations;
+        }
+    }
+
+    /**
+     * Represents the guided prompt and the Think Java context documents used for grounding.
+     *
+     * @param structuredPrompt structured prompt for LLM streaming
+     * @param bookContextDocuments Think Java-only context documents used for grounding and citations
+     */
+    public record GuidedChatPromptOutcome(StructuredPrompt structuredPrompt, List<Document> bookContextDocuments) {
+        public GuidedChatPromptOutcome {
+            if (structuredPrompt == null) {
+                throw new IllegalArgumentException("Structured prompt cannot be null");
+            }
+            bookContextDocuments = bookContextDocuments == null ? List.of() : List.copyOf(bookContextDocuments);
+        }
     }
 
     /**
@@ -216,7 +265,7 @@ To run this program, follow these steps:
             "Add a bullet list of 3-5 key points or rules.",
             "Include one short Java example in a fenced ```java code block with comments.",
             "Add a small numbered list (1-3 steps) when it helps understanding.",
-            "Use inline [n] citations that correspond to the provided context order.",
+            "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately.",
             "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
             "Do NOT include a conclusion section; keep it compact and practical.",
             "If context is insufficient, state what is missing briefly."

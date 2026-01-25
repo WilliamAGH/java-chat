@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import type { ChatMessage } from '../services/chat'
   import ChatInput from './ChatInput.svelte'
   import StreamingMessagesList from './StreamingMessagesList.svelte'
@@ -20,6 +21,8 @@
     streamingContent: string
     statusMessage: string
     statusDetails: string
+    /** Custom renderer for each message (e.g., to append citations). */
+    messageRenderer?: Snippet<[{ message: ChatMessage; index: number }]>
     /** Title shown in drawer header */
     title: string
     /** Subject for empty state prompt (e.g., "Variables and Data Types") */
@@ -39,6 +42,7 @@
     streamingContent,
     statusMessage,
     statusDetails,
+    messageRenderer,
     title,
     emptyStateSubject,
     placeholder,
@@ -115,6 +119,7 @@
           {streamingContent}
           {statusMessage}
           {statusDetails}
+          {messageRenderer}
         />
       {/if}
     </div>
