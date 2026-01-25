@@ -68,7 +68,7 @@ make build
 The `.github/workflows/build.yml` workflow:
 
 - Runs on **ubuntu-24.04** (pinned, not `-latest`)
-- Uses `actions/setup-java@v4` with `distribution: temurin` + `java-version: 21`
+- Uses `actions/setup-java@v5` with `distribution: temurin` + `java-version: 25`
 - Logs Java, Gradle, and OS versions for drift detection
 - Uploads test/lint reports on failure
 

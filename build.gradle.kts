@@ -6,7 +6,7 @@ plugins {
     id("pmd")
 }
 
-val javaVersion = 21
+val javaVersion = 25
 val springAiVersion = "1.1.2"
 val openaiVersion = "4.16.0"
 val springDotenvVersion = "5.1.0"

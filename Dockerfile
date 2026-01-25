@@ -25,7 +25,7 @@ RUN npm run build
 # ================================
 # BACKEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jdk AS builder
+FROM public.ecr.aws/docker/library/eclipse-temurin:25-jdk AS builder
 WORKDIR /app
 
 # Copy Gradle wrapper, build files, and static analysis configs
@@ -51,7 +51,7 @@ RUN ./gradlew clean build -x test --no-daemon && \
 # ================================
 # RUNTIME STAGE
 # ================================
-FROM public.ecr.aws/docker/library/eclipse-temurin:21-jre AS runtime
+FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
 
 # Install curl for health check
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
