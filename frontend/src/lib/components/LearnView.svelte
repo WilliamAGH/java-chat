@@ -995,7 +995,12 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding: var(--space-4);
-    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .messages-container {
+      scroll-behavior: smooth;
+    }
   }
 
   .messages-list {
