@@ -80,7 +80,7 @@ The `.github/workflows/build.yml` workflow:
 
 ```kotlin
 plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 ```
 
@@ -92,7 +92,7 @@ This enables **auto-download** of Temurin JDK if missing. Without it, Gradle fai
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
-        vendor = JvmVendorSpec.ADOPTOPENJDK  // Explicitly specify Temurin
+        vendor = JvmVendorSpec.ADOPTIUM  // Explicitly specify Temurin
     }
 }
 ```
