@@ -84,8 +84,8 @@ public class PromptTruncator {
                     originalTurnCount, fittingTurns.size());
         }
 
-        // Fit context documents with remaining budget (newest/highest-scored first)
-        List<ContextDocumentSegment> fittingDocs = fitDocumentsNewestFirst(
+        // Fit context documents with remaining budget (most relevant first)
+        List<ContextDocumentSegment> fittingDocs = fitDocumentsByRelevance(
                 prompt.contextDocuments(), available);
 
         if (fittingDocs.size() < prompt.contextDocuments().size()) {
@@ -143,27 +143,24 @@ public class PromptTruncator {
     }
 
     /**
-     * Fits context documents within token budget, prioritizing later documents.
+     * Fits context documents within token budget, prioritizing most relevant first.
      *
-     * <p>Later documents are assumed to be more relevant as retrieval typically
-     * scores them higher. Documents are re-indexed after truncation to maintain
-     * sequential [CTX N] markers.</p>
+     * <p>Documents are assumed to be ordered by relevance (most relevant first),
+     * matching the output order from reranking. Documents that fit are kept in
+     * their original order and re-indexed with sequential [CTX N] markers.</p>
      */
-    private List<ContextDocumentSegment> fitDocumentsNewestFirst(
+    private List<ContextDocumentSegment> fitDocumentsByRelevance(
             List<ContextDocumentSegment> docs, int availableTokens) {
 
         if (docs.isEmpty()) {
             return List.of();
         }
 
-        // Process from last (highest scored) to first
-        List<ContextDocumentSegment> reversed = new ArrayList<>(docs);
-        Collections.reverse(reversed);
-
+        // Process from first (most relevant) to last, keeping documents that fit
         List<ContextDocumentSegment> fitting = new ArrayList<>();
         int usedTokens = 0;
 
-        for (ContextDocumentSegment doc : reversed) {
+        for (ContextDocumentSegment doc : docs) {
             if (usedTokens + doc.estimatedTokens() <= availableTokens) {
                 fitting.add(doc);
                 usedTokens += doc.estimatedTokens();
@@ -172,8 +169,7 @@ public class PromptTruncator {
             }
         }
 
-        // Restore original order and re-index sequentially
-        Collections.reverse(fitting);
+        // Re-index sequentially to maintain [CTX N] markers
         List<ContextDocumentSegment> reindexed = new ArrayList<>();
         for (int newIndex = 0; newIndex < fitting.size(); newIndex++) {
             ContextDocumentSegment original = fitting.get(newIndex);
