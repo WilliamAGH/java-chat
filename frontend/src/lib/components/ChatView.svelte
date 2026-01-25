@@ -7,6 +7,7 @@
   import { streamChat, type ChatMessage, type Citation } from '../services/chat'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
   import { generateSessionId } from '../utils/session'
+  import { createChatMessageId } from '../utils/chatMessageId'
   import { createStreamingState } from '../composables/createStreamingState.svelte'
 
   /** Extended message type that includes inline citations from the stream. */
@@ -19,7 +20,7 @@
   let messages = $state<MessageWithCitations[]>([])
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
-  let pendingCitations = $state<Citation[]>([])
+  let activeStreamingMessageId = $state<string | null>(null)
 
   // Streaming state from composable (with 800ms status persistence)
   const streaming = createStreamingState({ statusClearDelayMs: 800 })
@@ -32,6 +33,43 @@
   // Session ID for chat continuity
   const sessionId = generateSessionId('chat')
 
+  let hasStreamingContent = $derived.by(() => {
+    if (!streaming.isStreaming || !activeStreamingMessageId) return false
+    const activeMessage = messages.find((existingMessage) => existingMessage.messageId === activeStreamingMessageId)
+    return !!activeMessage?.content
+  })
+
+  function findMessageIndex(messageId: string): number {
+    return messages.findIndex((existingMessage) => existingMessage.messageId === messageId)
+  }
+
+  function ensureAssistantMessage(messageId: string): void {
+    if (findMessageIndex(messageId) >= 0) return
+    messages = [
+      ...messages,
+      {
+        messageId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now()
+      }
+    ]
+  }
+
+  function updateAssistantMessage(messageId: string, updater: (message: MessageWithCitations) => MessageWithCitations): void {
+    const targetIndex = findMessageIndex(messageId)
+    if (targetIndex < 0) return
+
+    const existingMessage = messages[targetIndex]
+    const updatedMessage = updater(existingMessage)
+
+    messages = [
+      ...messages.slice(0, targetIndex),
+      updatedMessage,
+      ...messages.slice(targetIndex + 1)
+    ]
+  }
+
   function checkAutoScroll() {
     shouldAutoScroll = isNearBottom(messagesContainer)
   }
@@ -40,39 +78,39 @@
     await scrollToBottom(messagesContainer, shouldAutoScroll)
   }
 
-  async function executeChatStream(userQuery: string): Promise<void> {
+  async function executeChatStream(userQuery: string, assistantMessageId: string): Promise<void> {
     try {
       await streamChat(
         sessionId,
         userQuery,
         (chunk) => {
-          streaming.appendContent(chunk)
+          ensureAssistantMessage(assistantMessageId)
+          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+            ...existingMessage,
+            content: existingMessage.content + chunk
+          }))
           doScrollToBottom()
         },
         {
           onStatus: streaming.updateStatus,
           onError: streaming.updateStatus,
           onCitations: (citations) => {
-            pendingCitations = citations
+            ensureAssistantMessage(assistantMessageId)
+            updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+              ...existingMessage,
+              citations
+            }))
           }
         }
       )
-
-      // Add completed assistant message with inline citations
-      messages = [...messages, {
-        role: 'assistant',
-        content: streaming.streamingContent,
-        timestamp: Date.now(),
-        citations: pendingCitations
-      }]
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
-      messages = [...messages, {
-        role: 'assistant',
+      ensureAssistantMessage(assistantMessageId)
+      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+        ...existingMessage,
         content: errorMessage,
-        timestamp: Date.now(),
         isError: true
-      }]
+      }))
     }
   }
 
@@ -82,24 +120,30 @@
     const userQuery = message.trim()
 
     // Add user message
-    messages = [...messages, {
-      role: 'user',
-      content: userQuery,
-      timestamp: Date.now()
-    }]
+    messages = [
+      ...messages,
+      {
+        messageId: createChatMessageId('chat', sessionId),
+        role: 'user',
+        content: userQuery,
+        timestamp: Date.now()
+      }
+    ]
 
     shouldAutoScroll = true
     await doScrollToBottom()
 
     // Start streaming
     streaming.startStream()
-    pendingCitations = []
+    activeStreamingMessageId = createChatMessageId('chat', sessionId)
 
     try {
-      await executeChatStream(userQuery)
+      const assistantMessageId = activeStreamingMessageId
+      if (!assistantMessageId) return
+      await executeChatStream(userQuery, assistantMessageId)
     } finally {
       streaming.finishStream()
-      pendingCitations = []
+      activeStreamingMessageId = null
       await doScrollToBottom()
     }
   }
@@ -122,15 +166,15 @@
         <StreamingMessagesList
           {messages}
           isStreaming={streaming.isStreaming}
-          streamingContent={streaming.streamingContent}
           statusMessage={streaming.statusMessage}
           statusDetails={streaming.statusDetails}
-          hasContent={false}
+          hasContent={hasStreamingContent}
+          streamingMessageId={activeStreamingMessageId}
         >
-          {#snippet messageRenderer({ message, index })}
+          {#snippet messageRenderer({ message, index, isStreaming })}
             {@const typedMessage = message as MessageWithCitations}
             <div class="message-with-citations">
-              <MessageBubble message={typedMessage} {index} />
+              <MessageBubble message={typedMessage} index={index} isStreaming={isStreaming} />
               {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
                 <CitationPanel citations={typedMessage.citations} />
               {/if}

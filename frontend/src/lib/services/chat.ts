@@ -11,6 +11,8 @@ import type { StreamStatus, StreamError } from './stream-types'
 export type { StreamStatus, StreamError }
 
 export interface ChatMessage {
+  /** Stable client-side identifier for rendering and list keying. */
+  messageId: string
   role: 'user' | 'assistant'
   content: string
   timestamp: number
@@ -28,6 +30,7 @@ export interface StreamChatOptions {
   onStatus?: (status: StreamStatus) => void
   onError?: (error: StreamError) => void
   onCitations?: (citations: Citation[]) => void
+  signal?: AbortSignal
 }
 
 /** Result type for citation fetches - distinguishes empty results from errors. */
@@ -58,8 +61,31 @@ export async function streamChat(
       onError: options.onError,
       onCitations: options.onCitations
     },
-    'chat.ts'
+    'chat.ts',
+    { signal: options.signal }
   )
+}
+
+/**
+ * Clears the server-side chat memory for a session.
+ *
+ * @param sessionId - Session identifier to clear on the backend.
+ */
+export async function clearChatSession(sessionId: string): Promise<void> {
+  const normalizedSessionId = sessionId.trim()
+  if (!normalizedSessionId) {
+    throw new Error('Session ID is required')
+  }
+
+  const response = await fetch(`/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`, {
+    method: 'POST'
+  })
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '')
+    const suffix = errorBody ? `: ${errorBody}` : ''
+    throw new Error(`Failed to clear chat session (HTTP ${response.status})${suffix}`)
+  }
 }
 
 /**

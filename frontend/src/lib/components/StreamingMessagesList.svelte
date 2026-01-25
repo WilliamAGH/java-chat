@@ -18,41 +18,37 @@
   interface Props {
     messages: ChatMessage[]
     isStreaming: boolean
-    streamingContent: string
     statusMessage: string | null
     statusDetails: string | null
     hasContent?: boolean
-    /** Custom renderer for each message. Receives message and index. Defaults to plain MessageBubble. */
-    messageRenderer?: Snippet<[{ message: ChatMessage; index: number }]>
+    /** Stable identifier for the in-progress assistant message (if present). */
+    streamingMessageId?: string | null
+    /** Custom renderer for each message. Receives message, index, and streaming flag. Defaults to MessageBubble. */
+    messageRenderer?: Snippet<[{ message: ChatMessage; index: number; isStreaming: boolean }]>
   }
 
   let {
     messages,
     isStreaming,
-    streamingContent,
     statusMessage,
     statusDetails,
     hasContent = false,
+    streamingMessageId = null,
     messageRenderer
   }: Props = $props()
 </script>
 
 <div class="messages-list">
-  {#each messages as message, messageIndex (message.timestamp)}
+  {#each messages as message, messageIndex (message.messageId)}
+    {@const messageIsStreaming = isStreaming && !!streamingMessageId && message.messageId === streamingMessageId}
     {#if messageRenderer}
-      {@render messageRenderer({ message, index: messageIndex })}
+      {@render messageRenderer({ message, index: messageIndex, isStreaming: messageIsStreaming })}
     {:else}
-      <MessageBubble {message} index={messageIndex} />
+      <MessageBubble {message} index={messageIndex} isStreaming={messageIsStreaming} />
     {/if}
   {/each}
 
-  {#if isStreaming && streamingContent}
-    <MessageBubble
-      message={{ role: 'assistant', content: streamingContent, timestamp: Date.now() }}
-      index={messages.length}
-      isStreaming={true}
-    />
-  {:else if isStreaming}
+  {#if isStreaming && !hasContent}
     <ThinkingIndicator {statusMessage} {statusDetails} {hasContent} />
   {/if}
 </div>
