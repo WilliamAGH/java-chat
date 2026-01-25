@@ -295,7 +295,7 @@ public class ChatController extends BaseController {
             @RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
             return ResponseEntity.badRequest().body(
-                new SessionValidationResponse(sessionId, 0, false, "Session ID is required"));
+                new SessionValidationResponse("", 0, false, "Session ID is required"));
         }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
