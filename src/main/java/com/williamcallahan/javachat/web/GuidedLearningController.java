@@ -139,14 +139,7 @@ public class GuidedLearningController extends BaseController {
         if (cached.isPresent()) {
             return new LessonContentResponse(cached.get(), true);
         }
-        // Generate synchronously (best-effort) and cache
-        List<String> chunks = guidedService.streamLessonContent(slug).collectList().block(LESSON_CONTENT_TIMEOUT);
-        if (chunks == null || chunks.isEmpty()) {
-            log.error("Content generation timed out or returned empty for lesson");
-            throw new IllegalStateException("Content generation failed for lesson");
-        }
-        String md = String.join("", chunks);
-        guidedService.putLessonCache(slug, md);
+        String md = generateAndCacheLessonContent(slug);
         return new LessonContentResponse(md, false);
     }
 
@@ -160,17 +153,28 @@ public class GuidedLearningController extends BaseController {
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
     public String contentHtml(@RequestParam("slug") String slug) {
         var cached = guidedService.getCachedLessonMarkdown(slug);
-        String md = cached.orElseGet(() -> {
-            List<String> chunks = guidedService.streamLessonContent(slug).collectList().block(LESSON_CONTENT_TIMEOUT);
-            if (chunks == null || chunks.isEmpty()) {
-                log.error("Content generation timed out or returned empty for lesson HTML");
-                throw new IllegalStateException("Content generation failed for lesson");
-            }
-            String text = String.join("", chunks);
-            guidedService.putLessonCache(slug, text);
-            return text;
-        });
+        String md = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
         return markdownService.processStructured(md).html();
+    }
+
+    /**
+     * Generates lesson content synchronously and caches the result.
+     *
+     * @param slug lesson identifier
+     * @return generated markdown content
+     * @throws IllegalStateException if generation times out or returns empty
+     */
+    private String generateAndCacheLessonContent(String slug) {
+        List<String> chunks = guidedService.streamLessonContent(slug)
+                .collectList()
+                .block(LESSON_CONTENT_TIMEOUT);
+        if (chunks == null || chunks.isEmpty()) {
+            log.error("Content generation timed out or returned empty for lesson");
+            throw new IllegalStateException("Content generation failed for lesson");
+        }
+        String content = String.join("", chunks);
+        guidedService.putLessonCache(slug, content);
+        return content;
     }
 
     /**
@@ -190,47 +194,47 @@ public class GuidedLearningController extends BaseController {
         String lessonSlug = request.lessonSlug()
                 .orElseThrow(() -> new IllegalArgumentException("Lesson slug is required"));
 
-        // Load history BEFORE adding user message to avoid duplication in prompt
-        // (buildGuidedPromptWithContext adds latestUserMessage separately)
+        if (!openAIStreamingService.isAvailable()) {
+            log.warn("OpenAI streaming service unavailable for guided session");
+            return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
+        }
+
+        return streamGuidedResponse(sessionId, userQuery, lessonSlug);
+    }
+
+    /**
+     * Builds and streams the guided lesson response via OpenAI.
+     *
+     * @param sessionId chat session identifier
+     * @param userQuery user's question
+     * @param lessonSlug lesson context identifier
+     * @return SSE stream of response chunks with heartbeats
+     */
+    private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
         List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
 
-        // Use OpenAI streaming only (legacy fallback removed)
-        if (openAIStreamingService.isAvailable()) {
-            // Build structured prompt for intelligent truncation
-            StructuredPrompt structuredPrompt =
-                    guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
+        StructuredPrompt structuredPrompt =
+                guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-            // Stream with structure-aware truncation - preserves semantic boundaries
-            Flux<String> dataStream = sseSupport.prepareDataStream(
-                    openAIStreamingService.streamResponse(structuredPrompt, DEFAULT_TEMPERATURE),
-                    chunk -> fullResponse.append(chunk));
+        Flux<String> dataStream = sseSupport.prepareDataStream(
+                openAIStreamingService.streamResponse(structuredPrompt, DEFAULT_TEMPERATURE),
+                chunk -> fullResponse.append(chunk));
 
-            // Heartbeats terminate when data stream completes
-            Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+        Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+        Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
-            // Wrap chunks in JSON to preserve whitespace
-            Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
-
-            return Flux.merge(dataEvents, heartbeats)
-                    .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
-                    .onErrorResume(error -> {
-                        // SSE streams require error events rather than thrown exceptions.
-                        // Log full details server-side, send sanitized message to client.
-                        String errorType = error.getClass().getSimpleName();
-                        log.error("Guided streaming error (exception type: {})", errorType, error);
-                        return sseSupport.sseError(
-                            "Streaming error: " + errorType,
-                            "The response stream encountered an error. Please try again."
-                        );
-                    });
-
-        } else {
-            // Service unavailable - send structured error event
-            log.warn("OpenAI streaming service unavailable for guided session");
-            return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
-        }
+        return Flux.merge(dataEvents, heartbeats)
+                .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
+                .onErrorResume(error -> {
+                    String errorType = error.getClass().getSimpleName();
+                    log.error("Guided streaming error (exception type: {})", errorType, error);
+                    return sseSupport.sseError(
+                        "Streaming error: " + errorType,
+                        "The response stream encountered an error. Please try again."
+                    );
+                });
     }
 
     /**
