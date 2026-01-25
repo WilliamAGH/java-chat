@@ -12,6 +12,7 @@ import jakarta.annotation.security.PermitAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.servlet.http.HttpServletResponse;
@@ -230,5 +231,16 @@ public class GuidedLearningController extends BaseController {
             log.warn("OpenAI streaming service unavailable for guided session");
             return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
         }
+    }
+
+    /**
+     * Maps validation exceptions from missing request fields to HTTP 400 responses.
+     *
+     * @param validationException the validation exception with the error details
+     * @return standardized bad request error response
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
+        return super.handleValidationException(validationException);
     }
 }
