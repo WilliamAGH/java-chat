@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
   import { fetchCitations, type Citation } from '../services/chat'
-  import { renderMarkdown } from '../services/markdown'
+  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
   import type { ChatMessage } from '../services/chat'
   import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
@@ -33,8 +33,12 @@
   let currentStreamingContent = $state('')
   let streamStatusMessage = $state('')
   let streamStatusDetails = $state('')
-  let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
+
+  // Separate container refs for desktop panel and mobile drawer to prevent binding conflicts
+  // during layout recalculations when content loads on the left panel
+  let desktopMessagesContainer: HTMLElement | null = $state(null)
+  let drawerMessagesContainer: HTMLElement | null = $state(null)
 
   // Mobile chat drawer state
   let isChatDrawerOpen = $state(false)
@@ -43,11 +47,13 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
+  // Session ID for chat continuity - generated client-side only, not rendered in DOM.
+  // Safe for CSR; if SSR is added, move generation to onMount or use server-provided ID.
   const sessionId = `guided-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
-  // Rendered lesson content - safe empty string when no content
+  // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
-    lessonMarkdown ? renderMarkdown(lessonMarkdown) : ''
+    lessonMarkdown ? parseMarkdown(lessonMarkdown) : ''
   )
 
   // Load TOC on mount
@@ -174,12 +180,17 @@
     shouldAutoScroll = true
   }
 
+  /** Returns the currently active messages container based on drawer state. */
+  function getActiveMessagesContainer(): HTMLElement | null {
+    return isChatDrawerOpen ? drawerMessagesContainer : desktopMessagesContainer
+  }
+
   function checkAutoScroll(): void {
-    shouldAutoScroll = isNearBottom(messagesContainer)
+    shouldAutoScroll = isNearBottom(getActiveMessagesContainer())
   }
 
   async function doScrollToBottom(): Promise<void> {
-    await scrollToBottom(messagesContainer, shouldAutoScroll)
+    await scrollToBottom(getActiveMessagesContainer(), shouldAutoScroll)
   }
 
   async function handleSend(message: string): Promise<void> {
@@ -249,13 +260,16 @@
     }
   }
 
-  // Highlight code blocks after lesson content renders
+  // Apply Java language detection and highlight code blocks after lesson content renders
   // Uses shared utility with cancellation support
   $effect(() => {
     const contentElement = lessonContentEl
     if (!renderedLesson || !contentElement) return
 
     let isCancelled = false
+
+    // Apply Java language detection before highlighting (client-side DOM operation)
+    applyJavaLanguageDetection(contentElement)
 
     highlightCodeBlocks(contentElement).catch((highlightError) => {
       if (!isCancelled) {
@@ -398,7 +412,7 @@
 
           <div
             class="messages-container"
-            bind:this={messagesContainer}
+            bind:this={desktopMessagesContainer}
             onscroll={checkAutoScroll}
           >
             {#if messages.length === 0 && !isStreaming}
@@ -481,7 +495,7 @@
             </div>
           </div>
 
-          <div class="chat-drawer-messages" bind:this={messagesContainer} onscroll={checkAutoScroll}>
+          <div class="chat-drawer-messages" bind:this={drawerMessagesContainer} onscroll={checkAutoScroll}>
             {#if messages.length === 0 && !isStreaming}
               <div class="chat-empty">
                 <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
@@ -595,15 +609,18 @@
     animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
   }
 
-  .lesson-card:hover {
-    background: var(--color-bg-tertiary);
-    border-color: var(--color-border-default);
-    transform: translateX(4px);
-  }
+  /* Hover effects only for devices with hover capability */
+  @media (hover: hover) and (pointer: fine) {
+    .lesson-card:hover {
+      background: var(--color-bg-tertiary);
+      border-color: var(--color-border-default);
+      transform: translateX(4px);
+    }
 
-  .lesson-card:hover .lesson-arrow {
-    opacity: 1;
-    transform: translateX(0);
+    .lesson-card:hover .lesson-arrow {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   .lesson-number {
@@ -648,9 +665,16 @@
     width: 20px;
     height: 20px;
     color: var(--color-accent);
-    opacity: 0;
-    transform: translateX(-8px);
+    opacity: 0.6; /* Default visible for touch devices */
     transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  /* Only hide arrow by default on hover-capable devices */
+  @media (hover: hover) and (pointer: fine) {
+    .lesson-arrow {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
   }
 
   /* Loading/Error States */
