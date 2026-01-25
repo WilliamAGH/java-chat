@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.Optional;
 
 /**
  * Centralized utility for building consistent error responses across controllers.
@@ -86,15 +87,16 @@ public class ExceptionResponseBuilder {
     private void appendRestClientDetails(StringBuilder details, RestClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (statusText != null && !statusText.isBlank()) {
+        if (!statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
-        if (responseBody != null && !responseBody.isBlank()) {
+        if (!responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
-        HttpHeaders headers = exception.getResponseHeaders();
-        if (headers != null && !headers.isEmpty()) {
+        HttpHeaders headers = Optional.ofNullable(exception.getResponseHeaders())
+            .orElseGet(HttpHeaders::new);
+        if (!headers.isEmpty()) {
             details.append(", headers=").append(headers);
         }
         details.append("]");
@@ -103,15 +105,15 @@ public class ExceptionResponseBuilder {
     private void appendWebClientDetails(StringBuilder details, WebClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (statusText != null && !statusText.isBlank()) {
+        if (!statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
-        if (responseBody != null && !responseBody.isBlank()) {
+        if (!responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
         HttpHeaders headers = exception.getHeaders();
-        if (headers != null && !headers.isEmpty()) {
+        if (!headers.isEmpty()) {
             details.append(", headers=").append(headers);
         }
         details.append("]");
@@ -119,12 +121,10 @@ public class ExceptionResponseBuilder {
 
     private void appendOpenAiDetails(StringBuilder details, OpenAIServiceException exception) {
         details.append(" [httpStatus=").append(exception.statusCode());
-        if (exception.headers() != null && !exception.headers().isEmpty()) {
+        if (!exception.headers().isEmpty()) {
             details.append(", headers=").append(exception.headers());
         }
-        if (exception.body() != null) {
-            details.append(", body=").append(exception.body());
-        }
+        details.append(", body=").append(exception.body());
         exception.code().ifPresent(code -> details.append(", code=").append(code));
         exception.param().ifPresent(param -> details.append(", param=").append(param));
         exception.type().ifPresent(type -> details.append(", type=").append(type));
@@ -132,8 +132,6 @@ public class ExceptionResponseBuilder {
     }
 
     private void appendStatusExceptionDetails(StringBuilder details, ResponseStatusException exception) {
-        if (exception.getStatusCode() != null) {
-            details.append(" [httpStatus=").append(exception.getStatusCode().value()).append("]");
-        }
+        details.append(" [httpStatus=").append(exception.getStatusCode().value()).append("]");
     }
 }
