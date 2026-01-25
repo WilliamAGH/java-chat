@@ -4,6 +4,7 @@ import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
+import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -16,16 +17,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class OpenAIStreamingServiceTest {
 
+    private OpenAIStreamingService createService() {
+        return new OpenAIStreamingService(null, new Chunker(), new PromptTruncator());
+    }
+
     @Test
     void isRetryablePrimaryFailureTreatsSdkIoAsRetryable() throws ReflectiveOperationException {
-        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
+        OpenAIStreamingService service = createService();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, new OpenAIIoException("io"));
         assertTrue(retryable);
     }
 
     @Test
     void isRetryablePrimaryFailureTreats401AsRetryableForPrimaryFailover() throws ReflectiveOperationException {
-        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
+        OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
         UnauthorizedException unauthorized = UnauthorizedException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, unauthorized);
@@ -34,7 +39,7 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void isRetryablePrimaryFailureTreats429AsRetryable() throws ReflectiveOperationException {
-        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
+        OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
         RateLimitException rateLimit = RateLimitException.builder().headers(headers).build();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, rateLimit);
@@ -43,7 +48,7 @@ class OpenAIStreamingServiceTest {
 
     @Test
     void isRetryablePrimaryFailureDoesNotTreatGenericRuntimeAsRetryable() throws ReflectiveOperationException {
-        OpenAIStreamingService service = new OpenAIStreamingService(null, new Chunker());
+        OpenAIStreamingService service = createService();
         boolean retryable = invokeIsRetryablePrimaryFailure(service, new IllegalArgumentException("no"));
         assertFalse(retryable);
     }

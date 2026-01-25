@@ -7,6 +7,7 @@ import com.openai.core.Timeout;
 import com.openai.core.http.StreamResponse;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
+import com.openai.errors.RateLimitException;
 import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
 import com.openai.models.ResponsesModel;
@@ -17,9 +18,11 @@ import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
-import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,7 +31,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import jakarta.annotation.PreDestroy;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -42,13 +44,10 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
-    private static final String USER_MARKER = "User:";
-    private static final String CONTEXT_MARKER = "[CTX ";
-    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
-    private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
-    private static final String PARAGRAPH_SEPARATOR = "\n\n";
+
     private static final int MAX_COMPLETION_TOKENS = 4000;
     private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
+
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
 
@@ -58,24 +57,37 @@ public class OpenAIStreamingService {
     /** Generous token budget for high-context models. */
     private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
 
+    /** Truncation notice for GPT-5 family models with 8K input limit. */
+    private static final String TRUNCATION_NOTICE_GPT5 =
+            "[Context truncated due to GPT-5 8K input limit]\n\n";
+
+    /** Truncation notice for other models with larger limits. */
+    private static final String TRUNCATION_NOTICE_GENERIC =
+            "[Context truncated due to model input limit]\n\n";
+
     private OpenAIClient clientPrimary;   // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
     private volatile boolean isAvailable = false;
     private final RateLimitManager rateLimitManager;
     private final Chunker chunker;
+    private final PromptTruncator promptTruncator;
 
     // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
     private volatile long primaryBackoffUntilEpochMs = 0L;
-    
+
     /**
-     * Creates a streaming service that can consult rate limit state when selecting an active provider.
+     * Creates a streaming service with rate limiting, chunking, and structured prompt truncation.
      *
      * @param rateLimitManager rate limit state tracker
-     * @param chunker token-aware text chunker
+     * @param chunker token-aware text chunker for legacy string truncation
+     * @param promptTruncator structure-aware prompt truncator
      */
-    public OpenAIStreamingService(RateLimitManager rateLimitManager, Chunker chunker) {
+    public OpenAIStreamingService(RateLimitManager rateLimitManager,
+                                  Chunker chunker,
+                                  PromptTruncator promptTruncator) {
         this.rateLimitManager = rateLimitManager;
         this.chunker = chunker;
+        this.promptTruncator = promptTruncator;
     }
 
     @Value("${GITHUB_TOKEN:}")
@@ -180,11 +192,13 @@ public class OpenAIStreamingService {
     
     /**
      * Stream a response from the OpenAI API using clean, native streaming support.
-     * 
+     *
      * @param prompt The complete prompt to send to the model
      * @param temperature The temperature setting for response generation
      * @return A Flux of content strings as they arrive from the model
+     * @deprecated Use {@link #streamResponse(StructuredPrompt, double)} for structure-aware truncation.
      */
+    @Deprecated
     public Flux<String> streamResponse(String prompt, double temperature) {
         log.debug("Starting OpenAI stream");
 
@@ -207,35 +221,94 @@ public class OpenAIStreamingService {
             String truncatedPrompt = truncatePromptForModel(prompt);
             ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
             log.info("[LLM] [{}] Streaming started", activeProvider.getName());
-            
-            RequestOptions requestOptions = RequestOptions.builder()
-                .timeout(streamingTimeout())
-                .build();
 
-            // StreamResponse implements AutoCloseable; explicit type params help inference
-            return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
-                () -> streamingClient.responses().createStreaming(params, requestOptions),
-                (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
-                    .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event)))
-            )
-            .doOnComplete(() -> {
-                log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
-                if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(activeProvider);
-                }
-            })
-            .doOnError(exception -> {
-                log.error("[LLM] [{}] Streaming failed: {}",
-                        activeProvider.getName(), exception.getMessage(), exception);
-                if (rateLimitManager != null) {
-                    recordProviderFailure(activeProvider, exception);
-                }
-                maybeBackoffPrimary(streamingClient, exception);
-            });
+            return executeStreamingRequest(streamingClient, params, activeProvider);
         })
         // Move blocking SDK stream consumption off the servlet thread.
         // Prevents thread starvation and aligns with Reactor best practices.
         .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * Stream a response using a structured prompt with intelligent truncation.
+     *
+     * <p>Truncates the prompt segment-by-segment to preserve semantic boundaries.
+     * Context documents are removed first, then older conversation history,
+     * while system instructions and the current query are always preserved.</p>
+     *
+     * @param structuredPrompt the typed prompt segments
+     * @param temperature the temperature setting for response generation
+     * @return a Flux of content strings as they arrive from the model
+     */
+    public Flux<String> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
+        log.debug("Starting OpenAI stream with structured prompt");
+
+        return Flux.<String>defer(() -> {
+            OpenAIClient streamingClient = selectClientForStreaming();
+
+            if (streamingClient == null) {
+                String error = "All LLM providers unavailable - check rate limits and API credentials";
+                log.error("[LLM] {}", error);
+                return Flux.<String>error(new IllegalStateException(error));
+            }
+
+            boolean useGitHubModels = isPrimaryClient(streamingClient);
+            RateLimitManager.ApiProvider activeProvider = useGitHubModels
+                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+                    : RateLimitManager.ApiProvider.OPENAI;
+
+            // Determine model and token limits
+            String modelId = normalizedModelId(useGitHubModels);
+            boolean isGpt5 = isGpt5Family(modelId);
+            int tokenLimit = isGpt5 ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
+
+            // Truncate using structure-aware truncator
+            PromptTruncator.TruncatedPrompt truncated =
+                    promptTruncator.truncate(structuredPrompt, tokenLimit, isGpt5);
+            String finalPrompt = truncated.render();
+
+            if (truncated.wasTruncated()) {
+                log.info("[LLM] Prompt truncated: {} context docs, {} conversation turns",
+                        truncated.contextDocumentCount(), truncated.conversationTurnCount());
+            }
+
+            ResponseCreateParams params = buildResponseParams(finalPrompt, temperature, useGitHubModels);
+            log.info("[LLM] [{}] Streaming started (structured)", activeProvider.getName());
+
+            return executeStreamingRequest(streamingClient, params, activeProvider);
+        })
+        .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * Executes the streaming request and handles completion/error callbacks.
+     */
+    private Flux<String> executeStreamingRequest(OpenAIClient client,
+                                                  ResponseCreateParams params,
+                                                  RateLimitManager.ApiProvider activeProvider) {
+        RequestOptions requestOptions = RequestOptions.builder()
+                .timeout(streamingTimeout())
+                .build();
+
+        return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
+                () -> client.responses().createStreaming(params, requestOptions),
+                (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
+                        .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event)))
+        )
+        .doOnComplete(() -> {
+            log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
+            if (rateLimitManager != null) {
+                rateLimitManager.recordSuccess(activeProvider);
+            }
+        })
+        .doOnError(exception -> {
+            log.error("[LLM] [{}] Streaming failed: {}",
+                    activeProvider.getName(), exception.getMessage(), exception);
+            if (rateLimitManager != null) {
+                recordProviderFailure(activeProvider, exception);
+            }
+            maybeBackoffPrimary(client, exception);
+        });
     }
 
     /**
