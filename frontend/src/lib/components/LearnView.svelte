@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
-  import type { Citation, ChatMessage } from '../services/chat'
-  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
-  import ChatInput from './ChatInput.svelte'
-  import CitationPanel from './CitationPanel.svelte'
-  import LessonCitations from './LessonCitations.svelte'
-  import MessageBubble from './MessageBubble.svelte'
+	  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
+	  import { clearChatSession, type Citation, type ChatMessage } from '../services/chat'
+	  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
+	  import ChatInput from './ChatInput.svelte'
+	  import CitationPanel from './CitationPanel.svelte'
+	  import LessonCitations from './LessonCitations.svelte'
+	  import MessageBubble from './MessageBubble.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
   import StreamingMessagesList from './StreamingMessagesList.svelte'
   import MobileChatDrawer from './MobileChatDrawer.svelte'
@@ -13,6 +13,7 @@
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
   import { generateSessionId } from '../utils/session'
+  import { createChatMessageId } from '../utils/chatMessageId'
   import { createStreamingState } from '../composables/createStreamingState.svelte'
 
   // TOC state
@@ -39,11 +40,17 @@
   // Chat state - per-lesson persistence
   const chatHistoryByLesson = new Map<string, MessageWithCitations[]>()
   let messages = $state<MessageWithCitations[]>([])
-  let pendingChatCitations = $state<Citation[]>([])
   let shouldAutoScroll = $state(true)
+  let activeStreamingMessageId = $state<string | null>(null)
 
   // Streaming state from composable (immediate status clear for LearnView)
   const streaming = createStreamingState()
+
+  let hasStreamingContent = $derived.by(() => {
+    if (!streaming.isStreaming || !activeStreamingMessageId) return false
+    const activeMessage = messages.find((existingMessage) => existingMessage.messageId === activeStreamingMessageId)
+    return !!activeMessage?.content
+  })
 
   // Desktop container ref for scroll management
   let desktopMessagesContainer: HTMLElement | null = $state(null)
@@ -169,11 +176,11 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-	    // Cancel any in-flight stream
-	    streaming.reset()
-	    pendingChatCitations = []
-	    isChatDrawerOpen = false
-	    selectedLesson = null
+		    // Cancel any in-flight stream
+		    streaming.reset()
+		    activeStreamingMessageId = null
+		    isChatDrawerOpen = false
+		    selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
     lessonCitations = []
@@ -182,13 +189,23 @@
     messages = []
   }
 
-	  function clearChat(): void {
-	    if (selectedLesson) {
-	      chatHistoryByLesson.delete(selectedLesson.slug)
-	    }
-	    pendingChatCitations = []
-	    messages = []
-	  }
+		  function clearChat(): void {
+		    if (selectedLesson) {
+		      const lessonSlug = selectedLesson.slug
+		      const lessonSessionId = sessionIdsByLesson.get(lessonSlug)
+		      if (lessonSessionId) {
+		        sessionIdsByLesson.delete(lessonSlug)
+		        void clearChatSession(lessonSessionId).catch((error) => {
+		          console.warn(`[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`, error)
+		        })
+		      }
+
+		      chatHistoryByLesson.delete(lessonSlug)
+		    }
+
+			    activeStreamingMessageId = null
+			    messages = []
+			  }
 
   function toggleChatDrawer(): void {
     isChatDrawerOpen = !isChatDrawerOpen
@@ -215,6 +232,37 @@
     await scrollToBottom(getActiveMessagesContainer(), shouldAutoScroll)
   }
 
+  function findMessageIndex(messageId: string): number {
+    return messages.findIndex((existingMessage) => existingMessage.messageId === messageId)
+  }
+
+  function ensureAssistantMessage(messageId: string): void {
+    if (findMessageIndex(messageId) >= 0) return
+    messages = [
+      ...messages,
+      {
+        messageId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now()
+      }
+    ]
+  }
+
+  function updateAssistantMessage(messageId: string, updater: (message: MessageWithCitations) => MessageWithCitations): void {
+    const targetIndex = findMessageIndex(messageId)
+    if (targetIndex < 0) return
+
+    const existingMessage = messages[targetIndex]
+    const updatedMessage = updater(existingMessage)
+
+    messages = [
+      ...messages.slice(0, targetIndex),
+      updatedMessage,
+      ...messages.slice(targetIndex + 1)
+    ]
+  }
+
   async function handleSend(message: string): Promise<void> {
     if (!message.trim() || streaming.isStreaming || !selectedLesson) return
 
@@ -222,24 +270,33 @@
     const userQuery = message.trim()
     const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
 
-    messages = [...messages, {
-      role: 'user',
-      content: userQuery,
-      timestamp: Date.now()
-    }]
+    messages = [
+      ...messages,
+      {
+        messageId: createChatMessageId('guided', lessonSessionId),
+        role: 'user',
+        content: userQuery,
+        timestamp: Date.now()
+      }
+    ]
 
     shouldAutoScroll = true
     await doScrollToBottom()
 
     streaming.startStream()
-    pendingChatCitations = []
+    const assistantMessageId = createChatMessageId('guided', lessonSessionId)
+    activeStreamingMessageId = assistantMessageId
 
     try {
       await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
         onChunk: (chunk) => {
           // Guard: ignore chunks if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          streaming.appendContent(chunk)
+          ensureAssistantMessage(assistantMessageId)
+          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+            ...existingMessage,
+            content: existingMessage.content + chunk
+          }))
           doScrollToBottom()
         },
         onStatus: (status) => {
@@ -250,36 +307,30 @@
         onCitations: (citations) => {
           // Guard: ignore citations if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          pendingChatCitations = citations
+          ensureAssistantMessage(assistantMessageId)
+          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+            ...existingMessage,
+            citations
+          }))
         },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
         }
       })
-
-      // Guard: don't add message if user navigated away
-      if (selectedLesson?.slug !== streamLessonSlug) return
-      messages = [...messages, {
-        role: 'assistant',
-        content: streaming.streamingContent,
-        timestamp: Date.now(),
-        citations: pendingChatCitations
-      }]
     } catch (error) {
       if (selectedLesson?.slug !== streamLessonSlug) return
-      pendingChatCitations = []
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
-      messages = [...messages, {
-        role: 'assistant',
+      ensureAssistantMessage(assistantMessageId)
+      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+        ...existingMessage,
         content: errorMessage,
-        timestamp: Date.now(),
         isError: true
-      }]
+      }))
     } finally {
       // Guard: only reset streaming state if still on same lesson
       if (selectedLesson?.slug === streamLessonSlug) {
         streaming.finishStream()
-        pendingChatCitations = []
+        activeStreamingMessageId = null
         await doScrollToBottom()
       }
     }
@@ -428,23 +479,24 @@
                 <p class="hint">Ask anything about the concepts in this lesson.</p>
               </div>
 	            {:else}
-	              <StreamingMessagesList
-	                {messages}
-	                isStreaming={streaming.isStreaming}
-	                streamingContent={streaming.streamingContent}
-	                statusMessage={streaming.statusMessage}
-	                statusDetails={streaming.statusDetails}
-	              >
-	                {#snippet messageRenderer({ message, index })}
-	                  {@const typedMessage = message as MessageWithCitations}
-	                  <div class="message-with-citations">
-	                    <MessageBubble message={typedMessage} {index} />
-	                    {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
-	                      <CitationPanel citations={typedMessage.citations} />
-	                    {/if}
-	                  </div>
-	                {/snippet}
-	              </StreamingMessagesList>
+		              <StreamingMessagesList
+		                {messages}
+		                isStreaming={streaming.isStreaming}
+		                statusMessage={streaming.statusMessage}
+		                statusDetails={streaming.statusDetails}
+		                hasContent={hasStreamingContent}
+		                streamingMessageId={activeStreamingMessageId}
+		              >
+		                {#snippet messageRenderer({ message, index, isStreaming })}
+		                  {@const typedMessage = message as MessageWithCitations}
+		                  <div class="message-with-citations">
+		                    <MessageBubble message={typedMessage} index={index} isStreaming={isStreaming} />
+		                    {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+		                      <CitationPanel citations={typedMessage.citations} />
+		                    {/if}
+		                  </div>
+		                {/snippet}
+		              </StreamingMessagesList>
 	            {/if}
 	          </div>
 
@@ -453,32 +505,33 @@
       </div>
 
       <!-- Mobile Chat FAB + Drawer -->
-	      <MobileChatDrawer
-	        bind:this={mobileDrawer}
-	        isOpen={isChatDrawerOpen}
-	        {messages}
-	        isStreaming={streaming.isStreaming}
-	        streamingContent={streaming.streamingContent}
-	        statusMessage={streaming.statusMessage}
-	        statusDetails={streaming.statusDetails}
-	        title="Ask about this lesson"
-	        emptyStateSubject={selectedLesson.title}
-	        placeholder="Ask about this lesson..."
+		      <MobileChatDrawer
+		        bind:this={mobileDrawer}
+		        isOpen={isChatDrawerOpen}
+		        {messages}
+		        isStreaming={streaming.isStreaming}
+		        statusMessage={streaming.statusMessage}
+		        statusDetails={streaming.statusDetails}
+		        hasContent={hasStreamingContent}
+		        streamingMessageId={activeStreamingMessageId}
+		        title="Ask about this lesson"
+		        emptyStateSubject={selectedLesson.title}
+		        placeholder="Ask about this lesson..."
 	        onToggle={toggleChatDrawer}
 	        onClose={closeChatDrawer}
 	        onClear={clearChat}
 	        onSend={handleSend}
 	        onScroll={checkAutoScroll}
 	      >
-	        {#snippet messageRenderer({ message, index })}
-	          {@const typedMessage = message as MessageWithCitations}
-	          <div class="message-with-citations">
-	            <MessageBubble message={typedMessage} {index} />
-	            {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
-	              <CitationPanel citations={typedMessage.citations} />
-	            {/if}
-	          </div>
-	        {/snippet}
+		        {#snippet messageRenderer({ message, index, isStreaming })}
+		          {@const typedMessage = message as MessageWithCitations}
+		          <div class="message-with-citations">
+		            <MessageBubble message={typedMessage} index={index} isStreaming={isStreaming} />
+		            {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+		              <CitationPanel citations={typedMessage.citations} />
+		            {/if}
+		          </div>
+		        {/snippet}
 	      </MobileChatDrawer>
 	    </div>
 	  {/if}
