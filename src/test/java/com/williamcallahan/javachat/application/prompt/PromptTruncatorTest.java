@@ -151,6 +151,7 @@ class PromptTruncatorTest {
 
     @Test
     void reindexesContextDocumentsAfterTruncation() {
+        // Documents ordered by relevance (most relevant first, as from reranker)
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 50),
                 List.of(
@@ -162,19 +163,20 @@ class PromptTruncatorTest {
                 new CurrentQuerySegment("query", 50)
         );
 
-        // Should keep only last 2 docs (highest scored), re-indexed as 1 and 2
+        // Should keep first 2 docs (most relevant), re-indexed as 1 and 2
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350, false);
 
         assertTrue(result.wasTruncated());
         assertEquals(2, result.contextDocumentCount());
 
         String rendered = result.render();
-        // Should have [CTX 1] and [CTX 2], not [CTX 2] and [CTX 3]
+        // Should have [CTX 1] and [CTX 2], not [CTX 3]
         assertTrue(rendered.contains("[CTX 1]"));
         assertTrue(rendered.contains("[CTX 2]"));
         assertFalse(rendered.contains("[CTX 3]"));
-        // Should contain content from original docs 2 and 3 (newest)
-        assertTrue(rendered.contains("url2") || rendered.contains("url3"));
+        // Should contain content from original docs 1 and 2 (most relevant)
+        assertTrue(rendered.contains("url1") && rendered.contains("url2"));
+        assertFalse(rendered.contains("url3"));
     }
 
     @Test
