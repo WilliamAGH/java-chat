@@ -233,7 +233,7 @@ public class GuidedLearningController extends BaseController {
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();
-                    log.error("Guided streaming error (exception type: {})", errorType, error);
+                    log.error("Guided streaming error");
                     return sseSupport.sseError(
                         "Streaming error: " + errorType,
                         "The response stream encountered an error. Please try again."

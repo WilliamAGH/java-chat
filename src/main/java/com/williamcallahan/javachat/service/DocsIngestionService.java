@@ -135,7 +135,7 @@ public class DocsIngestionService {
                     }
                 } catch (RuntimeException storageException) {
                     String destination = localOnlyMode ? "cache" : "Qdrant";
-                    INDEXING_LOG.error("[INDEXING] ✗ Failed to store documents to {}", destination, storageException);
+                    INDEXING_LOG.error("[INDEXING] Failed to store documents");
                     throw new IOException("Failed to store documents to " + destination, storageException);
                 }
             } else {

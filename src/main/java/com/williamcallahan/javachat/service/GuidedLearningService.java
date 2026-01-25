@@ -183,16 +183,16 @@ public class GuidedLearningService {
         try {
             baseCitations = retrievalService.toCitations(bookContextDocuments);
         } catch (RuntimeException conversionFailure) {
-            logger.warn("Unable to convert guided context documents into citations: {}",
-                    conversionFailure.getMessage());
+            logger.warn("Unable to convert guided context documents into citations (exceptionType={})",
+                conversionFailure.getClass().getSimpleName());
             return List.of();
         }
 
         try {
             return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
         } catch (RuntimeException anchorFailure) {
-            logger.warn("Unable to enhance guided citations with PDF page anchors: {}",
-                    anchorFailure.getMessage());
+            logger.warn("Unable to enhance guided citations with PDF page anchors (exceptionType={})",
+                anchorFailure.getClass().getSimpleName());
             return baseCitations;
         }
     }

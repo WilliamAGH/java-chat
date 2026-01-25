@@ -159,22 +159,21 @@ public class QdrantIndexInitializer {
                 Integer collectionDimensions = extractVectorDimensions(response.getBody());
                 if (collectionDimensions != null) {
                     if (collectionDimensions != expectedDimensions) {
-                        log.error("[QDRANT] DIMENSION MISMATCH: Collection '{}' has {} dimensions, "
+                        log.error("[QDRANT] DIMENSION MISMATCH: Collection has {} dimensions, "
                             + "but embedding model produces {} dimensions. "
                             + "This will cause all similarity searches to fail. "
                             + "Recreate the collection or switch back to the original embedding model.",
-                            collection, collectionDimensions, expectedDimensions);
+                            collectionDimensions, expectedDimensions);
                         // Log warning but don't fail startup - let the application try to run
                         // The actual failure will happen on first search/insert
                     } else {
-                        log.info("[QDRANT] Collection '{}' dimensions ({}) match embedding model",
-                            collection, collectionDimensions);
+                        log.info("[QDRANT] Collection dimensions ({}) match embedding model", collectionDimensions);
                     }
                 }
                 return; // Success - we got a response
             } catch (RuntimeException exception) {
-                log.debug("[QDRANT] Could not validate dimensions via {} ({})", 
-                    url, exception.getClass().getSimpleName());
+                log.debug("[QDRANT] Could not validate dimensions (exceptionType={})",
+                    exception.getClass().getSimpleName());
                 // Continue to next URL candidate
             }
         }
@@ -265,18 +264,18 @@ public class QdrantIndexInitializer {
                 // Use PUT for Qdrant payload index creation (official API)
                 ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.PUT, 
                     new HttpEntity<>(body, headers), String.class);
-                log.info("[QDRANT] Ensured payload index field={} (status={})", field, resp.getStatusCode().value());
+                log.info("[QDRANT] Ensured payload index (status={})", resp.getStatusCode().value());
                 return;
             } catch (RuntimeException putEx) {
                 lastError = putEx;
-                log.debug("[QDRANT] PUT failed for index field={} url={} (exceptionType={})",
-                    field, url, putEx.getClass().getSimpleName());
+                log.debug("[QDRANT] PUT failed for payload index (exceptionType={})",
+                    putEx.getClass().getSimpleName());
                 // Continue to next URL candidate if available
             }
         }
         // If we reach here, all attempts failed; log once at INFO to avoid noisy warnings.
-        log.info("[QDRANT] Could not ensure payload index field={}. Last error type: {}",
-                field, lastError != null ? lastError.getClass().getSimpleName() : "unknown");
+        log.info("[QDRANT] Could not ensure payload index. Last error type: {}",
+            lastError != null ? lastError.getClass().getSimpleName() : "unknown");
     }
 
     /**

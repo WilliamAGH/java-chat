@@ -157,8 +157,7 @@ public class ChatController extends BaseController {
             try {
                 citations = retrievalService.toCitations(promptOutcome.documents());
             } catch (Exception citationError) {
-                PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations: {}",
-                        requestToken, citationError.getMessage());
+                PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations", requestToken);
                 citations = List.of();
             }
             Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(citations));
@@ -174,7 +173,7 @@ public class ChatController extends BaseController {
                         String diagnostics = error instanceof Exception exception
                             ? describeException(exception)
                             : error.toString();
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
+                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
                         return sseSupport.sseError(errorDetail, diagnostics);
                     });
 

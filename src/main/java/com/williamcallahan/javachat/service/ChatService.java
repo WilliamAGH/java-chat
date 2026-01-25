@@ -190,8 +190,7 @@ public class ChatService {
                 ModelConfiguration.RAG_LIMIT_CONSTRAINED,
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
             );
-            logger.debug("Using reduced RAG for {}: {} documents with max {} tokens each",
-                modelHint,
+            logger.debug("Using reduced RAG: {} documents with max {} tokens each",
                 retrievalOutcome.documents().size(),
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {

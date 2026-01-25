@@ -143,9 +143,7 @@ public class OpenAIStreamingService {
                 log.warn("No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
             } else {
                 log.info(
-                    "OpenAI streaming available (githubModel={}, openaiModel={}, primary={}, secondary={})",
-                    githubModelsChatModel,
-                    openaiModel,
+                    "OpenAI streaming available (primaryConfigured={}, secondaryConfigured={})",
                     clientPrimary != null,
                     clientSecondary != null
                 );
@@ -174,9 +172,9 @@ public class OpenAIStreamingService {
         }
         try {
             client.close();
-            log.debug("Closed OpenAI client ({})", clientName);
+            log.debug("Closed OpenAI client");
         } catch (RuntimeException closeException) {
-            log.warn("Failed to close OpenAI client ({})", clientName, closeException);
+            log.warn("Failed to close OpenAI client");
         }
     }
 
@@ -234,7 +232,7 @@ public class OpenAIStreamingService {
             }
 
             ResponseCreateParams params = buildResponseParams(finalPrompt, temperature, useGitHubModels);
-            log.info("[LLM] [{}] Streaming started (structured)", activeProvider.getName());
+            log.info("[LLM] Streaming started (structured, providerId={})", activeProvider.ordinal());
 
             return executeStreamingRequest(streamingClient, params, activeProvider);
         })
@@ -255,21 +253,20 @@ public class OpenAIStreamingService {
                 () -> client.responses().createStreaming(params, requestOptions),
                 (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
                         .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event)))
-        )
-        .doOnComplete(() -> {
-            log.debug("[LLM] [{}] Stream completed successfully", activeProvider.getName());
-            if (rateLimitManager != null) {
-                rateLimitManager.recordSuccess(activeProvider);
-            }
-        })
-        .doOnError(exception -> {
-            log.error("[LLM] [{}] Streaming failed: {}",
-                    activeProvider.getName(), exception.getMessage(), exception);
-            if (rateLimitManager != null) {
-                recordProviderFailure(activeProvider, exception);
-            }
-            maybeBackoffPrimary(client, exception);
-        });
+	        )
+	        .doOnComplete(() -> {
+	            log.debug("[LLM] Stream completed successfully (providerId={})", activeProvider.ordinal());
+	            if (rateLimitManager != null) {
+	                rateLimitManager.recordSuccess(activeProvider);
+	            }
+	        })
+	        .doOnError(exception -> {
+	            log.error("[LLM] Streaming failed (providerId={})", activeProvider.ordinal());
+	            if (rateLimitManager != null) {
+	                recordProviderFailure(activeProvider, exception);
+	            }
+	            maybeBackoffPrimary(client, exception);
+	        });
     }
 
     /**
@@ -285,29 +282,28 @@ public class OpenAIStreamingService {
                 return Mono.error(new IllegalStateException(error));
             }
             boolean useGitHubModels = isPrimaryClient(blockingClient);
-            RateLimitManager.ApiProvider activeProvider = useGitHubModels
-                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                    : RateLimitManager.ApiProvider.OPENAI;
-            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
-            try {
-                log.info("[LLM] [{}] Complete started", activeProvider.getName());
-                RequestOptions requestOptions = RequestOptions.builder()
-                    .timeout(completeTimeout())
-                    .build();
-                Response completion = blockingClient.responses().create(params, requestOptions);
-                if (rateLimitManager != null) {
-                    rateLimitManager.recordSuccess(activeProvider);
-                }
-                log.debug("[LLM] [{}] Complete succeeded", activeProvider.getName());
-                String response = extractTextFromResponse(completion);
-                return Mono.just(response);
-            } catch (RuntimeException completionException) {
-                log.error("[LLM] [{}] Complete failed: {}",
-                        activeProvider.getName(), completionException.getMessage(), completionException);
-                if (rateLimitManager != null) {
-                    recordProviderFailure(activeProvider, completionException);
-                }
-                maybeBackoffPrimary(blockingClient, completionException);
+	            RateLimitManager.ApiProvider activeProvider = useGitHubModels
+	                    ? RateLimitManager.ApiProvider.GITHUB_MODELS
+	                    : RateLimitManager.ApiProvider.OPENAI;
+	            ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
+	            try {
+	                log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
+	                RequestOptions requestOptions = RequestOptions.builder()
+	                    .timeout(completeTimeout())
+	                    .build();
+	                Response completion = blockingClient.responses().create(params, requestOptions);
+	                if (rateLimitManager != null) {
+	                    rateLimitManager.recordSuccess(activeProvider);
+	                }
+	                log.debug("[LLM] Complete succeeded (providerId={})", activeProvider.ordinal());
+	                String response = extractTextFromResponse(completion);
+	                return Mono.just(response);
+	            } catch (RuntimeException completionException) {
+	                log.error("[LLM] Complete failed (providerId={})", activeProvider.ordinal());
+	                if (rateLimitManager != null) {
+	                    recordProviderFailure(activeProvider, completionException);
+	                }
+	                maybeBackoffPrimary(blockingClient, completionException);
                 return Mono.error(completionException);
             }
         }).subscribeOn(Schedulers.boundedElastic());
@@ -472,37 +468,38 @@ public class OpenAIStreamingService {
 
     private OpenAIClient selectClientForStreaming() {
         // Prefer OpenAI when available (more reliable, shorter rate limit windows)
-        if (clientSecondary != null) {
-            if (rateLimitManager == null
-                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
-                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.OPENAI.getName());
-                return clientSecondary;
-            }
-        }
+	        if (clientSecondary != null) {
+	            if (rateLimitManager == null
+	                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+	                log.debug("Selected provider for streaming (providerId={})",
+	                    RateLimitManager.ApiProvider.OPENAI.ordinal());
+	                return clientSecondary;
+	            }
+	        }
 
         // Try GitHub Models if not in backoff and not rate limited
-        if (clientPrimary != null && !isPrimaryInBackoff()) {
-            if (rateLimitManager == null
-                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS)) {
-                log.debug("[{}] Selected for streaming", RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
-                return clientPrimary;
-            }
-        }
+	        if (clientPrimary != null && !isPrimaryInBackoff()) {
+	            if (rateLimitManager == null
+	                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS)) {
+	                log.debug("Selected provider for streaming (providerId={})",
+	                    RateLimitManager.ApiProvider.GITHUB_MODELS.ordinal());
+	                return clientPrimary;
+	            }
+	        }
 
-        // All providers marked as rate limited - try OpenAI anyway (short rate limit windows).
-        // Let the API decide if we're actually still rate limited.
-        if (clientSecondary != null) {
-            log.warn("[{}] All providers marked as rate limited; attempting OpenAI anyway "
-                    + "(typical rate limits are 1-60 seconds)", RateLimitManager.ApiProvider.OPENAI.getName());
-            return clientSecondary;
-        }
+	        // All providers marked as rate limited - try OpenAI anyway (short rate limit windows).
+	        // Let the API decide if we're actually still rate limited.
+	        if (clientSecondary != null) {
+	            log.warn("All providers marked as rate limited; attempting OpenAI anyway "
+	                + "(typical rate limits are 1-60 seconds)");
+	            return clientSecondary;
+	        }
 
-        // OpenAI not configured - try GitHub Models as last resort
-        if (clientPrimary != null) {
-            log.warn("[{}] All providers marked as rate limited; attempting GitHub Models as last resort",
-                    RateLimitManager.ApiProvider.GITHUB_MODELS.getName());
-            return clientPrimary;
-        }
+	        // OpenAI not configured - try GitHub Models as last resort
+	        if (clientPrimary != null) {
+	            log.warn("All providers marked as rate limited; attempting GitHub Models as last resort");
+	            return clientPrimary;
+	        }
 
         log.error("No LLM clients configured - check OPENAI_API_KEY and GITHUB_TOKEN environment variables");
         return null;
@@ -545,12 +542,11 @@ public class OpenAIStreamingService {
         return System.currentTimeMillis() < primaryBackoffUntilEpochMs;
     }
     
-    private void markPrimaryBackoff() {
-        long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
-        this.primaryBackoffUntilEpochMs = until;
-        long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
-        log.warn("[{}] Temporarily disabled for {}s due to failure",
-                RateLimitManager.ApiProvider.GITHUB_MODELS.getName(), seconds);
-    }
+	    private void markPrimaryBackoff() {
+	        long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
+	        this.primaryBackoffUntilEpochMs = until;
+	        long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
+	        log.warn("Primary provider temporarily disabled for {}s due to failure", seconds);
+	    }
 
 }

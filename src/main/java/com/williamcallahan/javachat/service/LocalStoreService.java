@@ -63,8 +63,7 @@ public class LocalStoreService {
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
-            log.info("Local store directories ready (snapshots={}, parsed={}, index={})",
-                snapshotDir, parsedDir, indexDir);
+            log.info("Local store directories ready");
         } catch (InvalidPathException | IOException exception) {
             throw new IllegalStateException("Failed to create local store directories", exception);
         }
