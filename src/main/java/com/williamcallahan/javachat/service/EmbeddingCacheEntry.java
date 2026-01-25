@@ -134,7 +134,7 @@ record EmbeddingCacheMetadata(
     static EmbeddingCacheMetadata fromDocument(Document sourceDocument) {
         Objects.requireNonNull(sourceDocument, "sourceDocument");
         Map<String, ?> springMetadata = sourceDocument.getMetadata();
-        if (springMetadata == null || springMetadata.isEmpty()) {
+        if (springMetadata.isEmpty()) {
             return empty();
         }
 

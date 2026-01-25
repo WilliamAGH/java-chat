@@ -250,7 +250,7 @@ public class RateLimitManager {
 
         // For GitHub Models, use longer backoff as they have strict limits
         if (provider == ApiProvider.GITHUB_MODELS) {
-            if (resetTime == null && retryAfterSeconds == 0) {
+            if (retryAfterSeconds == 0) {
                 // GitHub typically has 24-hour rate limits
                 resetTime = Instant.now().plus(Duration.ofHours(24));
                 log.info("[{}] Rate limited - applying 24-hour backoff", providerName);

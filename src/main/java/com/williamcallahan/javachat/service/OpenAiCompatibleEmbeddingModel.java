@@ -90,11 +90,11 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
 	     * Calls the OpenAI-compatible embeddings endpoint for all inputs in the request.
 	     */
 	    @Override
-	    public EmbeddingResponse call(EmbeddingRequest request) {
-	        List<String> instructions = request.getInstructions();
-            if (instructions == null || instructions.isEmpty()) {
-                return new EmbeddingResponse(List.of());
-            }
+    public EmbeddingResponse call(EmbeddingRequest request) {
+        List<String> instructions = request.getInstructions();
+        if (instructions.isEmpty()) {
+            return new EmbeddingResponse(List.of());
+        }
 	        try {
                 EmbeddingCreateParams params = EmbeddingCreateParams.builder()
                     .model(modelName)
@@ -131,7 +131,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
 	            throw new EmbeddingApiResponseException("Remote embedding response was null");
 	        }
             List<com.openai.models.embeddings.Embedding> data = response.data();
-            if (data == null || data.isEmpty()) {
+            if (data.isEmpty()) {
                 throw new EmbeddingApiResponseException("Remote embedding response missing embedding entries");
             }
 
