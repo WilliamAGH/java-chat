@@ -4,6 +4,8 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
     id("com.github.spotbugs") version "6.4.8"
     id("pmd")
+    id("com.diffplug.spotless") version "8.1.0"
+    id("com.palantir.java-format-spotless") version "2.85.0"
 }
 
 val javaVersion = 25
@@ -161,6 +163,13 @@ tasks.withType<Pmd>().configureEach {
     reports {
         xml.required.set(false)
         html.required.set(true)
+    }
+}
+
+spotless {
+    java {
+        target("src/main/java/**/*.java", "src/test/java/**/*.java")
+        removeUnusedImports()
     }
 }
 

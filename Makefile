@@ -21,7 +21,7 @@ export RED GREEN YELLOW CYAN NC
 export PROJECT_ROOT := $(shell pwd)
 export JAR_PATH = $(call get_jar)
 
-.PHONY: help clean build test lint run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: help clean build test lint format run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -39,6 +39,9 @@ test: ## Run tests (loads .env if present)
 lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
 	$(GRADLEW) spotbugsMain pmdMain
 	cd frontend && npm run check
+
+format: ## Apply Java formatting (Palantir via Spotless)
+	$(GRADLEW) spotlessApply
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
