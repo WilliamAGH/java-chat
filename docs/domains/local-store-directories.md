@@ -2,7 +2,8 @@
 
 LocalStoreService persists document snapshots, parsed chunks, and ingest markers on the filesystem.
 It creates the configured directories on startup; if the paths are invalid or not writable, the app
-fails to start and endpoints like `/api/guided/toc` return 500.
+fails to start (so endpoints are unavailable). If permissions change after startup, affected endpoints
+may return 500.
 
 ## Configuration
 - `DOCS_SNAPSHOT_DIR` → raw HTML snapshots (default `data/snapshots`)
