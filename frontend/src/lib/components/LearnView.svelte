@@ -692,6 +692,7 @@
     grid-template-rows: 1fr;
     overflow: hidden;
     min-height: 0; /* Critical for flex-in-grid scrolling */
+    max-height: 100%; /* Prevent grid from expanding beyond parent */
   }
 
   /* Lesson Content Panel */
