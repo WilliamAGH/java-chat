@@ -19,17 +19,25 @@ import reactor.core.publisher.Flux;
 
 import java.util.List;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Verifies guided chat SSE streams emit a terminal citation event for the UI citation panel.
+ *
+ * <p>This guards against regressions where guided mode would rely on inline footnote markers like
+ * {@code [1]} instead of emitting structured citation payloads.</p>
+ */
 @WebMvcTest(controllers = GuidedLearningController.class)
 @Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
@@ -67,13 +75,8 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.citationsForBookDocuments(anyList()))
                 .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
 
-        var pending = mvc.perform(post("/api/guided/stream")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sessionId\":\"guided:test\",\"slug\":\"intro\",\"latest\":\"Hello\"}"))
-                .andReturn()
-                .getRequest();
-
         var asyncResult = mvc.perform(post("/api/guided/stream")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sessionId\":\"guided:test\",\"slug\":\"intro\",\"latest\":\"Hello\"}"))
                 .andExpect(request().asyncStarted())
@@ -85,9 +88,9 @@ class GuidedSseCitationEventTest {
                 .getResponse()
                 .getContentAsString();
 
-        assertTrue(aggregated.contains("event:citation") || aggregated.contains("event: citation"),
-                "SSE stream should include a citation event");
+        assertTrue(aggregated.contains("event:" + EVENT_CITATION) || aggregated.contains("event: " + EVENT_CITATION),
+                "SSE stream should include a citation event. Response was:\n" + aggregated);
         assertTrue(aggregated.contains("https://example.com"),
-                "Citation payload should include the citation URL");
+                "Citation payload should include the citation URL. Response was:\n" + aggregated);
     }
 }
