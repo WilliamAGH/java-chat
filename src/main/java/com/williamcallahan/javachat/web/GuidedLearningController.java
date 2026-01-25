@@ -10,8 +10,8 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +20,8 @@ import com.williamcallahan.javachat.service.MarkdownService;
 
 import java.util.*;
 import java.time.Duration;
+
+import static com.williamcallahan.javachat.web.SseConstants.*;
 
 /**
  * Exposes guided learning endpoints for lesson metadata, citations, enrichment, and streaming lesson content.
@@ -37,8 +39,8 @@ public class GuidedLearningController extends BaseController {
     private final GuidedLearningService guidedService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
-
     private final MarkdownService markdownService;
+    private final SseSupport sseSupport;
 
     /**
      * Creates the guided learning controller wired to the guided learning orchestration services.
@@ -47,12 +49,14 @@ public class GuidedLearningController extends BaseController {
                                     ChatMemoryService chatMemory,
                                     OpenAIStreamingService openAIStreamingService,
                                     ExceptionResponseBuilder exceptionBuilder,
-                                    MarkdownService markdownService) {
+                                    MarkdownService markdownService,
+                                    SseSupport sseSupport) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
+        this.sseSupport = sseSupport;
     }
 
     /**
@@ -169,15 +173,14 @@ public class GuidedLearningController extends BaseController {
 
     /**
      * Streams a response to a user's chat message within the context of a guided lesson.
+     * Uses the same JSON-wrapped SSE format as ChatController for consistent whitespace handling.
      *
      * @param request The guided stream request containing sessionId, slug, and user message.
-     * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
+     * @return A {@link Flux} of ServerSentEvents with JSON-wrapped text chunks.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody GuidedStreamRequest request, HttpServletResponse response) {
-        // Critical proxy headers for streaming
-        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
-        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+    public Flux<ServerSentEvent<String>> stream(@RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+        sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
         String userQuery = request.userQuery();
@@ -191,35 +194,35 @@ public class GuidedLearningController extends BaseController {
         if (openAIStreamingService.isAvailable()) {
             // Build the complete prompt using GuidedLearningService logic
             String fullPrompt = guidedService.buildGuidedPromptWithContext(history, lessonSlug, userQuery);
-            
-            // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, 0.7)
-                    .doOnNext(chunk -> fullResponse.append(chunk))
-                    .filter(chunk -> chunk != null && !chunk.isEmpty())
-                    .onBackpressureLatest();  // Handle backpressure to prevent memory buildup
 
-            // Heartbeats terminate when data stream completes (success or error).
-            // Errors propagate through dataStream to onErrorResume below - no duplicate logging here.
-            Flux<String> heartbeats = Flux.interval(Duration.ofSeconds(20))
-                    .takeUntilOther(dataStream.ignoreElements())
-                    .map(tick -> "");
+            // Clean OpenAI streaming with shared stream to prevent duplicate API calls
+            Flux<String> dataStream = sseSupport.prepareDataStream(
+                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    chunk -> fullResponse.append(chunk));
 
-            return Flux.merge(dataStream, heartbeats)
-                    .filter(event -> event != null && !event.isEmpty())  // Filter out empty heartbeat strings
-                    .doOnComplete(() -> {
-                        chatMemory.addAssistant(sessionId, fullResponse.toString());
-                    })
+            // Heartbeats terminate when data stream completes
+            Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+
+            // Wrap chunks in JSON to preserve whitespace
+            Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+
+            return Flux.merge(dataEvents, heartbeats)
+                    .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                     .onErrorResume(error -> {
-                        // Log and send error marker to client - errors must be communicated, not silently dropped
-                        log.error("Guided streaming error (exception type: {})",
-                            error.getClass().getSimpleName());
-                        return Flux.just("[ERROR] Streaming error: " + error.getClass().getSimpleName());
+                        // SSE streams require error events rather than thrown exceptions.
+                        // Log full details server-side, send sanitized message to client.
+                        String errorType = error.getClass().getSimpleName();
+                        log.error("Guided streaming error (exception type: {})", errorType, error);
+                        return sseSupport.sseError(
+                            "Streaming error: " + errorType,
+                            "The response stream encountered an error. Please try again."
+                        );
                     });
 
         } else {
-            // Service unavailable - send structured error so client can handle appropriately
+            // Service unavailable - send structured error event
             log.warn("OpenAI streaming service unavailable for guided session");
-            return Flux.just("[ERROR] Service temporarily unavailable. The streaming service is not ready.");
+            return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
         }
     }
 }

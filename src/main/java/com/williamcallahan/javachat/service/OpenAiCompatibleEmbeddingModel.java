@@ -6,6 +6,7 @@ import com.openai.core.RequestOptions;
 import com.openai.core.Timeout;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
+import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -22,7 +23,7 @@ import java.time.Duration;
  * Simple OpenAI-compatible EmbeddingModel.
  * Uses the OpenAI Java SDK to call `/embeddings` against the configured base URL.
  */
-public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoCloseable {
+public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
     
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
@@ -45,49 +46,55 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
 		}
 	}
 
-	/**
-	 * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
-	 *
-	 * @param baseUrl base URL for the embedding API
-	 * @param apiKey API key for the embedding provider
-	 * @param modelName model identifier for embeddings
-	 * @param dimensionsHint expected embedding dimensions (used as a hint)
-	 */
-    public OpenAiCompatibleEmbeddingModel(String baseUrl,
-                                          String apiKey,
-                                          String modelName,
-                                          int dimensionsHint) {
-        if (dimensionsHint <= 0) {
-            throw new IllegalArgumentException("Embedding dimensions must be positive");
-        }
-        this.client = OpenAIOkHttpClient.builder()
+    /**
+     * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
+     *
+     * @param baseUrl base URL for the embedding API
+     * @param apiKey API key for the embedding provider
+     * @param modelName model identifier for embeddings
+     * @param dimensionsHint expected embedding dimensions (used as a hint)
+     * @return embedding model configured for the remote endpoint
+     */
+    public static OpenAiCompatibleEmbeddingModel create(String baseUrl,
+                                                        String apiKey,
+                                                        String modelName,
+                                                        int dimensionsHint) {
+        validateDimensions(dimensionsHint);
+        OpenAIClient client = OpenAIOkHttpClient.builder()
             .apiKey(requireConfiguredApiKey(apiKey))
             .baseUrl(normalizeSdkBaseUrl(baseUrl))
             .build();
-        this.modelName = requireConfiguredModel(modelName);
-        this.dimensionsHint = dimensionsHint;
-	    }
+        return new OpenAiCompatibleEmbeddingModel(client, requireConfiguredModel(modelName), dimensionsHint);
+    }
 
-        OpenAiCompatibleEmbeddingModel(OpenAIClient client,
-                                      String modelName,
-                                      int dimensionsHint) {
-            if (dimensionsHint <= 0) {
-                throw new IllegalArgumentException("Embedding dimensions must be positive");
-            }
-            this.client = Objects.requireNonNull(client, "client");
-            this.modelName = requireConfiguredModel(modelName);
-            this.dimensionsHint = dimensionsHint;
-        }
+    static OpenAiCompatibleEmbeddingModel create(OpenAIClient client,
+                                                 String modelName,
+                                                 int dimensionsHint) {
+        validateDimensions(dimensionsHint);
+        return new OpenAiCompatibleEmbeddingModel(
+            Objects.requireNonNull(client, "client"),
+            requireConfiguredModel(modelName),
+            dimensionsHint
+        );
+    }
+
+    private OpenAiCompatibleEmbeddingModel(OpenAIClient client,
+                                           String modelName,
+                                           int dimensionsHint) {
+        this.client = client;
+        this.modelName = modelName;
+        this.dimensionsHint = dimensionsHint;
+    }
 
 	    /**
 	     * Calls the OpenAI-compatible embeddings endpoint for all inputs in the request.
 	     */
 	    @Override
-	    public EmbeddingResponse call(EmbeddingRequest request) {
-	        List<String> instructions = request.getInstructions();
-            if (instructions == null || instructions.isEmpty()) {
-                return new EmbeddingResponse(List.of());
-            }
+    public EmbeddingResponse call(EmbeddingRequest request) {
+        List<String> instructions = request.getInstructions();
+        if (instructions.isEmpty()) {
+            return new EmbeddingResponse(List.of());
+        }
 	        try {
                 EmbeddingCreateParams params = EmbeddingCreateParams.builder()
                     .model(modelName)
@@ -124,7 +131,7 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
 	            throw new EmbeddingApiResponseException("Remote embedding response was null");
 	        }
             List<com.openai.models.embeddings.Embedding> data = response.data();
-            if (data == null || data.isEmpty()) {
+            if (data.isEmpty()) {
                 throw new EmbeddingApiResponseException("Remote embedding response missing embedding entries");
             }
 
@@ -235,29 +242,12 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
     }
 
     private static String normalizeSdkBaseUrl(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("Remote embedding base URL is not configured");
-        }
+        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
+    }
 
-        String trimmed = baseUrl.trim();
-        if (trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
+    private static void validateDimensions(int dimensionsHint) {
+        if (dimensionsHint <= 0) {
+            throw new IllegalArgumentException("Embedding dimensions must be positive");
         }
-
-        if (trimmed.endsWith("/v1/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
-        } else if (trimmed.endsWith("/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
-        }
-
-        if (trimmed.endsWith("/inference")) {
-            return trimmed + "/v1";
-        }
-
-        if (trimmed.endsWith("/v1")) {
-            return trimmed;
-        }
-
-        return trimmed + "/v1";
     }
 }

@@ -64,8 +64,9 @@ WORKDIR /app
 # Copy the bootable JAR from builder stage
 COPY --from=builder /app/build/app.jar app.jar
 
-# Create logs directory and set permissions
-RUN mkdir -p logs && chown -R appuser:appuser logs app.jar
+# Create writable data directories for local store + logs
+RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index && \
+    chown -R appuser:appuser logs /app/data app.jar
 
 USER appuser
 
@@ -81,6 +82,9 @@ ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
 ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
 ENV APP_KILL_ON_CONFLICT=false
+ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
+ENV DOCS_PARSED_DIR=/app/data/parsed
+ENV DOCS_INDEX_DIR=/app/data/index
 
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \

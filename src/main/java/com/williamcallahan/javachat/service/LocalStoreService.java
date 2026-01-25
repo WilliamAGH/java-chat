@@ -5,6 +5,9 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,6 +22,7 @@ import java.util.HexFormat;
  */
 @Service
 public class LocalStoreService {
+    private static final Logger log = LoggerFactory.getLogger(LocalStoreService.class);
     private static final String SHA_256_ALGORITHM = "SHA-256";
     private static final int SHORT_SHA_BYTES = 6;
     private static final int HASH_PREFIX_LENGTH = 12;
@@ -59,6 +63,8 @@ public class LocalStoreService {
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
+            log.info("Local store directories ready (snapshots={}, parsed={}, index={})",
+                snapshotDir, parsedDir, indexDir);
         } catch (InvalidPathException | IOException exception) {
             throw new IllegalStateException("Failed to create local store directories", exception);
         }

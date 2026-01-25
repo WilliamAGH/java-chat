@@ -8,6 +8,7 @@ import org.springframework.context.event.EventListener;
 import reactor.core.publisher.Hooks;
 
 import java.io.InterruptedIOException;
+import java.util.Locale;
 
 /**
  * Configures Reactor hooks to handle dropped errors gracefully.
@@ -53,6 +54,6 @@ public class ReactorHooksConfig {
             cause = cause.getCause();
         }
         String message = error.getMessage();
-        return message != null && message.toLowerCase().contains("interrupt");
+        return message != null && message.toLowerCase(Locale.ROOT).contains("interrupt");
     }
 }

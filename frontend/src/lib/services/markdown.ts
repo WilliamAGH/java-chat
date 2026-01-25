@@ -35,6 +35,80 @@ interface EnrichmentToken extends Tokens.Generic {
   content: string
 }
 
+/** Pattern matching code fence delimiters (3+ backticks or tildes at line start). */
+const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/
+
+/**
+ * Checks whether code fences in content are balanced.
+ * Uses simple line-by-line scan with toggle semantics.
+ */
+function hasBalancedCodeFences(content: string): boolean {
+  let depth = 0
+  let openChar = ''
+  let openLen = 0
+
+  for (const line of content.split('\n')) {
+    const match = line.match(FENCE_PATTERN)
+    if (!match) continue
+
+    const fence = match[1]
+    if (depth === 0) {
+      // Opening fence
+      depth = 1
+      openChar = fence[0]
+      openLen = fence.length
+    } else if (fence[0] === openChar && fence.length >= openLen) {
+      // Matching closing fence
+      depth = 0
+      openChar = ''
+      openLen = 0
+    }
+  }
+
+  return depth === 0
+}
+
+/** Enrichment close marker. */
+const ENRICHMENT_CLOSE = '}}'
+
+/**
+ * Finds the closing }} for an enrichment marker, skipping }} inside code fences.
+ * Scans character-by-character, tracking fence state at line boundaries.
+ */
+function findEnrichmentClose(src: string, startIndex: number): number {
+  let inFence = false
+  let fenceChar = ''
+  let fenceLen = 0
+
+  for (let cursor = startIndex; cursor < src.length - 1; cursor++) {
+    // At line boundaries, check for fence delimiters
+    if (cursor === startIndex || src[cursor - 1] === '\n') {
+      const lineMatch = src.slice(cursor).match(FENCE_PATTERN)
+      if (lineMatch) {
+        const fence = lineMatch[1]
+        if (!inFence) {
+          inFence = true
+          fenceChar = fence[0]
+          fenceLen = fence.length
+        } else if (fence[0] === fenceChar && fence.length >= fenceLen) {
+          inFence = false
+          fenceChar = ''
+          fenceLen = 0
+        }
+        cursor += fence.length - 1 // -1 because loop will increment
+        continue
+      }
+    }
+
+    // Check for closing marker only outside fences
+    if (!inFence && src.slice(cursor, cursor + ENRICHMENT_CLOSE.length) === ENRICHMENT_CLOSE) {
+      return cursor
+    }
+  }
+
+  return -1
+}
+
 /**
  * Custom marked extension for enrichment markers.
  * Parses {{kind:content}} syntax and renders as styled cards.
@@ -47,19 +121,31 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
       return src.indexOf('{{')
     },
     tokenizer(src: string): EnrichmentToken | undefined {
-      // Match {{kind:content}} with support for multiline content
-      // Use a non-greedy match that stops at the first }}
-      const rule = /^\{\{(hint|warning|background|example|reminder):([\s\S]*?)\}\}/
-      const match = rule.exec(src)
-      if (match) {
-        return {
-          type: 'enrichment',
-          raw: match[0],
-          kind: match[1].toLowerCase(),
-          content: match[2].trim()
-        }
+      // Match opening {{kind: pattern
+      const openingRule = /^\{\{(hint|warning|background|example|reminder):/
+      const openingMatch = openingRule.exec(src)
+      if (!openingMatch) {
+        return undefined
       }
-      return undefined
+
+      const kind = openingMatch[1].toLowerCase()
+      const contentStart = openingMatch[0].length
+
+      // Find closing }} that's not inside a code fence
+      const closeIndex = findEnrichmentClose(src, contentStart)
+      if (closeIndex === -1) {
+        return undefined
+      }
+
+      const content = src.slice(contentStart, closeIndex)
+      const raw = src.slice(0, closeIndex + 2)
+
+      return {
+        type: 'enrichment',
+        raw,
+        kind,
+        content: content.trim()
+      }
     },
     renderer(token: Tokens.Generic): string {
       const enrichmentToken = token as EnrichmentToken
@@ -68,8 +154,28 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
         return token.raw
       }
 
-      // Render inner content as markdown (without enrichment extension to avoid recursion)
-      const innerHtml = marked.parse(enrichmentToken.content, { async: false }) as string
+      const contentToRender = enrichmentToken.content
+
+      // DIAGNOSTIC: Log enrichment content to identify malformed markdown
+      if (import.meta.env.DEV) {
+        const hasFences = contentToRender.includes('```') || contentToRender.includes('~~~')
+        const isBalanced = hasBalancedCodeFences(contentToRender)
+        if (hasFences && !isBalanced) {
+          console.warn('[markdown] Unbalanced code fences in enrichment:', {
+            kind: enrichmentToken.kind,
+            content: contentToRender,
+            raw: enrichmentToken.raw
+          })
+        }
+      }
+
+      // Render inner content as markdown
+      // IMPORTANT: Use gfm but disable breaks to prevent fence interference
+      const innerHtml = marked.parse(contentToRender, {
+        async: false,
+        gfm: true,
+        breaks: false // Preserve fence detection accuracy
+      }) as string
 
       return `<div class="inline-enrichment ${enrichmentToken.kind}" data-enrichment-type="${enrichmentToken.kind}">
 <div class="inline-enrichment-header">${meta.icon}<span>${meta.title}</span></div>
@@ -93,6 +199,18 @@ marked.use({
 export function renderMarkdown(content: string): string {
   if (!content) {
     return ''
+  }
+
+  // DIAGNOSTIC: Log content with unbalanced fences before parsing
+  if (import.meta.env.DEV) {
+    const hasFences = content.includes('```') || content.includes('~~~')
+    if (hasFences && !hasBalancedCodeFences(content)) {
+      console.warn('[markdown] Unbalanced code fences in input:', {
+        contentLength: content.length,
+        contentPreview: content.slice(0, 500),
+        contentEnd: content.slice(-200)
+      })
+    }
   }
 
   const rawHtml = marked.parse(content, { async: false }) as string

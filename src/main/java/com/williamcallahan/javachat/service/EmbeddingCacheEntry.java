@@ -14,6 +14,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+/**
+ * Captures a cached embedding payload with metadata for disk persistence.
+ */
 @JsonAutoDetect(
     fieldVisibility = JsonAutoDetect.Visibility.ANY,
     getterVisibility = JsonAutoDetect.Visibility.NONE,
@@ -131,7 +134,7 @@ record EmbeddingCacheMetadata(
     static EmbeddingCacheMetadata fromDocument(Document sourceDocument) {
         Objects.requireNonNull(sourceDocument, "sourceDocument");
         Map<String, ?> springMetadata = sourceDocument.getMetadata();
-        if (springMetadata == null || springMetadata.isEmpty()) {
+        if (springMetadata.isEmpty()) {
             return empty();
         }
 

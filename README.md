@@ -165,6 +165,7 @@ All config is env-driven. See `src/main/resources/application.properties` for de
 - `DOCS_SNAPSHOT_DIR`: default `data/snapshots` (raw HTML)
 - `DOCS_PARSED_DIR`: default `data/parsed` (chunk text)
 - `DOCS_INDEX_DIR`: default `data/index` (ingest hash markers)
+- **Containers**: point `DOCS_*` to a writable path (e.g., `/app/data/...`) and ensure the directories exist.
 
 ## Documentation Ingestion
 

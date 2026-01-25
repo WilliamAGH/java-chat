@@ -1,63 +1,90 @@
 <script lang="ts">
-  import { tick } from 'svelte'
   import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
   import WelcomeScreen from './WelcomeScreen.svelte'
-  import { streamChat, type ChatMessage } from '../services/chat'
+  import CitationPanel from './CitationPanel.svelte'
+  import ThinkingIndicator from './ThinkingIndicator.svelte'
+  import { streamChat, type ChatMessage, type Citation } from '../services/chat'
+  import { isNearBottom, scrollToBottom } from '../utils/scroll'
 
-  let messages = $state<ChatMessage[]>([])
+  /** Extended message type that includes inline citations from the stream. */
+  interface MessageWithCitations extends ChatMessage {
+    /** Citations received inline from the SSE stream (eliminates separate API call). */
+    citations?: Citation[]
+  }
+
+  let messages = $state<MessageWithCitations[]>([])
   let isStreaming = $state(false)
   let currentStreamingContent = $state('')
   let messagesContainer: HTMLElement | null = $state(null)
   let shouldAutoScroll = $state(true)
   let streamStatusMessage = $state<string | null>(null)
   let streamStatusDetails = $state<string | null>(null)
+  let pendingCitations = $state<Citation[]>([])
+
+  /** Timer for delayed status message clearing to allow users to read final status. */
+  let statusClearTimer: ReturnType<typeof setTimeout> | null = null
+
+  $effect(() => {
+    return () => {
+      if (statusClearTimer) {
+        clearTimeout(statusClearTimer)
+      }
+    }
+  })
+
+  /** Duration to keep status visible after streaming ends so users can read it. */
+  const STATUS_PERSISTENCE_DURATION_MS = 800
 
   const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
-  function checkAutoScroll() {
-    if (!messagesContainer) return
-    const threshold = 100
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer
-    shouldAutoScroll = scrollHeight - scrollTop - clientHeight < threshold
-  }
-
-  async function scrollToBottom() {
-    await tick()
-    if (messagesContainer && shouldAutoScroll) {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-      })
+  /**
+   * Cancels any pending status clear timer.
+   */
+  function cancelStatusTimer(): void {
+    if (statusClearTimer) {
+      clearTimeout(statusClearTimer)
+      statusClearTimer = null
     }
   }
 
-  async function handleSend(message: string) {
-    if (!message.trim() || isStreaming) return
-
-    // Add user message
-    messages = [...messages, {
-      role: 'user',
-      content: message,
-      timestamp: Date.now()
-    }]
-
-    shouldAutoScroll = true
-    await scrollToBottom()
-
-    // Start streaming
-    isStreaming = true
-    currentStreamingContent = ''
+  /**
+   * Clears status messages immediately.
+   */
+  function clearStatusNow(): void {
+    cancelStatusTimer()
     streamStatusMessage = null
     streamStatusDetails = null
+  }
 
+  /**
+   * Clears status messages after a delay to allow users to read final status.
+   */
+  function clearStatusDelayed(): void {
+    cancelStatusTimer()
+    statusClearTimer = setTimeout(() => {
+      streamStatusMessage = null
+      streamStatusDetails = null
+      statusClearTimer = null
+    }, STATUS_PERSISTENCE_DURATION_MS)
+  }
+
+  function checkAutoScroll() {
+    shouldAutoScroll = isNearBottom(messagesContainer)
+  }
+
+  async function doScrollToBottom() {
+    await scrollToBottom(messagesContainer, shouldAutoScroll)
+  }
+
+  async function executeChatStream(userQuery: string): Promise<void> {
     try {
       await streamChat(
         sessionId,
-        message,
+        userQuery,
         (chunk) => {
           currentStreamingContent += chunk
-          scrollToBottom()
+          doScrollToBottom()
         },
         {
           onStatus: (status) => {
@@ -67,18 +94,21 @@
           onError: (streamError) => {
             streamStatusMessage = streamError.message
             streamStatusDetails = streamError.details ?? null
+          },
+          onCitations: (citations) => {
+            pendingCitations = citations
           }
         }
       )
 
-      // Add completed assistant message
+      // Add completed assistant message with inline citations
       messages = [...messages, {
         role: 'assistant',
         content: currentStreamingContent,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        citations: pendingCitations
       }]
     } catch (error) {
-      console.error('Stream error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
       messages = [...messages, {
         role: 'assistant',
@@ -86,12 +116,38 @@
         timestamp: Date.now(),
         isError: true
       }]
+    }
+  }
+
+  async function handleSend(message: string): Promise<void> {
+    if (!message.trim() || isStreaming) return
+
+    const userQuery = message.trim()
+
+    // Add user message
+    messages = [...messages, {
+      role: 'user',
+      content: userQuery,
+      timestamp: Date.now()
+    }]
+
+    shouldAutoScroll = true
+    await doScrollToBottom()
+
+    // Start streaming - clear any persisting status immediately
+    isStreaming = true
+    currentStreamingContent = ''
+    clearStatusNow() // Immediate clear for fresh start
+    pendingCitations = []
+
+    try {
+      await executeChatStream(userQuery)
     } finally {
       isStreaming = false
       currentStreamingContent = ''
-      streamStatusMessage = null
-      streamStatusDetails = null
-      await scrollToBottom()
+      clearStatusDelayed() // Delayed clear so users can read final status
+      pendingCitations = []
+      await doScrollToBottom()
     }
   }
 
@@ -112,7 +168,12 @@
       {:else}
         <div class="messages-list">
           {#each messages as message, i (message.timestamp)}
-            <MessageBubble {message} index={i} />
+            <div class="message-with-citations">
+              <MessageBubble {message} index={i} />
+              {#if message.role === 'assistant' && message.citations && message.citations.length > 0 && !message.isError}
+                <CitationPanel citations={message.citations} />
+              {/if}
+            </div>
           {/each}
 
           {#if isStreaming && currentStreamingContent}
@@ -126,21 +187,11 @@
               isStreaming={true}
             />
           {:else if isStreaming}
-            <div class="loading-indicator">
-              <div class="loading-dots">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
-              </div>
-              {#if streamStatusMessage}
-                <div class="stream-status">
-                  <p class="stream-status-title">{streamStatusMessage}</p>
-                  {#if streamStatusDetails}
-                    <p class="stream-status-details">{streamStatusDetails}</p>
-                  {/if}
-                </div>
-              {/if}
-            </div>
+            <ThinkingIndicator
+              statusMessage={streamStatusMessage}
+              statusDetails={streamStatusDetails}
+              hasContent={false}
+            />
           {/if}
         </div>
       {/if}
@@ -176,62 +227,9 @@
     gap: var(--space-6);
   }
 
-  /* Loading indicator */
-  .loading-indicator {
+  .message-with-citations {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-2);
-    justify-content: flex-start;
-    padding-left: var(--space-4);
-  }
-
-  .loading-dots {
-    display: flex;
-    gap: 6px;
-    padding: var(--space-4);
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-xl);
-    border: 1px solid var(--color-border-subtle);
-  }
-
-  .dot {
-    width: 8px;
-    height: 8px;
-    background: var(--color-text-muted);
-    border-radius: 50%;
-    animation: bounce 1.4s infinite ease-in-out both;
-  }
-
-  .dot:nth-child(1) { animation-delay: -0.32s; }
-  .dot:nth-child(2) { animation-delay: -0.16s; }
-  .dot:nth-child(3) { animation-delay: 0s; }
-
-  .stream-status {
-    padding: 0 var(--space-2);
-  }
-
-  .stream-status-title {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  .stream-status-details {
-    margin: var(--space-1) 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  @keyframes bounce {
-    0%, 80%, 100% {
-      transform: scale(0.8);
-      opacity: 0.5;
-    }
-    40% {
-      transform: scale(1);
-      opacity: 1;
-    }
   }
 
   /* Tablet */
@@ -249,10 +247,6 @@
 
     .messages-list {
       gap: var(--space-4);
-    }
-
-    .loading-dots {
-      padding: var(--space-3);
     }
   }
 

@@ -55,6 +55,8 @@ public final class RetrySupport {
             String operationName,
             int maxAttempts,
             Duration initialBackoff) {
+
+        String safeOperationName = sanitizeLogValue(operationName);
         
         if (maxAttempts < 1) {
             throw new IllegalArgumentException("maxAttempts must be at least 1");
@@ -71,13 +73,13 @@ public final class RetrySupport {
                 // Check if this is a transient error worth retrying
                 if (!RetrievalErrorClassifier.isTransientVectorStoreError(exception)) {
                     log.warn("{} failed with non-transient error on attempt {}/{}, not retrying",
-                        operationName, attempt, maxAttempts);
+                        safeOperationName, attempt, maxAttempts);
                     throw exception;
                 }
                 
                 if (attempt < maxAttempts) {
                     log.warn("{} failed with transient error on attempt {}/{}, retrying in {}ms",
-                        operationName, attempt, maxAttempts, currentBackoff.toMillis());
+                        safeOperationName, attempt, maxAttempts, currentBackoff.toMillis());
                     
                     try {
                         Thread.sleep(currentBackoff.toMillis());
@@ -90,7 +92,7 @@ public final class RetrySupport {
                     long nextBackoffMillis = (long) (currentBackoff.toMillis() * DEFAULT_MULTIPLIER);
                     currentBackoff = Duration.ofMillis(Math.min(nextBackoffMillis, MAX_BACKOFF.toMillis()));
                 } else {
-                    log.error("{} failed after {} attempts, giving up", operationName, maxAttempts);
+                    log.error("{} failed after {} attempts, giving up", safeOperationName, maxAttempts);
                 }
             }
         }
@@ -113,5 +115,12 @@ public final class RetrySupport {
             operation.run();
             return null;
         }, operationName);
+    }
+
+    private static String sanitizeLogValue(String rawValue) {
+        if (rawValue == null) {
+            return "null";
+        }
+        return rawValue.replace("\r", "\\r").replace("\n", "\\n");
     }
 }

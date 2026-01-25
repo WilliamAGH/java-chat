@@ -1,9 +1,8 @@
 package com.williamcallahan.javachat.web;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
@@ -15,8 +14,6 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,11 +26,13 @@ import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 import org.springframework.http.codec.ServerSentEvent;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+
+import static com.williamcallahan.javachat.web.SseConstants.*;
 
 /**
  * Exposes chat endpoints for streaming responses, session history management, and diagnostics.
@@ -46,89 +45,42 @@ public class ChatController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
-    private static final double TEMPERATURE = 0.7;
-    private static final int HEARTBEAT_INTERVAL_SECONDS = 20;
 
-    /** SSE event type for error notifications sent to the client. */
-    private static final String SSE_EVENT_ERROR = "error";
-    /** SSE event type for diagnostic status events. */
-    private static final String SSE_EVENT_STATUS = "status";
-    /** SSE event type for primary text chunks. */
-    private static final String SSE_EVENT_TEXT = "text";
-    /** SSE comment content for heartbeats. */
-    private static final String SSE_COMMENT_KEEPALIVE = "keepalive";
-
-    /**
-     * Monotonic request counter for correlating log entries within a single chat request.
-     * Uses AtomicLong (vs timestamp+threadId) to guarantee uniqueness even under high concurrency
-     * where multiple requests could start in the same millisecond on the same thread pool.
-     */
-    
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
-    private final ObjectMapper objectMapper;
+    private final SseSupport sseSupport;
     private final RestTemplate restTemplate;
+    private final AppProperties appProperties;
 
-    @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
-    private String localEmbeddingServerUrl;
-
-	    @Value("${app.local-embedding.enabled:false}")
-	    private boolean localEmbeddingEnabled;
-
-	    /**
-	     * Creates the chat controller wired to chat, retrieval, and markdown services.
-	     *
-	     * @param chatService chat orchestration service
-	     * @param chatMemory conversation memory service
-	     * @param openAIStreamingService streaming LLM client
-	     * @param retrievalService retrieval service for diagnostics
-	     * @param objectMapper JSON mapper for safe SSE serialization
-	     * @param restTemplateBuilder builder for creating the RestTemplate
-	     * @param exceptionBuilder shared exception response builder
-	     */
-	    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
-	                         OpenAIStreamingService openAIStreamingService,
-	                         RetrievalService retrievalService,
-	                         ObjectMapper objectMapper,
-	                         RestTemplateBuilder restTemplateBuilder,
-	                         ExceptionResponseBuilder exceptionBuilder) {
+    /**
+     * Creates the chat controller wired to chat, retrieval, and streaming services.
+     *
+     * @param chatService chat orchestration service
+     * @param chatMemory conversation memory service
+     * @param openAIStreamingService streaming LLM client
+     * @param retrievalService retrieval service for diagnostics
+     * @param sseSupport shared SSE serialization and event support
+     * @param restTemplateBuilder builder for creating the RestTemplate
+     * @param exceptionBuilder shared exception response builder
+     * @param appProperties centralized application configuration
+     */
+    public ChatController(ChatService chatService, ChatMemoryService chatMemory,
+                         OpenAIStreamingService openAIStreamingService,
+                         RetrievalService retrievalService,
+                         SseSupport sseSupport,
+                         RestTemplateBuilder restTemplateBuilder,
+                         ExceptionResponseBuilder exceptionBuilder,
+                         AppProperties appProperties) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
-        this.objectMapper = objectMapper;
+        this.sseSupport = sseSupport;
         this.restTemplate = restTemplateBuilder.build();
-    }
-
-    /**
-     * Serializes an object to JSON, throwing a RuntimeException on failure to ensure errors propagate.
-     */
-    private String jsonSerialize(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize SSE data", e);
-        }
-    }
-
-    /**
-     * Creates a Flux containing a single SSE error event with safe JSON serialization.
-     */
-    private Flux<ServerSentEvent<String>> sseError(String message, String details) {
-        String json;
-        try {
-            json = objectMapper.writeValueAsString(new ErrorMessage(message, details));
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE error: {}", message, e);
-            json = "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
-        }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(SSE_EVENT_ERROR)
-            .data(json)
-            .build());
+        this.appProperties = appProperties;
     }
 
     /**
@@ -156,9 +108,7 @@ public class ChatController extends BaseController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(@RequestBody ChatStreamRequest request, HttpServletResponse response) {
-        // Critical proxy headers for streaming
-        response.addHeader("X-Accel-Buffering", "no"); // Nginx: disable proxy buffering
-        response.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
         String sessionId = request.resolvedSessionId();
@@ -184,39 +134,38 @@ public class ChatController extends BaseController {
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming", requestToken);
-            
+
             // Clean OpenAI streaming - no manual SSE parsing, no token buffering artifacts
             // Use .share() to hot-share the stream and prevent double API subscription
-            Flux<String> dataStream = openAIStreamingService.streamResponse(fullPrompt, TEMPERATURE)
-                    .filter(chunk -> chunk != null && !chunk.isEmpty())
-                    .doOnNext(chunk -> {
+            Flux<String> dataStream = sseSupport.prepareDataStream(
+                    openAIStreamingService.streamResponse(fullPrompt, DEFAULT_TEMPERATURE),
+                    chunk -> {
                         fullResponse.append(chunk);
                         chunkCount.incrementAndGet();
-                    })
-                    .onBackpressureBuffer()  // Buffer signals to prevent data loss during spikes
-                    .share();  // Hot-share to prevent double subscription causing duplicate API calls
+                    });
 
-            // Heartbeats terminate when data stream completes (success or error).
-            // Errors propagate through dataEvents to onErrorResume below - no duplicate logging here.
-            Flux<ServerSentEvent<String>> heartbeats = Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
-                    .takeUntilOther(dataStream.ignoreElements())
-                    .map(tick -> ServerSentEvent.<String>builder().comment(SSE_COMMENT_KEEPALIVE).build());
+            // Heartbeats terminate when data stream completes (success or error)
+            Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
 
             Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
-                    .map(notice -> ServerSentEvent.<String>builder()
-                        .event(SSE_EVENT_STATUS)
-                        .data(jsonSerialize(new StatusMessage(notice.summary(), notice.details())))
-                        .build());
+                    .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
 
             // Wrap chunks in JSON to preserve whitespace - Spring's SSE handling can trim leading spaces
             // See: https://github.com/spring-projects/spring-framework/issues/27473
-            Flux<ServerSentEvent<String>> dataEvents = dataStream
-                    .map(chunk -> ServerSentEvent.<String>builder()
-                            .event(SSE_EVENT_TEXT)
-                            .data(jsonSerialize(new ChunkMessage(chunk)))
-                            .build());
+            Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
-            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats))
+            // Emit citations inline at stream end - eliminates separate /citations API call and UI flicker
+            List<Citation> citations;
+            try {
+                citations = retrievalService.toCitations(promptOutcome.documents());
+            } catch (Exception citationError) {
+                PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations: {}",
+                        requestToken, citationError.getMessage());
+                citations = List.of();
+            }
+            Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(citations));
+
+            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent)
                     .doOnComplete(() -> {
                         chatMemory.addAssistant(sessionId, fullResponse.toString());
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
@@ -228,20 +177,15 @@ public class ChatController extends BaseController {
                             ? describeException(exception)
                             : error.toString();
                         PIPELINE_LOG.error("[{}] STREAMING ERROR: {}", requestToken, errorDetail, error);
-                        return sseError(errorDetail, diagnostics);
+                        return sseSupport.sseError(errorDetail, diagnostics);
                     });
 
         } else {
             // Service unavailable - send structured error event so client can handle appropriately
             PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-            return sseError("Streaming service unavailable", "OpenAI streaming service is not ready");
+            return sseSupport.sseError("Streaming service unavailable", "OpenAI streaming service is not ready");
         }
     }
-
-    // Helper records for JSON serialization
-    private record StatusMessage(String message, String details) {}
-    private record ChunkMessage(String text) {}
-    private record ErrorMessage(String message, String details) {}
 
     /**
      * Diagnostics: Return the RAG retrieval context for a given query.
@@ -336,28 +280,29 @@ public class ChatController extends BaseController {
         }
         chatMemory.clear(sessionId);
         PIPELINE_LOG.info("Cleared chat session");
-	        return ResponseEntity.ok("Session cleared");
-	    }
-	    
-	    /**
-	     * Reports whether the configured local embedding server is reachable when the feature is enabled.
-	     */
-	    @GetMapping("/health/embeddings")
-	    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-	        if (!localEmbeddingEnabled) {
-	            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
-	        }
+        return ResponseEntity.ok("Session cleared");
+    }
+    
+    /**
+     * Reports whether the configured local embedding server is reachable when the feature is enabled.
+     */
+    @GetMapping("/health/embeddings")
+    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
+        String serverUrl = appProperties.getLocalEmbedding().getServerUrl();
+        if (!appProperties.getLocalEmbedding().isEnabled()) {
+            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(serverUrl));
+        }
 
         try {
             // Simple health check - try to get models list
-            String healthUrl = localEmbeddingServerUrl + "/v1/models";
+            String healthUrl = serverUrl + "/v1/models";
             restTemplate.getForEntity(healthUrl, String.class);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(localEmbeddingServerUrl));
+            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(serverUrl));
         } catch (RestClientException httpError) {
             log.debug("Embedding server health check failed", httpError);
             String details = describeException(httpError);
             return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
-                localEmbeddingServerUrl, "UNREACHABLE: " + details));
+                serverUrl, "UNREACHABLE: " + details));
         }
     }
 
@@ -378,7 +323,7 @@ public class ChatController extends BaseController {
         if (error instanceof OpenAIIoException ioError) {
             Throwable cause = ioError.getCause();
             if (cause != null && cause.getMessage() != null
-                    && cause.getMessage().toLowerCase().contains("interrupt")) {
+                    && cause.getMessage().toLowerCase(Locale.ROOT).contains("interrupt")) {
                 return "Request cancelled - LLM provider did not respond in time";
             }
             return "LLM provider connection failed - " + error.getClass().getSimpleName();

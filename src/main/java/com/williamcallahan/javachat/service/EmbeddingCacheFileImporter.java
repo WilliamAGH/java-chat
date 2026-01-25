@@ -15,6 +15,9 @@ import java.util.UUID;
 
 import static java.io.ObjectInputFilter.Status;
 
+/**
+ * Reads embedding cache files in JSON or legacy serialized formats.
+ */
 final class EmbeddingCacheFileImporter {
     /** Bytes reserved for mark/reset during format detection. */
     private static final int FORMAT_DETECTION_MARK_LIMIT = 512;
@@ -51,6 +54,9 @@ final class EmbeddingCacheFileImporter {
         };
     }
 
+    /**
+     * Represents supported cache file serialization formats.
+     */
     private enum CacheFileFormat {
         JSON,
         LEGACY_JAVA_SERIALIZED

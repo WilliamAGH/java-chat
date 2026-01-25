@@ -1,12 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  /** Default placeholder text for the chat input field. */
+  const DEFAULT_PLACEHOLDER = 'Ask about Java...'
+
   interface Props {
+    /** Callback invoked when user submits a message. */
     onSend: (message: string) => void
+    /** Whether the input should be disabled (e.g., during streaming). */
     disabled?: boolean
+    /** Placeholder text shown when input is empty. */
+    placeholder?: string
   }
 
-  let { onSend, disabled = false }: Props = $props()
+  let { onSend, disabled = false, placeholder = DEFAULT_PLACEHOLDER }: Props = $props()
 
   let inputValue = $state('')
   let inputEl: HTMLTextAreaElement | null = $state(null)
@@ -65,7 +72,7 @@
         bind:value={inputValue}
         oninput={autoResize}
         onkeydown={handleKeyDown}
-        placeholder="Ask about Java..."
+        {placeholder}
         rows="1"
         {disabled}
         class="input-field"

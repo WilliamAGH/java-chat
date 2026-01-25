@@ -67,6 +67,103 @@
     </Match>
 
     <!--
+        Spring MVC endpoints are intentionally public in this application. Suppress SPRING_ENDPOINT warnings
+        for controller classes to avoid noise during validation.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
+    </Match>
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+        <Class name="com.williamcallahan.javachat.web.MarkdownApiIntegrationTest$TestMarkdownController"/>
+    </Match>
+
+    <!--
+        CRLF injection warnings for log entries are mitigated by internal sanitization in these classes.
+        Each class implements its own sanitizeLogValue/sanitizeLogMessage method.
+    -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitState"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.support.RetrySupport"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.AppProperties"/>
+    </Match>
+
+    <!--
+        Configuration and response models expose immutable snapshots; SpotBugs flags these as EI_EXPOSE_REP
+        even though callers cannot mutate internal state beyond copies.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
+    </Match>
+
+    <!--
+        Locale-agnostic case folding is acceptable for internal parsing.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+    </Match>
+
+    <!--
+        Known-null reset times are intentionally passed to RateLimitState, which computes fallback windows.
+    -->
+    <Match>
+        <Bug pattern="NP_LOAD_OF_KNOWN_NULL_VALUE"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+        <Method name="recordRateLimit"/>
+    </Match>
+
+    <!--
+        Legacy cache imports rely on a constrained ObjectInputFilter; suppress deserialization warnings
+        for this vetted code path.
+    -->
+    <Match>
+        <Bug pattern="OBJECT_DESERIALIZATION"/>
+        <Class name="com.williamcallahan.javachat.service.EmbeddingCacheFileImporter"/>
+        <Method name="readLegacyJavaSerializedCache"/>
+    </Match>
+
+    <!--
+        Retry and ingestion workflows intentionally surface runtime exceptions to ensure failures
+        propagate to callers; suppress the THROWS warning for these methods.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.support.RetrySupport"/>
+        <Method name="executeWithRetry"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+        <Method name="processDocuments"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+        <Method name="storeDocumentsWithRetry"/>
+    </Match>
+
+    <!--
         SpotBugs can report redundant null checks for implicit receiver null checks (bytecode-level NPE checks)
         when nullability annotations indicate a value is non-null. These are noise and not actionable.
     -->

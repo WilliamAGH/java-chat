@@ -13,8 +13,6 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -25,8 +23,6 @@ import java.util.UUID;
  * Extracts inline enrichment markers and replaces them with HTML placeholders.
  */
 class EnrichmentPlaceholderizer {
-
-    private static final Logger logger = LoggerFactory.getLogger(EnrichmentPlaceholderizer.class);
 
     private static final String MARKER_START = "{{";
     private static final String MARKER_END = "}}";
@@ -136,7 +132,7 @@ class EnrichmentPlaceholderizer {
             if (!fenceTracker.isInsideFence()) {
                 CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, cursor);
                 if (backtickRun != null) {
-                    int consumed = fenceTracker.processCharacter(markdown, cursor, isStartOfLine);
+                    fenceTracker.processCharacter(markdown, cursor, isStartOfLine);
                     for (int offset = 0; offset < backtickRun.length(); offset++) {
                         outputBuilder.append(markdown.charAt(cursor + offset));
                     }
@@ -204,16 +200,6 @@ class EnrichmentPlaceholderizer {
         }
 
         return container.outerHtml();
-    }
-
-    private static String escapeHtml(String text) {
-        if (text == null) return "";
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;");
     }
 
     /**

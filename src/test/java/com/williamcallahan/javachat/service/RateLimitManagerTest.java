@@ -13,6 +13,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+/**
+ * Verifies rate limit manager header parsing behavior.
+ */
 class RateLimitManagerTest {
 
     @Test

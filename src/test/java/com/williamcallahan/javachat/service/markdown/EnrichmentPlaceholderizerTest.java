@@ -15,6 +15,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies enrichment markers are handled safely around code fences.
+ */
 class EnrichmentPlaceholderizerTest {
 
     private EnrichmentPlaceholderizer placeholderizer;

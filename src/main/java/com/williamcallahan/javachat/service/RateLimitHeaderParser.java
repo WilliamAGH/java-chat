@@ -6,12 +6,49 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Parses rate limit headers into structured values for backoff decisions.
  */
 final class RateLimitHeaderParser {
+
+    private static final long HOURS_PER_DAY = 24;
+    private static final long MINUTES_PER_HOUR = 60;
+
+    /**
+     * Duration units with their conversion factors to seconds.
+     */
+    private enum DurationUnit {
+        MILLISECONDS("ms", Duration::ofMillis),
+        DAYS("d", Duration::ofDays),
+        HOURS("h", Duration::ofHours),
+        MINUTES("m", Duration::ofMinutes),
+        SECONDS("s", Duration::ofSeconds);
+
+        private final String suffix;
+        private final java.util.function.LongFunction<Duration> toDuration;
+
+        DurationUnit(String suffix, java.util.function.LongFunction<Duration> toDuration) {
+            this.suffix = suffix;
+            this.toDuration = toDuration;
+        }
+
+        boolean matches(String normalized) {
+            return normalized.endsWith(suffix);
+        }
+
+        String extractNumber(String normalized) {
+            return normalized.substring(0, normalized.length() - suffix.length()).trim();
+        }
+
+        Duration convert(long amount) {
+            return toDuration.apply(amount);
+        }
+
+        long toSeconds(long amount) {
+            return convert(amount).getSeconds();
+        }
+    }
 
     /**
      * Parses the X-RateLimit-Reset header (epoch seconds or ISO instant).
@@ -124,45 +161,28 @@ final class RateLimitHeaderParser {
         if (rawDuration == null) {
             return 0;
         }
-        String trimmed = rawDuration.trim();
+        String trimmed = rawDuration.trim().toLowerCase(java.util.Locale.ROOT);
         if (trimmed.isEmpty()) {
             return 0;
         }
 
-        int lastIndex = trimmed.length() - 1;
-        char lastChar = trimmed.charAt(lastIndex);
         if (isDigits(trimmed)) {
             return Long.parseLong(trimmed);
         }
 
-        if (lastChar == 's') {
-            return parsePositiveSeconds(trimmed.substring(0, lastIndex).trim(), trimmed);
-        }
-        if (lastChar == 'm') {
-            long minutes = parsePositiveSeconds(trimmed.substring(0, lastIndex).trim(), trimmed);
-            return TimeUnit.MINUTES.toSeconds(minutes);
-        }
-        if (lastChar == 'h') {
-            long hours = parsePositiveSeconds(trimmed.substring(0, lastIndex).trim(), trimmed);
-            return TimeUnit.HOURS.toSeconds(hours);
-        }
-        if (trimmed.endsWith("ms")) {
-            String numberPart = trimmed.substring(0, trimmed.length() - 2).trim();
-            if (!isDigits(numberPart)) {
-                throw new IllegalArgumentException("Invalid reset duration header: " + trimmed);
+        for (DurationUnit unit : DurationUnit.values()) {
+            if (unit.matches(trimmed)) {
+                String numberPart = unit.extractNumber(trimmed);
+                if (!isDigits(numberPart)) {
+                    throw new IllegalArgumentException("Invalid reset duration header: " + rawDuration);
+                }
+                long amount = Long.parseLong(numberPart);
+                long seconds = unit.toSeconds(amount);
+                return unit == DurationUnit.MILLISECONDS ? Math.max(1, seconds) : seconds;
             }
-            long millis = Long.parseLong(numberPart);
-            return Math.max(1, TimeUnit.MILLISECONDS.toSeconds(millis));
         }
 
-        throw new IllegalArgumentException("Invalid reset duration header: " + trimmed);
-    }
-
-    private long parsePositiveSeconds(String rawNumber, String fullValue) {
-        if (!isDigits(rawNumber)) {
-            throw new IllegalArgumentException("Invalid reset duration header: " + fullValue);
-        }
-        return Long.parseLong(rawNumber);
+        throw new IllegalArgumentException("Invalid reset duration header: " + rawDuration);
     }
 
     private String firstHeaderValue(Headers headers, String name) {
@@ -177,11 +197,11 @@ final class RateLimitHeaderParser {
             }
             return null;
         }
-        var values = headers.values(name);
-        if (values == null || values.isEmpty()) {
+        var headerValues = headers.values(name);
+        if (headerValues.isEmpty()) {
             return null;
         }
-        return values.get(0);
+        return headerValues.get(0);
     }
 
     private long minPositive(long... candidates) {
@@ -209,10 +229,82 @@ final class RateLimitHeaderParser {
         return true;
     }
 
-    private String requireHeaderValue(String value, String headerName) {
-        if (value == null) {
+    private String requireHeaderValue(String headerValue, String headerName) {
+        if (headerValue == null) {
             throw new IllegalArgumentException("Missing header: " + Objects.requireNonNull(headerName, "headerName"));
         }
-        return value.trim();
+        return headerValue.trim();
+    }
+
+    /**
+     * Formats a duration as a human-readable string using days, hours, and minutes.
+     *
+     * @param duration the duration to format
+     * @return formatted string like "2d 3h 15m", "5h 30m", or "45m"
+     */
+    static String formatDuration(Duration duration) {
+        long days = duration.toDays();
+        long hours = duration.toHours() % HOURS_PER_DAY;
+        long minutes = duration.toMinutes() % MINUTES_PER_HOUR;
+
+        if (days > 0) {
+            return String.format("%dd %dh %dm", days, hours, minutes);
+        } else if (hours > 0) {
+            return String.format("%dh %dm", hours, minutes);
+        } else {
+            return String.format("%dm", minutes);
+        }
+    }
+
+    /**
+     * Parses a duration string with various unit suffixes into a Duration.
+     * Supports: d (days), h (hours), m (minutes), s (seconds), ms (milliseconds).
+     *
+     * @param durationString the string to parse (e.g., "24h", "1d", "30m", "45s", "500ms")
+     * @return the parsed duration
+     * @throws IllegalArgumentException when the string cannot be parsed
+     */
+    Duration parseDuration(String durationString) {
+        if (durationString == null) {
+            throw new IllegalArgumentException("Duration string cannot be null");
+        }
+        String trimmed = durationString.trim().toLowerCase(java.util.Locale.ROOT);
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("Duration string cannot be empty");
+        }
+
+        if (isDigits(trimmed)) {
+            return Duration.ofSeconds(Long.parseLong(trimmed));
+        }
+
+        for (DurationUnit unit : DurationUnit.values()) {
+            if (unit.matches(trimmed)) {
+                String numberPart = unit.extractNumber(trimmed);
+                if (!isDigits(numberPart)) {
+                    throw new IllegalArgumentException("Invalid duration: " + durationString);
+                }
+                return unit.convert(Long.parseLong(numberPart));
+            }
+        }
+
+        throw new IllegalArgumentException("Invalid duration suffix: " + durationString);
+    }
+
+    /**
+     * Parses a duration string with a fallback default for null, empty, or invalid input.
+     *
+     * @param durationString the string to parse
+     * @param fallbackDuration the value to return for null, empty, or unparseable input
+     * @return the parsed duration or the default
+     */
+    Duration parseDurationOrDefault(String durationString, Duration fallbackDuration) {
+        if (durationString == null || durationString.isBlank()) {
+            return fallbackDuration;
+        }
+        try {
+            return parseDuration(durationString);
+        } catch (IllegalArgumentException parseError) {
+            return fallbackDuration;
+        }
     }
 }

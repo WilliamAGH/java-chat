@@ -54,6 +54,9 @@ class GuidedLearningControllerTest {
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
 
+    @MockitoBean
+    SseSupport sseSupport;
+
     @Test
     void guided_enrich_filters_empty_strings_and_whitespace() throws Exception {
         Enrichment e = new Enrichment();

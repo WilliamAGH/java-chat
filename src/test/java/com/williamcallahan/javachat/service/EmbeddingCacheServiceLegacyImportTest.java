@@ -8,6 +8,7 @@ import org.mockito.Mockito;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 
+import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -21,9 +22,12 @@ import java.util.zip.GZIPOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/**
+ * Verifies legacy embedding cache imports remain compatible with new metadata handling.
+ */
 final class EmbeddingCacheServiceLegacyImportTest {
     @Test
-    void importsLegacyJavaSerializedCacheAndPreservesAdditionalMetadata(@TempDir Path tempDir) throws Exception {
+    void importsLegacyJavaSerializedCacheAndPreservesAdditionalMetadata(@TempDir Path tempDir) throws IOException {
         EmbeddingModel embeddingModel = Mockito.mock(EmbeddingModel.class);
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         ObjectMapper objectMapper = new ObjectMapper();
@@ -60,7 +64,7 @@ final class EmbeddingCacheServiceLegacyImportTest {
         assertEquals("legacyValue", additionalMetadata.path("legacyField").asText());
     }
 
-    private static void writeLegacyCache(Path legacyCachePath) throws Exception {
+    private static void writeLegacyCache(Path legacyCachePath) throws IOException {
         EmbeddingCacheService.CachedEmbedding legacyEntry = new EmbeddingCacheService.CachedEmbedding();
         legacyEntry.id = "legacy-id";
         legacyEntry.content = "Legacy content";
@@ -83,7 +87,7 @@ final class EmbeddingCacheServiceLegacyImportTest {
         }
     }
 
-    private static JsonNode readGzipJson(Path gzipPath, ObjectMapper objectMapper) throws Exception {
+    private static JsonNode readGzipJson(Path gzipPath, ObjectMapper objectMapper) throws IOException {
         try (var fileInputStream = Files.newInputStream(gzipPath);
              var gzipInputStream = new java.util.zip.GZIPInputStream(fileInputStream)) {
             return objectMapper.readTree(gzipInputStream);

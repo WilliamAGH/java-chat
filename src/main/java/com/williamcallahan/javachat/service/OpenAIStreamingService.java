@@ -19,6 +19,7 @@ import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -425,16 +426,7 @@ public class OpenAIStreamingService {
     }
 
     private String normalizeBaseUrl(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return baseUrl;
-        }
-        String trimmed = baseUrl.trim();
-        String normalized = trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
-        if (normalized.endsWith("/inference")) {
-            // openai-java expects baseUrl to include the API version prefix, e.g. /v1.
-            return normalized + "/v1";
-        }
-        return normalized;
+        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
     }
     
     /**
@@ -491,13 +483,9 @@ public class OpenAIStreamingService {
     }
 
     private boolean isRateLimit(Throwable throwable) {
-        if (throwable instanceof RateLimitException) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            return serviceException.statusCode() == 429;
-        }
-        return false;
+        return throwable instanceof RateLimitException
+            || (throwable instanceof OpenAIServiceException serviceException
+                && serviceException.statusCode() == 429);
     }
     
     private boolean isRetryablePrimaryFailure(Throwable throwable) {

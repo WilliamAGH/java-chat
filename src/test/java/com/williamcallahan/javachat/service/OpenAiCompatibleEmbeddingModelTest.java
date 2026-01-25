@@ -16,6 +16,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Verifies OpenAI embedding responses preserve request ordering.
+ */
 class OpenAiCompatibleEmbeddingModelTest {
 
     @Test
@@ -42,7 +45,7 @@ class OpenAiCompatibleEmbeddingModelTest {
 
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
-        try (OpenAiCompatibleEmbeddingModel model = new OpenAiCompatibleEmbeddingModel(
+        try (OpenAiCompatibleEmbeddingModel model = OpenAiCompatibleEmbeddingModel.create(
             client,
             "text-embedding-3-small",
             2

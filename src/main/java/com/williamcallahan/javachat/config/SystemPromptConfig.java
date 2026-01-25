@@ -35,12 +35,16 @@ public class SystemPromptConfig {
             CRITICAL: Embed learning insights directly in your response using these markers. EACH marker MUST be on its own line.
             - {{hint:Text here}} for helpful tips and best practices
             - {{reminder:Text here}} for important things to remember
-            - {{background:Text here}} for conceptual explanations  
+            - {{background:Text here}} for conceptual explanations
             - {{example:code here}} for inline code examples
             - {{warning:Text here}} for common pitfalls to avoid
-            - [n] for citations with source URLs from retrieved documents
 
             Integrate these markers naturally throughout your explanation. Don't group them at the end.
+
+            ## Citation Handling
+            Do NOT include footnote references like [1], [2] or citation/reference sections in your response.
+            The UI automatically displays source citations from retrieved documents in a separate panel.
+            Simply reference sources naturally in prose when relevant (e.g., "the JDK documentation explains...").
 
             ## Version Awareness
             - For current Java version questions, prioritize RAG retrieval data
