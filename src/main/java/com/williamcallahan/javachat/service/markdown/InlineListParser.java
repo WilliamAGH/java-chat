@@ -353,9 +353,14 @@ final class InlineListParser {
                 if (token == '.' || token == '!' || token == '?') {
                     if (index + 1 < rawEntryText.length()) {
                         int candidateStart = index + 1;
+                        boolean sawWhitespace = false;
                         while (candidateStart < rawEntryText.length()
                             && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
+                            sawWhitespace = true;
                             candidateStart++;
+                        }
+                        if (!sawWhitespace) {
+                            continue; // punctuation inside token (e.g., 1.8, e.g.)
                         }
                         if (candidateStart < rawEntryText.length()) {
                             trailingStart = candidateStart;
