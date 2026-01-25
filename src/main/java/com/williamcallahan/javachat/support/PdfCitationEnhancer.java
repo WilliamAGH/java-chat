@@ -38,6 +38,12 @@ public class PdfCitationEnhancer {
     /** Classpath location of the Think Java PDF. */
     private static final String THINK_JAVA_PDF_CLASSPATH = "public/pdfs/Think Java - 2nd Edition Book.pdf";
 
+    /** Filename pattern used to identify Think Java PDF URLs. */
+    private static final String THINK_JAVA_PDF_FILENAME = "think java";
+
+    /** URL-encoded variant of Think Java filename. */
+    private static final String THINK_JAVA_PDF_FILENAME_ENCODED = "think%20java";
+
     public PdfCitationEnhancer(LocalStoreService localStore) {
         this.localStore = localStore;
     }
@@ -69,6 +75,11 @@ public class PdfCitationEnhancer {
             String url = citation.getUrl();
 
             if (url == null || !url.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+                continue;
+            }
+
+            // Only apply page estimation to the Think Java PDF where we know the page count
+            if (!isThinkJavaPdf(url)) {
                 continue;
             }
 
@@ -191,5 +202,17 @@ public class PdfCitationEnhancer {
             return "";
         }
         return rawText.replace("\r", "\\r").replace("\n", "\\n");
+    }
+
+    /**
+     * Checks if the URL refers to the Think Java PDF.
+     *
+     * @param url the citation URL
+     * @return true if the URL appears to be the Think Java PDF
+     */
+    private static boolean isThinkJavaPdf(String url) {
+        String normalized = url.toLowerCase(Locale.ROOT);
+        return normalized.contains(THINK_JAVA_PDF_FILENAME)
+                || normalized.contains(THINK_JAVA_PDF_FILENAME_ENCODED);
     }
 }
