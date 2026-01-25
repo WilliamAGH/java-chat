@@ -248,6 +248,23 @@ public final class DocsSourceRegistry {
     }
 
     /**
+     * Resolves a local filesystem path to its authoritative remote URL.
+     * Tries book PDF mapping, embedded host reconstruction, and prefix-based mapping in order.
+     * Returns empty for null or blank paths (defensive null handling for chained Optional calls).
+     *
+     * @param absolutePath absolute local filesystem path (forward slashes normalized), may be null
+     * @return resolved remote URL, or empty if no mapping found or path is null/blank
+     */
+    public static Optional<String> resolveLocalPath(String absolutePath) {
+        if (absolutePath == null || absolutePath.isBlank()) {
+            return Optional.empty();
+        }
+        return mapBookLocalToPublic(absolutePath)
+            .or(() -> reconstructFromEmbeddedHost(absolutePath))
+            .or(() -> mapLocalPrefixToRemote(absolutePath));
+    }
+
+    /**
      * Normalizes a documentation URL from local file paths or mirrors to authoritative remote URLs.
      * Handles file:// URLs, embedded host paths, and already-HTTP URLs.
      *
