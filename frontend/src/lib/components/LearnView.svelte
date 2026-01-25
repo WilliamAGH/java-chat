@@ -11,7 +11,7 @@
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
   import { generateSessionId } from '../utils/session'
-  import { createStreamingState } from '$lib/composables/createStreamingState.svelte'
+  import { createStreamingState } from '../composables/createStreamingState.svelte'
 
   // TOC state
   let lessons = $state<GuidedLesson[]>([])

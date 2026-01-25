@@ -25,8 +25,11 @@ export function isNearBottom(container: HTMLElement | null, threshold = AUTO_SCR
 }
 
 /**
- * Scrolls a container to the bottom with smooth animation.
+ * Scrolls a container to the bottom, respecting user motion preferences.
  * Only scrolls if shouldScroll is true (typically based on isNearBottom check).
+ *
+ * Uses smooth scrolling unless the user has enabled reduced motion preference,
+ * in which case it uses instant scrolling to avoid animation.
  *
  * @param container - The scrollable container element
  * @param shouldScroll - Whether to actually perform the scroll
@@ -34,9 +37,10 @@ export function isNearBottom(container: HTMLElement | null, threshold = AUTO_SCR
 export async function scrollToBottom(container: HTMLElement | null, shouldScroll: boolean): Promise<void> {
   await tick()
   if (container && shouldScroll) {
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     container.scrollTo({
       top: container.scrollHeight,
-      behavior: 'smooth'
+      behavior: prefersReducedMotion ? 'auto' : 'smooth'
     })
   }
 }

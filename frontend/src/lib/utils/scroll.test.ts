@@ -1,5 +1,29 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { isNearBottom, scrollToBottom } from './scroll'
+
+/**
+ * Mocks window.matchMedia for testing prefers-reduced-motion behavior.
+ */
+function mockMatchMedia(prefersReducedMotion: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)' ? prefersReducedMotion : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
+
+beforeEach(() => {
+  // Default to no reduced motion preference
+  mockMatchMedia(false)
+})
 
 describe('isNearBottom', () => {
   it('returns true when container is null', () => {
@@ -66,7 +90,8 @@ describe('scrollToBottom', () => {
     expect(scrollToSpy).not.toHaveBeenCalled()
   })
 
-  it('scrolls to bottom when shouldScroll is true', async () => {
+  it('scrolls smoothly when prefers-reduced-motion is not set', async () => {
+    mockMatchMedia(false) // User prefers motion
     const container = createMockContainer({
       scrollTop: 0,
       scrollHeight: 1000,
@@ -79,6 +104,23 @@ describe('scrollToBottom', () => {
     expect(scrollToSpy).toHaveBeenCalledWith({
       top: 1000,
       behavior: 'smooth'
+    })
+  })
+
+  it('scrolls instantly when prefers-reduced-motion is set', async () => {
+    mockMatchMedia(true) // User prefers reduced motion
+    const container = createMockContainer({
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 100
+    })
+    const scrollToSpy = vi.spyOn(container, 'scrollTo')
+
+    await scrollToBottom(container, true)
+
+    expect(scrollToSpy).toHaveBeenCalledWith({
+      top: 1000,
+      behavior: 'auto'
     })
   })
 })

@@ -5,7 +5,7 @@
  * with optional timer-based status message persistence.
  */
 
-import type { StreamStatus } from '$lib/services/stream-types'
+import type { StreamStatus } from '../services/stream-types'
 
 /** Configuration options for streaming state behavior. */
 export interface StreamingStateOptions {
@@ -51,7 +51,7 @@ export interface StreamingState {
  * @example
  * ```svelte
  * <script lang="ts">
- *   import { createStreamingState } from '$lib/composables/createStreamingState.svelte'
+ *   import { createStreamingState } from '../composables/createStreamingState.svelte'
  *
  *   const streaming = createStreamingState({ statusClearDelayMs: 800 })
  *

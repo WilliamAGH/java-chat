@@ -7,7 +7,7 @@
   import { streamChat, type ChatMessage, type Citation } from '../services/chat'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
   import { generateSessionId } from '../utils/session'
-  import { createStreamingState } from '$lib/composables/createStreamingState.svelte'
+  import { createStreamingState } from '../composables/createStreamingState.svelte'
 
   /** Extended message type that includes inline citations from the stream. */
   interface MessageWithCitations extends ChatMessage {
