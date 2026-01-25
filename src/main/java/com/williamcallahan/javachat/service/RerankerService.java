@@ -170,7 +170,7 @@ public class RerankerService {
      */
     private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
         String jsonObject = extractFirstJsonObject(response);
-        if (jsonObject == null || jsonObject.isBlank()) {
+        if (jsonObject.isBlank()) {
             throw new RerankParsingException("Rerank response did not contain a JSON object");
         }
         try {
@@ -290,6 +290,9 @@ public class RerankerService {
         return Integer.toHexString(hashBuilder.toString().hashCode());
     }
 
+    /**
+     * Signals that a rerank response could not be parsed into the expected JSON structure.
+     */
     private static final class RerankParsingException extends JsonProcessingException {
         private static final long serialVersionUID = 1L;
 
