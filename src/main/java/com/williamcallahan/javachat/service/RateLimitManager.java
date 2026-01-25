@@ -353,9 +353,14 @@ public class RateLimitManager {
         String providerName = sanitizeLogValue(provider.getName());
         ApiEndpointState state = getOrCreateEndpointState(provider);
 
-        long retryAfterSeconds = retryAfterSecondsOverride > 0
-            ? retryAfterSecondsOverride
-            : Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
+        long retryAfterSeconds;
+        if (retryAfterSecondsOverride > 0) {
+            retryAfterSeconds = retryAfterSecondsOverride;
+        } else if (resetTime != null) {
+            retryAfterSeconds = Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
+        } else {
+            retryAfterSeconds = 0;
+        }
 
         state.recordRateLimit(retryAfterSeconds);
         rateLimitState.recordRateLimit(
