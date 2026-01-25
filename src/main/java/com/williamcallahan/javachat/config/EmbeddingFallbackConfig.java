@@ -73,11 +73,11 @@ public class EmbeddingFallbackConfig {
         if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
             log.info("[EMBEDDING] Configured remote OpenAI-compatible embedding fallback (urlId={})",
                 Integer.toHexString(Objects.hashCode(remoteUrl)));
-            secondaryModel = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
+            secondaryModel = OpenAiCompatibleEmbeddingModel.create(remoteUrl, remoteApiKey, remoteModel,
                     remoteDims > 0 ? remoteDims : dimensions);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Configured OpenAI embedding fallback");
-            secondaryModel = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
+            secondaryModel = OpenAiCompatibleEmbeddingModel.create(openaiBaseUrl, openaiApiKey, openaiModel,
                     dimensions);
         } else {
             log.info("[EMBEDDING] No remote/OpenAI embedding fallback configured");
@@ -127,11 +127,11 @@ public class EmbeddingFallbackConfig {
         if (remoteUrl != null && !remoteUrl.isBlank() && remoteApiKey != null && !remoteApiKey.isBlank()) {
             log.info("[EMBEDDING] Using remote OpenAI-compatible embedding provider (urlId={})",
                 Integer.toHexString(Objects.hashCode(remoteUrl)));
-            primary = new OpenAiCompatibleEmbeddingModel(remoteUrl, remoteApiKey, remoteModel,
+            primary = OpenAiCompatibleEmbeddingModel.create(remoteUrl, remoteApiKey, remoteModel,
                     remoteDims > 0 ? remoteDims : embeddingDimensions);
         } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Using OpenAI embeddings as primary provider");
-            primary = new OpenAiCompatibleEmbeddingModel(openaiBaseUrl, openaiApiKey, openaiModel,
+            primary = OpenAiCompatibleEmbeddingModel.create(openaiBaseUrl, openaiApiKey, openaiModel,
                     embeddingDimensions);
         }
 

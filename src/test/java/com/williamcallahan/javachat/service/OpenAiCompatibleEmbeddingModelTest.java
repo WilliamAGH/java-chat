@@ -45,7 +45,7 @@ class OpenAiCompatibleEmbeddingModelTest {
 
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
-        try (OpenAiCompatibleEmbeddingModel model = new OpenAiCompatibleEmbeddingModel(
+        try (OpenAiCompatibleEmbeddingModel model = OpenAiCompatibleEmbeddingModel.create(
             client,
             "text-embedding-3-small",
             2
