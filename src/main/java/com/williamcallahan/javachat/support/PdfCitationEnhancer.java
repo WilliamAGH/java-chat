@@ -52,9 +52,12 @@ public class PdfCitationEnhancer {
      * @param docs the retrieved documents with chunk metadata
      * @param citations the citations to enhance (must be same size as docs)
      * @return the enhanced citations list (same list, mutated)
+     * @throws UncheckedIOException when the PDF or chunk listing cannot be read
      */
     public List<Citation> enhanceWithPageAnchors(List<Document> docs, List<Citation> citations) {
         if (docs.size() != citations.size()) {
+            logger.warn("Skipping PDF anchor enhancement because docs/citations sizes differ (docs={}, citations={})",
+                    docs.size(), citations.size());
             return citations;
         }
 
@@ -86,7 +89,7 @@ public class PdfCitationEnhancer {
     }
 
     /**
-     * Gets the total page count for the Think Java PDF.
+     * Returns the total page count for the Think Java PDF.
      *
      * <p>The result is cached after the first load to avoid repeated I/O.</p>
      *
