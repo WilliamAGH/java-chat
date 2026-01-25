@@ -12,23 +12,24 @@ import java.util.Objects;
  */
 final class RateLimitHeaderParser {
 
+    private static final long HOURS_PER_DAY = 24;
+    private static final long MINUTES_PER_HOUR = 60;
+
     /**
      * Duration units with their conversion factors to seconds.
      */
     private enum DurationUnit {
-        MILLISECONDS("ms", 2, value -> Duration.ofMillis(value)),
-        DAYS("d", 1, value -> Duration.ofDays(value)),
-        HOURS("h", 1, value -> Duration.ofHours(value)),
-        MINUTES("m", 1, value -> Duration.ofMinutes(value)),
-        SECONDS("s", 1, value -> Duration.ofSeconds(value));
+        MILLISECONDS("ms", Duration::ofMillis),
+        DAYS("d", Duration::ofDays),
+        HOURS("h", Duration::ofHours),
+        MINUTES("m", Duration::ofMinutes),
+        SECONDS("s", Duration::ofSeconds);
 
         private final String suffix;
-        private final int suffixLength;
         private final java.util.function.LongFunction<Duration> toDuration;
 
-        DurationUnit(String suffix, int suffixLength, java.util.function.LongFunction<Duration> toDuration) {
+        DurationUnit(String suffix, java.util.function.LongFunction<Duration> toDuration) {
             this.suffix = suffix;
-            this.suffixLength = suffixLength;
             this.toDuration = toDuration;
         }
 
@@ -37,15 +38,15 @@ final class RateLimitHeaderParser {
         }
 
         String extractNumber(String normalized) {
-            return normalized.substring(0, normalized.length() - suffixLength).trim();
+            return normalized.substring(0, normalized.length() - suffix.length()).trim();
         }
 
-        Duration convert(long value) {
-            return toDuration.apply(value);
+        Duration convert(long amount) {
+            return toDuration.apply(amount);
         }
 
-        long toSeconds(long value) {
-            return convert(value).getSeconds();
+        long toSeconds(long amount) {
+            return convert(amount).getSeconds();
         }
     }
 
@@ -175,8 +176,8 @@ final class RateLimitHeaderParser {
                 if (!isDigits(numberPart)) {
                     throw new IllegalArgumentException("Invalid reset duration header: " + rawDuration);
                 }
-                long value = Long.parseLong(numberPart);
-                long seconds = unit.toSeconds(value);
+                long amount = Long.parseLong(numberPart);
+                long seconds = unit.toSeconds(amount);
                 return unit == DurationUnit.MILLISECONDS ? Math.max(1, seconds) : seconds;
             }
         }
@@ -196,11 +197,11 @@ final class RateLimitHeaderParser {
             }
             return null;
         }
-        var values = headers.values(name);
-        if (values == null || values.isEmpty()) {
+        var headerValues = headers.values(name);
+        if (headerValues.isEmpty()) {
             return null;
         }
-        return values.get(0);
+        return headerValues.get(0);
     }
 
     private long minPositive(long... candidates) {
@@ -228,11 +229,11 @@ final class RateLimitHeaderParser {
         return true;
     }
 
-    private String requireHeaderValue(String value, String headerName) {
-        if (value == null) {
+    private String requireHeaderValue(String headerValue, String headerName) {
+        if (headerValue == null) {
             throw new IllegalArgumentException("Missing header: " + Objects.requireNonNull(headerName, "headerName"));
         }
-        return value.trim();
+        return headerValue.trim();
     }
 
     /**
@@ -243,8 +244,8 @@ final class RateLimitHeaderParser {
      */
     static String formatDuration(Duration duration) {
         long days = duration.toDays();
-        long hours = duration.toHours() % 24;
-        long minutes = duration.toMinutes() % 60;
+        long hours = duration.toHours() % HOURS_PER_DAY;
+        long minutes = duration.toMinutes() % MINUTES_PER_HOUR;
 
         if (days > 0) {
             return String.format("%dd %dh %dm", days, hours, minutes);
@@ -293,17 +294,17 @@ final class RateLimitHeaderParser {
      * Parses a duration string with a fallback default for null, empty, or invalid input.
      *
      * @param durationString the string to parse
-     * @param defaultValue the value to return for null, empty, or unparseable input
+     * @param fallbackDuration the value to return for null, empty, or unparseable input
      * @return the parsed duration or the default
      */
-    Duration parseDurationOrDefault(String durationString, Duration defaultValue) {
+    Duration parseDurationOrDefault(String durationString, Duration fallbackDuration) {
         if (durationString == null || durationString.isBlank()) {
-            return defaultValue;
+            return fallbackDuration;
         }
         try {
             return parseDuration(durationString);
         } catch (IllegalArgumentException parseError) {
-            return defaultValue;
+            return fallbackDuration;
         }
     }
 }

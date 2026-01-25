@@ -191,9 +191,10 @@ public class RateLimitManager {
      * Reports whether the provider can be used right now based on configuration, persisted rate limits, and in-memory backoff.
      */
     public boolean isProviderAvailable(ApiProvider provider) {
+        String providerName = sanitizeLogValue(provider.getName());
         // First check if provider is actually configured
         if (!isProviderConfigured(provider)) {
-            log.debug("[{}] Not configured; treating as unavailable", provider.getName());
+            log.debug("[{}] Not configured; treating as unavailable", providerName);
             return false;
         }
 
@@ -203,7 +204,7 @@ public class RateLimitManager {
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.debug("[{}] Rate limited (persistent state)", provider.getName());
+                log.debug("[{}] Rate limited (persistent state)", providerName);
                 return false;
             }
         }
@@ -212,12 +213,12 @@ public class RateLimitManager {
         ApiEndpointState state = getOrCreateEndpointState(provider);
 
         if (!state.isAvailable()) {
-            log.debug("[{}] In circuit breaker state", provider.getName());
+            log.debug("[{}] In circuit breaker state", providerName);
             return false;
         }
 
         if (state.getRequestsToday() >= provider.dailyLimit) {
-            log.warn("[{}] Reached daily limit", provider.getName());
+            log.warn("[{}] Reached daily limit", providerName);
             return false;
         }
 
@@ -228,18 +229,21 @@ public class RateLimitManager {
      * Records a successful provider request in both in-memory and persisted rate limit state.
      */
     public void recordSuccess(ApiProvider provider) {
+        String providerName = sanitizeLogValue(provider.getName());
         // Update both in-memory and persistent state
         ApiEndpointState state = getOrCreateEndpointState(provider);
         state.recordSuccess();
         rateLimitState.recordSuccess(provider.getName());
 
-        log.debug("[{}] Request successful", provider.getName());
+        log.debug("[{}] Request successful", providerName);
     }
 
     /**
      * Records a rate limit for the provider using best-effort parsing of reset or retry information.
      */
     public void recordRateLimit(ApiProvider provider, String errorMessage) {
+        String providerName = sanitizeLogValue(provider.getName());
+        String safeErrorMessage = sanitizeLogValue(errorMessage);
         // Reset time parsing from error messages not implemented; rely on window-based fallback
         Instant resetTime = null;
         long retryAfterSeconds = extractRetryAfter(errorMessage);
@@ -249,7 +253,7 @@ public class RateLimitManager {
             if (resetTime == null && retryAfterSeconds == 0) {
                 // GitHub typically has 24-hour rate limits
                 resetTime = Instant.now().plus(Duration.ofHours(24));
-                log.info("[{}] Rate limited - applying 24-hour backoff", provider.getName());
+                log.info("[{}] Rate limited - applying 24-hour backoff", providerName);
             }
         }
 
@@ -264,7 +268,7 @@ public class RateLimitManager {
             provider.getTypicalRateLimitWindow()
         );
 
-        log.warn("[{}] Rate limited (errorMessage={})", provider.getName(), errorMessage);
+        log.warn("[{}] Rate limited (errorMessage={})", providerName, safeErrorMessage);
     }
 
     /**
@@ -346,6 +350,7 @@ public class RateLimitManager {
      * @param retryAfterSecondsOverride explicit retry-after seconds (0 to compute from resetTime)
      */
     private void applyRateLimit(ApiProvider provider, Instant resetTime, long retryAfterSecondsOverride) {
+        String providerName = sanitizeLogValue(provider.getName());
         ApiEndpointState state = getOrCreateEndpointState(provider);
 
         long retryAfterSeconds = retryAfterSecondsOverride > 0
@@ -360,7 +365,7 @@ public class RateLimitManager {
         );
 
         log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})",
-                 provider.getName(), resetTime, retryAfterSeconds);
+                 providerName, resetTime, retryAfterSeconds);
     }
 
     private long extractRetryAfter(String errorMessage) {
@@ -413,27 +418,29 @@ public class RateLimitManager {
             ApiProvider.GITHUB_MODELS,
             ApiProvider.LOCAL,
         }) {
+            String providerName = sanitizeLogValue(provider.getName());
             if (!isProviderConfigured(provider)) {
-                log.debug("[{}] Skipping: not configured", provider.getName());
+                log.debug("[{}] Skipping: not configured", providerName);
                 continue;
             }
             if (isProviderAvailable(provider)) {
-                log.debug("[{}] Selected as best provider", provider.getName());
+                log.debug("[{}] Selected as best provider", providerName);
                 return Optional.of(provider);
             }
         }
 
         // Log detailed status for debugging
         for (ApiProvider provider : ApiProvider.values()) {
+            String providerName = sanitizeLogValue(provider.getName());
             if (!isProviderConfigured(provider)) {
-                log.warn("[{}] Unavailable - missing configuration (API key/token)", provider.getName());
+                log.warn("[{}] Unavailable - missing configuration (API key/token)", providerName);
                 continue;
             }
             Duration remaining = rateLimitState.getRemainingWaitTime(
                 provider.getName()
             );
             if (!remaining.isZero()) {
-                log.warn("[{}] Unavailable - rate limited for {} more", provider.getName(), formatDuration(remaining));
+                log.warn("[{}] Unavailable - rate limited for {} more", providerName, formatDuration(remaining));
             }
         }
 
@@ -442,6 +449,13 @@ public class RateLimitManager {
 
     private String formatDuration(Duration duration) {
         return RateLimitHeaderParser.formatDuration(duration);
+    }
+
+    private static String sanitizeLogValue(String rawValue) {
+        if (rawValue == null) {
+            return "null";
+        }
+        return rawValue.replace("\r", "\\r").replace("\n", "\\n");
     }
 
     /**

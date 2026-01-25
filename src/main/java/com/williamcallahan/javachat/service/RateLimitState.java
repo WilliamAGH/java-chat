@@ -105,11 +105,11 @@ public class RateLimitState {
 
             state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
             log.warn("[{}] Consecutive failures (count={}). Extended backoff until {}",
-                    provider, failures, state.rateLimitedUntil);
+                    sanitizeLogValue(provider), failures, state.rateLimitedUntil);
         }
 
         safeSaveState();
-        log.info("[{}] Rate limited until {}", provider, state.rateLimitedUntil);
+        log.info("[{}] Rate limited until {}", sanitizeLogValue(provider), state.rateLimitedUntil);
     }
 
     /**
@@ -179,16 +179,17 @@ public class RateLimitState {
         }
 
         try {
-            StateData data = objectMapper.readValue(file, StateData.class);
-            if (data != null && data.getProviders() != null) {
-                providerStates = new ConcurrentHashMap<>(data.getProviders());
+            StateData persistedState = objectMapper.readValue(file, StateData.class);
+            if (persistedState != null && persistedState.getProviders() != null) {
+                providerStates = new ConcurrentHashMap<>(persistedState.getProviders());
                 log.info("Loaded rate limit state for {} providers", providerStates.size());
                 logCurrentRateLimitStatus();
             }
             return true;
         } catch (IOException exception) {
+            String safeMessage = sanitizeLogValue(exception.getMessage());
             log.error("Failed to load rate limit state from {}: {} - {}",
-                STATE_FILE, exception.getClass().getSimpleName(), exception.getMessage());
+                STATE_FILE, exception.getClass().getSimpleName(), safeMessage);
             log.warn("Continuing with empty rate limit state; previously rate-limited providers may be retried prematurely");
             return false;
         }
@@ -198,7 +199,8 @@ public class RateLimitState {
         for (Map.Entry<String, ProviderState> entry : providerStates.entrySet()) {
             if (!isAvailable(entry.getKey())) {
                 Duration remaining = getRemainingWaitTime(entry.getKey());
-                log.warn("[{}] Rate limited for {} more", entry.getKey(), formatDuration(remaining));
+                log.warn("[{}] Rate limited for {} more",
+                    sanitizeLogValue(entry.getKey()), formatDuration(remaining));
             }
         }
     }
@@ -214,12 +216,14 @@ public class RateLimitState {
             saveState();
             return true;
         } catch (IOException ioException) {
+            String safeMessage = sanitizeLogValue(ioException.getMessage());
             log.error("Failed to persist rate limit state to {}: {} - {}",
-                STATE_FILE, ioException.getClass().getSimpleName(), ioException.getMessage());
+                STATE_FILE, ioException.getClass().getSimpleName(), safeMessage);
             return false;
         } catch (RuntimeException runtimeException) {
+            String safeMessage = sanitizeLogValue(runtimeException.getMessage());
             log.error("Unexpected error persisting rate limit state: {} - {}",
-                runtimeException.getClass().getSimpleName(), runtimeException.getMessage());
+                runtimeException.getClass().getSimpleName(), safeMessage);
             return false;
         }
     }
@@ -252,6 +256,13 @@ public class RateLimitState {
 
     private String formatDuration(Duration duration) {
         return RateLimitHeaderParser.formatDuration(duration);
+    }
+
+    private static String sanitizeLogValue(String rawValue) {
+        if (rawValue == null) {
+            return "null";
+        }
+        return rawValue.replace("\r", "\\r").replace("\n", "\\n");
     }
 
     /**
