@@ -67,10 +67,9 @@ public enum SearchQualityLevel {
             return 0;
         }
         return contents.stream()
-                .filter(content -> {
-                    String text = content.getText();
-                    return text != null && text.length() > SUBSTANTIAL_CONTENT_THRESHOLD;
-                })
+                .filter(content -> content.getText()
+                        .filter(text -> text.length() > SUBSTANTIAL_CONTENT_THRESHOLD)
+                        .isPresent())
                 .count();
     }
 
@@ -87,10 +86,9 @@ public enum SearchQualityLevel {
 
         // Check if documents came from keyword/fallback search
         boolean likelyKeywordSearch = contents.stream()
-                .anyMatch(content -> {
-                    String url = String.valueOf(content.getMetadata().getOrDefault("url", ""));
-                    return url.contains("local-search") || url.contains("keyword");
-                });
+                .anyMatch(content -> content.getSourceUrl()
+                        .filter(url -> url.contains("local-search") || url.contains("keyword"))
+                        .isPresent());
 
         if (likelyKeywordSearch) {
             return KEYWORD_SEARCH;

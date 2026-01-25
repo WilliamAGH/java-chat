@@ -1,6 +1,6 @@
 package com.williamcallahan.javachat.domain;
 
-import java.util.Map;
+import java.util.Optional;
 
 /**
  * Domain abstraction for retrieved document content used in search quality evaluation.
@@ -13,14 +13,16 @@ public interface RetrievedContent {
     /**
      * Returns the text content of this retrieved item.
      *
-     * @return the content text, may be null if no content is available
+     * @return the content text, empty if no content is available
      */
-    String getText();
+    Optional<String> getText();
 
     /**
-     * Returns metadata associated with this retrieved item.
+     * Returns the source URL of this retrieved item, if available.
      *
-     * @return unmodifiable map of metadata key-value pairs, never null
+     * <p>Used to identify retrieval source characteristics (e.g., keyword search markers).</p>
+     *
+     * @return the source URL, empty if unknown
      */
-    Map<String, Object> getMetadata();
+    Optional<String> getSourceUrl();
 }

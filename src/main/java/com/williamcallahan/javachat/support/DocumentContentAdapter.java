@@ -3,9 +3,9 @@ package com.williamcallahan.javachat.support;
 import com.williamcallahan.javachat.domain.RetrievedContent;
 import org.springframework.ai.document.Document;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Adapts Spring AI Document to the domain RetrievedContent interface.
@@ -51,13 +51,17 @@ public final class DocumentContentAdapter implements RetrievedContent {
     }
 
     @Override
-    public String getText() {
-        return document.getText();
+    public Optional<String> getText() {
+        return Optional.ofNullable(document.getText());
     }
 
     @Override
-    public Map<String, Object> getMetadata() {
+    public Optional<String> getSourceUrl() {
         Map<String, Object> metadata = document.getMetadata();
-        return metadata != null ? Collections.unmodifiableMap(metadata) : Map.of();
+        if (metadata == null) {
+            return Optional.empty();
+        }
+        Object url = metadata.get("url");
+        return url != null ? Optional.of(String.valueOf(url)) : Optional.empty();
     }
 }
