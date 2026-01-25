@@ -31,7 +31,7 @@ version = "0.0.1-SNAPSHOT"
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(javaVersion)
-        vendor = JvmVendorSpec.ADOPTOPENJDK
+        vendor = JvmVendorSpec.ADOPTIUM
     }
 }
 
