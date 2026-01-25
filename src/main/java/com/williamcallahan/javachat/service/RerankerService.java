@@ -171,12 +171,12 @@ public class RerankerService {
     private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
         String jsonObject = extractFirstJsonObject(response);
         if (jsonObject == null || jsonObject.isBlank()) {
-            throw new JsonProcessingException("Rerank response did not contain a JSON object") {};
+            throw new RerankParsingException("Rerank response did not contain a JSON object");
         }
         try {
             return mapper.readerFor(RerankOrderResponse.class).readValue(jsonObject);
         } catch (IOException ioException) {
-            throw new JsonProcessingException("Failed to parse rerank JSON payload", ioException) {};
+            throw new RerankParsingException("Failed to parse rerank JSON payload", ioException);
         }
     }
 
@@ -288,5 +288,17 @@ public class RerankerService {
             hashBuilder.append("|");
         }
         return Integer.toHexString(hashBuilder.toString().hashCode());
+    }
+
+    private static final class RerankParsingException extends JsonProcessingException {
+        private static final long serialVersionUID = 1L;
+
+        private RerankParsingException(String message) {
+            super(message);
+        }
+
+        private RerankParsingException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }
