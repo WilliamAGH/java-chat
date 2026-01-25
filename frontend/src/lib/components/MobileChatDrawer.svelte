@@ -18,11 +18,14 @@
     isOpen: boolean
     messages: ChatMessage[]
     isStreaming: boolean
-    streamingContent: string
     statusMessage: string
     statusDetails: string
+    /** Whether the current in-progress assistant message has content yet. */
+    hasContent: boolean
+    /** Stable identifier for the in-progress assistant message (if present). */
+    streamingMessageId?: string | null
     /** Custom renderer for each message (e.g., to append citations). */
-    messageRenderer?: Snippet<[{ message: ChatMessage; index: number }]>
+    messageRenderer?: Snippet<[{ message: ChatMessage; index: number; isStreaming: boolean }]>
     /** Title shown in drawer header */
     title: string
     /** Subject for empty state prompt (e.g., "Variables and Data Types") */
@@ -39,9 +42,10 @@
     isOpen,
     messages,
     isStreaming,
-    streamingContent,
     statusMessage,
     statusDetails,
+    hasContent,
+    streamingMessageId = null,
     messageRenderer,
     title,
     emptyStateSubject,
@@ -116,9 +120,10 @@
         <StreamingMessagesList
           {messages}
           {isStreaming}
-          {streamingContent}
           {statusMessage}
           {statusDetails}
+          {hasContent}
+          {streamingMessageId}
           {messageRenderer}
         />
       {/if}

@@ -26,7 +26,6 @@ export interface StreamError {
  */
 export interface StreamingChatFields {
   isStreaming: boolean
-  streamingContent: string
   statusMessage: string
   statusDetails: string
 }

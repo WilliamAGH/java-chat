@@ -31,6 +31,7 @@ export interface GuidedStreamCallbacks {
   onStatus?: (status: StreamStatus) => void
   onError?: (error: Error) => void
   onCitations?: (citations: Citation[]) => void
+  signal?: AbortSignal
 }
 
 /**
@@ -95,7 +96,7 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
-  const { onChunk, onStatus, onError, onCitations } = callbacks
+  const { onChunk, onStatus, onError, onCitations, signal } = callbacks
   let errorNotified = false
 
   try {
@@ -111,7 +112,8 @@ export async function streamGuidedChat(
           onError?.(new Error(streamError.message))
         }
       },
-      'guided.ts'
+      'guided.ts',
+      { signal }
     )
   } catch (error) {
     // Re-throw after invoking callback to maintain dual error propagation

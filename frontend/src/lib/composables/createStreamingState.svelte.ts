@@ -24,8 +24,6 @@ export interface StreamingStateOptions {
 export interface StreamingState {
   /** Whether a stream is currently active. */
   readonly isStreaming: boolean
-  /** Accumulated content from stream chunks. */
-  readonly streamingContent: string
   /** Current status message (e.g., "Searching...", "Done"). */
   readonly statusMessage: string
   /** Additional status details. */
@@ -33,8 +31,6 @@ export interface StreamingState {
 
   /** Marks stream as active and resets content/status. */
   startStream: () => void
-  /** Appends a text chunk to streaming content. */
-  appendContent: (chunk: string) => void
   /** Updates status message and optional details. */
   updateStatus: (status: StreamStatus) => void
   /** Marks stream as complete and schedules status clearing. */
@@ -62,7 +58,7 @@ export interface StreamingState {
  *     streaming.startStream()
  *     try {
  *       await streamChat(sessionId, message, (chunk) => {
- *         streaming.appendContent(chunk)
+ *         // Update the active assistant message content in your messages list.
  *       }, {
  *         onStatus: streaming.updateStatus
  *       })
@@ -73,7 +69,7 @@ export interface StreamingState {
  * </script>
  *
  * {#if streaming.isStreaming}
- *   <StreamingUI content={streaming.streamingContent} />
+ *   <ThinkingIndicator statusMessage={streaming.statusMessage} statusDetails={streaming.statusDetails} />
  * {/if}
  * ```
  */
@@ -82,7 +78,6 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
 
   // Internal reactive state
   let isStreaming = $state(false)
-  let streamingContent = $state('')
   let statusMessage = $state('')
   let statusDetails = $state('')
 
@@ -121,9 +116,6 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     get isStreaming() {
       return isStreaming
     },
-    get streamingContent() {
-      return streamingContent
-    },
     get statusMessage() {
       return statusMessage
     },
@@ -135,13 +127,8 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     startStream() {
       cancelStatusTimer()
       isStreaming = true
-      streamingContent = ''
       statusMessage = ''
       statusDetails = ''
-    },
-
-    appendContent(chunk: string) {
-      streamingContent += chunk
     },
 
     updateStatus(status: StreamStatus) {
@@ -151,14 +138,12 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
 
     finishStream() {
       isStreaming = false
-      streamingContent = ''
       clearStatusDelayed()
     },
 
     reset() {
       cancelStatusTimer()
       isStreaming = false
-      streamingContent = ''
       statusMessage = ''
       statusDetails = ''
     },

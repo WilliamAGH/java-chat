@@ -14,12 +14,21 @@ const SSE_EVENT_STATUS = 'status'
 const SSE_EVENT_ERROR = 'error'
 const SSE_EVENT_CITATION = 'citation'
 
+/** Optional request options for streaming fetch calls. */
+export interface StreamSseRequestOptions {
+  signal?: AbortSignal
+}
+
 /** Callbacks for SSE stream processing. */
 export interface SseCallbacks {
   onText: (content: string) => void
   onStatus?: (status: StreamStatus) => void
   onError?: (error: StreamError) => void
   onCitations?: (citations: Citation[]) => void
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 /**
@@ -121,15 +130,27 @@ export async function streamSse(
   url: string,
   body: object,
   callbacks: SseCallbacks,
-  source: string
+  source: string,
+  options: StreamSseRequestOptions = {}
 ): Promise<void> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  })
+  const abortSignal = options.signal
+  let response: Response
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: abortSignal
+    })
+  } catch (fetchError) {
+    if (abortSignal?.aborted || isAbortError(fetchError)) {
+      return
+    }
+    throw fetchError
+  }
 
   if (!response.ok) {
     const httpError = new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -231,6 +252,11 @@ export async function streamSse(
         }
       }
     }
+  } catch (streamError) {
+    if (abortSignal?.aborted || isAbortError(streamError)) {
+      return
+    }
+    throw streamError
   } finally {
     // Cancel reader on abnormal exit to prevent dangling connections
     if (!streamCompletedNormally) {

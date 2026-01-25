@@ -1,14 +1,13 @@
 <script lang="ts">
 	  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
 	  import { clearChatSession, type Citation, type ChatMessage } from '../services/chat'
-	  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
-	  import ChatInput from './ChatInput.svelte'
-	  import CitationPanel from './CitationPanel.svelte'
-	  import LessonCitations from './LessonCitations.svelte'
-	  import MessageBubble from './MessageBubble.svelte'
+		  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
+		  import CitationPanel from './CitationPanel.svelte'
+		  import GuidedLessonChatPanel from './GuidedLessonChatPanel.svelte'
+		  import LessonCitations from './LessonCitations.svelte'
+		  import MessageBubble from './MessageBubble.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
-  import StreamingMessagesList from './StreamingMessagesList.svelte'
-  import MobileChatDrawer from './MobileChatDrawer.svelte'
+	  import MobileChatDrawer from './MobileChatDrawer.svelte'
   import { deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
@@ -52,10 +51,10 @@
     return !!activeMessage?.content
   })
 
-  // Desktop container ref for scroll management
-  let desktopMessagesContainer: HTMLElement | null = $state(null)
-  // Component ref for mobile drawer to access its scroll container
-  let mobileDrawer: MobileChatDrawer | null = $state(null)
+	  // Desktop chat panel ref for scroll management
+	  let desktopChatPanel: GuidedLessonChatPanel | null = $state(null)
+	  // Component ref for mobile drawer to access its scroll container
+	  let mobileDrawer: MobileChatDrawer | null = $state(null)
 
   // Mobile chat drawer state
   let isChatDrawerOpen = $state(false)
@@ -64,22 +63,35 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
-  // Session IDs per lesson for backend conversation isolation
-  // Each lesson gets its own session ID to prevent conversation bleeding across topics
-  const sessionIdsByLesson = new Map<string, string>()
+	  // Session IDs per lesson for backend conversation isolation
+	  // Each lesson gets its own session ID to prevent conversation bleeding across topics
+	  const sessionIdsByLesson = new Map<string, string>()
+
+	  let guidedChatAbortController: AbortController | null = null
+	  let guidedChatStreamVersion = 0
 
   /**
    * Gets or creates a session ID for a specific lesson.
    * Each lesson gets its own backend session to prevent conversation bleeding.
    */
-  function getSessionIdForLesson(slug: string): string {
-    let lessonSessionId = sessionIdsByLesson.get(slug)
-    if (!lessonSessionId) {
-      lessonSessionId = generateSessionId(`guided-${slug}`)
-      sessionIdsByLesson.set(slug, lessonSessionId)
-    }
-    return lessonSessionId
-  }
+	  function getSessionIdForLesson(slug: string): string {
+	    let lessonSessionId = sessionIdsByLesson.get(slug)
+	    if (!lessonSessionId) {
+	      lessonSessionId = generateSessionId(`guided:${slug}`)
+	      sessionIdsByLesson.set(slug, lessonSessionId)
+	    }
+	    return lessonSessionId
+	  }
+
+	  function cancelInFlightGuidedChatStream(): void {
+	    guidedChatStreamVersion++
+	    if (guidedChatAbortController) {
+	      guidedChatAbortController.abort()
+	      guidedChatAbortController = null
+	    }
+	    streaming.reset()
+	    activeStreamingMessageId = null
+	  }
 
   // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
@@ -176,11 +188,10 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-		    // Cancel any in-flight stream
-		    streaming.reset()
-		    activeStreamingMessageId = null
-		    isChatDrawerOpen = false
-		    selectedLesson = null
+	    // Cancel any in-flight stream
+	    cancelInFlightGuidedChatStream()
+	    isChatDrawerOpen = false
+	    selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
     lessonCitations = []
@@ -189,23 +200,23 @@
     messages = []
   }
 
-		  function clearChat(): void {
-		    if (selectedLesson) {
-		      const lessonSlug = selectedLesson.slug
-		      const lessonSessionId = sessionIdsByLesson.get(lessonSlug)
-		      if (lessonSessionId) {
-		        sessionIdsByLesson.delete(lessonSlug)
-		        void clearChatSession(lessonSessionId).catch((error) => {
-		          console.warn(`[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`, error)
-		        })
-		      }
+	  function clearChat(): void {
+	    cancelInFlightGuidedChatStream()
+	    if (selectedLesson) {
+	      const lessonSlug = selectedLesson.slug
+	      const lessonSessionId = sessionIdsByLesson.get(lessonSlug)
+	      if (lessonSessionId) {
+	        sessionIdsByLesson.delete(lessonSlug)
+	        void clearChatSession(lessonSessionId).catch((error) => {
+	          console.warn(`[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`, error)
+	        })
+	      }
 
-		      chatHistoryByLesson.delete(lessonSlug)
-		    }
+	      chatHistoryByLesson.delete(lessonSlug)
+	    }
 
-			    activeStreamingMessageId = null
-			    messages = []
-			  }
+	    messages = []
+	  }
 
   function toggleChatDrawer(): void {
     isChatDrawerOpen = !isChatDrawerOpen
@@ -219,10 +230,12 @@
     shouldAutoScroll = true
   }
 
-  /** Returns the currently active messages container based on drawer state. */
-  function getActiveMessagesContainer(): HTMLElement | null {
-    return isChatDrawerOpen ? mobileDrawer?.getMessagesContainer() ?? null : desktopMessagesContainer
-  }
+	  /** Returns the currently active messages container based on drawer state. */
+	  function getActiveMessagesContainer(): HTMLElement | null {
+	    return isChatDrawerOpen
+	      ? mobileDrawer?.getMessagesContainer() ?? null
+	      : desktopChatPanel?.getMessagesContainer() ?? null
+	  }
 
   function checkAutoScroll(): void {
     shouldAutoScroll = isNearBottom(getActiveMessagesContainer())
@@ -263,12 +276,18 @@
     ]
   }
 
-  async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
+	  async function handleSend(message: string): Promise<void> {
+	    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
+	
+	    guidedChatStreamVersion++
+	    const activeStreamVersion = guidedChatStreamVersion
+	    guidedChatAbortController?.abort()
+	    guidedChatAbortController = new AbortController()
+	    const abortSignal = guidedChatAbortController.signal
 
-    const streamLessonSlug = selectedLesson.slug
-    const userQuery = message.trim()
-    const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
+	    const streamLessonSlug = selectedLesson.slug
+	    const userQuery = message.trim()
+	    const lessonSessionId = getSessionIdForLesson(streamLessonSlug)
 
     messages = [
       ...messages,
@@ -285,56 +304,73 @@
 
     streaming.startStream()
     const assistantMessageId = createChatMessageId('guided', lessonSessionId)
-    activeStreamingMessageId = assistantMessageId
-
-    try {
-      await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
-        onChunk: (chunk) => {
-          // Guard: ignore chunks if user navigated away
-          if (selectedLesson?.slug !== streamLessonSlug) return
-          ensureAssistantMessage(assistantMessageId)
-          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-            ...existingMessage,
-            content: existingMessage.content + chunk
+	    activeStreamingMessageId = assistantMessageId
+	
+	    try {
+	      await streamGuidedChat(lessonSessionId, selectedLesson.slug, userQuery, {
+	        signal: abortSignal,
+	        onChunk: (chunk) => {
+	          // Guard: ignore chunks if user navigated away
+	          if (selectedLesson?.slug !== streamLessonSlug) return
+	          if (guidedChatStreamVersion !== activeStreamVersion) return
+	          if (abortSignal.aborted) return
+	          ensureAssistantMessage(assistantMessageId)
+	          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+	            ...existingMessage,
+	            content: existingMessage.content + chunk
           }))
           doScrollToBottom()
         },
-        onStatus: (status) => {
-          // Guard: ignore status if user navigated away
-          if (selectedLesson?.slug !== streamLessonSlug) return
-          streaming.updateStatus(status)
-        },
-        onCitations: (citations) => {
-          // Guard: ignore citations if user navigated away
-          if (selectedLesson?.slug !== streamLessonSlug) return
-          ensureAssistantMessage(assistantMessageId)
-          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-            ...existingMessage,
-            citations
+	        onStatus: (status) => {
+	          // Guard: ignore status if user navigated away
+	          if (selectedLesson?.slug !== streamLessonSlug) return
+	          if (guidedChatStreamVersion !== activeStreamVersion) return
+	          if (abortSignal.aborted) return
+	          streaming.updateStatus(status)
+	        },
+	        onCitations: (citations) => {
+	          // Guard: ignore citations if user navigated away
+	          if (selectedLesson?.slug !== streamLessonSlug) return
+	          if (guidedChatStreamVersion !== activeStreamVersion) return
+	          if (abortSignal.aborted) return
+	          ensureAssistantMessage(assistantMessageId)
+	          updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+	            ...existingMessage,
+	            citations
           }))
         },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
         }
-      })
-    } catch (error) {
-      if (selectedLesson?.slug !== streamLessonSlug) return
-      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
-      ensureAssistantMessage(assistantMessageId)
-      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+	      })
+	    } catch (error) {
+	      if (selectedLesson?.slug !== streamLessonSlug) return
+	      if (guidedChatStreamVersion !== activeStreamVersion) return
+	      if (abortSignal.aborted) return
+	      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
+	      ensureAssistantMessage(assistantMessageId)
+	      updateAssistantMessage(assistantMessageId, (existingMessage) => ({
         ...existingMessage,
         content: errorMessage,
         isError: true
       }))
-    } finally {
-      // Guard: only reset streaming state if still on same lesson
-      if (selectedLesson?.slug === streamLessonSlug) {
-        streaming.finishStream()
-        activeStreamingMessageId = null
-        await doScrollToBottom()
-      }
-    }
-  }
+	    } finally {
+	      // Guard: only reset streaming state if still on same lesson
+	      if (
+	        selectedLesson?.slug === streamLessonSlug &&
+	        guidedChatStreamVersion === activeStreamVersion &&
+	        !abortSignal.aborted
+	      ) {
+	        streaming.finishStream()
+	        activeStreamingMessageId = null
+	        await doScrollToBottom()
+	      }
+
+	      if (guidedChatStreamVersion === activeStreamVersion) {
+	        guidedChatAbortController = null
+	      }
+	    }
+	  }
 
   // Apply Java language detection and highlight code blocks after lesson content renders
   // Uses shared utility with cancellation support
