@@ -12,34 +12,28 @@ public enum SearchQualityLevel {
     /**
      * No documents were retrieved; LLM must rely on general knowledge.
      */
-    NONE("No relevant documents found. Using general knowledge only."),
+    NONE,
 
     /**
      * Documents came from keyword/fallback search rather than semantic embeddings.
      */
-    KEYWORD_SEARCH("Found %d documents via keyword search (embedding service unavailable). Results may be less semantically relevant."),
+    KEYWORD_SEARCH,
 
     /**
      * All retrieved documents are high-quality semantic matches.
      */
-    HIGH_QUALITY("Found %d high-quality relevant documents via semantic search."),
+    HIGH_QUALITY,
 
     /**
      * Mix of high and lower quality results from semantic search.
      */
-    MIXED_QUALITY("Found %d documents (%d high-quality) via search. Some results may be less relevant.");
+    MIXED_QUALITY;
 
     /**
      * Minimum content length to consider a document as having substantial content.
      * Documents shorter than this threshold are classified as lower quality.
      */
     private static final int SUBSTANTIAL_CONTENT_THRESHOLD = 100;
-
-    private final String messageTemplate;
-
-    SearchQualityLevel(String messageTemplate) {
-        this.messageTemplate = messageTemplate;
-    }
 
     /**
      * Formats the quality message with document counts.
@@ -50,9 +44,12 @@ public enum SearchQualityLevel {
      */
     public String formatMessage(int totalCount, int highQualityCount) {
         return switch (this) {
-            case NONE -> messageTemplate;
-            case KEYWORD_SEARCH, HIGH_QUALITY -> String.format(messageTemplate, totalCount);
-            case MIXED_QUALITY -> String.format(messageTemplate, totalCount, highQualityCount);
+            case NONE -> "No relevant documents found. Using general knowledge only.";
+            case KEYWORD_SEARCH -> "Found " + totalCount + " documents via keyword search (embedding service unavailable). "
+                    + "Results may be less semantically relevant.";
+            case HIGH_QUALITY -> "Found " + totalCount + " high-quality relevant documents via semantic search.";
+            case MIXED_QUALITY -> "Found " + totalCount + " documents (" + highQualityCount + " high-quality) via search. "
+                    + "Some results may be less relevant.";
         };
     }
 
