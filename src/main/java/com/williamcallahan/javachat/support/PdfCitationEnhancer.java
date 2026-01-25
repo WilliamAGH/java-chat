@@ -44,6 +44,11 @@ public class PdfCitationEnhancer {
     /** URL-encoded variant of Think Java filename. */
     private static final String THINK_JAVA_PDF_FILENAME_ENCODED = "think%20java";
 
+    /**
+     * Creates an enhancer that estimates PDF page anchors using locally stored chunk metadata.
+     *
+     * @param localStore service that provides access to parsed chunk storage
+     */
     public PdfCitationEnhancer(LocalStoreService localStore) {
         this.localStore = localStore;
     }
@@ -100,7 +105,7 @@ public class PdfCitationEnhancer {
     }
 
     /**
-     * Returns the total page count for the Think Java PDF.
+     * Provides the total page count for the Think Java PDF.
      *
      * <p>The result is cached after the first load to avoid repeated I/O.</p>
      *

@@ -200,8 +200,12 @@ public class GuidedLearningService {
     /**
      * Represents the guided prompt and the Think Java context documents used for grounding.
      *
+     * <p>Normalizes {@code bookContextDocuments} to an unmodifiable list: {@link List#of()} when null,
+     * otherwise {@link List#copyOf(List)}.</p>
+     *
      * @param structuredPrompt structured prompt for LLM streaming
      * @param bookContextDocuments Think Java-only context documents used for grounding and citations
+     * @throws IllegalArgumentException when structuredPrompt is null
      */
     public record GuidedChatPromptOutcome(StructuredPrompt structuredPrompt, List<Document> bookContextDocuments) {
         public GuidedChatPromptOutcome {
