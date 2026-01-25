@@ -11,6 +11,7 @@ import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import com.williamcallahan.javachat.support.DocumentContentAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -305,7 +306,7 @@ public class ChatService {
      * <p>Delegates to {@link SearchQualityLevel} enum for self-describing quality categorization.</p>
      */
     private String determineSearchQuality(List<Document> docs) {
-        return SearchQualityLevel.describeQuality(docs);
+        return SearchQualityLevel.describeQuality(DocumentContentAdapter.fromDocuments(docs));
     }
 
     /**
