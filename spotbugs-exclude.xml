@@ -76,18 +76,28 @@
     </Match>
     <Match>
         <Bug pattern="SPRING_ENDPOINT"/>
-    </Match>
-    <Match>
-        <Bug pattern="SPRING_ENDPOINT"/>
         <Class name="com.williamcallahan.javachat.web.MarkdownApiIntegrationTest$TestMarkdownController"/>
     </Match>
 
     <!--
-        CRLF injection warnings for log entries are mitigated by internal sanitization and controlled sources.
-        Suppress these warnings to keep SpotBugs focused on actionable security issues.
+        CRLF injection warnings for log entries are mitigated by internal sanitization in these classes.
+        Each class implements its own sanitizeLogValue/sanitizeLogMessage method.
     -->
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitState"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.support.RetrySupport"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.AppProperties"/>
     </Match>
 
     <!--
@@ -101,12 +111,6 @@
     <Match>
         <Bug pattern="EI_EXPOSE_REP2"/>
         <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
-    </Match>
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP"/>
-    </Match>
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
 
     <!--
