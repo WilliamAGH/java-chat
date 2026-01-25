@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.domain;
 
+import com.williamcallahan.javachat.support.DocumentContentAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 
@@ -28,7 +29,8 @@ class SearchQualityLevelTest {
     @Test
     void determineReturnsKeywordSearchWhenUrlContainsKeyword() {
         Document keywordDoc = new Document("some content", Map.of("url", "local-search://query"));
-        SearchQualityLevel level = SearchQualityLevel.determine(List.of(keywordDoc));
+        SearchQualityLevel level = SearchQualityLevel.determine(
+                DocumentContentAdapter.fromDocuments(List.of(keywordDoc)));
         assertThat(level).isEqualTo(SearchQualityLevel.KEYWORD_SEARCH);
     }
 
@@ -37,7 +39,8 @@ class SearchQualityLevelTest {
         String longContent = "a".repeat(150);
         Document doc1 = new Document(longContent, Map.of("url", "https://example.com/doc1"));
         Document doc2 = new Document(longContent, Map.of("url", "https://example.com/doc2"));
-        SearchQualityLevel level = SearchQualityLevel.determine(List.of(doc1, doc2));
+        SearchQualityLevel level = SearchQualityLevel.determine(
+                DocumentContentAdapter.fromDocuments(List.of(doc1, doc2)));
         assertThat(level).isEqualTo(SearchQualityLevel.HIGH_QUALITY);
     }
 
@@ -47,7 +50,8 @@ class SearchQualityLevelTest {
         String shortContent = "short";
         Document highQualityDoc = new Document(longContent, Map.of("url", "https://example.com/doc1"));
         Document lowQualityDoc = new Document(shortContent, Map.of("url", "https://example.com/doc2"));
-        SearchQualityLevel level = SearchQualityLevel.determine(List.of(highQualityDoc, lowQualityDoc));
+        SearchQualityLevel level = SearchQualityLevel.determine(
+                DocumentContentAdapter.fromDocuments(List.of(highQualityDoc, lowQualityDoc)));
         assertThat(level).isEqualTo(SearchQualityLevel.MIXED_QUALITY);
     }
 
