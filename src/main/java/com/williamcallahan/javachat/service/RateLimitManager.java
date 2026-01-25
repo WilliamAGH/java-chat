@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIServiceException;
 import org.slf4j.Logger;
@@ -41,10 +40,6 @@ public class RateLimitManager {
 
     private final RateLimitState rateLimitState;
     private final Map<String, ApiEndpointState> endpointStates =
-        new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> dailyUsage =
-        new ConcurrentHashMap<>();
-    private final Map<String, AtomicLong> resetTimes =
         new ConcurrentHashMap<>();
     private final Environment env;
     private final RateLimitHeaderParser headerParser;
@@ -93,7 +88,6 @@ public class RateLimitManager {
      */
     public static class ApiEndpointState {
 
-        // Testing live refresh functionality
         private volatile boolean circuitOpen = false;
         private volatile Instant nextRetryTime;
 
@@ -246,8 +240,8 @@ public class RateLimitManager {
      * Records a rate limit for the provider using best-effort parsing of reset or retry information.
      */
     public void recordRateLimit(ApiProvider provider, String errorMessage) {
-        // Extract reset time from error or headers
-        Instant resetTime = parseResetTimeFromError(errorMessage);
+        // Reset time parsing from error messages not implemented; rely on window-based fallback
+        Instant resetTime = null;
         long retryAfterSeconds = extractRetryAfter(errorMessage);
 
         // For GitHub Models, use longer backoff as they have strict limits
@@ -369,13 +363,6 @@ public class RateLimitManager {
                  provider.getName(), resetTime, retryAfterSeconds);
     }
 
-    private Instant parseResetTimeFromError(String errorMessage) {
-        // Try to parse reset time from error message
-        // Implementation would parse various formats
-        // For now, return null and rely on window-based calculation
-        return null;
-    }
-
     private long extractRetryAfter(String errorMessage) {
         if (errorMessage == null) {
             return 0;
@@ -462,8 +449,6 @@ public class RateLimitManager {
      */
     public void reset() {
         endpointStates.clear();
-        dailyUsage.clear();
-        resetTimes.clear();
         log.info("Rate limit manager reset (in-memory state only)");
     }
 }
