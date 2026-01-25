@@ -6,6 +6,7 @@ import com.openai.core.RequestOptions;
 import com.openai.core.Timeout;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
+import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -235,29 +236,6 @@ public class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoClose
     }
 
     private static String normalizeSdkBaseUrl(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("Remote embedding base URL is not configured");
-        }
-
-        String trimmed = baseUrl.trim();
-        if (trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
-        }
-
-        if (trimmed.endsWith("/v1/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
-        } else if (trimmed.endsWith("/embeddings")) {
-            trimmed = trimmed.substring(0, trimmed.length() - "/embeddings".length());
-        }
-
-        if (trimmed.endsWith("/inference")) {
-            return trimmed + "/v1";
-        }
-
-        if (trimmed.endsWith("/v1")) {
-            return trimmed;
-        }
-
-        return trimmed + "/v1";
+        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
     }
 }
