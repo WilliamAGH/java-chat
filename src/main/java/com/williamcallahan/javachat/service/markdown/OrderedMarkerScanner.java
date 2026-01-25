@@ -15,6 +15,9 @@ import java.util.Optional;
  */
 final class OrderedMarkerScanner {
 
+    private static final int MAX_NUMERIC_DIGITS = 3;
+    private static final int MAX_ROMAN_LENGTH = 6;
+
     private OrderedMarkerScanner() {}
 
     /**
@@ -131,7 +134,8 @@ final class OrderedMarkerScanner {
     private static int readNumericSequence(String text, int index) {
         int cursor = index;
         int digitCount = 0;
-        while (cursor < text.length() && Character.isDigit(text.charAt(cursor)) && digitCount < 3) {
+        while (cursor < text.length() && Character.isDigit(text.charAt(cursor))
+            && digitCount < MAX_NUMERIC_DIGITS) {
             digitCount++;
             cursor++;
         }
@@ -147,7 +151,7 @@ final class OrderedMarkerScanner {
     private static int readRomanSequence(String text, int index) {
         int cursor = index;
         int length = 0;
-        while (cursor < text.length() && length < 6) {
+        while (cursor < text.length() && length < MAX_ROMAN_LENGTH) {
             char romanChar = text.charAt(cursor);
             if (romanChar != 'i' && romanChar != 'v' && romanChar != 'x') break;
             length++;

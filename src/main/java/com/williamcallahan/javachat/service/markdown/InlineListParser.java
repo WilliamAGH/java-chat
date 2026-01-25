@@ -16,6 +16,11 @@ import java.util.List;
  */
 final class InlineListParser {
 
+    private static final int MAX_NESTED_DEPTH = 3;
+    private static final int MIN_MARKER_COUNT = 2;
+    private static final int BULLET_MARKER_WIDTH = 2;
+    private static final int COLON_BACKTRACK_OFFSET = 2;
+
     private InlineListParser() {}
 
     /**
@@ -31,8 +36,8 @@ final class InlineListParser {
         }
 
         Element listElement = new Element(parse.primaryBlock().tagName());
-        for (String itemLabel : parse.primaryBlock().itemLabels()) {
-            listElement.appendChild(new Element("li").text(itemLabel));
+        for (String entryLabel : parse.primaryBlock().entryLabels()) {
+            listElement.appendChild(new Element("li").text(entryLabel));
         }
 
         List<Element> additionalLists = new ArrayList<>();
@@ -40,8 +45,8 @@ final class InlineListParser {
             Parse nestedParse = Parse.tryParse(nestedSegment);
             if (nestedParse == null) continue;
             Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
-            for (String itemLabel : nestedParse.primaryBlock().itemLabels()) {
-                nestedListElement.appendChild(new Element("li").text(itemLabel));
+            for (String entryLabel : nestedParse.primaryBlock().entryLabels()) {
+                nestedListElement.appendChild(new Element("li").text(entryLabel));
             }
             additionalLists.add(nestedListElement);
             additionalLists.addAll(renderNestedListsRecursively(nestedParse, 1));
@@ -51,7 +56,7 @@ final class InlineListParser {
     }
 
     private static List<Element> renderNestedListsRecursively(Parse parse, int depth) {
-        if (depth >= 3) {
+        if (depth >= MAX_NESTED_DEPTH) {
             return List.of();
         }
         List<Element> listElements = new ArrayList<>();
@@ -59,8 +64,8 @@ final class InlineListParser {
             Parse nestedParse = Parse.tryParse(nestedSegment);
             if (nestedParse == null) continue;
             Element nestedListElement = new Element(nestedParse.primaryBlock().tagName());
-            for (String itemLabel : nestedParse.primaryBlock().itemLabels()) {
-                nestedListElement.appendChild(new Element("li").text(itemLabel));
+            for (String entryLabel : nestedParse.primaryBlock().entryLabels()) {
+                nestedListElement.appendChild(new Element("li").text(entryLabel));
             }
             listElements.add(nestedListElement);
             listElements.addAll(renderNestedListsRecursively(nestedParse, depth + 1));
@@ -87,9 +92,9 @@ final class InlineListParser {
      * Represents a parsed inline list with its items and structure.
      *
      * @param tagName "ol" for ordered lists, "ul" for unordered
-     * @param itemLabels the text content of each list item
+     * @param entryLabels the text content of each list entry
      */
-    record Block(String tagName, List<String> itemLabels) {}
+    record Block(String tagName, List<String> entryLabels) {}
 
     /**
      * Result of parsing inline list markers from text.
@@ -127,30 +132,37 @@ final class InlineListParser {
 
         private static Parse parseInlineListOrderedKind(String text, InlineListOrderedKind kind) {
             List<Marker> markers = findOrderedMarkers(text, kind);
-            if (markers.size() < 2) return null;
+            if (markers.size() < MIN_MARKER_COUNT) return null;
 
             int firstMarkerIndex = markers.get(0).markerStartIndex();
             String leading = text.substring(0, firstMarkerIndex).trim();
 
-            List<String> itemLabels = new ArrayList<>();
+            List<String> entryLabels = new ArrayList<>();
             List<String> nestedSegments = new ArrayList<>();
+            String trailingText = "";
             for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
                 int contentStart = markers.get(markerIndex).contentStartIndex();
                 int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
-                String rawItem = text.substring(contentStart, nextMarkerStart).trim();
-                if (rawItem.isEmpty()) continue;
+                String rawEntryText = text.substring(contentStart, nextMarkerStart).trim();
+                if (rawEntryText.isEmpty()) continue;
 
-                ParsedItem parsedItem = splitNestedList(rawItem);
-                itemLabels.add(parsedItem.label());
-                if (parsedItem.nestedSegment() != null && !parsedItem.nestedSegment().isBlank()) {
-                    nestedSegments.add(parsedItem.nestedSegment());
+                boolean isLastMarker = markerIndex == markers.size() - 1;
+                EntryTextSplit entryTextSplit = isLastMarker ? extractTrailingText(rawEntryText)
+                    : new EntryTextSplit(rawEntryText, "");
+                ParsedEntry parsedEntry = splitNestedList(entryTextSplit.entryText());
+                entryLabels.add(parsedEntry.label());
+                if (parsedEntry.nestedSegment() != null && !parsedEntry.nestedSegment().isBlank()) {
+                    nestedSegments.add(parsedEntry.nestedSegment());
+                }
+                if (!entryTextSplit.trailingText().isBlank()) {
+                    trailingText = entryTextSplit.trailingText();
                 }
             }
 
-            if (itemLabels.size() < 2) return null;
+            if (entryLabels.size() < MIN_MARKER_COUNT) return null;
 
-            Block primaryBlock = new Block("ol", itemLabels);
-            return new Parse(leading, primaryBlock, nestedSegments, "");
+            Block primaryBlock = new Block("ol", entryLabels);
+            return new Parse(leading, primaryBlock, nestedSegments, trailingText);
         }
 
         private static Parse tryParseBulleted(String text) {
@@ -158,29 +170,36 @@ final class InlineListParser {
             if (bulletKind == null) return null;
 
             List<Marker> markers = findBulletMarkers(text, bulletKind);
-            if (markers.size() < 2) return null;
+            if (markers.size() < MIN_MARKER_COUNT) return null;
 
             int firstMarkerIndex = markers.get(0).markerStartIndex();
             String leading = text.substring(0, firstMarkerIndex).trim();
 
-            List<String> itemLabels = new ArrayList<>();
+            List<String> entryLabels = new ArrayList<>();
             List<String> nestedSegments = new ArrayList<>();
+            String trailingText = "";
             for (int markerIndex = 0; markerIndex < markers.size(); markerIndex++) {
                 int contentStart = markers.get(markerIndex).contentStartIndex();
                 int nextMarkerStart = markerIndex + 1 < markers.size() ? markers.get(markerIndex + 1).markerStartIndex() : text.length();
-                String rawItem = text.substring(contentStart, nextMarkerStart).trim();
-                if (rawItem.isEmpty()) continue;
-                ParsedItem parsedItem = splitNestedList(rawItem);
-                itemLabels.add(parsedItem.label());
-                if (parsedItem.nestedSegment() != null && !parsedItem.nestedSegment().isBlank()) {
-                    nestedSegments.add(parsedItem.nestedSegment());
+                String rawEntryText = text.substring(contentStart, nextMarkerStart).trim();
+                if (rawEntryText.isEmpty()) continue;
+                boolean isLastMarker = markerIndex == markers.size() - 1;
+                EntryTextSplit entryTextSplit = isLastMarker ? extractTrailingText(rawEntryText)
+                    : new EntryTextSplit(rawEntryText, "");
+                ParsedEntry parsedEntry = splitNestedList(entryTextSplit.entryText());
+                entryLabels.add(parsedEntry.label());
+                if (parsedEntry.nestedSegment() != null && !parsedEntry.nestedSegment().isBlank()) {
+                    nestedSegments.add(parsedEntry.nestedSegment());
+                }
+                if (!entryTextSplit.trailingText().isBlank()) {
+                    trailingText = entryTextSplit.trailingText();
                 }
             }
 
-            if (itemLabels.size() < 2) return null;
+            if (entryLabels.size() < MIN_MARKER_COUNT) return null;
 
-            Block primaryBlock = new Block("ul", itemLabels);
-            return new Parse(leading, primaryBlock, nestedSegments, "");
+            Block primaryBlock = new Block("ul", entryLabels);
+            return new Parse(leading, primaryBlock, nestedSegments, trailingText);
         }
 
         private static InlineListBulletKind findFirstInlineListBulletKind(String text) {
@@ -219,7 +238,8 @@ final class InlineListParser {
             char previousChar = text.charAt(markerIndex - 1);
             return previousChar == ':'
                 || previousChar == '\n'
-                || (previousChar == ' ' && markerIndex >= 2 && text.charAt(markerIndex - 2) == ':');
+                || (previousChar == ' ' && markerIndex >= COLON_BACKTRACK_OFFSET
+                && text.charAt(markerIndex - COLON_BACKTRACK_OFFSET) == ':');
         }
 
         private static boolean isBulletMarker(String text, int markerIndex, InlineListBulletKind kind) {
@@ -237,11 +257,11 @@ final class InlineListParser {
                     if (!isBulletListIntro(text, index)) continue;
                     if (!isBulletMarker(text, index, kind)) continue;
                     hasIntro = true;
-                    markers.add(new Marker(index, index + 2));
+                    markers.add(new Marker(index, index + BULLET_MARKER_WIDTH));
                     continue;
                 }
                 if (isBulletMarker(text, index, kind)) {
-                    markers.add(new Marker(index, index + 2));
+                    markers.add(new Marker(index, index + BULLET_MARKER_WIDTH));
                 }
             }
             return markers;
@@ -280,23 +300,23 @@ final class InlineListParser {
         }
 
         private static boolean isContentStartValid(String text, int contentStart) {
-            return contentStart < text.length() && Character.isLetter(text.charAt(contentStart));
+            return contentStart < text.length() && !Character.isWhitespace(text.charAt(contentStart));
         }
 
-        private static ParsedItem splitNestedList(String rawItemText) {
-            String trimmed = rawItemText.trim();
+        private static ParsedEntry splitNestedList(String rawEntryText) {
+            String trimmed = rawEntryText.trim();
             int colonIndex = trimmed.indexOf(':');
             if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
                 String labelPart = trimmed.substring(0, colonIndex).trim();
                 String tail = trimmed.substring(colonIndex + 1).trim();
                 if (Parse.tryParse(tail) != null) {
-                    return new ParsedItem(normalizeItemLabel(labelPart), tail);
+                    return new ParsedEntry(normalizeEntryLabel(labelPart), tail);
                 }
             }
-            return new ParsedItem(normalizeItemLabel(trimmed), null);
+            return new ParsedEntry(normalizeEntryLabel(trimmed), null);
         }
 
-        private static String normalizeItemLabel(String raw) {
+        private static String normalizeEntryLabel(String raw) {
             String label = raw == null ? "" : raw.trim();
             int colonIndex = label.indexOf(':');
             if (colonIndex > 0) {
@@ -311,6 +331,40 @@ final class InlineListParser {
                 }
             }
             return label;
+        }
+
+        private static EntryTextSplit extractTrailingText(String rawEntryText) {
+            if (rawEntryText == null || rawEntryText.isBlank()) {
+                return new EntryTextSplit("", "");
+            }
+            int trailingStart = findTrailingTextStart(rawEntryText);
+            if (trailingStart < 0) {
+                return new EntryTextSplit(rawEntryText, "");
+            }
+            String entryText = rawEntryText.substring(0, trailingStart).trim();
+            String trailingText = rawEntryText.substring(trailingStart).trim();
+            return new EntryTextSplit(entryText, trailingText);
+        }
+
+        private static int findTrailingTextStart(String rawEntryText) {
+            int trailingStart = -1;
+            for (int index = 0; index < rawEntryText.length(); index++) {
+                char token = rawEntryText.charAt(index);
+                if (token == '.' || token == '!' || token == '?') {
+                    if (index + 1 < rawEntryText.length()) {
+                        int candidateStart = index + 1;
+                        while (candidateStart < rawEntryText.length()
+                            && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
+                            candidateStart++;
+                        }
+                        if (candidateStart < rawEntryText.length()) {
+                            trailingStart = candidateStart;
+                        }
+                    }
+                    break;
+                }
+            }
+            return trailingStart;
         }
     }
 
@@ -328,5 +382,7 @@ final class InlineListParser {
      * @param label the cleaned item label
      * @param nestedSegment text that may contain a nested list, or null
      */
-    private record ParsedItem(String label, String nestedSegment) {}
+    private record ParsedEntry(String label, String nestedSegment) {}
+
+    private record EntryTextSplit(String entryText, String trailingText) {}
 }

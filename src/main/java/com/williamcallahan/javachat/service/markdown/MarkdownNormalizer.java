@@ -26,12 +26,7 @@ final class MarkdownNormalizer {
                     // Repair malformed "attached" fences like "Here:```java" by forcing the fence
                     // onto its own line. We ensure a single newline exists, but do NOT force a blank line,
                     // as CommonMark allows fences to interrupt paragraphs.
-                    if (normalizedBuilder.length() > 0) {
-                        char previousChar = normalizedBuilder.charAt(normalizedBuilder.length() - 1);
-                        if (previousChar != '\n') {
-                            normalizedBuilder.append('\n');
-                        }
-                    }
+                    appendLineBreakIfNeeded(normalizedBuilder);
 
                     fenceTracker.enterFence(fenceMarker.character(), fenceMarker.length());
                     appendFenceMarker(normalizedBuilder, fenceMarker, markdownText, cursor);
@@ -53,9 +48,7 @@ final class MarkdownNormalizer {
 
                 // Only close fences when they're properly on their own line.
                 if (fenceTracker.isInsideFence() && isStartOfLine && fenceTracker.wouldCloseFence(fenceMarker)) {
-                    if (normalizedBuilder.length() > 0 && normalizedBuilder.charAt(normalizedBuilder.length() - 1) != '\n') {
-                        normalizedBuilder.append('\n');
-                    }
+                    appendLineBreakIfNeeded(normalizedBuilder);
                     appendFenceMarker(normalizedBuilder, fenceMarker, markdownText, cursor);
                     cursor += fenceMarker.length();
                     fenceTracker.exitFence();
@@ -117,21 +110,7 @@ final class MarkdownNormalizer {
                 }
             }
 
-            boolean isHeader = false;
-            if (!fenceTracker.isInsideFence()) {
-                int digitIndex = 0;
-                while (digitIndex < trimmed.length() && Character.isDigit(trimmed.charAt(digitIndex))) {
-                    digitIndex++;
-                }
-                if (digitIndex > 0 && digitIndex <= 3 && digitIndex < trimmed.length()) {
-                    char markerChar = trimmed.charAt(digitIndex);
-                    if ((markerChar == '.' || markerChar == ')')
-                        && (digitIndex + 1 < trimmed.length())
-                        && trimmed.charAt(digitIndex + 1) == ' ') {
-                        isHeader = true;
-                    }
-                }
-            }
+            boolean isHeader = !fenceTracker.isInsideFence() && isNumericHeader(trimmed);
 
             if (isHeader) {
                 inNumericHeader = true;
@@ -174,6 +153,24 @@ final class MarkdownNormalizer {
         return !unorderedMarker && !startsWithOrderedMarker(trimmedLine);
     }
 
+    private static boolean isNumericHeader(String trimmedLine) {
+        if (trimmedLine == null || trimmedLine.isBlank()) {
+            return false;
+        }
+        int digitIndex = 0;
+        while (digitIndex < trimmedLine.length() && Character.isDigit(trimmedLine.charAt(digitIndex))) {
+            digitIndex++;
+        }
+        if (digitIndex == 0 || digitIndex > 3 || digitIndex >= trimmedLine.length()) {
+            return false;
+        }
+        char markerChar = trimmedLine.charAt(digitIndex);
+        if (markerChar != '.' && markerChar != ')') {
+            return false;
+        }
+        return digitIndex + 1 < trimmedLine.length() && trimmedLine.charAt(digitIndex + 1) == ' ';
+    }
+
     private static void appendFenceMarker(StringBuilder builder, CodeFenceStateTracker.FenceMarker marker,
                                           String text, int index) {
         for (int offset = 0; offset < marker.length(); offset++) {
@@ -184,6 +181,15 @@ final class MarkdownNormalizer {
     private static void appendBacktickRun(StringBuilder builder, String text, int index, int length) {
         for (int offset = 0; offset < length; offset++) {
             builder.append(text.charAt(index + offset));
+        }
+    }
+
+    private static void appendLineBreakIfNeeded(StringBuilder builder) {
+        if (builder.length() == 0) {
+            return;
+        }
+        if (builder.charAt(builder.length() - 1) != '\n') {
+            builder.append('\n');
         }
     }
 
