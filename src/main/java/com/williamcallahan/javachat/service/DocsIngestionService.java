@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import com.williamcallahan.javachat.support.RetrievalErrorClassifier;
+import com.williamcallahan.javachat.support.RetrySupport;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -127,45 +129,16 @@ public class DocsIngestionService {
 
             // Add documents to vector store or cache
             if (!documents.isEmpty()) {
-                if (localOnlyMode) {
-                    // Local-only mode: compute and cache embeddings without uploading
-                    INDEXING_LOG.info("[INDEXING] Caching {} documents locally", documents.size());
-                    try {
-                        // Compute and cache embeddings
-                        embeddingCache.getOrComputeEmbeddings(documents);
-                        INDEXING_LOG.info("[INDEXING] ✓ Successfully cached {} documents locally ({})",
-                            documents.size(), progressTracker.formatPercent());
-
-                        // Mark hashes as ingested (cached) after successful caching
-                        for (org.springframework.ai.document.Document aiDoc : documents) {
-                            Object hashMetadata = aiDoc.getMetadata().get("hash");
-                            if (hashMetadata != null) {
-                                localStore.markHashIngested(hashMetadata.toString());
-                            }
-                        }
-                    } catch (RuntimeException cacheException) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to cache documents locally", cacheException);
-                        throw new IOException("Failed to cache documents locally", cacheException);
+                INDEXING_LOG.info("[INDEXING] Processing {} documents", documents.size());
+                try {
+                    DocumentStorageResult storageResult = storeDocumentsWithRetry(documents);
+                    if (storageResult.usedPrimaryDestination()) {
+                        markDocumentsIngested(documents);
                     }
-                } else {
-                    // Upload mode: send to Qdrant
-                    INDEXING_LOG.info("[INDEXING] Adding {} documents to Qdrant", documents.size());
-                    try {
-                        vectorStore.add(documents);
-                        INDEXING_LOG.info("[INDEXING] ✓ Successfully added {} documents to Qdrant ({})",
-                            documents.size(), progressTracker.formatPercent());
-                        
-                        // Mark hashes as ingested ONLY after successful addition
-                        for (org.springframework.ai.document.Document aiDoc : documents) {
-                            Object hashMetadata = aiDoc.getMetadata().get("hash");
-                            if (hashMetadata != null) {
-                                localStore.markHashIngested(hashMetadata.toString());
-                            }
-                        }
-                    } catch (RuntimeException qdrantException) {
-                        INDEXING_LOG.error("[INDEXING] ✗ Failed to add documents to Qdrant", qdrantException);
-                        throw new IOException("Failed to add documents to Qdrant", qdrantException);
-                    }
+                } catch (RuntimeException storageException) {
+                    String destination = localOnlyMode ? "cache" : "Qdrant";
+                    INDEXING_LOG.error("[INDEXING] ✗ Failed to store documents to {}", destination, storageException);
+                    throw new IOException("Failed to store documents to " + destination, storageException);
                 }
             } else {
                 INDEXING_LOG.warn("[INDEXING] No documents to add for URL");
@@ -303,78 +276,26 @@ public class DocsIngestionService {
                                                        long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
-        // Track non-transient errors that should abort the run rather than continue with next file
-        boolean shouldFailFast = false;
         try {
-            long startTime = System.currentTimeMillis();
-            boolean qdrantWriteSucceeded = false;
+            DocumentStorageResult storageResult = storeDocumentsWithRetry(documents);
 
-            if (localOnlyMode) {
-                // Local-only mode: compute and cache embeddings
-                embeddingCache.getOrComputeEmbeddings(documents);
-                long duration = System.currentTimeMillis() - startTime;
-                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
-                    documents.size(), duration, progressTracker.formatPercent());
-            } else {
-                // Upload mode: send to Qdrant with retry for transient errors, fallback to cache as last resort
-                try {
-                    com.williamcallahan.javachat.support.RetrySupport.executeWithRetry(
-                        () -> { vectorStore.add(documents); return null; },
-                        "Qdrant upload"
-                    );
-                    long duration = System.currentTimeMillis() - startTime;
-                    INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
-                        documents.size(), duration, progressTracker.formatPercent());
-                    qdrantWriteSucceeded = true;
-                } catch (RuntimeException qdrantError) {
-                    // Retry exhausted or non-transient error - check if we should fallback
-                    if (com.williamcallahan.javachat.support.RetrievalErrorClassifier
-                            .isTransientVectorStoreError(qdrantError)) {
-                        // Transient error after all retries - fallback to cache
-                        INDEXING_LOG.warn("[INDEXING] Qdrant upload failed after retries ({}), falling back to local cache",
-                            qdrantError.getClass().getSimpleName());
-                        embeddingCache.getOrComputeEmbeddings(documents);
-                        long duration = System.currentTimeMillis() - startTime;
-                        INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
-                            documents.size(), duration, progressTracker.formatPercent());
-                        // qdrantWriteSucceeded remains false - don't mark as ingested
-                    } else {
-                        // Non-transient error (programming error, invalid data) - rethrow to fail fast
-                        INDEXING_LOG.error("[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
-                            qdrantError.getClass().getSimpleName());
-                        shouldFailFast = true;
-                        throw qdrantError;
-                    }
-                }
-            }
-            
             // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
             long totalDuration = System.currentTimeMillis() - fileStartMillis;
-            String destination = localOnlyMode ? "cache" : (qdrantWriteSucceeded ? "Qdrant" : "cache (fallback)");
+            String destination = localOnlyMode ? "cache" :
+                (storageResult.usedPrimaryDestination() ? "Qdrant" : "cache (fallback)");
             INDEXING_LOG.info("[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
                 documents.size(), documents.size(), destination, totalDuration, progressTracker.formatPercent());
-            
-            // Mark hashes as processed only after confirmed Qdrant write (or in local-only mode)
+
+            // Mark hashes as processed only after confirmed primary destination write
             // Don't mark when we fell back to cache in upload mode - allows future re-upload
-            if (localOnlyMode || qdrantWriteSucceeded) {
-                for (org.springframework.ai.document.Document aiDoc : documents) {
-                    Object hashMetadata = aiDoc.getMetadata().get("hash");
-                    if (hashMetadata == null) {
-                        continue;
-                    }
-                    try {
-                        localStore.markHashIngested(hashMetadata.toString());
-                    } catch (IOException hashMarkException) {
-                        log.warn("Failed to mark hash as ingested (exception type: {})",
-                            hashMarkException.getClass().getSimpleName());
-                    }
-                }
+            if (storageResult.usedPrimaryDestination()) {
+                markDocumentsIngested(documents);
             }
-            
+
             return new LocalFileProcessingOutcome(true, null);
         } catch (RuntimeException indexingException) {
-            // Let non-transient errors propagate to abort the run
-            if (shouldFailFast) {
+            // Non-transient errors from storeDocumentsWithRetry propagate to abort the run
+            if (!RetrievalErrorClassifier.isTransientVectorStoreError(indexingException)) {
                 throw indexingException;
             }
             String operation = localOnlyMode ? "cache" : "index";
@@ -384,6 +305,74 @@ public class DocsIngestionService {
                 failure(file, operation, indexingException));
         }
     }
+
+    /**
+     * Marks all document hashes as ingested after successful storage.
+     * Logs warnings for individual failures but does not abort.
+     */
+    private void markDocumentsIngested(List<org.springframework.ai.document.Document> documents) {
+        for (org.springframework.ai.document.Document doc : documents) {
+            Object hashMetadata = doc.getMetadata().get("hash");
+            if (hashMetadata == null) {
+                continue;
+            }
+            try {
+                localStore.markHashIngested(hashMetadata.toString());
+            } catch (IOException markHashException) {
+                log.warn("Failed to mark hash as ingested (exception type: {})",
+                    markHashException.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /**
+     * Stores documents to vector store with retry logic, or local cache based on mode.
+     * Returns a result indicating storage success and whether primary destination was used.
+     */
+    private DocumentStorageResult storeDocumentsWithRetry(List<org.springframework.ai.document.Document> documents) {
+        long startTime = System.currentTimeMillis();
+
+        if (localOnlyMode) {
+            embeddingCache.getOrComputeEmbeddings(documents);
+            long duration = System.currentTimeMillis() - startTime;
+            INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally in {}ms ({})",
+                documents.size(), duration, progressTracker.formatPercent());
+            return new DocumentStorageResult(true, true);
+        }
+
+        // Upload mode with retry and fallback
+        try {
+            RetrySupport.executeWithRetry(
+                () -> { vectorStore.add(documents); return null; },
+                "Qdrant upload"
+            );
+            long duration = System.currentTimeMillis() - startTime;
+            INDEXING_LOG.info("[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
+                documents.size(), duration, progressTracker.formatPercent());
+            return new DocumentStorageResult(true, true);
+        } catch (RuntimeException qdrantError) {
+            if (RetrievalErrorClassifier.isTransientVectorStoreError(qdrantError)) {
+                INDEXING_LOG.warn("[INDEXING] Qdrant upload failed after retries ({}), falling back to local cache",
+                    qdrantError.getClass().getSimpleName());
+                embeddingCache.getOrComputeEmbeddings(documents);
+                long duration = System.currentTimeMillis() - startTime;
+                INDEXING_LOG.info("[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
+                    documents.size(), duration, progressTracker.formatPercent());
+                return new DocumentStorageResult(true, false);
+            }
+            INDEXING_LOG.error("[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
+                qdrantError.getClass().getSimpleName());
+            throw qdrantError;
+        }
+    }
+
+    /**
+     * Result of document storage operation.
+     *
+     * @param succeeded true if documents were stored successfully (to any destination)
+     * @param usedPrimaryDestination true if stored to the intended destination (Qdrant in upload mode, cache in local mode)
+     */
+    private record DocumentStorageResult(boolean succeeded, boolean usedPrimaryDestination) {}
 
     /**
      * Constructs a failure record with exception-specific diagnostic context.
