@@ -55,7 +55,8 @@ export interface StreamingState {
  *
  *   const streaming = createStreamingState({ statusClearDelayMs: 800 })
  *
- *   $effect(() => streaming.cleanup)  // Cleanup on unmount
+ *   // Cleanup timer on unmount - return the cleanup function
+ *   $effect(() => { return streaming.cleanup })
  *
  *   async function handleSend(message: string) {
  *     streaming.startStream()
