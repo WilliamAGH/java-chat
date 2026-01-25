@@ -10,6 +10,8 @@
   import { sanitizeUrl, deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
+  import { generateSessionId } from '../utils/session'
+  import { createStreamingState } from '$lib/composables/createStreamingState.svelte'
 
   // TOC state
   let lessons = $state<GuidedLesson[]>([])
@@ -30,11 +32,10 @@
   // Chat state - per-lesson persistence
   const chatHistoryByLesson = new Map<string, ChatMessage[]>()
   let messages = $state<ChatMessage[]>([])
-  let isStreaming = $state(false)
-  let currentStreamingContent = $state('')
-  let streamStatusMessage = $state('')
-  let streamStatusDetails = $state('')
   let shouldAutoScroll = $state(true)
+
+  // Streaming state from composable (immediate status clear for LearnView)
+  const streaming = createStreamingState()
 
   // Desktop container ref for scroll management
   let desktopMessagesContainer: HTMLElement | null = $state(null)
@@ -48,9 +49,8 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
-  // Session ID for chat continuity - generated client-side only, not rendered in DOM.
-  // Safe for CSR; if SSR is added, move generation to onMount or use server-provided ID.
-  const sessionId = `guided-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
+  // Session ID for chat continuity
+  const sessionId = generateSessionId('guided')
 
   // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
@@ -147,11 +147,8 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-    // Cancel any in-flight stream by clearing streaming state
-    isStreaming = false
-    currentStreamingContent = ''
-    streamStatusMessage = ''
-    streamStatusDetails = ''
+    // Cancel any in-flight stream
+    streaming.reset()
     isChatDrawerOpen = false
     selectedLesson = null
     lessonMarkdown = ''
@@ -195,7 +192,7 @@
   }
 
   async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || isStreaming || !selectedLesson) return
+    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
 
     const streamLessonSlug = selectedLesson.slug
     const userQuery = message.trim()
@@ -209,24 +206,20 @@
     shouldAutoScroll = true
     await doScrollToBottom()
 
-    isStreaming = true
-    currentStreamingContent = ''
-    streamStatusMessage = ''
-    streamStatusDetails = ''
+    streaming.startStream()
 
     try {
       await streamGuidedChat(sessionId, selectedLesson.slug, userQuery, {
         onChunk: (chunk) => {
           // Guard: ignore chunks if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          currentStreamingContent += chunk
+          streaming.appendContent(chunk)
           doScrollToBottom()
         },
         onStatus: (status) => {
           // Guard: ignore status if user navigated away
           if (selectedLesson?.slug !== streamLessonSlug) return
-          streamStatusMessage = status.message
-          streamStatusDetails = status.details ?? ''
+          streaming.updateStatus(status)
         },
         onError: (streamError) => {
           console.error('Stream error during processing:', streamError)
@@ -237,7 +230,7 @@
       if (selectedLesson?.slug !== streamLessonSlug) return
       messages = [...messages, {
         role: 'assistant',
-        content: currentStreamingContent,
+        content: streaming.streamingContent,
         timestamp: Date.now()
       }]
     } catch (error) {
@@ -252,10 +245,7 @@
     } finally {
       // Guard: only reset streaming state if still on same lesson
       if (selectedLesson?.slug === streamLessonSlug) {
-        isStreaming = false
-        currentStreamingContent = ''
-        streamStatusMessage = ''
-        streamStatusDetails = ''
+        streaming.finishStream()
         await doScrollToBottom()
       }
     }
@@ -416,7 +406,7 @@
             bind:this={desktopMessagesContainer}
             onscroll={checkAutoScroll}
           >
-            {#if messages.length === 0 && !isStreaming}
+            {#if messages.length === 0 && !streaming.isStreaming}
               <div class="chat-empty">
                 <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
                 <p class="hint">Ask anything about the concepts in this lesson.</p>
@@ -424,15 +414,15 @@
             {:else}
               <StreamingMessagesList
                 {messages}
-                {isStreaming}
-                streamingContent={currentStreamingContent}
-                statusMessage={streamStatusMessage}
-                statusDetails={streamStatusDetails}
+                isStreaming={streaming.isStreaming}
+                streamingContent={streaming.streamingContent}
+                statusMessage={streaming.statusMessage}
+                statusDetails={streaming.statusDetails}
               />
             {/if}
           </div>
 
-          <ChatInput onSend={handleSend} disabled={isStreaming} placeholder="Ask about this lesson..." />
+          <ChatInput onSend={handleSend} disabled={streaming.isStreaming} placeholder="Ask about this lesson..." />
         </div>
       </div>
 
@@ -441,10 +431,10 @@
         bind:this={mobileDrawer}
         isOpen={isChatDrawerOpen}
         {messages}
-        {isStreaming}
-        streamingContent={currentStreamingContent}
-        statusMessage={streamStatusMessage}
-        statusDetails={streamStatusDetails}
+        isStreaming={streaming.isStreaming}
+        streamingContent={streaming.streamingContent}
+        statusMessage={streaming.statusMessage}
+        statusDetails={streaming.statusDetails}
         title="Ask about this lesson"
         emptyStateSubject={selectedLesson.title}
         placeholder="Ask about this lesson..."
