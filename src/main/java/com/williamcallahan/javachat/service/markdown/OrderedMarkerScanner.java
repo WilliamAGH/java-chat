@@ -124,7 +124,7 @@ final class OrderedMarkerScanner {
         }
 
         int afterIndex = sequenceEnd + 1;
-        if (afterIndex < text.length() && text.charAt(afterIndex) == ' ') {
+        while (afterIndex < text.length() && Character.isWhitespace(text.charAt(afterIndex))) {
             afterIndex++;
         }
 
