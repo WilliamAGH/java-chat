@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +32,7 @@ public class SseSupport {
     private static final String ERROR_FALLBACK_JSON =
         "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
-    private final ObjectMapper objectMapper;
+    private final ObjectWriter jsonWriter;
 
     /**
      * Creates SSE support wired to the application's ObjectMapper.
@@ -39,7 +40,7 @@ public class SseSupport {
      * @param objectMapper JSON mapper for safe SSE serialization
      */
     public SseSupport(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+        this.jsonWriter = objectMapper.writer();
     }
 
     /**
@@ -78,7 +79,7 @@ public class SseSupport {
      */
     public String jsonSerialize(Object payload) {
         try {
-            return objectMapper.writeValueAsString(payload);
+            return jsonWriter.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize SSE data", e);
         }
@@ -94,9 +95,9 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> sseError(String message, String details) {
         String json;
         try {
-            json = objectMapper.writeValueAsString(new ErrorPayload(message, details));
+            json = jsonWriter.writeValueAsString(new ErrorPayload(message, details));
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE error: {}", message, e);
+            log.error("Failed to serialize SSE error payload", e);
             json = ERROR_FALLBACK_JSON;
         }
         return Flux.just(ServerSentEvent.<String>builder()
@@ -116,9 +117,9 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> sseStatus(String message, String details) {
         String json;
         try {
-            json = objectMapper.writeValueAsString(new StatusPayload(message, details));
+            json = jsonWriter.writeValueAsString(new StatusPayload(message, details));
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE status: {}", message, e);
+            log.error("Failed to serialize SSE status payload", e);
             json = ERROR_FALLBACK_JSON;
         }
         return Flux.just(ServerSentEvent.<String>builder()

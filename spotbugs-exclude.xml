@@ -58,25 +58,30 @@
     </Match>
 
     <!--
-        Public-facing REST controllers are intentionally open and do not use Spring Security annotations.
-        FindSecBugs reports these as endpoints to prompt security review; in this project the API surface is intended.
+        AppProperties is a Spring @ConfigurationProperties holder; nested objects are intentionally mutable for
+        binding and are not exposed outside the Spring context as a security boundary.
     -->
     <Match>
-        <Bug code="SECSC"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.config.AppProperties"/>
     </Match>
 
     <!--
-        Spring MVC endpoints are intentionally public in this application. Suppress SPRING_ENDPOINT warnings
-        for controller classes to avoid noise during validation.
+        Controllers store Spring-managed singleton dependencies for request handling; SpotBugs reports these as
+        EI_EXPOSE_REP2 even though the fields are not exposed via accessors.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+    </Match>
+
+    <!--
+        FindSecBugs reports every Spring MVC endpoint as remotely reachable. In this application the
+        endpoint surface is intentional and reviewed; suppress these informational SPRING_ENDPOINT
+        findings to keep SpotBugs actionable.
     -->
     <Match>
         <Bug pattern="SPRING_ENDPOINT"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\.web\\.(.*Controller)$"/>
-    </Match>
-    <Match>
-        <Bug pattern="SPRING_ENDPOINT"/>
-        <Class name="com.williamcallahan.javachat.web.MarkdownApiIntegrationTest$TestMarkdownController"/>
     </Match>
 
     <!--
@@ -98,19 +103,6 @@
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.config.AppProperties"/>
-    </Match>
-
-    <!--
-        Configuration and response models expose immutable snapshots; SpotBugs flags these as EI_EXPOSE_REP
-        even though callers cannot mutate internal state beyond copies.
-    -->
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
-    </Match>
-    <Match>
-        <Bug pattern="EI_EXPOSE_REP2"/>
-        <Class name="~com\\.williamcallahan\\.javachat\\.(config|domain|web)\\..*"/>
     </Match>
 
     <!--

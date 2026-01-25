@@ -22,11 +22,38 @@ public record MarkdownStructuredOutcome(
         Objects.requireNonNull(enrichments, "Enrichments cannot be null");
         Objects.requireNonNull(warnings, "Warnings cannot be null");
         Objects.requireNonNull(source, "Render source cannot be null");
+        citations = List.copyOf(citations);
+        enrichments = List.copyOf(enrichments);
+        warnings = List.copyOf(warnings);
         if (processingTimeMs < 0) {
             throw new IllegalArgumentException("Processing time must be non-negative");
         }
         if (structuredElementCount < 0) {
             throw new IllegalArgumentException("Structured element count must be non-negative");
         }
+    }
+
+    /**
+     * Returns citations as an unmodifiable snapshot to prevent mutation through the domain API.
+     */
+    @Override
+    public List<MarkdownCitation> citations() {
+        return List.copyOf(citations);
+    }
+
+    /**
+     * Returns enrichments as an unmodifiable snapshot to prevent mutation through the domain API.
+     */
+    @Override
+    public List<MarkdownEnrichment> enrichments() {
+        return List.copyOf(enrichments);
+    }
+
+    /**
+     * Returns warnings as an unmodifiable snapshot to prevent mutation through the domain API.
+     */
+    @Override
+    public List<ProcessingWarning> warnings() {
+        return List.copyOf(warnings);
     }
 }
