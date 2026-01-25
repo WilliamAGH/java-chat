@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
@@ -13,7 +14,6 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -52,12 +52,7 @@ public class ChatController extends BaseController {
     private final RetrievalService retrievalService;
     private final SseSupport sseSupport;
     private final RestTemplate restTemplate;
-
-    @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}")
-    private String localEmbeddingServerUrl;
-
-    @Value("${app.local-embedding.enabled:false}")
-    private boolean localEmbeddingEnabled;
+    private final AppProperties appProperties;
 
     /**
      * Creates the chat controller wired to chat, retrieval, and streaming services.
@@ -69,13 +64,15 @@ public class ChatController extends BaseController {
      * @param sseSupport shared SSE serialization and event support
      * @param restTemplateBuilder builder for creating the RestTemplate
      * @param exceptionBuilder shared exception response builder
+     * @param appProperties centralized application configuration
      */
     public ChatController(ChatService chatService, ChatMemoryService chatMemory,
                          OpenAIStreamingService openAIStreamingService,
                          RetrievalService retrievalService,
                          SseSupport sseSupport,
                          RestTemplateBuilder restTemplateBuilder,
-                         ExceptionResponseBuilder exceptionBuilder) {
+                         ExceptionResponseBuilder exceptionBuilder,
+                         AppProperties appProperties) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
@@ -83,6 +80,7 @@ public class ChatController extends BaseController {
         this.retrievalService = retrievalService;
         this.sseSupport = sseSupport;
         this.restTemplate = restTemplateBuilder.build();
+        this.appProperties = appProperties;
     }
 
     /**
@@ -290,20 +288,21 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/health/embeddings")
     public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-        if (!localEmbeddingEnabled) {
-            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(localEmbeddingServerUrl));
+        String serverUrl = appProperties.getLocalEmbedding().getServerUrl();
+        if (!appProperties.getLocalEmbedding().isEnabled()) {
+            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(serverUrl));
         }
 
         try {
             // Simple health check - try to get models list
-            String healthUrl = localEmbeddingServerUrl + "/v1/models";
+            String healthUrl = serverUrl + "/v1/models";
             restTemplate.getForEntity(healthUrl, String.class);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(localEmbeddingServerUrl));
+            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(serverUrl));
         } catch (RestClientException httpError) {
             log.debug("Embedding server health check failed", httpError);
             String details = describeException(httpError);
             return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(
-                localEmbeddingServerUrl, "UNREACHABLE: " + details));
+                serverUrl, "UNREACHABLE: " + details));
         }
     }
 
