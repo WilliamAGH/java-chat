@@ -81,20 +81,6 @@ public class ChatService {
     }
 
     /**
-     * Appends context documents to a system prompt builder with normalized URLs.
-     */
-    private void appendContextDocs(StringBuilder systemContext, List<Document> contextDocs) {
-        for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
-            Document contextDoc = contextDocs.get(docIndex);
-            Object urlMetadata = contextDoc.getMetadata().get("url");
-            String rawUrl = urlMetadata != null ? urlMetadata.toString() : "";
-            String normUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            systemContext.append("\n[CTX ").append(docIndex + 1).append("] ").append(normUrl)
-                .append("\n").append(contextDoc.getText());
-        }
-    }
-
-    /**
      * Streams a chat response with preselected context and custom guidance using structured prompts.
      *
      * <p>Uses structure-aware truncation to preserve semantic boundaries when the prompt
@@ -128,134 +114,6 @@ public class ChatService {
     public List<Citation> citationsFor(String userQuery) {
         List<Document> docs = retrievalService.retrieve(userQuery);
         return retrievalService.toCitations(docs);
-    }
-
-    /**
-     * Builds a prompt string from a list of messages, including both user and assistant messages.
-     * This ensures the LLM has full conversation context matching what the frontend displays.
-     *
-     * @param messages the conversation history including system context, user messages, and assistant responses
-     * @return formatted prompt string with role prefixes for multi-turn conversation
-     */
-    private String buildPromptFromMessages(List<Message> messages) {
-        StringBuilder prompt = new StringBuilder();
-        for (Message msg : messages) {
-            if (msg instanceof UserMessage userMsg) {
-                prompt.append(userMsg.getText()).append("\n\n");
-            } else if (msg instanceof AssistantMessage assistantMsg) {
-                prompt.append("Assistant: ").append(assistantMsg.getText()).append("\n\n");
-            }
-        }
-        return prompt.toString().trim();
-    }
-    
-    /**
-     * Builds a full prompt with retrieval context for the default model.
-     *
-     * @deprecated Use {@link #buildStructuredPromptWithContextOutcome} for structure-aware truncation.
-     */
-    @Deprecated
-    public String buildPromptWithContext(List<Message> history, String latestUserMessage) {
-        return buildPromptWithContext(history, latestUserMessage, null);
-    }
-
-    /**
-     * Builds a full prompt with retrieval context and an optional model hint.
-     *
-     * @deprecated Use {@link #buildStructuredPromptWithContextOutcome} for structure-aware truncation.
-     */
-    @Deprecated
-    public String buildPromptWithContext(List<Message> history, String latestUserMessage, String modelHint) {
-        return buildPromptWithContextOutcome(history, latestUserMessage, modelHint).prompt();
-    }
-
-    /**
-     * Builds a prompt while returning retrieval notices for UI diagnostics.
-     *
-     * @param history existing chat history
-     * @param latestUserMessage user query
-     * @param modelHint optional model hint
-     * @return prompt plus retrieval notices
-     * @deprecated Use {@link #buildStructuredPromptWithContextOutcome} for structure-aware truncation.
-     */
-    @Deprecated
-    public ChatPromptOutcome buildPromptWithContextOutcome(List<Message> history,
-                                                          String latestUserMessage,
-                                                          String modelHint) {
-        // Use reduced RAG for token-constrained models (GPT-5.x family)
-        RetrievalService.RetrievalOutcome retrievalOutcome;
-        if (ModelConfiguration.isTokenConstrained(modelHint)) {
-            retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
-                latestUserMessage,
-                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
-                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED
-            );
-            logger.debug("Using reduced RAG for {}: {} documents with max {} tokens each",
-                modelHint,
-                retrievalOutcome.documents().size(),
-                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
-        } else {
-            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
-        }
-
-        List<Document> contextDocs = retrievalOutcome.documents();
-        String searchQualityNote = determineSearchQuality(contextDocs);
-        
-        // Build system prompt using centralized configuration
-        StringBuilder systemContext = new StringBuilder(systemPromptConfig.getCoreSystemPrompt());
-        
-        // Add search quality context if needed
-        if (!searchQualityNote.isEmpty()) {
-            systemContext.append("\n\nSEARCH CONTEXT: ").append(searchQualityNote);
-            
-            // Add low quality search guidance if applicable
-            if (searchQualityNote.contains("less relevant") || searchQualityNote.contains("keyword search")) {
-                systemContext.append("\n").append(systemPromptConfig.getLowQualitySearchPrompt());
-            }
-        }
-
-        appendContextDocs(systemContext, contextDocs);
-
-        List<Message> messages = new ArrayList<>();
-        messages.add(new UserMessage(systemContext.toString()));
-        messages.addAll(history);
-        messages.add(new UserMessage(latestUserMessage));
-
-        return new ChatPromptOutcome(
-                buildPromptFromMessages(messages),
-                retrievalOutcome.notices(),
-                retrievalOutcome.documents());
-    }
-
-    /**
-     * Builds a prompt with context and guidance for OpenAI streaming service.
-     *
-     * @param history conversation history
-     * @param latestUserMessage user query
-     * @param contextDocs pre-selected context documents
-     * @param guidance custom system guidance
-     * @return formatted prompt string
-     * @deprecated Use {@link #buildStructuredPromptWithContextAndGuidance} for structure-aware truncation.
-     */
-    @Deprecated
-    public String buildPromptWithContextAndGuidance(List<Message> history, String latestUserMessage,
-                                                   List<Document> contextDocs, String guidance) {
-        // Build system prompt with guidance
-        String basePrompt = systemPromptConfig.getCoreSystemPrompt();
-        String completePrompt = guidance != null && !guidance.isBlank()
-            ? systemPromptConfig.buildFullPrompt(basePrompt, guidance)
-            : basePrompt;
-
-        StringBuilder systemContext = new StringBuilder(completePrompt);
-
-        appendContextDocs(systemContext, contextDocs);
-
-        List<Message> messages = new ArrayList<>();
-        messages.add(new UserMessage(systemContext.toString()));
-        messages.addAll(history);
-        messages.add(new UserMessage(latestUserMessage));
-
-        return buildPromptFromMessages(messages);
     }
 
     /**
@@ -472,28 +330,6 @@ public class ChatService {
         } else {
             return String.format("Found %d documents (%d high-quality) via search. Some results may be less relevant.", 
                 docs.size(), highQualityDocs);
-        }
-    }
-
-    /**
-     * Captures the prompt, retrieval notices, and source documents for UI diagnostics and citations.
-     *
-     * @param prompt generated prompt
-     * @param notices retrieval notices to surface to clients
-     * @param documents source documents used for RAG context (for inline citation emission)
-     * @deprecated Use {@link StructuredPromptOutcome} for structure-aware truncation.
-     */
-    @Deprecated
-    public record ChatPromptOutcome(
-            String prompt,
-            List<RetrievalService.RetrievalNotice> notices,
-            List<Document> documents) {
-        public ChatPromptOutcome {
-            if (prompt == null) {
-                throw new IllegalArgumentException("Prompt cannot be null");
-            }
-            notices = notices == null ? List.of() : List.copyOf(notices);
-            documents = documents == null ? List.of() : List.copyOf(documents);
         }
     }
 
