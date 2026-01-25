@@ -15,7 +15,7 @@ Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) and supports:
 - **GitHub Models** via `GITHUB_TOKEN`
 - **OpenAI** via `OPENAI_API_KEY`
 
-If both keys are present, the service prefers OpenAI for streaming and can fall back to GitHub Models based on rate-limit/backoff state.
+If both keys are present, the service prefers OpenAI for streaming. There is no automatic cross-provider fallback; if the preferred provider fails or is rate-limited, the error is surfaced to the client rather than silently switching providers.
 
 Common variables:
 
