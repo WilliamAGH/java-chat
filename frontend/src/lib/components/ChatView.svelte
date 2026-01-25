@@ -1,9 +1,9 @@
 <script lang="ts">
-  import MessageBubble from './MessageBubble.svelte'
   import ChatInput from './ChatInput.svelte'
   import WelcomeScreen from './WelcomeScreen.svelte'
   import CitationPanel from './CitationPanel.svelte'
-  import ThinkingIndicator from './ThinkingIndicator.svelte'
+  import MessageBubble from './MessageBubble.svelte'
+  import StreamingMessagesList from './StreamingMessagesList.svelte'
   import { streamChat, type ChatMessage, type Citation } from '../services/chat'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
 
@@ -36,6 +36,8 @@
   /** Duration to keep status visible after streaming ends so users can read it. */
   const STATUS_PERSISTENCE_DURATION_MS = 800
 
+  // Session ID for chat continuity - generated client-side only, not rendered in DOM.
+  // Safe for CSR; if SSR is added, move generation to onMount or use server-provided ID.
   const sessionId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`
 
   /**
@@ -166,34 +168,24 @@
       {#if messages.length === 0 && !isStreaming}
         <WelcomeScreen onSuggestionClick={handleSuggestionClick} />
       {:else}
-        <div class="messages-list">
-          {#each messages as message, i (message.timestamp)}
+        <StreamingMessagesList
+          {messages}
+          {isStreaming}
+          streamingContent={currentStreamingContent}
+          statusMessage={streamStatusMessage}
+          statusDetails={streamStatusDetails}
+          hasContent={false}
+        >
+          {#snippet messageRenderer({ message, index })}
+            {@const typedMessage = message as MessageWithCitations}
             <div class="message-with-citations">
-              <MessageBubble {message} index={i} />
-              {#if message.role === 'assistant' && message.citations && message.citations.length > 0 && !message.isError}
-                <CitationPanel citations={message.citations} />
+              <MessageBubble message={typedMessage} {index} />
+              {#if typedMessage.role === 'assistant' && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+                <CitationPanel citations={typedMessage.citations} />
               {/if}
             </div>
-          {/each}
-
-          {#if isStreaming && currentStreamingContent}
-            <MessageBubble
-              message={{
-                role: 'assistant',
-                content: currentStreamingContent,
-                timestamp: Date.now()
-              }}
-              index={messages.length}
-              isStreaming={true}
-            />
-          {:else if isStreaming}
-            <ThinkingIndicator
-              statusMessage={streamStatusMessage}
-              statusDetails={streamStatusDetails}
-              hasContent={false}
-            />
-          {/if}
-        </div>
+          {/snippet}
+        </StreamingMessagesList>
       {/if}
     </div>
   </div>
@@ -219,12 +211,7 @@
     max-width: 800px;
     margin: 0 auto;
     padding: var(--space-6);
-  }
-
-  .messages-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-6);
+    --messages-list-gap: var(--space-6);
   }
 
   .message-with-citations {
@@ -243,10 +230,7 @@
   @media (max-width: 640px) {
     .messages-inner {
       padding: var(--space-3);
-    }
-
-    .messages-list {
-      gap: var(--space-4);
+      --messages-list-gap: var(--space-4);
     }
   }
 
@@ -254,10 +238,7 @@
   @media (max-width: 380px) {
     .messages-inner {
       padding: var(--space-2);
-    }
-
-    .messages-list {
-      gap: var(--space-3);
+      --messages-list-gap: var(--space-3);
     }
   }
 </style>
