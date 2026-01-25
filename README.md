@@ -9,6 +9,7 @@ Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 - Streaming chat over SSE (`/api/chat/stream`) with a final `citation` event
 - Guided learning mode (`/learn`) with lesson-scoped chat (`/api/guided/*`)
 - Documentation ingestion pipeline (fetch → chunk → embed → dedupe → index)
+- Chunking uses JTokkit's CL100K_BASE tokenizer (GPT-3.5/4 style) for token counting
 - Embedding fallbacks: local embedding server → remote/OpenAI → hash fallback
 
 ## Quick start
