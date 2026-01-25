@@ -241,10 +241,10 @@
   .icon-sparkle {
     width: 18px;
     height: 18px;
-    animation: generate-glow var(--duration-glow) ease-in-out infinite;
+    animation: sparkle-glow var(--duration-glow) ease-in-out infinite;
   }
 
-  @keyframes generate-glow {
+  @keyframes sparkle-glow {
     0%, 100% {
       opacity: 0.7;
       filter: drop-shadow(0 0 0 transparent);

@@ -186,8 +186,10 @@ public class GuidedLearningController extends BaseController {
         String userQuery = request.userQuery();
         String lessonSlug = request.lessonSlug();
 
-        chatMemory.addUser(sessionId, userQuery);
+        // Load history BEFORE adding user message to avoid duplication in prompt
+        // (buildGuidedPromptWithContext adds latestUserMessage separately)
         List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        chatMemory.addUser(sessionId, userQuery);
         StringBuilder fullResponse = new StringBuilder();
 
         // Use OpenAI streaming only (legacy fallback removed)

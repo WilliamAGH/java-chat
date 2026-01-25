@@ -45,16 +45,36 @@ final class OrderedMarkerScanner {
     }
 
     /**
-     * Checks if text starts with any ordered list marker.
+     * Checks if text starts with any ordered list marker per CommonMark spec.
+     *
+     * <p>Unlike {@link #scanAt}, this method enforces CommonMark's requirement
+     * for whitespace after the marker delimiter. Text like "1.Foo" is rejected
+     * because there's no space between "." and "Foo".</p>
      *
      * @param trimmedLine line with leading whitespace already removed
-     * @return true if the line starts with an ordered marker
+     * @return true if the line starts with a CommonMark-compliant ordered marker
      */
     static boolean startsWithOrderedMarker(String trimmedLine) {
         if (trimmedLine == null || trimmedLine.isEmpty()) {
             return false;
         }
-        return scanAt(trimmedLine, 0).isPresent();
+        var match = scanAt(trimmedLine, 0);
+        if (match.isEmpty()) {
+            return false;
+        }
+        // CommonMark requires whitespace after marker delimiter (. or ))
+        // Reject "1.Foo" but accept "1. Foo" or "1." at end of line
+        for (int cursor = 0; cursor < trimmedLine.length(); cursor++) {
+            char c = trimmedLine.charAt(cursor);
+            if (c == '.' || c == ')') {
+                // Found delimiter at position cursor
+                int posAfterDelimiter = cursor + 1;
+                // Valid if: at end of line, or next char is whitespace
+                return posAfterDelimiter >= trimmedLine.length()
+                    || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
+            }
+        }
+        return false;
     }
 
     /**

@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
@@ -154,12 +155,20 @@ public class ChatService {
         return retrievalService.toCitations(docs);
     }
 
+    /**
+     * Builds a prompt string from a list of messages, including both user and assistant messages.
+     * This ensures the LLM has full conversation context matching what the frontend displays.
+     *
+     * @param messages the conversation history including system context, user messages, and assistant responses
+     * @return formatted prompt string with role prefixes for multi-turn conversation
+     */
     private String buildPromptFromMessages(List<Message> messages) {
         StringBuilder prompt = new StringBuilder();
         for (Message msg : messages) {
-            if (msg instanceof UserMessage) {
-                UserMessage userMsg = (UserMessage) msg;
+            if (msg instanceof UserMessage userMsg) {
                 prompt.append(userMsg.getText()).append("\n\n");
+            } else if (msg instanceof AssistantMessage assistantMsg) {
+                prompt.append("Assistant: ").append(assistantMsg.getText()).append("\n\n");
             }
         }
         return prompt.toString().trim();

@@ -282,6 +282,27 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("Cleared chat session");
         return ResponseEntity.ok("Session cleared");
     }
+
+    /**
+     * Validates session state for frontend synchronization.
+     * Returns the server-side message count so frontends can detect drift after server restarts.
+     *
+     * @param sessionId The ID of the chat session to validate.
+     * @return Session validation info including message count.
+     */
+    @GetMapping("/session/validate")
+    public ResponseEntity<SessionValidationResponse> validateSession(
+            @RequestParam(name = "sessionId") String sessionId) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            return ResponseEntity.badRequest().body(
+                new SessionValidationResponse("", 0, false, "Session ID is required"));
+        }
+        var turns = chatMemory.getTurns(sessionId);
+        int turnCount = turns.size();
+        boolean exists = turnCount > 0;
+        return ResponseEntity.ok(new SessionValidationResponse(
+            sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
+    }
     
     /**
      * Reports whether the configured local embedding server is reachable when the feature is enabled.
