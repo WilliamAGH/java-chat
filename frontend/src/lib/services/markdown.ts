@@ -71,92 +71,6 @@ function hasBalancedCodeFences(content: string): boolean {
 /** Enrichment close marker. */
 const ENRICHMENT_CLOSE = '}}'
 
-/** Maximum digit length supported for stripping inline citation markers like [123]. */
-const INLINE_CITATION_MAX_DIGITS = 3
-
-function isAsciiAlphaNumeric(char: string): boolean {
-  if (!char) return false
-  const code = char.charCodeAt(0)
-  return (
-    (code >= 48 && code <= 57) || // 0-9
-    (code >= 65 && code <= 90) || // A-Z
-    (code >= 97 && code <= 122) // a-z
-  )
-}
-
-function isAsciiDigit(char: string): boolean {
-  if (!char) return false
-  const code = char.charCodeAt(0)
-  return code >= 48 && code <= 57
-}
-
-function isStandaloneBracketNumber(text: string, openIndex: number, closeIndex: number): boolean {
-  if (openIndex > 0 && isAsciiAlphaNumeric(text[openIndex - 1])) {
-    return false
-  }
-  if (closeIndex + 1 < text.length && isAsciiAlphaNumeric(text[closeIndex + 1])) {
-    return false
-  }
-  return true
-}
-
-function skipSpacesAfterBracket(text: string, nextIndex: number, output: string[]): number {
-  if (output.length > 0 && output[output.length - 1] === ' ') {
-    while (nextIndex < text.length && text[nextIndex] === ' ') {
-      nextIndex++
-    }
-  }
-  return nextIndex
-}
-
-/**
- * Removes inline citation markers like [1] from plain text while preserving legitimate uses like array[1].
- * Intended as a UI backstop in case a model emits footnote markers despite prompt instructions.
- */
-function stripInlineCitationMarkers(text: string): string {
-  if (!text || !text.includes('[')) {
-    return text
-  }
-
-  const output: string[] = []
-  let cursor = 0
-
-  while (cursor < text.length) {
-    const currentChar = text[cursor]
-    if (currentChar !== '[') {
-      output.push(currentChar)
-      cursor++
-      continue
-    }
-
-    const openIndex = cursor
-    let scanIndex = cursor + 1
-    let digitCount = 0
-
-    while (
-      scanIndex < text.length &&
-      digitCount < INLINE_CITATION_MAX_DIGITS &&
-      isAsciiDigit(text[scanIndex])
-    ) {
-      scanIndex++
-      digitCount++
-    }
-
-    if (digitCount > 0 && scanIndex < text.length && text[scanIndex] === ']') {
-      const closeIndex = scanIndex
-      if (isStandaloneBracketNumber(text, openIndex, closeIndex)) {
-        cursor = skipSpacesAfterBracket(text, closeIndex + 1, output)
-        continue
-      }
-    }
-
-    output.push(currentChar)
-    cursor++
-  }
-
-  return output.join('')
-}
-
 /**
  * Finds the closing }} for an enrichment marker, skipping }} inside code fences.
  * Scans character-by-character, tracking fence state at line boundaries.
@@ -275,15 +189,7 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 marked.use({
   gfm: true,
   breaks: true,
-  extensions: [createEnrichmentExtension()],
-  walkTokens: (token) => {
-    if (token.type === 'text') {
-      const textToken = token as Tokens.Text
-      if (typeof textToken.text === 'string') {
-        textToken.text = stripInlineCitationMarkers(textToken.text)
-      }
-    }
-  }
+  extensions: [createEnrichmentExtension()]
 })
 
 /** Keywords indicating Java code for auto-detection. */

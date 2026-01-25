@@ -36,38 +36,6 @@ describe('parseMarkdown', () => {
     expect(renderedHtml).toContain('data-enrichment-type="hint"')
   })
 
-  it('strips inline citation markers like [1] in rendered HTML', () => {
-    const markdown = 'Hello world. [1]\n\nNext paragraph.'
-    const renderedHtml = parseMarkdown(markdown)
-    expect(renderedHtml).toContain('Hello world.')
-    expect(renderedHtml).not.toContain('[1]')
-  })
-
-  it('strips multi-digit citation markers up to 3 digits', () => {
-    const markdown = 'Reference [12] and [123] here.'
-    const renderedHtml = parseMarkdown(markdown)
-    expect(renderedHtml).not.toContain('[12]')
-    expect(renderedHtml).not.toContain('[123]')
-  })
-
-  it('preserves 4+ digit bracket numbers', () => {
-    const markdown = 'Error code [1234] is special.'
-    const renderedHtml = parseMarkdown(markdown)
-    expect(renderedHtml).toContain('[1234]')
-  })
-
-  it('does not strip bracket indexing like array[1]', () => {
-    const markdown = 'Use array[1] to access the second element.'
-    const renderedHtml = parseMarkdown(markdown)
-    expect(renderedHtml).toContain('array[1]')
-  })
-
-  it('does not strip bracket markers inside code blocks', () => {
-    const markdown = '```java\nSystem.out.println("x"); // [1]\n```'
-    const renderedHtml = parseMarkdown(markdown)
-    expect(renderedHtml).toContain('[1]')
-  })
-
   it('is SSR-safe - does not use document APIs', () => {
     // This test verifies parseMarkdown works without DOM
     // If it used document.createElement, this would fail in Node
