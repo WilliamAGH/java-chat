@@ -5,6 +5,7 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -407,7 +408,8 @@ class MarkdownServiceTest {
 
             // Track pre/code depth
             if (currentChar == '<' && cursorIndex + 5 < html.length()) {
-                String ahead = html.substring(cursorIndex, Math.min(cursorIndex + 7, html.length())).toLowerCase();
+                String ahead = html.substring(cursorIndex, Math.min(cursorIndex + 7, html.length()))
+                    .toLowerCase(Locale.ROOT);
                 if (ahead.startsWith("<pre>") || ahead.startsWith("<pre ")) {
                     preDepth++;
                 } else if (ahead.startsWith("</pre>")) {
