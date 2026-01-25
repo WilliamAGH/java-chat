@@ -21,6 +21,9 @@ import java.util.zip.GZIPOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/**
+ * Verifies legacy embedding cache imports remain compatible with new metadata handling.
+ */
 final class EmbeddingCacheServiceLegacyImportTest {
     @Test
     void importsLegacyJavaSerializedCacheAndPreservesAdditionalMetadata(@TempDir Path tempDir) throws Exception {

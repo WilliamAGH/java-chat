@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -43,7 +44,7 @@ public class DocumentFactory {
         );
 
         // Create and configure the document
-        var document = new org.springframework.ai.document.Document(text);
+        var document = createDocumentWithOptionalId(text, hash);
         // Persist hash alongside metadata (used for audit and dedup checks)
         document.getMetadata().putAll(metadata);
 
@@ -111,5 +112,12 @@ public class DocumentFactory {
         doc.getMetadata().put("pageStart", pageStart);
         doc.getMetadata().put("pageEnd", pageEnd);
         return doc;
+    }
+
+    private org.springframework.ai.document.Document createDocumentWithOptionalId(String text, String hash) {
+        if (hash == null || hash.isBlank()) {
+            return new org.springframework.ai.document.Document(text);
+        }
+        return new org.springframework.ai.document.Document(hash, text, new HashMap<>());
     }
 }
