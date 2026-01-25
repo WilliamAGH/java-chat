@@ -53,8 +53,7 @@ public class QdrantClientConfig {
     @Bean
     @Primary
     public QdrantClient qdrantClient() {
-        log.info("Creating QdrantClient with gRPC keepalive (host={}, port={}, tls={})",
-            host, port, useTls);
+        log.info("Creating QdrantClient with gRPC keepalive");
 
         ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(host, port);
         if (useTls) {
