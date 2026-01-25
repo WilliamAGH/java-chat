@@ -1,13 +1,13 @@
 <script lang="ts">
-	  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
-	  import { clearChatSession, type Citation, type ChatMessage } from '../services/chat'
-		  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
-		  import CitationPanel from './CitationPanel.svelte'
-		  import GuidedLessonChatPanel from './GuidedLessonChatPanel.svelte'
-		  import LessonCitations from './LessonCitations.svelte'
-		  import MessageBubble from './MessageBubble.svelte'
+  import { fetchTOC, fetchLessonContent, fetchGuidedLessonCitations, streamGuidedChat, type GuidedLesson } from '../services/guided'
+  import { clearChatSession, type Citation, type ChatMessage } from '../services/chat'
+  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
+  import CitationPanel from './CitationPanel.svelte'
+  import GuidedLessonChatPanel from './GuidedLessonChatPanel.svelte'
+  import LessonCitations from './LessonCitations.svelte'
+  import MessageBubble from './MessageBubble.svelte'
   import ThinkingIndicator from './ThinkingIndicator.svelte'
-	  import MobileChatDrawer from './MobileChatDrawer.svelte'
+  import MobileChatDrawer from './MobileChatDrawer.svelte'
   import { deduplicateCitations } from '../utils/url'
   import { highlightCodeBlocks } from '../utils/highlight'
   import { isNearBottom, scrollToBottom } from '../utils/scroll'
@@ -51,10 +51,10 @@
     return !!activeMessage?.content
   })
 
-	  // Desktop chat panel ref for scroll management
-	  let desktopChatPanel: GuidedLessonChatPanel | null = $state(null)
-	  // Component ref for mobile drawer to access its scroll container
-	  let mobileDrawer: MobileChatDrawer | null = $state(null)
+  // Desktop chat panel ref for scroll management
+  let desktopChatPanel: GuidedLessonChatPanel | null = $state(null)
+  // Component ref for mobile drawer to access its scroll container
+  let mobileDrawer: MobileChatDrawer | null = $state(null)
 
   // Mobile chat drawer state
   let isChatDrawerOpen = $state(false)
@@ -63,35 +63,35 @@
   let lessonContentEl: HTMLElement | null = $state(null)
   let lessonContentPanelEl: HTMLElement | null = $state(null)
 
-	  // Session IDs per lesson for backend conversation isolation
-	  // Each lesson gets its own session ID to prevent conversation bleeding across topics
-	  const sessionIdsByLesson = new Map<string, string>()
+  // Session IDs per lesson for backend conversation isolation
+  // Each lesson gets its own session ID to prevent conversation bleeding across topics
+  const sessionIdsByLesson = new Map<string, string>()
 
-	  let guidedChatAbortController: AbortController | null = null
-	  let guidedChatStreamVersion = 0
+  let guidedChatAbortController: AbortController | null = null
+  let guidedChatStreamVersion = 0
 
   /**
    * Gets or creates a session ID for a specific lesson.
    * Each lesson gets its own backend session to prevent conversation bleeding.
    */
-	  function getSessionIdForLesson(slug: string): string {
-	    let lessonSessionId = sessionIdsByLesson.get(slug)
-	    if (!lessonSessionId) {
-	      lessonSessionId = generateSessionId(`guided:${slug}`)
-	      sessionIdsByLesson.set(slug, lessonSessionId)
-	    }
-	    return lessonSessionId
-	  }
+  function getSessionIdForLesson(slug: string): string {
+    let lessonSessionId = sessionIdsByLesson.get(slug)
+    if (!lessonSessionId) {
+      lessonSessionId = generateSessionId(`guided:${slug}`)
+      sessionIdsByLesson.set(slug, lessonSessionId)
+    }
+    return lessonSessionId
+  }
 
-	  function cancelInFlightGuidedChatStream(): void {
-	    guidedChatStreamVersion++
-	    if (guidedChatAbortController) {
-	      guidedChatAbortController.abort()
-	      guidedChatAbortController = null
-	    }
-	    streaming.reset()
-	    activeStreamingMessageId = null
-	  }
+  function cancelInFlightGuidedChatStream(): void {
+    guidedChatStreamVersion++
+    if (guidedChatAbortController) {
+      guidedChatAbortController.abort()
+      guidedChatAbortController = null
+    }
+    streaming.reset()
+    activeStreamingMessageId = null
+  }
 
   // Rendered lesson content - SSR-safe parsing without DOM operations
   let renderedLesson = $derived(
@@ -188,10 +188,10 @@
       chatHistoryByLesson.set(selectedLesson.slug, [...messages])
     }
 
-	    // Cancel any in-flight stream
-	    cancelInFlightGuidedChatStream()
-	    isChatDrawerOpen = false
-	    selectedLesson = null
+    // Cancel any in-flight stream
+    cancelInFlightGuidedChatStream()
+    isChatDrawerOpen = false
+    selectedLesson = null
     lessonMarkdown = ''
     lessonError = null
     lessonCitations = []
@@ -200,23 +200,23 @@
     messages = []
   }
 
-	  function clearChat(): void {
-	    cancelInFlightGuidedChatStream()
-	    if (selectedLesson) {
-	      const lessonSlug = selectedLesson.slug
-	      const lessonSessionId = sessionIdsByLesson.get(lessonSlug)
-	      if (lessonSessionId) {
-	        sessionIdsByLesson.delete(lessonSlug)
-	        void clearChatSession(lessonSessionId).catch((error) => {
-	          console.warn(`[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`, error)
-	        })
-	      }
+  function clearChat(): void {
+    cancelInFlightGuidedChatStream()
+    if (selectedLesson) {
+      const lessonSlug = selectedLesson.slug
+      const lessonSessionId = sessionIdsByLesson.get(lessonSlug)
+      if (lessonSessionId) {
+        sessionIdsByLesson.delete(lessonSlug)
+        void clearChatSession(lessonSessionId).catch((error) => {
+          console.warn(`[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`, error)
+        })
+      }
 
-	      chatHistoryByLesson.delete(lessonSlug)
-	    }
+      chatHistoryByLesson.delete(lessonSlug)
+    }
 
-	    messages = []
-	  }
+    messages = []
+  }
 
   function toggleChatDrawer(): void {
     isChatDrawerOpen = !isChatDrawerOpen
@@ -230,12 +230,12 @@
     shouldAutoScroll = true
   }
 
-	  /** Returns the currently active messages container based on drawer state. */
-	  function getActiveMessagesContainer(): HTMLElement | null {
-	    return isChatDrawerOpen
-	      ? mobileDrawer?.getMessagesContainer() ?? null
-	      : desktopChatPanel?.getMessagesContainer() ?? null
-	  }
+  /** Returns the currently active messages container based on drawer state. */
+  function getActiveMessagesContainer(): HTMLElement | null {
+    return isChatDrawerOpen
+      ? mobileDrawer?.getMessagesContainer() ?? null
+      : desktopChatPanel?.getMessagesContainer() ?? null
+  }
 
   function checkAutoScroll(): void {
     shouldAutoScroll = isNearBottom(getActiveMessagesContainer())
