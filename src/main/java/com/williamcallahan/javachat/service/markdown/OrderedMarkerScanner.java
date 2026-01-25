@@ -45,16 +45,42 @@ final class OrderedMarkerScanner {
     }
 
     /**
-     * Checks if text starts with any ordered list marker.
+     * Checks if text starts with any ordered list marker per CommonMark spec.
+     *
+     * <p>Unlike {@link #scanAt}, this method enforces CommonMark's requirement
+     * for whitespace after the marker delimiter. Text like "1.Foo" is rejected
+     * because there's no space between "." and "Foo".</p>
      *
      * @param trimmedLine line with leading whitespace already removed
-     * @return true if the line starts with an ordered marker
+     * @return true if the line starts with a CommonMark-compliant ordered marker
      */
     static boolean startsWithOrderedMarker(String trimmedLine) {
         if (trimmedLine == null || trimmedLine.isEmpty()) {
             return false;
         }
-        return scanAt(trimmedLine, 0).isPresent();
+        var match = scanAt(trimmedLine, 0);
+        if (match.isEmpty()) {
+            return false;
+        }
+        // CommonMark requires whitespace after marker delimiter (. or ))
+        // Reject "1.Foo" but accept "1. Foo" or "1." at end of line
+        int markerEnd = match.get().afterIndex();
+        // If afterIndex skipped any whitespace, we have valid CommonMark marker
+        // Find the delimiter position (just before first whitespace or content)
+        // The marker sequence ends just before the delimiter, so sequenceEnd+1 is delimiter position
+        // afterIndex is after the delimiter and any trailing whitespace
+        // If markerEnd > (position right after delimiter), then whitespace was consumed
+        for (int i = 0; i < trimmedLine.length(); i++) {
+            char c = trimmedLine.charAt(i);
+            if (c == '.' || c == ')') {
+                // Found delimiter at position i
+                int posAfterDelimiter = i + 1;
+                // Valid if: at end of line, or next char is whitespace
+                return posAfterDelimiter >= trimmedLine.length()
+                    || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
+            }
+        }
+        return false;
     }
 
     /**
