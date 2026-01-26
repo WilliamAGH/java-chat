@@ -39,9 +39,7 @@ class SeoControllerTest {
                 .andReturn();
         Document htmlDocument = Jsoup.parse(mvcOutcome.getResponse().getContentAsString());
 
-        assertEquals(
-                "Java Chat - AI-Powered Java Learning With Citations",
-                htmlDocument.title());
+        assertEquals("Java Chat - AI-Powered Java Learning With Citations", htmlDocument.title());
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com");
     }
 
@@ -67,17 +65,12 @@ class SeoControllerTest {
     }
 
     private Document loadSeoDocument(String path) throws Exception {
-        MvcResult mvcOutcome = mvc.perform(get(path))
-                .andExpect(status().isOk())
-                .andReturn();
+        MvcResult mvcOutcome = mvc.perform(get(path)).andExpect(status().isOk()).andReturn();
         return Jsoup.parse(mvcOutcome.getResponse().getContentAsString());
     }
 
     private void assertMetaContent(
-            Document htmlDocument,
-            String attributeName,
-            String attributeMatch,
-            String expectedContent) {
+            Document htmlDocument, String attributeName, String attributeMatch, String expectedContent) {
         String attributeSelector = "meta[" + attributeName + "=\"" + attributeMatch + "\"]";
         Element metaElement = htmlDocument.head().selectFirst(attributeSelector);
         assertNotNull(metaElement, "Missing meta tag for " + attributeName + "=" + attributeMatch);
