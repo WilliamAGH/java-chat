@@ -2,8 +2,8 @@ repos:
   - repo: local
     hooks:
       - id: spotless-java
-        name: Spotless Java (Gradle)
-        entry: ./gradlew spotlessJavaCheck --no-daemon
+        name: Spotless Java (Gradle, auto-format)
+        entry: ./gradlew spotlessApply --no-daemon
         language: system
         pass_filenames: false
       - id: frontend-check

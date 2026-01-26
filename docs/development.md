@@ -66,7 +66,8 @@ make build
 #### Git Hooks (prek)
 
 This repo uses a `pre-commit` configuration compatible with [prek](https://prek.j178.dev/) to catch
-formatting and frontend issues before commits. Hooks are local, so each developer installs once:
+formatting and frontend issues before commits. The Java hook auto-formats with Spotless, so commits
+may update files. Hooks are local, so each developer installs once:
 
 ```bash
 prek install --install-hooks
