@@ -112,9 +112,8 @@ public class ExtractorQualityTest {
                     // New extraction
                     String path = file.toString();
                     boolean isApiDoc = path.contains("/api/") || path.contains("\\api\\");
-                    String newText = isApiDoc
-                            ? extractor.extractJavaApiContent(doc)
-                            : extractor.extractCleanContent(doc);
+                    String newText =
+                            isApiDoc ? extractor.extractJavaApiContent(doc) : extractor.extractCleanContent(doc);
 
                     // Count noise patterns
                     String[] noisePatterns = {
@@ -144,9 +143,8 @@ public class ExtractorQualityTest {
                     System.out.println("File " + (i + 1) + ": " + file.getFileName());
                     System.out.println("  Old: " + oldText.length() + " chars, " + oldNoise + " noise patterns");
                     System.out.println("  New: " + newText.length() + " chars, " + newNoise + " noise patterns");
-                    double reduction = oldText.length() > 0
-                            ? (1.0 - (double) newText.length() / oldText.length()) * 100
-                            : 0;
+                    double reduction =
+                            oldText.length() > 0 ? (1.0 - (double) newText.length() / oldText.length()) * 100 : 0;
                     System.out.println("  Reduction: "
                             + String.format("%.1f%%", reduction)
                             + " size, "
@@ -169,11 +167,8 @@ public class ExtractorQualityTest {
                 System.out.println("Summary for " + name + ":");
                 System.out.println("  Total noise patterns: " + totalOldNoise + " → " + totalNewNoise + " ("
                         + (totalOldNoise - totalNewNoise) + " removed)");
-                double avgReduction = totalOldLength > 0
-                        ? (1.0 - (double) totalNewLength / totalOldLength) * 100
-                        : 0;
-                System.out.println("  Average size reduction: "
-                        + String.format("%.1f%%", avgReduction));
+                double avgReduction = totalOldLength > 0 ? (1.0 - (double) totalNewLength / totalOldLength) * 100 : 0;
+                System.out.println("  Average size reduction: " + String.format("%.1f%%", avgReduction));
                 System.out.println("  Quality improvement: "
                         + (totalNewNoise == 0
                                 ? "✅ EXCELLENT - No noise patterns"

@@ -29,12 +29,10 @@ public enum SearchQualityLevel {
      */
     MIXED_QUALITY;
 
-    private static final String MESSAGE_NONE =
-            "No relevant documents found. Using general knowledge only.";
+    private static final String MESSAGE_NONE = "No relevant documents found. Using general knowledge only.";
     private static final String MESSAGE_KEYWORD_SEARCH =
             "Found %d documents via keyword search (embedding service unavailable). Results may be less semantically relevant.";
-    private static final String MESSAGE_HIGH_QUALITY =
-            "Found %d high-quality relevant documents via semantic search.";
+    private static final String MESSAGE_HIGH_QUALITY = "Found %d high-quality relevant documents via semantic search.";
     private static final String MESSAGE_MIXED_QUALITY =
             "Found %d documents (%d high-quality) via search. Some results may be less relevant.";
     private static final String KEYWORD_MARKER_LOCAL_SEARCH = "local-search";

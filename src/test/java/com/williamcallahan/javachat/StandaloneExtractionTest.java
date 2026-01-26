@@ -94,9 +94,7 @@ public class StandaloneExtractionTest {
                 // New extraction
                 String path = file.toString();
                 boolean isApiDoc = path.contains("/api/") || path.contains("\\api\\");
-                String newText = isApiDoc
-                        ? extractor.extractJavaApiContent(doc)
-                        : extractor.extractCleanContent(doc);
+                String newText = isApiDoc ? extractor.extractJavaApiContent(doc) : extractor.extractCleanContent(doc);
 
                 // Count noise patterns
                 String[] noisePatterns = {
