@@ -47,7 +47,7 @@ jobs:
       
       - name: Upload test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: build/test-results/
@@ -55,7 +55,7 @@ jobs:
       
       - name: Upload SpotBugs report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: spotbugs-report
           path: build/reports/spotbugs/
@@ -63,7 +63,7 @@ jobs:
       
       - name: Upload PMD report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pmd-report
           path: build/reports/pmd/
