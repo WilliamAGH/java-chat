@@ -62,6 +62,10 @@ run: build ## Run the packaged jar (loads .env if present)
 	      --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
 	      --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
 	    ); \
+	  elif [ -n "$$OPENAI_API_KEY" ]; then \
+	    APP_ARGS+=( \
+	      --spring.ai.openai.api-key="$$OPENAI_API_KEY" \
+	    ); \
 	  fi; \
 	  # Add conservative JVM memory limits to prevent OS-level SIGKILL (exit 137) under memory pressure
 	  # Tuned for local dev: override via JAVA_OPTS env if needed
