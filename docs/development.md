@@ -12,11 +12,11 @@ The project is configured to use **Gradle Toolchains** with **Temurin JDK 25** f
 
 ##### Option 1: Using mise (recommended)
 
-[mise](https://mise.jdnow.dev/) is a modern version manager that reads `.tool-versions` for Java versioning.
+[mise](https://mise.jdx.dev/) is a modern version manager that reads `.tool-versions` for Java versioning.
 
 ```bash
 # Install mise (one-time)
-curl https://mise.jdnow.dev | sh
+curl https://mise.jdx.dev/install.sh | sh
 
 # Then, in the repo:
 mise install
@@ -136,7 +136,7 @@ Example:
 
 1. **Local dev**: Patch version determined by `mise`/`asdf` + Foojay resolver.
 2. **CI/CD**: GitHub Actions logs exact Java patch version:
-   ```
+   ```text
    java -version
    # Output: openjdk version "25.0.3" 2024-XX-XX
    ```
