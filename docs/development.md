@@ -46,7 +46,7 @@ asdf install
 2. **Gradle Wrapper** (`./gradlew`) pins Gradle 9.2.1.
 3. **Gradle Toolchains** auto-downloads Temurin JDK 25 if missing (enabled by Foojay resolver in `settings.gradle.kts`).
 4. **Result**: Consistent Java version across:
-   - Shell commands (`gradle build`, `java -version`)
+   - Shell commands (`./gradlew build`, `java -version`)
    - IntelliJ "Gradle JVM" setting
    - IntelliJ "Project SDK" setting
 

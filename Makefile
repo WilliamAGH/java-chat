@@ -46,6 +46,7 @@ format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
 
 hooks: ## Install git hooks via prek
+	@command -v prek >/dev/null 2>&1 || { echo "Error: 'prek' not found. Install it first: https://prek.j178.dev/" >&2; exit 1; }
 	prek install --install-hooks
 
 run: build ## Run the packaged jar (loads .env if present)
