@@ -29,6 +29,17 @@ public enum SearchQualityLevel {
      */
     MIXED_QUALITY;
 
+    private static final String MESSAGE_NONE =
+            "No relevant documents found. Using general knowledge only.";
+    private static final String MESSAGE_KEYWORD_SEARCH =
+            "Found %d documents via keyword search (embedding service unavailable). Results may be less semantically relevant.";
+    private static final String MESSAGE_HIGH_QUALITY =
+            "Found %d high-quality relevant documents via semantic search.";
+    private static final String MESSAGE_MIXED_QUALITY =
+            "Found %d documents (%d high-quality) via search. Some results may be less relevant.";
+    private static final String KEYWORD_MARKER_LOCAL_SEARCH = "local-search";
+    private static final String KEYWORD_MARKER_KEYWORD = "keyword";
+
     /**
      * Minimum content length to consider a document as having substantial content.
      * Documents shorter than this threshold are classified as lower quality.
@@ -44,14 +55,10 @@ public enum SearchQualityLevel {
      */
     public String formatMessage(int totalCount, int highQualityCount) {
         return switch (this) {
-            case NONE -> "No relevant documents found. Using general knowledge only.";
-            case KEYWORD_SEARCH ->
-                "Found " + totalCount + " documents via keyword search (embedding service unavailable). "
-                        + "Results may be less semantically relevant.";
-            case HIGH_QUALITY -> "Found " + totalCount + " high-quality relevant documents via semantic search.";
-            case MIXED_QUALITY ->
-                "Found " + totalCount + " documents (" + highQualityCount + " high-quality) via search. "
-                        + "Some results may be less relevant.";
+            case NONE -> MESSAGE_NONE;
+            case KEYWORD_SEARCH -> MESSAGE_KEYWORD_SEARCH.formatted(totalCount);
+            case HIGH_QUALITY -> MESSAGE_HIGH_QUALITY.formatted(totalCount);
+            case MIXED_QUALITY -> MESSAGE_MIXED_QUALITY.formatted(totalCount, highQualityCount);
         };
     }
 
@@ -85,7 +92,7 @@ public enum SearchQualityLevel {
 
         // Check if documents came from keyword/fallback search
         boolean likelyKeywordSearch = contents.stream().anyMatch(content -> content.getSourceUrl()
-                .filter(url -> url.contains("local-search") || url.contains("keyword"))
+                .filter(url -> url.contains(KEYWORD_MARKER_LOCAL_SEARCH) || url.contains(KEYWORD_MARKER_KEYWORD))
                 .isPresent());
 
         if (likelyKeywordSearch) {
