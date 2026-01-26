@@ -48,8 +48,7 @@ public class GuidedTOCProvider {
                 cache = List.copyOf(loadedLessons);
             }
         } catch (IOException exception) {
-            log.warn("Failed to load guided TOC", exception);
-            cache = Collections.emptyList();
+            throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
         } finally {
             tocLoaded = true;
         }
