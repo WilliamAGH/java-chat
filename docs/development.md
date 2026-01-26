@@ -218,5 +218,5 @@ make compose-down
 - [Gradle Toolchains](https://docs.gradle.org/current/userguide/toolchains.html)
 - [Foojay Resolver Convention](https://plugins.gradle.org/plugin/org.gradle.toolchains.foojay-resolver-convention)
 - [Eclipse Temurin JDK](https://adoptium.net/)
-- [mise version manager](https://mise.jdnow.dev/)
+- [mise version manager](https://mise.jdx.dev/)
 - [asdf version manager](https://asdf-vm.com/)
