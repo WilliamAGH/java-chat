@@ -49,9 +49,8 @@ public class GuidedTOCProvider {
             }
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
-        } finally {
-            tocLoaded = true;
         }
+        tocLoaded = true;
         return cache;
     }
 
