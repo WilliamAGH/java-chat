@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import jakarta.annotation.security.PermitAll;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
@@ -17,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Controller
 @RequestMapping("/test-errors")
+@Profile("!prod")
 @PermitAll
 @PreAuthorize("permitAll()")
 public class ErrorTestController {
