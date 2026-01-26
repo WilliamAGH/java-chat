@@ -21,7 +21,9 @@ export RED GREEN YELLOW CYAN NC
 export PROJECT_ROOT := $(shell pwd)
 export JAR_PATH = $(call get_jar)
 
-.PHONY: help clean build test lint format run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint format run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+
+all: help ## Default target (alias)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
