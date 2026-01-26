@@ -92,7 +92,9 @@ public class StandaloneExtractionTest {
                 String oldText = doc.body() != null ? doc.body().text() : "";
 
                 // New extraction
-                String newText = file.toString().contains("/api/")
+                String path = file.toString();
+                boolean isApiDoc = path.contains("/api/") || path.contains("\\api\\");
+                String newText = isApiDoc
                         ? extractor.extractJavaApiContent(doc)
                         : extractor.extractCleanContent(doc);
 
