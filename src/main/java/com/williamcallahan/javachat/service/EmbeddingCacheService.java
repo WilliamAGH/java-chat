@@ -185,7 +185,9 @@ public class EmbeddingCacheService {
 
         if (!toCompute.isEmpty()) {
             CACHE_LOG.info(
-                    "Computing {} new embeddings (cache hit rate: {:.1f}%)", toCompute.size(), getCacheHitRate() * 100);
+                    "Computing {} new embeddings (cache hit rate: {}%)",
+                    toCompute.size(),
+                    String.format("%.1f", getCacheHitRate() * 100));
 
             List<String> texts = toCompute.stream().map(Document::getText).collect(Collectors.toList());
 
