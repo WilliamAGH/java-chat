@@ -18,14 +18,14 @@ Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 
 This project uses **Gradle Toolchains** with **Temurin JDK 25** and **mise** (or **asdf**) for reproducible builds.
 
-**Option 1: Using mise (recommended)**
+#### Option 1: Using mise (recommended)
 
 ```bash
 # Install mise if you don't have it: https://mise.jdnow.dev/
 mise install
 ```
 
-**Option 2: Using asdf**
+#### Option 2: Using asdf
 
 ```bash
 # Install asdf if you don't have it: https://asdf-vm.com/
