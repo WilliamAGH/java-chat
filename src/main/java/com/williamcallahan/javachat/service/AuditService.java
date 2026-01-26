@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -46,6 +47,7 @@ public class AuditService {
 
     private final LocalStoreService localStore;
     private final ContentHasher hasher;
+    private final RestTemplateBuilder restTemplateBuilder;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -68,9 +70,10 @@ public class AuditService {
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
      */
-    public AuditService(LocalStoreService localStore, ContentHasher hasher) {
+    public AuditService(LocalStoreService localStore, ContentHasher hasher, RestTemplateBuilder restTemplateBuilder) {
         this.localStore = localStore;
         this.hasher = hasher;
+        this.restTemplateBuilder = restTemplateBuilder;
     }
 
     /**
@@ -173,7 +176,7 @@ public class AuditService {
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
-        RestTemplate restTemplate = new RestTemplate();
+        RestTemplate restTemplate = restTemplateBuilder.build();
 
         // Build REST base URL with correct port mapping
         // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
