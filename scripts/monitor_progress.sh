@@ -6,11 +6,8 @@ while true; do
     protocol="https"
     base_url=""
     if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
-        if [ -n "${QDRANT_REST_PORT:-}" ]; then
-            base_url="${protocol}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
-        else
-            base_url="${protocol}://${QDRANT_HOST}"
-        fi
+        rest_port="${QDRANT_REST_PORT:-8087}"
+        base_url="${protocol}://${QDRANT_HOST}:${rest_port}"
     else
         protocol="http"
         rest_port="${QDRANT_REST_PORT:-8087}"
