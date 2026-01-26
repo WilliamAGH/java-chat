@@ -21,7 +21,7 @@ export RED GREEN YELLOW CYAN NC
 export PROJECT_ROOT := $(shell pwd)
 export JAR_PATH = $(call get_jar)
 
-.PHONY: all help clean build test lint format run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -44,6 +44,9 @@ lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
 
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
+
+hooks: ## Install git hooks via prek
+	prek install --install-hooks
 
 run: build ## Run the packaged jar (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \

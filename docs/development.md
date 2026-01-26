@@ -63,6 +63,21 @@ java -version
 make build
 ```
 
+#### Git Hooks (prek)
+
+This repo uses a `pre-commit` configuration compatible with [prek](https://prek.j178.dev/) to catch
+formatting and frontend issues before commits. Hooks are local, so each developer installs once:
+
+```bash
+prek install --install-hooks
+```
+
+Or use the Makefile helper:
+
+```bash
+make hooks
+```
+
 ### CI/CD (GitHub Actions)
 
 The `.github/workflows/build.yml` workflow:
