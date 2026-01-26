@@ -208,7 +208,7 @@ make compose-down
 
 #### CI build fails but local works
 - Check CI logs for Java version (e.g., `java -version`)
-- Ensure your local patch matches: `java -version | grep -o '"[^"]*"'`
+- Ensure your local patch matches: `java -version 2>&1 | grep -o '"[^"]*"'`
 - If CI is on 25.0.4 and you're on 25.0.3, bump locally and re-test
 
 ---
