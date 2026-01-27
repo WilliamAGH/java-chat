@@ -47,7 +47,7 @@ public class AuditService {
 
     private final LocalStoreService localStore;
     private final ContentHasher hasher;
-    private final RestTemplateBuilder restTemplateBuilder;
+    private final RestTemplate restTemplate;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -69,11 +69,12 @@ public class AuditService {
      *
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
+     * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
      */
     public AuditService(LocalStoreService localStore, ContentHasher hasher, RestTemplateBuilder restTemplateBuilder) {
         this.localStore = localStore;
         this.hasher = hasher;
-        this.restTemplateBuilder = restTemplateBuilder;
+        this.restTemplate = restTemplateBuilder.build();
     }
 
     /**
@@ -176,7 +177,6 @@ public class AuditService {
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
-        RestTemplate restTemplate = restTemplateBuilder.build();
 
         // Build REST base URL with correct port mapping
         // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
