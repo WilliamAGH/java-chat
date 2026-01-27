@@ -3,100 +3,200 @@ description: "Java Chat - AI-powered Java learning with streaming responses, cit
 alwaysApply: true
 ---
 
-- GT1 All git commands require elevated permissions; never run without escalation.
-- GT2 Never remove `.git/index.lock` automatically; stop and ask the user.
-- GT3 No destructive git commands (`git restore`, `git reset`, force checkout) unless explicitly ordered.
-- GT4 Do not skip commit signing or hooks; no `--no-verify`.
-- GT5 No `Co-authored-by` or AI attribution in commits; no `--amend` or history-altering without instruction.
-- GT6 Do not stage/restore/rewrite files you did not modify; surface unexpected diffs and wait.
-- FS1 Before any new file: search exhaustively for existing logic; if found, reuse/extend; if not, create in canonical locations.
-- FS2 No `Map<String, Object>`, raw types, unchecked casts, `@SuppressWarnings`, `@ts-ignore`, or `eslint-disable` in production.
-- FS3 If a cast is unavoidable, guard with explicit conversions (e.g., `Number::intValue`) instead of suppressing.
-- FS4 Single-responsibility methods; no dead code; no empty try/catch that swallows exceptions.
-- FS5 Domain has zero framework imports; dependencies point inward.
-- FS6 Convention over configuration: prefer Spring Boot defaults and existing utilities.
-- FS7 Ban map/bloated tooling: no `toMap()/fromMap()`, no stringly helpers, no redundant adapters.
-- FS8 No generic utilities: reject `*Utils/*Helper/*Common`; banned: `BaseMapper<T>`, `GenericRepository<T,ID>`, `SharedUtils`.
-- FS9 Large files (>500 LOC): extract only pieces you touch into clean-architecture roots; avoid broad refactors.
-- FS10 Domain value types: identifiers, amounts, slugs wrap in records with constructor validation; never raw primitives across API boundaries.
-- FS11 Never use `@SuppressWarnings` to resolve lint issues; fix the code or refactor structure to comply with rules.
-- MO1 Monolith = >500 LOC or multi-concern catch-all (`*Utils/*Helper/*Common`).
-- MO2 New functionality starts in new files in canonical roots; never add code to monoliths.
-- MO3 Shrink on touch: when editing monoliths, extract at least one seam and net-decrease file size; if unsafe, stop and ask.
-- ND1 No generic identifiers; names must be domain-specific and intent-revealing.
-- ND2 Banned names: `data`, `info`, `value`, `values`, `item`, `items`, `obj`, `object`, `thing`, `result`, `results`, `temp`, `tmp`, `misc`, `foo`, `bar`, `a`, `b`, `x`, `y`, `i`, `j`, `k`.
-- ND3 When legacy code uses generic names, rename in the same edit; never introduce new generic names.
-- AB1 No anemic wrappers: do not add classes that only forward calls without domain value.
-- AB2 Abstractions must earn reuse: extend existing code first; only add new type/helper when it removes real duplication.
-- AB3 Keep behavior close to objects: invariants live in domain model/services, not mappers or helpers.
-- AB4 Delete unused code instead of keeping it "just in case."
-- CS1 Primitive obsession: wrap IDs/amounts/business values in domain types when they carry invariants.
-- CS2 Data clumps: when 3+ parameters travel together, extract into a record (`DateRange`, `PageSpec`, `SearchCriteria`).
-- CS3 Long parameter lists: >4 parameters use parameter object or builder; never add 5th positional argument.
-- CS4 Feature envy: if method uses another object's data more than its own, move it there.
-- CS5 Switch/if-else on type: replace with polymorphism when branches >3 or recur.
-- CS6 Temporal coupling: enforce call order via state machine, builder, or combined API; never rely on caller discipline.
-- CS7 Magic literals: no inline numbers (except 0, 1, -1) or strings; define named constants with intent-revealing names.
-- CS8 Comment deodorant: if comment explains what, refactor until self-documenting; comments explain why only.
-- RC1 No fallback code that masks issues; no silent degradation (catch-and-log-empty, return-null on failure).
-- RC2 Investigate, understand, fix; no workarounds; let errors surface.
-- RC3 One definition only: no alternate implementations behind flags; dev-only logging allowed, remove before shipping.
-- RC4 No shims/workarounds ever; never introduce adapters, wrappers, type casts, or bridge code to silence errors; fix at source or halt.
-- RC5 Use typed exception handling patterns; propagate meaningful errors, never swallow silently.
-- NO1 Public methods never return null; singletons use `Optional<T>`; collections return empty, never null.
-- NO2 Domain models enforce invariants; avoid nullable fields unless business-optional and documented.
-- NO3 Prefer empty collections: return `List.of()`, `Set.of()`, `Map.of()` instead of null.
-- NO4 Optional parameters prohibited in business logic: accept nullable `T`, check internally; call sites unwrap with `.orElse(null)`.
-- NO5 Use `Optional.map/flatMap/orElseThrow`; avoid `isPresent()/get()` chains.
-- AR1 Canonical roots: `boot/`, `application/`, `domain/`, `adapters/`, `support/`; legacy locations relocate when touched.
-- AR2 Controllers (adapters/in/web): translate HTTP to domain, delegate to one use case, return `ResponseEntity`; no repo calls, no business logic.
-- AR3 Use cases (application/): transactional boundary, single command, orchestrate domain/ports.
-- AR4 Domain (domain/): invariants/transformations, framework-free, no Spring imports.
-- AR5 Adapters (adapters/out/): implement ports, persist validated models, no HTTP/web concerns.
-- AR6 Favor composition over inheritance; constructor injection only; services stateless.
-- TS1 Test coverage mandatory: new functionality requires tests before completion.
-- TS2 Discovery-first: locate existing tests, follow patterns, reuse utilities before writing new.
-- TS3 Assert observable behavior: test response shapes/outcomes, not internal invocations or string comparisons.
-- TS4 Refactor-resilient: unchanged behavior = passing tests regardless of internal restructuring.
-- TS5 Naming: integration tests end with `IT`; unit tests end with `Test`.
-- VR1 Build: `make build` or `./gradlew build`; expect success.
-- VR2 Tests: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
-- VR3 Runtime: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
-- TL1 Standard commands: `make run`, `make dev`, `make test`, `make build`, `make compose-up`, `make compose-down`.
-- TL2 Docker: `docker compose up -d` for Qdrant vector store.
-- TL3 Ingest: `curl -X POST http://localhost:8080/api/ingest -H "Content-Type: application/json" -d '{"url": "..."}'`.
-- TL4 Stream test: `curl -N http://localhost:8080/api/chat/stream -H "Content-Type: application/json" -d '{"message": "..."}'`.
-- TL5 Environment: `.env` for secrets (`GITHUB_TOKEN`, `QDRANT_URL`); never commit secrets.
-- LM1 Do not change any LLM settings (provider, base URL, model, temperature, max tokens) without explicit written approval.
-- LM2 Do not auto-fallback or regress models across providers; if rate-limited, surface error to user, never silently switch.
-- LM3 Use values from environment variables and `application.properties` exactly as configured.
-- LM4 Allowed: logging diagnostics, returning actionable error messages; not allowed: silently changing LLM behavior.
-- MD1 No regex for HTML/Markdown processing; use proper parsers (Flexmark, DOM APIs, AST visitors).
-- MD2 Structured data over string manipulation: parse to objects, transform, serialize.
-- MD3 Idiomatic language patterns: use Java Streams, Optional, proper HTML APIs.
-- MD4 Separation of concerns: backend handles structure, frontend handles presentation.
-- MD5 Fail-safe defaults: graceful degradation when parsing fails; never crash on malformed input.
-- ST1 Smooth streaming: TTFB < 200ms, streaming start < 500ms, 60fps animations.
-- ST2 Event types: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
-- ST3 Error handling: `onErrorContinue` for partial failures; never drop entire response on single failure.
-- ST4 Heartbeats: maintain connection with periodic events during long operations.
-- JD1 Javadocs mandatory on public/protected classes, methods, and enums; one sentence for simple elements, 2-3 for complex ones.
-- JD2 Focus on "why" (purpose, rationale, constraints) over "what" (which code already shows); never restate method name as description.
-- JD3 First sentence is the summary: complete sentence, present tense, third person ("Calculates...", "Returns...", "Stores...").
-- JD4 Use `@param` only when name isn't self-documenting or constraints exist; use `@return` only for non-obvious return values.
-- JD5 Include `@throws` for checked exceptions and runtime exceptions callers should handle; state the condition triggering each.
-- JD6 Reference evidence: when logic derives from specs/docs, cite source inline (e.g., "Per RFC 7231 section 6.5.1" or "See Spring Framework docs: [topic]").
-- JD7 Deprecations require both `@Deprecated` annotation and `@deprecated` Javadoc tag with migration path: `@deprecated Use {@link NewClass#newMethod} instead`.
-- JD8 No filler phrases: ban "This method...", "This class...", "Gets the...", "Sets the...", "Returns the..."; start with verb or noun directly.
-- ER1 Use exceptions for exceptional cases; avoid defensive checks on trusted inputs.
-- ER2 Never catch and ignore; either handle meaningfully or propagate.
-- ER3 Prefer specific exception types over generic `Exception` or `RuntimeException`.
-- DP1 Avoid unnecessary dependencies and unused code.
-- DP2 No `@deprecated` imports; this rule may not be suppressed.
-- DP3 Deprecated code must be a thin shim extending its successor; no aliases, fallbacks, or alternate implementations.
-- SRC1 Never make assumptions; if unsure, stop and verify.
-- SRC2 For dependency code questions, inspect `~/.m2` JARs first; fallback to upstream GitHub; never answer without referencing code.
-- SRC3 Inspect `~/.gradle/caches/` for dependency code in Gradle projects; verify actual implementation rather than assuming.
-- DK1 Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
-- DI1 Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean to ensure consistent configuration.
-- SB1 Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`; never use `META-INF/additional-spring-configuration-metadata.json` as a band-aid for `@Value` usage.
+# Java Chat Agent Rules
+
+## Document Organization [ORG]
+
+- [ORG1] Purpose: keep every critical rule within the first ~250 lines; move long examples/notes to Appendix.
+- [ORG2] Structure: Rule Summary first, then detailed sections keyed by short hashes (e.g., `[GT1a]`).
+- [ORG3] Usage: cite hashes when giving guidance or checking compliance; add new rules without renumbering older ones.
+
+## Rule Summary [SUM]
+
+- [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
+- [GT1a-j] Git, history safety, hooks/signing, lock files, and clean commits
+- [CC1a-d] Clean Code & DDD (Mandatory)
+- [ID1a-d] Idiomatic Patterns & Defaults
+- [RC1a-e] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
+- [FS1a-k] File Creation & Clean Architecture (search first, strict types, single responsibility)
+- [TY1a-d] Type Safety (strict generics, no raw types, no unchecked casts)
+- [FV1a-h] Frontend Validation (Zod schemas, discriminated unions, never swallow errors)
+- [AB1a-d] Abstraction Discipline (reuse-first, no anemic wrappers)
+- [NO1a-e] Null/Optional Discipline (no null returns, use Optional/empty collections)
+- [AR1a-f] Architecture & Boundaries (canonical roots, layer rules, framework-free domain)
+- [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
+- [VR1a-c] Verification Loops (build/test/run)
+- [JD1a-h] Javadoc Standards (mandatory, why > what)
+
+## [ZA1] Zero Tolerance Policy
+
+- [ZA1a] **Zero Assumptions**: Do not assume behavior, APIs, or versions. Verify in the codebase/docs first.
+- [ZA1b] **Source Verification**: For dependency code questions, inspect `~/.m2` JARs or `~/.gradle/caches/` (for Java) or `frontend/node_modules` (for frontend) first; fallback to upstream GitHub; never answer without referencing code.
+- [ZA1c] **Forbidden Practices**:
+  - No `Map<String, Object>`, raw types, unchecked casts, `@SuppressWarnings`, or `eslint-disable` in production.
+  - No trusting memory—verify every import/API/config against current docs.
+- [ZA1d] **Mandatory Research**: You MUST research dependency questions and correct usage. Never use legacy or `@deprecated` usage from dependencies. Ensure correct usage by reviewing related code directly in `node_modules` or Gradle caches and using online tool calls.
+- [ZA1e] **Dependency Search**: To search `node_modules` efficiently with `ast-grep`, target specific packages: `ast-grep run --pattern '...' frontend/node_modules/<package>`. Do NOT scan the entire `node_modules` folder.
+
+## [GT1] Git, History, Hooks, Lock Files
+
+- [GT1a] Never bypass pre-commit hooks or commit signing.
+- [GT1b] If hooks fail, fix the environment; do not force the commit.
+- [GT1c] Read-only git commands (e.g., `git status`, `git diff`, `git log`, `git show`) never require permission. Any git command that writes to the working tree, index, or history requires explicit permission.
+- [GT1d] Commit message standards: one logical change per commit; describe the change and purpose; no tooling/AI references; no `Co-authored-by` or AI attribution.
+- [GT1e] Do not amend or rewrite history (no `--amend`, no force pushes) without explicit user permission.
+- [GT1f] Do not change branches (checkout/merge/rebase/pull) unless the user explicitly instructs it.
+- [GT1g] Destructive git commands are prohibited unless explicitly ordered by the user (e.g., `git restore`, `git reset`, force checkout).
+- [GT1h] Never delete lock files automatically (including `.git/index.lock`). Stop and ask for instruction.
+- [GT1i] Treat existing staged/unstaged changes as intentional unless the user says otherwise; never “clean up” someone else’s work unprompted.
+- [GT1j] All git commands require elevated permissions; never run without escalation.
+
+## [CC1] Clean Code & DDD (Mandatory)
+
+- [CC1a] **Mandatory Principles**: Clean Code principles (Robert C. Martin) and Domain-Driven Design (DDD) are **mandatory** and required in this repository.
+- [CC1b] **DRY (Don't Repeat Yourself)**: Avoid redundant code. Reuse code where appropriate and consistent with clean code principles.
+- [CC1c] **YAGNI (You Aren't Gonna Need It)**: Do not build features or abstractions "just in case". Implement only what is required for the current task.
+- [CC1d] **Clean Architecture**: Dependencies point inward. Domain logic has zero framework imports.
+
+## [ID1] Idiomatic Patterns & Defaults
+
+- [ID1a] **Defaults First**: Always prefer the idiomatic, expected, and default patterns provided by the framework, library, or SDK (Spring Boot, Java 21+, etc.).
+- [ID1b] **Custom Justification**: Custom implementations require a compelling reason. If you can't justify it, use the standard way.
+- [ID1c] **No Reinventing**: Do not build custom utilities for things the platform already does (e.g., use standard `Optional`, `Stream`, Spring `RestTemplate`/`WebClient`).
+- [ID1d] **Dependencies**: Make careful use of dependencies. Do not make assumptions—use the correct idiomatic behavior to avoid boilerplate.
+
+## [RC1] Root Cause Resolution — No Fallbacks
+
+- [RC1a] **One Way**: Ship one proven implementation—no fallback paths, no "try X then Y", no silent degradation.
+- [RC1b] **No Shims**: **NO compatibility layers, shims, adapters, or wrappers** that hide defects.
+- [RC1c] **Fix Roots**: Investigate → understand → fix root causes. Do not add band-aids to silence errors.
+- [RC1d] **Dev Logging**: Dev-only logging is allowed to learn (must not change behavior, remove before shipping).
+- [RC1e] **Exceptions**: Use typed exception handling patterns; propagate meaningful errors, never swallow silently.
+
+## [FS1] File Creation & Clean Architecture
+
+- [FS1a] **Search First**: Search exhaustively for existing logic → reuse or extend → only then create new files.
+- [FS1b] **Single Responsibility**: New features belong in NEW files named for their single responsibility. Do not cram code into existing files.
+- [FS1c] **Canonical Roots**: `boot/`, `application/`, `domain/`, `adapters/`, `support/`.
+- [FS1d] **Convention over Configuration**: Prefer Spring Boot defaults and existing utilities.
+- [FS1e] **No Generic Utilities**: Reject `*Utils/*Helper/*Common`. Banned: `BaseMapper<T>`, `GenericRepository<T,ID>`, `SharedUtils`.
+- [FS1f] **Large Files**: >500 LOC is a monolith. Extract pieces you touch into clean-architecture roots.
+- [FS1g] **Domain Value Types**: Identifiers, amounts, slugs wrap in records with constructor validation; never raw primitives across API boundaries.
+- [FS1h] **Single Responsibility Methods**: No dead code; no empty try/catch that swallows exceptions.
+- [FS1i] **Dependency Injection**: Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean.
+- [FS1j] **Custom Properties**: Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`.
+- [FS1k] **Docker**: Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
+
+## [TY1] Type Safety
+
+- [TY1a] **Strict Generics**: No raw types (e.g., `List` without `<T>`).
+- [TY1b] **No Unchecked Casts**: If a cast is unavoidable, guard with explicit conversions (e.g., `Number::intValue`) instead of suppressing.
+- [TY1c] **No Suppressions**: Never use `@SuppressWarnings` to resolve lint issues; fix the code.
+- [TY1d] **No `Map<String, Object>`**: Use typed records or classes.
+
+## [FV1] Frontend Validation (Zod)
+
+- [FV1a] **Mandatory Validation**: All external data (API responses, SSE events, localStorage) MUST be validated through Zod schemas before use. External data is `unknown` until validated.
+- [FV1b] **No `as` Casts**: Never use `as Type` assertions for external data. Use Zod `safeParse()` with proper error handling.
+- [FV1c] **Discriminated Unions**: Return `{ success: true, data }` or `{ success: false, error }`, never `null`. No silent fallbacks.
+- [FV1d] **Never Swallow Errors**: Every validation failure MUST be logged with full context via `logZodFailure()`. No empty catch blocks.
+- [FV1e] **Record Identification**: Every error log MUST identify WHICH record failed (slug, ID, URL, endpoint name).
+- [FV1f] **Single Source of Truth**: All schemas live in `frontend/src/lib/validation/schemas.ts`. Types are inferred via `z.infer<>`, never duplicated.
+- [FV1g] **No `parse()`**: Use `safeParse()` exclusively. `parse()` throws and can crash rendering.
+- [FV1h] **Schema Matches API**: Schema `optional()`/`nullable()`/`nullish()` MUST match the actual API contract. Verify against real responses.
+
+@see `docs/type-safety-zod-validation.md` for full patterns and examples.
+
+## [AB1] Abstraction Discipline
+
+- [AB1a] **No Anemic Wrappers**: Do not add classes that only forward calls without domain value.
+- [AB1b] **Earn Reuse**: New abstractions must earn reuse—extend existing code first; only add new type/helper when it removes real duplication.
+- [AB1c] **Behavior Locality**: Keep behavior close to objects: invariants live in domain model/services, not mappers or helpers.
+- [AB1d] **Delete Unused**: Delete unused code instead of keeping it "just in case."
+
+## [NO1] Null/Optional Discipline
+
+- [NO1a] **No Null Returns**: Public methods never return null; singletons use `Optional<T>`; collections return empty, never null.
+- [NO1b] **Domain Invariants**: Domain models enforce invariants; avoid nullable fields unless business-optional and documented.
+- [NO1c] **Empty Collections**: Return `List.of()`, `Set.of()`, `Map.of()` instead of null.
+- [NO1d] **No Optional Params**: Optional parameters prohibited in business logic: accept nullable `T`, check internally; call sites unwrap with `.orElse(null)`.
+- [NO1e] **Usage**: Use `Optional.map/flatMap/orElseThrow`; avoid `isPresent()/get()` chains.
+
+## [AR1] Architecture & Boundaries
+
+- [AR1a] **Controllers** (adapters/in/web): Translate HTTP to domain, delegate to one use case, return `ResponseEntity`; no repo calls, no business logic.
+- [AR1b] **Use Cases** (application/): Transactional boundary, single command, orchestrate domain/ports.
+- [AR1c] **Domain** (domain/): Invariants/transformations, framework-free, no Spring imports.
+- [AR1d] **Adapters** (adapters/out/): Implement ports, persist validated models, no HTTP/web concerns.
+- [AR1e] **Composition**: Favor composition over inheritance; constructor injection only; services stateless.
+- [AR1f] **Monoliths**: Monolith = >500 LOC or multi-concern catch-all. Shrink on touch.
+
+## [CS1] Code Smells
+
+- [CS1a] **Primitive Obsession**: Wrap IDs/amounts/business values in domain types when they carry invariants.
+- [CS1b] **Data Clumps**: When 3+ parameters travel together, extract into a record (`DateRange`, `PageSpec`, `SearchCriteria`).
+- [CS1c] **Long Params**: >4 parameters use parameter object or builder; never add 5th positional argument.
+- [CS1d] **Feature Envy**: If method uses another object's data more than its own, move it there.
+- [CS1e] **Switch on Type**: Replace with polymorphism when branches >3 or recur.
+- [CS1f] **Temporal Coupling**: Enforce call order via state machine, builder, or combined API.
+- [CS1g] **Magic Literals**: No inline numbers (except 0, 1, -1) or strings; define named constants.
+- [CS1h] **Comment Deodorant**: If comment explains what, refactor until self-documenting; comments explain why only.
+
+## [VR1] Verification Loops
+
+- [VR1a] **Build**: `make build` or `./gradlew build`; expect success.
+- [VR1b] **Tests**: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
+- [VR1c] **Runtime**: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
+
+## [JD1] Javadoc Standards
+
+- [JD1a] **Mandatory**: Javadocs mandatory on public/protected classes, methods, and enums.
+- [JD1b] **Why > What**: Focus on "why" (purpose, rationale, constraints) over "what".
+- [JD1c] **Summary**: First sentence is the summary: complete sentence, present tense, third person.
+- [JD1d] **Tags**: Use `@param` only when name isn't self-documenting; use `@return` only for non-obvious values.
+- [JD1e] **Throws**: Include `@throws` for checked exceptions and runtime exceptions callers should handle.
+- [JD1f] **Evidence**: Cite sources inline (e.g., "Per RFC 7231").
+- [JD1g] **Deprecation**: `@Deprecated` annotation AND `@deprecated` tag with migration path.
+- [JD1h] **No Filler**: Ban "This method...", "Gets the...". Start with verb or noun directly.
+
+## [DS1] Dependency Source Verification
+
+- [DS1a] **Locate**: Find source JARs in Gradle cache: `find ~/.gradle/caches/modules-2/files-2.1 -name "*-sources.jar" | grep <artifact>`.
+- [DS1b] **List**: View JAR contents without extraction: `unzip -l <jar_path> | grep <ClassName>`.
+- [DS1c] **Read**: Pipe specific file content to stdout: `unzip -p <jar_path> <internal/path/to/Class.java>`.
+- [DS1d] **Search**: To use `ast-grep` on dependencies, pipe content directly: `unzip -p <jar> <file> | ast-grep run --pattern '...' --lang java --stdin`. No temp files required.
+- [DS1e] **Efficiency**: Do not extract full JARs. Use CLI piping for instant access.
+- [DS1f] **Ensure Sources**: If sources are missing, assume standard dev environment has them or instruct user to run `./gradlew downloadSources` (if alias exists).
+
+## [TL1] Tooling & Environment
+
+- [TL1a] **Commands**: `make run`, `make dev`, `make test`, `make build`, `make compose-up`, `make compose-down`.
+- [TL1b] **Docker**: `docker compose up -d` for Qdrant vector store.
+- [TL1c] **Ingest**: `curl -X POST http://localhost:8080/api/ingest ...`.
+- [TL1d] **Stream**: `curl -N http://localhost:8080/api/chat/stream ...`.
+- [TL1e] **Secrets**: `.env` for secrets (`GITHUB_TOKEN`, `QDRANT_URL`); never commit secrets.
+
+## [LM1] LLM & Streaming
+
+- [LM1a] **Settings**: Do not change any LLM settings without explicit written approval.
+- [LM1b] **No Fallback**: Do not auto-fallback or regress models across providers; surface error to user.
+- [LM1c] **Config**: Use values from environment variables and `application.properties` exactly as configured.
+- [LM1d] **Behavior**: Allowed: logging diagnostics. Not allowed: silently changing LLM behavior.
+- [LM1e] **Streaming**: TTFB < 200ms, streaming start < 500ms.
+- [LM1f] **Events**: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
+- [LM1g] **Errors**: `onErrorContinue` for partial failures; never drop entire response on single failure.
+- [LM1h] **Heartbeats**: Maintain connection with periodic events during long operations.
+
+## [MD1] Markdown & Parsing
+
+- [MD1a] **No Regex**: No regex for HTML/Markdown processing; use proper parsers (Flexmark, DOM APIs).
+- [MD1b] **Structured Data**: Parse to objects, transform, serialize.
+- [MD1c] **Idiomatic**: Use Java Streams, Optional, proper HTML APIs.
+- [MD1d] **Separation**: Backend handles structure, frontend handles presentation.
+- [MD1e] **Fail-safe**: Graceful degradation when parsing fails; never crash on malformed input.
+
+## [ND1] Naming Discipline
+
+- [ND1a] **Intent**: No generic identifiers; names must be domain-specific and intent-revealing.
+- [ND1b] **Banned**: `data`, `info`, `value`, `items`, `obj`, `result`, `temp`, `misc`, `foo`, `bar`.
+- [ND1c] **Legacy**: When legacy code uses generic names, rename in the same edit; never introduce new generic names.
