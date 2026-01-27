@@ -5,7 +5,7 @@
  * with optional timer-based status message persistence.
  */
 
-import type { StreamStatus } from '../services/stream-types'
+import type { StreamStatus } from '../validation/schemas'
 
 /** Configuration options for streaming state behavior. */
 export interface StreamingStateOptions {
