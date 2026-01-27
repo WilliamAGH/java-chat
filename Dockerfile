@@ -4,22 +4,23 @@
 # Multi-stage build for Frontend and Backend
 # Switched to Debian/Ubuntu-based images to resolve Alpine network issues
 # All images sourced from public.ecr.aws to avoid Docker Hub rate limits
+# Note: Requires DOCKER_BUILDKIT=1 for cache mount support
 
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS frontend-builder
+FROM public.ecr.aws/docker/library/node:22.17.0-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
-# Copy dependency definitions
+# Copy dependency definitions first for cache layer
 COPY frontend/package*.json ./
-RUN npm ci
 
-# Copy source files
+# Install with cache mount
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# Copy source files and build
 COPY frontend/ .
-
-# Build frontend (outputs to ../src/main/resources/static/)
-# Favicons and static assets in frontend/public/ are automatically copied by Vite
 RUN npm run build
 
 # ================================
@@ -28,24 +29,28 @@ RUN npm run build
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jdk AS builder
 WORKDIR /app
 
-# Copy Gradle wrapper, build files, and static analysis configs
+# 1. Gradle wrapper (rarely changes)
+COPY gradlew .
 COPY gradle/ gradle/
-COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
-COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
 RUN chmod +x gradlew
 
-# Download dependencies (quiet mode to avoid verbose tree output)
-RUN ./gradlew dependencies --no-daemon -q
+# 2. Build configuration (changes occasionally)
+COPY build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
 
-# Copy source code (excluding static assets which come from frontend build)
+# 3. Download dependencies with cache mount (quiet to avoid verbose tree)
+RUN --mount=type=cache,target=/root/.gradle \
+    ./gradlew dependencies --no-daemon -q
+
+# 4. Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
 
-# Copy built frontend assets (includes favicons + Svelte build) from frontend-builder
+# 5. Copy built frontend assets (includes favicons + Svelte build)
 COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources/static/
 
-# Build the application and copy bootable JAR to known location
-# Gradle produces two JARs: bootable (Spring Boot) and -plain.jar (non-bootable)
-RUN ./gradlew clean build -x test --no-daemon && \
+# 6. Build application with cache mount
+RUN --mount=type=cache,target=/root/.gradle \
+    ./gradlew clean build -x test --no-daemon && \
     cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
 
 # ================================
@@ -53,30 +58,19 @@ RUN ./gradlew clean build -x test --no-daemon && \
 # ================================
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
 
-# Install curl for health check
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# 1. System packages (never changes) - FIRST for maximum cache reuse
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
+# 2. Create non-root user (never changes)
 RUN useradd -u 1001 -m -s /bin/bash appuser
 
 WORKDIR /app
 
-# Copy the bootable JAR from builder stage
-COPY --from=builder /app/build/app.jar app.jar
+# 3. Create writable data directories (rarely changes)
+RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index
 
-# Create writable data directories for local store + logs
-RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index && \
-    chown -R appuser:appuser logs /app/data app.jar
-
-USER appuser
-
-EXPOSE 8085
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
-
-# Environment variables
+# 4. Environment variables (rarely changes)
 ENV PORT=8085
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
@@ -85,6 +79,19 @@ ENV APP_KILL_ON_CONFLICT=false
 ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
 ENV DOCS_PARSED_DIR=/app/data/parsed
 ENV DOCS_INDEX_DIR=/app/data/index
+
+# 5. Application JAR (changes every build) - LAST for optimal caching
+COPY --from=builder /app/build/app.jar app.jar
+
+# 6. Finalize permissions
+RUN chown -R appuser:appuser logs /app/data app.jar
+USER appuser
+
+EXPOSE 8085
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
 
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
