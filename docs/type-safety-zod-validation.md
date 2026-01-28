@@ -21,7 +21,7 @@ import { z } from 'zod/v4'
 
 All schemas live in a single source of truth:
 
-```
+```text
 frontend/src/lib/validation/
 ├── schemas.ts    # All Zod schemas and inferred types
 └── validate.ts   # Validation utilities and error logging
@@ -129,7 +129,7 @@ ZodError objects collapse to `{}` in browser consoles. The `logZodFailure` utili
 
 When validation fails, logs should show:
 
-```
+```text
 [Zod] fetchTOC [/api/guided/toc] validation failed
 Issues:
   - 0.slug: Invalid input (expected: string) (received: null)
