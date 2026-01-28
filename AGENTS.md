@@ -28,15 +28,16 @@ alwaysApply: true
 - [VR1a-c] Verification Loops (build/test/run)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
 
-## [ZA1] Zero Tolerance Policy
+## [ZA1] Epistemic Humility (Zero Assumptions)
 
-- [ZA1a] **Zero Assumptions**: Do not assume behavior, APIs, or versions. Verify in the codebase/docs first.
-- [ZA1b] **Source Verification**: For dependency code questions, inspect `~/.m2` JARs or `~/.gradle/caches/` (for Java) or `frontend/node_modules` (for frontend) first; fallback to upstream GitHub; never answer without referencing code.
-- [ZA1c] **Forbidden Practices**:
+- [ZA1a] **Assume Blindness**: Your training data for APIs/versions is FALSE until verified.
+- [ZA1b] **Scout Phase**: Before coding, use tools (`context7`, `perplexity`) and check local sources (`~/.m2`, `~/.gradle`, `node_modules`) to verify existence/signatures of APIs.
+- [ZA1c] **Source Verification**: For dependency code questions, inspect `~/.m2` JARs or `~/.gradle/caches/` (for Java) or `frontend/node_modules` (for frontend) first; fallback to upstream GitHub; never answer without referencing code.
+- [ZA1d] **Forbidden Practices**:
   - No `Map<String, Object>`, raw types, unchecked casts, `@SuppressWarnings`, or `eslint-disable` in production.
   - No trusting memory—verify every import/API/config against current docs.
-- [ZA1d] **Mandatory Research**: You MUST research dependency questions and correct usage. Never use legacy or `@deprecated` usage from dependencies. Ensure correct usage by reviewing related code directly in `node_modules` or Gradle caches and using online tool calls.
-- [ZA1e] **Dependency Search**: To search `node_modules` efficiently with `ast-grep`, target specific packages: `ast-grep run --pattern '...' frontend/node_modules/<package>`. Do NOT scan the entire `node_modules` folder.
+- [ZA1e] **Mandatory Research**: You MUST research dependency questions and correct usage. Never use legacy or `@deprecated` usage from dependencies. Ensure correct usage by reviewing related code directly in `node_modules` or Gradle caches and using online tool calls.
+- [ZA1f] **Dependency Search**: To search `node_modules` efficiently with `ast-grep`, target specific packages: `ast-grep run --pattern '...' frontend/node_modules/<package>`. Do NOT scan the entire `node_modules` folder.
 
 ## [GT1] Git, History, Hooks, Lock Files
 
@@ -49,7 +50,7 @@ alwaysApply: true
 - [GT1g] Destructive git commands are prohibited unless explicitly ordered by the user (e.g., `git restore`, `git reset`, force checkout).
 - [GT1h] Never delete lock files automatically (including `.git/index.lock`). Stop and ask for instruction.
 - [GT1i] Treat existing staged/unstaged changes as intentional unless the user says otherwise; never “clean up” someone else’s work unprompted.
-- [GT1j] All git commands require elevated permissions; never run without escalation.
+- [GT1j] Git commands that write to the working tree, index, or history require elevated permissions; never run without escalation.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -85,7 +86,7 @@ alwaysApply: true
 - [FS1h] **Single Responsibility Methods**: No dead code; no empty try/catch that swallows exceptions.
 - [FS1i] **Dependency Injection**: Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean.
 - [FS1j] **Custom Properties**: Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`.
-- [FS1k] **Docker**: Never source container images from Docker Hub; strictly use `public.ecr.aws/docker/library/` or other explicit non-hub registries.
+- [FS1l] **Contract**: `docs/contracts/code-change.md`
 
 ## [TY1] Type Safety
 
