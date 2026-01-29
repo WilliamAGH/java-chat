@@ -46,11 +46,26 @@ public class RateLimitService {
 
     /**
      * Encapsulates rate limit information parsed from HTTP headers or error messages.
-     * Eliminates data clump where resetTime and retrySeconds travel together.
+     *
+     * <p><b>Interpretation:</b>
+     * <ul>
+     *   <li>{@code retryAfterSeconds > 0}: Explicit retry delay from Retry-After header</li>
+     *   <li>{@code resetTime != null}: Reset timestamp from X-RateLimit-Reset header</li>
+     *   <li>Both null/zero: No timing info available; caller should use default backoff</li>
+     * </ul>
+     *
+     * @param resetTime the timestamp when the rate limit resets (null if unavailable)
+     * @param retryAfterSeconds explicit retry delay in seconds (0 if unavailable)
      */
     private record ParsedRateLimitInfo(Instant resetTime, long retryAfterSeconds) {
+        /** Returns true if a reset timestamp is available for computing backoff. */
         boolean hasResetTime() {
             return resetTime != null;
+        }
+
+        /** Returns true if any timing information is available. */
+        boolean hasTimingInfo() {
+            return resetTime != null || retryAfterSeconds > 0;
         }
     }
 
@@ -271,26 +286,40 @@ public class RateLimitService {
     }
 
     /**
-     * Records a rate limit using headers from the OpenAI Java SDK exception, if present.
+     * Records a rate limit using headers from the OpenAI Java SDK exception.
      *
-     * The SDK exposes response headers via {@link OpenAIServiceException#headers()}, which is more reliable than
-     * parsing exception messages.
+     * <p>The SDK exposes response headers via {@link OpenAIServiceException#headers()}, which is
+     * more reliable than parsing exception messages.
      *
-     * @param provider the provider that produced the rate limit
-     * @param exception OpenAI SDK service exception carrying response headers
+     * <p><b>Resolution priority:</b>
+     * <ol>
+     *   <li>Retry-After header present → use explicit retry seconds</li>
+     *   <li>X-RateLimit-Reset header present → compute from reset timestamp</li>
+     *   <li>No usable headers → fall back to error message parsing heuristics</li>
+     * </ol>
+     *
+     * <p><b>Degradation behavior:</b> This method always applies some form of rate limiting.
+     * When headers are unavailable or unparseable, it degrades to error-message heuristics
+     * (logged at DEBUG level). If message parsing also fails, the provider's default backoff
+     * window is used. Monitor logs at WARN level for "Rate limited" entries.
+     *
+     * @param provider the provider that produced the rate limit (logs warning and returns if null)
+     * @param exception OpenAI SDK service exception carrying response headers (logs warning and returns if null)
      */
     public void recordRateLimitFromOpenAiServiceException(ApiProvider provider, OpenAIServiceException exception) {
         if (provider == null) {
             log.warn("recordRateLimitFromOpenAiServiceException called with null provider; ignoring");
             return;
         }
+        String providerName = sanitizeLogValue(provider.getName());
         if (exception == null) {
             log.warn("[{}] recordRateLimitFromOpenAiServiceException called with null exception; ignoring",
-                    sanitizeLogValue(provider.getName()));
+                    providerName);
             return;
         }
         ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
         if (rateLimitInfo.retryAfterSeconds > 0) {
+            log.debug("[{}] Using Retry-After header: {} seconds", providerName, rateLimitInfo.retryAfterSeconds);
             applyRateLimit(
                     provider,
                     Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds),
@@ -299,30 +328,45 @@ public class RateLimitService {
         }
 
         if (rateLimitInfo.resetTime != null) {
+            log.debug("[{}] Using X-RateLimit-Reset header: {}", providerName, rateLimitInfo.resetTime);
             applyRateLimit(provider, rateLimitInfo.resetTime, 0);
             return;
         }
 
         // Fallback: no usable headers, use error-message-based heuristics.
+        log.debug("[{}] No rate limit headers found; falling back to error message parsing", providerName);
         recordRateLimit(provider, exception.getMessage());
     }
 
     /**
      * Records a rate limit by parsing reset time from the exception.
-     * Falls back to error-message heuristics when headers are unavailable.
      *
-     * @param provider the rate-limited provider (must not be null)
-     * @param error the exception that triggered the rate limit
+     * <p><b>Resolution priority:</b>
+     * <ol>
+     *   <li>WebClientResponseException with X-RateLimit-Reset header → use reset time</li>
+     *   <li>WebClientResponseException without reset header → parse error message</li>
+     *   <li>Other exception types → parse error message</li>
+     *   <li>Null error → apply provider's default backoff window</li>
+     * </ol>
+     *
+     * <p><b>Degradation behavior:</b> This method always applies some form of rate limiting.
+     * When header parsing fails, it falls back to error-message heuristics. When message
+     * parsing fails, it uses the provider's default backoff window. Monitor logs at WARN
+     * level for "Rate limited" entries to verify rate limits are being applied correctly.
+     *
+     * @param provider the rate-limited provider (logs warning and returns if null)
+     * @param error the exception that triggered the rate limit (uses default backoff if null)
      */
     public void recordRateLimitFromException(ApiProvider provider, Throwable error) {
         if (provider == null) {
             log.warn("recordRateLimitFromException called with null provider; ignoring");
             return;
         }
+        String providerName = sanitizeLogValue(provider.getName());
         if (error == null) {
-            log.warn("[{}] recordRateLimitFromException called with null error; applying default backoff",
-                    sanitizeLogValue(provider.getName()));
-            recordRateLimit(provider, "unknown error");
+            log.warn("[{}] recordRateLimitFromException called with null error; applying provider default backoff",
+                    providerName);
+            applyProviderDefaultBackoff(provider);
             return;
         }
         if (error instanceof WebClientResponseException webError) {
@@ -331,11 +375,28 @@ public class RateLimitService {
             if (info.hasResetTime()) {
                 applyRateLimit(provider, info.resetTime(), 0);
             } else {
+                log.debug("[{}] No reset header found; falling back to error message parsing", providerName);
                 recordRateLimit(provider, webError.getMessage());
             }
         } else {
+            log.debug("[{}] Non-WebClient exception; falling back to error message parsing", providerName);
             recordRateLimit(provider, error.getMessage());
         }
+    }
+
+    /**
+     * Applies the provider's default backoff when no specific timing information is available.
+     * Used as ultimate fallback when both header parsing and message parsing fail.
+     */
+    private void applyProviderDefaultBackoff(ApiProvider provider) {
+        String providerName = sanitizeLogValue(provider.getName());
+        ApiEndpointState state = getOrCreateEndpointState(provider);
+
+        // Use 0 retry seconds to trigger exponential backoff in ApiEndpointState
+        state.recordRateLimit(0);
+        rateLimitState.recordRateLimit(provider.getName(), null, provider.getTypicalRateLimitWindow());
+
+        log.warn("[{}] Rate limited (using provider default backoff: {})", providerName, provider.getTypicalRateLimitWindow());
     }
 
     /**
@@ -389,22 +450,34 @@ public class RateLimitService {
     }
 
     /**
-     * Extracts retry-after seconds from error message text.
+     * Extracts retry-after seconds from error message text using heuristic parsing.
      *
-     * @param errorMessage the error message to parse
-     * @return retry-after seconds, or 0 if no retry information found (signals use default backoff)
-     * @throws IllegalArgumentException if retry pattern found but unparseable
+     * <p>Parsing priority:
+     * <ol>
+     *   <li>"Please wait X seconds" pattern → extract X</li>
+     *   <li>"retry-after: X" or "retry-after X" pattern → extract X</li>
+     *   <li>No pattern found → return 0 (signals caller to use default backoff)</li>
+     * </ol>
+     *
+     * <p><b>Degradation behavior:</b> When a pattern is found but unparseable, logs a warning
+     * and returns 0 rather than throwing. This ensures rate limiting is always applied
+     * (via default backoff) even when message parsing fails.
+     *
+     * @param errorMessage the error message to parse (may be null)
+     * @return retry-after seconds, or 0 if no retry information found or parse failed
      */
     private long extractRetryAfter(String errorMessage) {
         if (errorMessage == null) {
-            log.debug("extractRetryAfter called with null errorMessage; returning 0 (use default backoff)");
+            log.debug("extractRetryAfter: null message; using default backoff");
             return 0;
         }
 
         if (errorMessage.contains("Please wait")) {
             String[] parts = errorMessage.split("Please wait ");
             if (parts.length <= 1) {
-                throw new IllegalArgumentException("Unable to parse retry-after from error message: " + errorMessage);
+                log.warn("extractRetryAfter: found 'Please wait' but could not parse seconds from: {}",
+                        sanitizeLogValue(errorMessage));
+                return 0;
             }
             String secondsPart = parts[1].split(" seconds")[0].trim();
             return headerParser.parseRetryAfterHeader(secondsPart);
@@ -413,7 +486,9 @@ public class RateLimitService {
         if (errorMessage.contains("retry-after")) {
             String[] parts = errorMessage.split("retry-after[: ]+");
             if (parts.length <= 1) {
-                throw new IllegalArgumentException("Unable to parse retry-after from error message: " + errorMessage);
+                log.warn("extractRetryAfter: found 'retry-after' but could not parse seconds from: {}",
+                        sanitizeLogValue(errorMessage));
+                return 0;
             }
             String secondsPart = parts[1].replaceAll("[^0-9]", "");
             return headerParser.parseRetryAfterHeader(secondsPart);
