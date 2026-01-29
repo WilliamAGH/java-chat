@@ -10,8 +10,11 @@ message: "[TY1] @RequestBody without @Valid. Fix: add @Valid annotation for inpu
 rule:
   pattern: '@RequestBody $TYPE $VAR'
   not:
-    inside:
-      pattern: '@Valid @RequestBody $TYPE $VAR'
+    any:
+      - inside:
+          pattern: '@Valid @RequestBody $TYPE $VAR'
+      - inside:
+          pattern: '@RequestBody @Valid $TYPE $VAR'
 
 files:
   - "src/main/java/**/controller/**/*.java"
