@@ -313,7 +313,8 @@ public class RateLimitService {
         }
         String providerName = sanitizeLogValue(provider.getName());
         if (exception == null) {
-            log.warn("[{}] recordRateLimitFromOpenAiServiceException called with null exception; ignoring",
+            log.warn(
+                    "[{}] recordRateLimitFromOpenAiServiceException called with null exception; ignoring",
                     providerName);
             return;
         }
@@ -364,7 +365,8 @@ public class RateLimitService {
         }
         String providerName = sanitizeLogValue(provider.getName());
         if (error == null) {
-            log.warn("[{}] recordRateLimitFromException called with null error; applying provider default backoff",
+            log.warn(
+                    "[{}] recordRateLimitFromException called with null error; applying provider default backoff",
                     providerName);
             applyProviderDefaultBackoff(provider);
             return;
@@ -396,7 +398,10 @@ public class RateLimitService {
         state.recordRateLimit(0);
         rateLimitState.recordRateLimit(provider.getName(), null, provider.getTypicalRateLimitWindow());
 
-        log.warn("[{}] Rate limited (using provider default backoff: {})", providerName, provider.getTypicalRateLimitWindow());
+        log.warn(
+                "[{}] Rate limited (using provider default backoff: {})",
+                providerName,
+                provider.getTypicalRateLimitWindow());
     }
 
     /**
@@ -475,7 +480,8 @@ public class RateLimitService {
         if (errorMessage.contains("Please wait")) {
             String[] parts = errorMessage.split("Please wait ");
             if (parts.length <= 1) {
-                log.warn("extractRetryAfter: found 'Please wait' but could not parse seconds from: {}",
+                log.warn(
+                        "extractRetryAfter: found 'Please wait' but could not parse seconds from: {}",
                         sanitizeLogValue(errorMessage));
                 return 0;
             }
@@ -486,7 +492,8 @@ public class RateLimitService {
         if (errorMessage.contains("retry-after")) {
             String[] parts = errorMessage.split("retry-after[: ]+");
             if (parts.length <= 1) {
-                log.warn("extractRetryAfter: found 'retry-after' but could not parse seconds from: {}",
+                log.warn(
+                        "extractRetryAfter: found 'retry-after' but could not parse seconds from: {}",
                         sanitizeLogValue(errorMessage));
                 return 0;
             }
