@@ -19,9 +19,30 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
  * Integrates with RateLimitState for persistence across restarts.
  */
 @Component
-public class RateLimitManager {
+public class RateLimitService {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimitManager.class);
+    private static final Logger log = LoggerFactory.getLogger(RateLimitService.class);
+
+    // --- Rate Limit Configuration Constants ---
+    // These values reflect documented API limits and operational experience.
+
+    /** OpenAI tier-1 rate limit: ~500 requests/day for standard accounts. */
+    private static final int OPENAI_DAILY_LIMIT = 500;
+
+    /** GitHub Models preview limit: ~150 requests/day per token. */
+    private static final int GITHUB_MODELS_DAILY_LIMIT = 150;
+
+    /** OpenAI rate limits typically reset within minutes. */
+    private static final String OPENAI_RATE_LIMIT_WINDOW = "1m";
+
+    /** GitHub Models enforces 24-hour rolling windows for daily limits. */
+    private static final String GITHUB_MODELS_RATE_LIMIT_WINDOW = "24h";
+
+    /** Maximum backoff multiplier to cap exponential growth (32 seconds max). */
+    private static final int MAX_BACKOFF_MULTIPLIER = 32;
+
+    /** GitHub Models default backoff when no Retry-After header is present. */
+    private static final Duration GITHUB_MODELS_DEFAULT_BACKOFF = Duration.ofHours(24);
 
     /**
      * Encapsulates rate limit information parsed from HTTP headers or error messages.
@@ -43,9 +64,9 @@ public class RateLimitManager {
      */
     public enum ApiProvider {
         /** OpenAI has short rate limit windows (typically seconds to minutes). */
-        OPENAI("openai", 500, "1m"),
+        OPENAI("openai", OPENAI_DAILY_LIMIT, OPENAI_RATE_LIMIT_WINDOW),
         /** GitHub Models has strict daily limits with 24-hour reset windows. */
-        GITHUB_MODELS("github_models", 150, "24h"),
+        GITHUB_MODELS("github_models", GITHUB_MODELS_DAILY_LIMIT, GITHUB_MODELS_RATE_LIMIT_WINDOW),
         LOCAL("local", Integer.MAX_VALUE, null);
 
         private final String name;
@@ -128,7 +149,7 @@ public class RateLimitManager {
                 nextRetryTime = Instant.now().plusSeconds(retryAfterSeconds);
             } else {
                 // Exponential backoff for unknown retry times
-                backoffMultiplier = Math.min(backoffMultiplier * 2, 32);
+                backoffMultiplier = Math.min(backoffMultiplier * 2, MAX_BACKOFF_MULTIPLIER);
                 nextRetryTime = Instant.now().plusSeconds(backoffMultiplier);
             }
         }
@@ -148,11 +169,11 @@ public class RateLimitManager {
     /**
      * Builds a manager that combines in-memory circuit state with persisted rate-limit state.
      */
-    public RateLimitManager(RateLimitState rateLimitState, Environment env) {
+    public RateLimitService(RateLimitState rateLimitState, Environment env) {
         this.rateLimitState = rateLimitState;
         this.env = env;
         this.headerParser = new RateLimitHeaderParser();
-        log.info("RateLimitManager initialized with persistent state");
+        log.info("RateLimitService initialized with persistent state");
     }
 
     private boolean isProviderConfigured(ApiProvider provider) {
@@ -234,9 +255,8 @@ public class RateLimitManager {
         // For GitHub Models, use longer backoff as they have strict limits
         if (provider == ApiProvider.GITHUB_MODELS) {
             if (retryAfterSeconds == 0) {
-                // GitHub typically has 24-hour rate limits
-                resetTime = Instant.now().plus(Duration.ofHours(24));
-                log.info("[{}] Rate limited - applying 24-hour backoff", providerName);
+                resetTime = Instant.now().plus(GITHUB_MODELS_DEFAULT_BACKOFF);
+                log.info("[{}] Rate limited - applying {} backoff", providerName, GITHUB_MODELS_DEFAULT_BACKOFF);
             }
         }
 

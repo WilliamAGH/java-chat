@@ -27,8 +27,8 @@ public class QdrantHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        ExternalServiceHealth.ServiceInfo info =
-                externalServiceHealth.getServiceInfo(ExternalServiceHealth.SERVICE_QDRANT);
+        ExternalServiceHealth.HealthSnapshot info =
+                externalServiceHealth.getHealthSnapshot(ExternalServiceHealth.SERVICE_QDRANT);
 
         if (info.isHealthy()) {
             return Health.up().withDetail("status", info.message()).build();

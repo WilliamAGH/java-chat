@@ -15,19 +15,19 @@ import org.springframework.mock.env.MockEnvironment;
 /**
  * Verifies rate limit manager header parsing behavior.
  */
-class RateLimitManagerTest {
+class RateLimitServiceTest {
 
     @Test
     void recordRateLimitFromOpenAiServiceExceptionUsesRetryAfterHeaderSeconds() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
         MockEnvironment environment = new MockEnvironment();
-        RateLimitManager manager = new RateLimitManager(rateLimitState, environment);
+        RateLimitService manager = new RateLimitService(rateLimitState, environment);
 
         Headers headers = Headers.builder().put("Retry-After", "12").build();
         RateLimitException exception =
                 RateLimitException.builder().headers(headers).build();
 
-        manager.recordRateLimitFromOpenAiServiceException(RateLimitManager.ApiProvider.OPENAI, exception);
+        manager.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -36,7 +36,7 @@ class RateLimitManagerTest {
     void recordRateLimitFromOpenAiServiceExceptionUsesResetWindowWhenRetryAfterMissing() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
         MockEnvironment environment = new MockEnvironment();
-        RateLimitManager manager = new RateLimitManager(rateLimitState, environment);
+        RateLimitService manager = new RateLimitService(rateLimitState, environment);
 
         Headers headers =
                 Headers.builder().put("x-ratelimit-reset-requests", "2s").build();
@@ -45,7 +45,7 @@ class RateLimitManagerTest {
                 .headers(headers)
                 .build();
 
-        manager.recordRateLimitFromOpenAiServiceException(RateLimitManager.ApiProvider.OPENAI, exception);
+        manager.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }

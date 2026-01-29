@@ -181,7 +181,7 @@ public class RateLimitState {
         }
 
         try {
-            StateData persistedState = objectMapper.readValue(file, StateData.class);
+            PersistedState persistedState = objectMapper.readValue(file, PersistedState.class);
             if (persistedState != null && persistedState.getProviders() != null) {
                 providerStates = new ConcurrentHashMap<>(persistedState.getProviders());
                 log.info("Loaded rate limit state for {} providers", providerStates.size());
@@ -256,7 +256,7 @@ public class RateLimitState {
                 throw new IOException("Failed to create state directory: " + parent);
             }
 
-            StateData data = new StateData();
+            PersistedState data = new PersistedState();
             data.setProviders(new ConcurrentHashMap<>(providerStates));
             data.setSavedAt(Instant.now());
 
@@ -279,7 +279,7 @@ public class RateLimitState {
      * Defines the persisted JSON payload for rate limit state storage.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class StateData {
+    public static class PersistedState {
         private Map<String, ProviderState> providers;
         private Instant savedAt;
 

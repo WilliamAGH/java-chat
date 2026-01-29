@@ -116,10 +116,10 @@ public class ExternalServiceHealth {
      * @param serviceName logical service name
      * @return service status details for UI/diagnostics
      */
-    public ServiceInfo getServiceInfo(String serviceName) {
+    public HealthSnapshot getHealthSnapshot(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status == null) {
-            return new ServiceInfo(serviceName, true, "Unknown service", null);
+            return new HealthSnapshot(serviceName, true, "Unknown service", null);
         }
 
         String message;
@@ -141,7 +141,7 @@ public class ExternalServiceHealth {
             }
         }
 
-        return new ServiceInfo(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
+        return new HealthSnapshot(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
     }
 
     /**
@@ -314,7 +314,7 @@ public class ExternalServiceHealth {
     /**
      * Public DTO for service health information
      */
-    public static class ServiceInfo {
+    public static class HealthSnapshot {
         private final String name;
         private final boolean healthy;
         private final String message;
@@ -323,7 +323,7 @@ public class ExternalServiceHealth {
         /**
          * Creates a snapshot of service health status.
          */
-        public ServiceInfo(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
+        public HealthSnapshot(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
             this.name = name;
             this.healthy = isHealthy;
             this.message = message;

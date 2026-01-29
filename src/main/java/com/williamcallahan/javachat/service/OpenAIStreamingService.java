@@ -65,7 +65,7 @@ public class OpenAIStreamingService {
     private OpenAIClient clientPrimary; // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
     private volatile boolean isAvailable = false;
-    private final RateLimitManager rateLimitManager;
+    private final RateLimitService rateLimitManager;
     private final Chunker chunker;
     private final PromptTruncator promptTruncator;
 
@@ -79,7 +79,7 @@ public class OpenAIStreamingService {
      * @param chunker token-aware text chunker for legacy string truncation
      * @param promptTruncator structure-aware prompt truncator
      */
-    public OpenAIStreamingService(RateLimitManager rateLimitManager, Chunker chunker, PromptTruncator promptTruncator) {
+    public OpenAIStreamingService(RateLimitService rateLimitManager, Chunker chunker, PromptTruncator promptTruncator) {
         this.rateLimitManager = rateLimitManager;
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
@@ -207,9 +207,9 @@ public class OpenAIStreamingService {
                     }
 
                     boolean useGitHubModels = isPrimaryClient(streamingClient);
-                    RateLimitManager.ApiProvider activeProvider = useGitHubModels
-                            ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                            : RateLimitManager.ApiProvider.OPENAI;
+                    RateLimitService.ApiProvider activeProvider = useGitHubModels
+                            ? RateLimitService.ApiProvider.GITHUB_MODELS
+                            : RateLimitService.ApiProvider.OPENAI;
 
                     // Determine model and token limits
                     String modelId = normalizedModelId(useGitHubModels);
@@ -240,7 +240,7 @@ public class OpenAIStreamingService {
      * Executes the streaming request and handles completion/error callbacks.
      */
     private Flux<String> executeStreamingRequest(
-            OpenAIClient client, ResponseCreateParams params, RateLimitManager.ApiProvider activeProvider) {
+            OpenAIClient client, ResponseCreateParams params, RateLimitService.ApiProvider activeProvider) {
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(streamingTimeout()).build();
 
@@ -276,9 +276,9 @@ public class OpenAIStreamingService {
                         return Mono.error(new IllegalStateException(error));
                     }
                     boolean useGitHubModels = isPrimaryClient(blockingClient);
-                    RateLimitManager.ApiProvider activeProvider = useGitHubModels
-                            ? RateLimitManager.ApiProvider.GITHUB_MODELS
-                            : RateLimitManager.ApiProvider.OPENAI;
+                    RateLimitService.ApiProvider activeProvider = useGitHubModels
+                            ? RateLimitService.ApiProvider.GITHUB_MODELS
+                            : RateLimitService.ApiProvider.OPENAI;
                     ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, useGitHubModels);
                     try {
                         log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
@@ -317,7 +317,7 @@ public class OpenAIStreamingService {
                 .build();
     }
 
-    private void recordProviderFailure(RateLimitManager.ApiProvider provider, Throwable throwable) {
+    private void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
         if (!(throwable instanceof OpenAIServiceException serviceException)) {
             if (isRetryablePrimaryFailure(throwable)) {
                 rateLimitManager.recordRateLimit(provider, throwable.getMessage());
@@ -461,10 +461,10 @@ public class OpenAIStreamingService {
     private OpenAIClient selectClientForStreaming() {
         // Prefer OpenAI when available (more reliable, shorter rate limit windows)
         if (clientSecondary != null) {
-            if (rateLimitManager == null || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.OPENAI)) {
+            if (rateLimitManager == null || rateLimitManager.isProviderAvailable(RateLimitService.ApiProvider.OPENAI)) {
                 log.debug(
                         "Selected provider for streaming (providerId={})",
-                        RateLimitManager.ApiProvider.OPENAI.ordinal());
+                        RateLimitService.ApiProvider.OPENAI.ordinal());
                 return clientSecondary;
             }
         }
@@ -472,10 +472,10 @@ public class OpenAIStreamingService {
         // Try GitHub Models if not in backoff and not rate limited
         if (clientPrimary != null && !isPrimaryInBackoff()) {
             if (rateLimitManager == null
-                    || rateLimitManager.isProviderAvailable(RateLimitManager.ApiProvider.GITHUB_MODELS)) {
+                    || rateLimitManager.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS)) {
                 log.debug(
                         "Selected provider for streaming (providerId={})",
-                        RateLimitManager.ApiProvider.GITHUB_MODELS.ordinal());
+                        RateLimitService.ApiProvider.GITHUB_MODELS.ordinal());
                 return clientPrimary;
             }
         }
