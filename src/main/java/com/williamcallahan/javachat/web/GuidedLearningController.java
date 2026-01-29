@@ -218,8 +218,19 @@ public class GuidedLearningController extends BaseController {
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-        // Compute citations before streaming starts
-        List<Citation> citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+        // Compute citations before streaming starts - errors surfaced to UI, not silently swallowed
+        List<Citation> citations;
+        String citationWarning;
+        try {
+            citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+            citationWarning = null;
+        } catch (Exception citationError) {
+            log.warn("Citation conversion failed for guided lesson: {}", citationError.getMessage());
+            citations = List.of();
+            citationWarning = "Citation retrieval failed - sources unavailable for this response";
+        }
+        final List<Citation> finalCitations = citations;
+        final String finalCitationWarning = citationWarning;
 
         // Stream with provider transparency - surfaces which LLM is responding
         return openAIStreamingService
@@ -234,14 +245,20 @@ public class GuidedLearningController extends BaseController {
 
                     Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
-                    Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(citations));
+                    Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(finalCitations));
 
-                    return Flux.concat(Flux.just(providerEvent), Flux.merge(dataEvents, heartbeats), citationEvent);
+                    // Include citation warning in stream if citations failed
+                    Flux<ServerSentEvent<String>> statusEvents = finalCitationWarning != null
+                            ? Flux.just(sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded"))
+                            : Flux.empty();
+
+                    return Flux.concat(
+                            Flux.just(providerEvent), statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent);
                 })
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();
-                    log.error("Guided streaming error");
+                    log.error("Guided streaming error: {} - {}", errorType, error.getMessage());
                     return sseSupport.sseError(
                             "Streaming error: " + errorType,
                             "The response stream encountered an error. Please try again.");

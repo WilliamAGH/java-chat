@@ -135,14 +135,19 @@ public class ChatController extends BaseController {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
             // Emit citations inline at stream end - compute before streaming starts
+            // Citation conversion errors are surfaced to UI via status event, not silently swallowed
             List<Citation> citations;
+            String citationWarning;
             try {
                 citations = retrievalService.toCitations(promptOutcome.documents());
+                citationWarning = null;
             } catch (Exception citationError) {
-                PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations", requestToken);
+                PIPELINE_LOG.warn("[{}] Citation conversion failed: {}", requestToken, citationError.getMessage());
                 citations = List.of();
+                citationWarning = "Citation retrieval failed - sources unavailable for this response";
             }
             final List<Citation> finalCitations = citations;
+            final String finalCitationWarning = citationWarning;
 
             // Stream with provider transparency - surfaces which LLM is responding
             return openAIStreamingService
@@ -161,8 +166,13 @@ public class ChatController extends BaseController {
                         // Heartbeats terminate when data stream completes (success or error)
                         Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
 
+                        // Combine retrieval notices with citation warning if present
                         Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                                 .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
+                        if (finalCitationWarning != null) {
+                            statusEvents = statusEvents.concatWith(Flux.just(
+                                    sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded")));
+                        }
 
                         // Wrap chunks in JSON to preserve whitespace
                         Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
