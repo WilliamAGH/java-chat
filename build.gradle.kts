@@ -179,7 +179,10 @@ tasks.withType<Test> {
     maxHeapSize = "1024m"
     jvmArgs(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED"
+        "--add-opens", "java.base/java.util=ALL-UNNAMED",
+        // Suppress sun.misc.Unsafe deprecation warnings from gRPC/Netty (Qdrant client dependency)
+        // See: https://netty.io/wiki/java-24-and-sun.misc.unsafe.html
+        "--sun-misc-unsafe-memory-access=allow"
     )
 }
 
@@ -207,7 +210,10 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     jvmArgs(
         "-Xmx2g",
         "-Dio.netty.handler.ssl.noOpenSsl=true",
-        "-Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
+        "-Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true",
+        // Suppress sun.misc.Unsafe deprecation warnings from gRPC/Netty (Qdrant client dependency)
+        // See: https://netty.io/wiki/java-24-and-sun.misc.unsafe.html
+        "--sun-misc-unsafe-memory-access=allow"
     )
     systemProperty("java.net.preferIPv4Stack", "true")
     // spring.devtools.restart.enabled is controlled by devtools presence on classpath

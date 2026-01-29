@@ -75,7 +75,8 @@ run: build ## Run the packaged jar (loads .env if present)
 	  fi; \
 	  # Add conservative JVM memory limits to prevent OS-level SIGKILL (exit 137) under memory pressure
 	  # Tuned for local dev: override via JAVA_OPTS env if needed
-	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true}"; \
+	  # --sun-misc-unsafe-memory-access=allow suppresses gRPC/Netty Unsafe warnings (see netty.io/wiki/java-24-and-sun.misc.unsafe.html)
+	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true --sun-misc-unsafe-memory-access=allow}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
 dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
