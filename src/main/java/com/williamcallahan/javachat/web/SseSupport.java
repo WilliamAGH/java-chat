@@ -178,6 +178,20 @@ public class SseSupport {
                 .build();
     }
 
+    /**
+     * Creates a provider event indicating which LLM provider is handling the request.
+     * Surfaces provider transparency to end-users per the no-silent-fallback policy.
+     *
+     * @param providerName the name of the LLM provider (e.g., "OpenAI", "GitHub Models")
+     * @return ServerSentEvent with provider metadata payload
+     */
+    public ServerSentEvent<String> providerEvent(String providerName) {
+        return ServerSentEvent.<String>builder()
+                .event(EVENT_PROVIDER)
+                .data(jsonSerialize(new ProviderPayload(providerName)))
+                .build();
+    }
+
     /** Payload record for text chunks - preserves whitespace in JSON. */
     public record ChunkPayload(String text) {}
 
@@ -186,4 +200,7 @@ public class SseSupport {
 
     /** Payload record for error messages. */
     public record ErrorPayload(String message, String details) {}
+
+    /** Payload record for provider metadata. */
+    public record ProviderPayload(String provider) {}
 }

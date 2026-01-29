@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,6 +26,12 @@ public class ExternalServiceHealth {
 
     /** Known external service identifiers for type-safe health checks. */
     public static final String SERVICE_QDRANT = "qdrant";
+
+    // Health snapshot message templates
+    private static final String HEALTHY_MSG_TEMPLATE = "Healthy (checked %s ago)";
+    private static final String UNHEALTHY_CHECKING_MSG = "Unhealthy (checking now...)";
+    private static final String UNHEALTHY_NEXT_CHECK_TEMPLATE = "Unhealthy (failed %d times, next check in %s)";
+    private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
 
     private final WebClient webClient;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
@@ -111,7 +118,7 @@ public class ExternalServiceHealth {
     }
 
     /**
-     * Returns detailed status information for a service.
+     * Provides detailed status information for a service.
      *
      * @param serviceName logical service name
      * @return service status details for UI/diagnostics
@@ -119,7 +126,7 @@ public class ExternalServiceHealth {
     public HealthSnapshot getHealthSnapshot(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status == null) {
-            return new HealthSnapshot(serviceName, true, "Unknown service", null);
+            return new HealthSnapshot(serviceName, true, UNKNOWN_SERVICE_MSG, null);
         }
 
         String message;
@@ -127,17 +134,18 @@ public class ExternalServiceHealth {
 
         if (status.isHealthy.get()) {
             message = String.format(
-                    "Healthy (checked %s ago)", formatDuration(Duration.between(status.lastCheck, Instant.now())));
+                    HEALTHY_MSG_TEMPLATE, formatDuration(Duration.between(status.lastCheck, Instant.now())));
         } else {
             timeUntilNextCheck = Duration.between(Instant.now(), status.lastCheck.plus(status.currentBackoff));
 
             if (timeUntilNextCheck.isNegative()) {
-                message = "Unhealthy (checking now...)";
+                message = UNHEALTHY_CHECKING_MSG;
                 timeUntilNextCheck = Duration.ZERO;
             } else {
                 message = String.format(
-                        "Unhealthy (failed %d times, next check in %s)",
-                        status.consecutiveFailures.get(), formatDuration(timeUntilNextCheck));
+                        UNHEALTHY_NEXT_CHECK_TEMPLATE,
+                        status.consecutiveFailures.get(),
+                        formatDuration(timeUntilNextCheck));
             }
         }
 
@@ -312,49 +320,46 @@ public class ExternalServiceHealth {
     }
 
     /**
-     * Public DTO for service health information
+     * Immutable snapshot of service health status for UI and diagnostics.
      */
     public static class HealthSnapshot {
         private final String name;
         private final boolean healthy;
         private final String message;
-        private final Duration timeUntilNextCheck;
+        private final Optional<Duration> timeUntilNextCheck;
 
         /**
          * Creates a snapshot of service health status.
+         *
+         * @param name service identifier
+         * @param isHealthy current health state
+         * @param message human-readable status description
+         * @param timeUntilNextCheck time until next check (null wraps to empty Optional)
          */
         public HealthSnapshot(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
             this.name = name;
             this.healthy = isHealthy;
             this.message = message;
-            this.timeUntilNextCheck = timeUntilNextCheck;
+            this.timeUntilNextCheck = Optional.ofNullable(timeUntilNextCheck);
         }
 
-        /**
-         * Returns the service identifier.
-         */
+        /** Provides the service identifier. */
         public String name() {
             return name;
         }
 
-        /**
-         * Indicates whether the service is currently healthy.
-         */
+        /** Indicates whether the service is currently healthy. */
         public boolean isHealthy() {
             return healthy;
         }
 
-        /**
-         * Describes the current health state in human-readable form.
-         */
+        /** Describes the current health state in human-readable form. */
         public String message() {
             return message;
         }
 
-        /**
-         * Returns the time until the next scheduled check, if applicable.
-         */
-        public Duration timeUntilNextCheck() {
+        /** Provides the time until the next scheduled check, if applicable. */
+        public Optional<Duration> timeUntilNextCheck() {
             return timeUntilNextCheck;
         }
     }

@@ -218,19 +218,26 @@ public class GuidedLearningController extends BaseController {
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-        Flux<String> dataStream = sseSupport.prepareDataStream(
-                openAIStreamingService.streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE),
-                fullResponse::append);
+        // Compute citations before streaming starts
+        List<Citation> citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
 
-        Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
-        Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+        // Stream with provider transparency - surfaces which LLM is responding
+        return openAIStreamingService
+                .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                .flatMapMany(streamingResult -> {
+                    // Provider event first - surfaces which LLM is handling this request
+                    ServerSentEvent<String> providerEvent =
+                            sseSupport.providerEvent(streamingResult.providerDisplayName());
 
-        Flux<ServerSentEvent<String>> citationEvent = Flux.defer(() -> {
-            List<Citation> citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
-            return Flux.just(sseSupport.citationEvent(citations));
-        });
+                    Flux<String> dataStream =
+                            sseSupport.prepareDataStream(streamingResult.content(), fullResponse::append);
 
-        return Flux.concat(Flux.merge(dataEvents, heartbeats), citationEvent)
+                    Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+                    Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+                    Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(citations));
+
+                    return Flux.concat(Flux.just(providerEvent), Flux.merge(dataEvents, heartbeats), citationEvent);
+                })
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();

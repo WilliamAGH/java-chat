@@ -5,7 +5,6 @@ import com.openai.errors.OpenAIServiceException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -57,7 +56,7 @@ public class RateLimitService {
      * @param resetTime the timestamp when the rate limit resets (null if unavailable)
      * @param retryAfterSeconds explicit retry delay in seconds (0 if unavailable)
      */
-    private record ParsedRateLimitInfo(Instant resetTime, long retryAfterSeconds) {
+    private record RateLimitTiming(Instant resetTime, long retryAfterSeconds) {
         /** Returns true if a reset timestamp is available for computing backoff. */
         boolean hasResetTime() {
             return resetTime != null;
@@ -318,19 +317,16 @@ public class RateLimitService {
                     providerName);
             return;
         }
-        ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
-        if (rateLimitInfo.retryAfterSeconds > 0) {
-            log.debug("[{}] Using Retry-After header: {} seconds", providerName, rateLimitInfo.retryAfterSeconds);
-            applyRateLimit(
-                    provider,
-                    Instant.now().plusSeconds(rateLimitInfo.retryAfterSeconds),
-                    rateLimitInfo.retryAfterSeconds);
+        RateLimitTiming timing = parseRateLimitFromHeaders(exception.headers());
+        if (timing.retryAfterSeconds > 0) {
+            log.debug("[{}] Using Retry-After header: {} seconds", providerName, timing.retryAfterSeconds);
+            applyRateLimit(provider, Instant.now().plusSeconds(timing.retryAfterSeconds), timing.retryAfterSeconds);
             return;
         }
 
-        if (rateLimitInfo.resetTime != null) {
-            log.debug("[{}] Using X-RateLimit-Reset header: {}", providerName, rateLimitInfo.resetTime);
-            applyRateLimit(provider, rateLimitInfo.resetTime, 0);
+        if (timing.resetTime != null) {
+            log.debug("[{}] Using X-RateLimit-Reset header: {}", providerName, timing.resetTime);
+            applyRateLimit(provider, timing.resetTime, 0);
             return;
         }
 
@@ -372,10 +368,10 @@ public class RateLimitService {
             return;
         }
         if (error instanceof WebClientResponseException webError) {
-            ParsedRateLimitInfo info = parseRateLimitHeaders(webError);
+            RateLimitTiming timing = parseRateLimitHeaders(webError);
 
-            if (info.hasResetTime()) {
-                applyRateLimit(provider, info.resetTime(), 0);
+            if (timing.hasResetTime()) {
+                applyRateLimit(provider, timing.resetTime(), 0);
             } else {
                 log.debug("[{}] No reset header found; falling back to error message parsing", providerName);
                 recordRateLimit(provider, webError.getMessage());
@@ -407,7 +403,7 @@ public class RateLimitService {
     /**
      * Parse rate limit information from HTTP response headers.
      */
-    private ParsedRateLimitInfo parseRateLimitHeaders(WebClientResponseException webError) {
+    private RateLimitTiming parseRateLimitHeaders(WebClientResponseException webError) {
         Instant resetTime = headerParser.parseResetHeader(webError.getHeaders().getFirst("X-RateLimit-Reset"));
         long retrySeconds =
                 headerParser.parseRetryAfterHeader(webError.getHeaders().getFirst("Retry-After"));
@@ -417,7 +413,7 @@ public class RateLimitService {
             resetTime = Instant.now().plusSeconds(retrySeconds);
         }
 
-        return new ParsedRateLimitInfo(resetTime, retrySeconds);
+        return new RateLimitTiming(resetTime, retrySeconds);
     }
 
     /**
@@ -504,57 +500,18 @@ public class RateLimitService {
         return 0;
     }
 
-    private ParsedRateLimitInfo parseRateLimitFromHeaders(Headers headers) {
+    private RateLimitTiming parseRateLimitFromHeaders(Headers headers) {
         if (headers == null || headers.isEmpty()) {
-            return new ParsedRateLimitInfo(null, 0);
+            return new RateLimitTiming(null, 0);
         }
 
         long retryAfterSeconds = headerParser.parseRetryAfterSeconds(headers);
         if (retryAfterSeconds > 0) {
-            return new ParsedRateLimitInfo(null, retryAfterSeconds);
+            return new RateLimitTiming(null, retryAfterSeconds);
         }
 
         Instant resetInstant = headerParser.parseResetInstant(headers);
-        return new ParsedRateLimitInfo(resetInstant, 0);
-    }
-
-    /**
-     * Selects the highest-priority configured provider that is currently available.
-     */
-    public Optional<ApiProvider> selectBestProvider() {
-        // Priority order: OpenAI > GitHub Models > Local
-        for (ApiProvider provider : new ApiProvider[] {
-            ApiProvider.OPENAI, ApiProvider.GITHUB_MODELS, ApiProvider.LOCAL,
-        }) {
-            String providerName = sanitizeLogValue(provider.getName());
-            if (!isProviderConfigured(provider)) {
-                log.debug("[{}] Skipping: not configured", providerName);
-                continue;
-            }
-            if (isProviderAvailable(provider)) {
-                log.debug("[{}] Selected as best provider", providerName);
-                return Optional.of(provider);
-            }
-        }
-
-        // Log detailed status for debugging
-        for (ApiProvider provider : ApiProvider.values()) {
-            String providerName = sanitizeLogValue(provider.getName());
-            if (!isProviderConfigured(provider)) {
-                log.warn("[{}] Unavailable - missing configuration (API key/token)", providerName);
-                continue;
-            }
-            Duration remaining = rateLimitState.getRemainingWaitTime(provider.getName());
-            if (!remaining.isZero()) {
-                log.warn("[{}] Unavailable - rate limited for {} more", providerName, formatDuration(remaining));
-            }
-        }
-
-        return Optional.empty();
-    }
-
-    private String formatDuration(Duration duration) {
-        return RateLimitHeaderParser.formatDuration(duration);
+        return new RateLimitTiming(resetInstant, 0);
     }
 
     private static String sanitizeLogValue(String rawValue) {

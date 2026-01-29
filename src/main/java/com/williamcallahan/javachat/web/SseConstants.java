@@ -23,6 +23,9 @@ public final class SseConstants {
     /** SSE event type for inline citations derived from RAG documents. */
     public static final String EVENT_CITATION = "citation";
 
+    /** SSE event type for provider metadata (which LLM provider is responding). */
+    public static final String EVENT_PROVIDER = "provider";
+
     /** SSE comment content for keepalive heartbeats. */
     public static final String COMMENT_KEEPALIVE = "keepalive";
 

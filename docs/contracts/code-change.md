@@ -22,7 +22,7 @@ See `AGENTS.md` ([FS1a-k], [MO1a-g], [AR1a-f], [ND1a-c], [CC1a-d]).
 Use this as a hard rule, not a suggestion.
 
 | Situation | MUST do | MUST NOT do |
-|----------|---------|-------------|
+| --------- | ------- | ----------- |
 | New user-facing behavior (new endpoint, new domain capability) | Add a new, narrowly scoped type in the correct layer/package ([MO1b], [AR1a]) | “Just add a method” to an unrelated class ([MO1a], [MO1d]) |
 | Bug fix (existing behavior wrong) | Edit the smallest correct owner; add/adjust tests to lock behavior ([RC1c]) | Create a parallel/shadow implementation ([RC1a]) |
 | Logic change in stable code | Extract/replace via composition; keep stable code stable ([MO1g]) | Add flags, shims, or “compat” paths to hide uncertainty ([RC1b]) |

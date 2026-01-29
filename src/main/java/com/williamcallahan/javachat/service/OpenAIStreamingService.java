@@ -62,6 +62,20 @@ public class OpenAIStreamingService {
     /** Truncation notice for other models with larger limits. */
     private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
 
+    /**
+     * Result of streaming response containing the content flux and the provider that handled the request.
+     * Surfacing the provider ensures transparency when multiple providers are configured.
+     *
+     * @param content the streaming response flux
+     * @param provider the LLM provider that handled this request
+     */
+    public record StreamingResult(Flux<String> content, RateLimitService.ApiProvider provider) {
+        /** Returns a user-friendly display name for the provider. */
+        public String providerDisplayName() {
+            return provider.getName();
+        }
+    }
+
     private OpenAIClient clientPrimary; // Prefer GitHub Models when available
     private OpenAIClient clientSecondary; // Fallback to OpenAI when available
     private volatile boolean isAvailable = false;
@@ -190,20 +204,24 @@ public class OpenAIStreamingService {
      * Context documents are removed first, then older conversation history,
      * while system instructions and the current query are always preserved.</p>
      *
+     * <p>Returns a {@link StreamingResult} containing both the content flux and the provider
+     * that handled the request. This surfaces provider transparency to callers, ensuring
+     * users know which LLM provider is responding (per the no-silent-fallback policy).</p>
+     *
      * @param structuredPrompt the typed prompt segments
      * @param temperature the temperature setting for response generation
-     * @return a Flux of content strings as they arrive from the model
+     * @return a Mono that emits a StreamingResult with content flux and provider info
      */
-    public Flux<String> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
+    public Mono<StreamingResult> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
         log.debug("Starting OpenAI stream with structured prompt");
 
-        return Flux.<String>defer(() -> {
+        return Mono.<StreamingResult>defer(() -> {
                     OpenAIClient streamingClient = selectClientForStreaming();
 
                     if (streamingClient == null) {
                         String error = "All LLM providers unavailable - check rate limits and API credentials";
                         log.error("[LLM] {}", error);
-                        return Flux.<String>error(new IllegalStateException(error));
+                        return Mono.<StreamingResult>error(new IllegalStateException(error));
                     }
 
                     boolean useGitHubModels = isPrimaryClient(streamingClient);
@@ -231,7 +249,8 @@ public class OpenAIStreamingService {
                     ResponseCreateParams params = buildResponseParams(finalPrompt, temperature, useGitHubModels);
                     log.info("[LLM] Streaming started (structured, providerId={})", activeProvider.ordinal());
 
-                    return executeStreamingRequest(streamingClient, params, activeProvider);
+                    Flux<String> contentFlux = executeStreamingRequest(streamingClient, params, activeProvider);
+                    return Mono.just(new StreamingResult(contentFlux, activeProvider));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }

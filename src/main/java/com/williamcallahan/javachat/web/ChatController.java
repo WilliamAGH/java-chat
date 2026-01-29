@@ -134,25 +134,7 @@ public class ChatController extends BaseController {
         if (openAIStreamingService.isAvailable()) {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
-            // Stream with structure-aware truncation - preserves semantic boundaries
-            Flux<String> dataStream = sseSupport.prepareDataStream(
-                    openAIStreamingService.streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE),
-                    chunk -> {
-                        fullResponse.append(chunk);
-                        chunkCount.incrementAndGet();
-                    });
-
-            // Heartbeats terminate when data stream completes (success or error)
-            Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
-
-            Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
-                    .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-
-            // Wrap chunks in JSON to preserve whitespace - Spring's SSE handling can trim leading spaces
-            // See: https://github.com/spring-projects/spring-framework/issues/27473
-            Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
-
-            // Emit citations inline at stream end - eliminates separate /citations API call and UI flicker
+            // Emit citations inline at stream end - compute before streaming starts
             List<Citation> citations;
             try {
                 citations = retrievalService.toCitations(promptOutcome.documents());
@@ -160,9 +142,40 @@ public class ChatController extends BaseController {
                 PIPELINE_LOG.warn("[{}] Citation conversion failed, continuing without citations", requestToken);
                 citations = List.of();
             }
-            Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(citations));
+            final List<Citation> finalCitations = citations;
 
-            return Flux.concat(statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent)
+            // Stream with provider transparency - surfaces which LLM is responding
+            return openAIStreamingService
+                    .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                    .flatMapMany(streamingResult -> {
+                        // Provider event first - surfaces which LLM is handling this request
+                        ServerSentEvent<String> providerEvent =
+                                sseSupport.providerEvent(streamingResult.providerDisplayName());
+
+                        // Stream with structure-aware truncation - preserves semantic boundaries
+                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.content(), chunk -> {
+                            fullResponse.append(chunk);
+                            chunkCount.incrementAndGet();
+                        });
+
+                        // Heartbeats terminate when data stream completes (success or error)
+                        Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+
+                        Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
+                                .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
+
+                        // Wrap chunks in JSON to preserve whitespace
+                        Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+
+                        Flux<ServerSentEvent<String>> citationEvent =
+                                Flux.just(sseSupport.citationEvent(finalCitations));
+
+                        return Flux.concat(
+                                Flux.just(providerEvent),
+                                statusEvents,
+                                Flux.merge(dataEvents, heartbeats),
+                                citationEvent);
+                    })
                     .doOnComplete(() -> {
                         chatMemory.addAssistant(sessionId, fullResponse.toString());
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
