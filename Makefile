@@ -21,7 +21,7 @@ export RED GREEN YELLOW CYAN NC
 export PROJECT_ROOT := $(shell pwd)
 export JAR_PATH = $(call get_jar)
 
-.PHONY: all help clean build test lint format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -38,9 +38,14 @@ test: ## Run tests (loads .env if present)
 	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
 	  $(GRADLEW) test
 
-lint: ## Run static analysis (Java: SpotBugs + PMD, Frontend: svelte-check)
+lint: lint-ast ## Run static analysis (Java: SpotBugs + PMD + ast-grep, Frontend: svelte-check)
 	$(GRADLEW) spotbugsMain pmdMain
 	cd frontend && npm run check
+
+lint-ast: ## Run ast-grep rules for Java naming and type safety
+	@command -v ast-grep >/dev/null 2>&1 || { echo "$(RED)Error: 'ast-grep' not found. Install: brew install ast-grep$(NC)" >&2; exit 1; }
+	@echo "$(CYAN)Running ast-grep rules...$(NC)"
+	@ast-grep scan src/main/java/
 
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
