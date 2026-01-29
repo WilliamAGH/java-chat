@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "react",
+    "react-hooks",
+    "nextjs",
+    "import",
+    "jsx-a11y",
+    "promise",
+    "vitest"
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2023": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn",
+    "style": "off",
+    "pedantic": "off"
+  },
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unsafe-type-assertion": "warn",
+    "typescript/no-floating-promises": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{test,spec}.{js,jsx,ts,tsx}", "src/test/**/*.{js,jsx,ts,tsx}"],
+      "env": {
+        "vitest": true
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    "public/**",
+    "**/*.svelte",
+    "**/*.d.ts"
+  ]
+}
