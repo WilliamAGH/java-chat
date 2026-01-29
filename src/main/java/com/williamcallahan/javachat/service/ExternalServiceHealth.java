@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 /**
  * Monitors external service health with exponential backoff for failed services.
@@ -64,6 +63,9 @@ public class ExternalServiceHealth {
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
     private static final Duration HEALTHY_CHECK_INTERVAL = Duration.ofHours(1);
+
+    /** Timeout for external service health check requests. */
+    private static final Duration HEALTH_CHECK_TIMEOUT = Duration.ofSeconds(5);
 
     /**
      * Creates the health monitor with a WebClient for outbound checks.
@@ -193,20 +195,19 @@ public class ExternalServiceHealth {
         requestSpec
                 .retrieve()
                 .toBodilessEntity()
-                .timeout(Duration.ofSeconds(5))
-                .doOnSuccess(response -> {
-                    status.markHealthy();
-                    log.debug("Qdrant health check succeeded");
-                })
-                .doOnError(error -> {
-                    status.markUnhealthy();
-                    log.warn(
-                            "Qdrant health check failed (exception type: {}) - Will retry in {}",
-                            error.getClass().getSimpleName(),
-                            formatDuration(status.currentBackoff));
-                })
-                .onErrorResume(error -> Mono.empty())
-                .subscribe();
+                .timeout(HEALTH_CHECK_TIMEOUT)
+                .subscribe(
+                        response -> {
+                            status.markHealthy();
+                            log.debug("Qdrant health check succeeded");
+                        },
+                        error -> {
+                            status.markUnhealthy();
+                            log.warn(
+                                    "Qdrant health check failed (exception type: {}) - Will retry in {}",
+                                    error.getClass().getSimpleName(),
+                                    formatDuration(status.currentBackoff));
+                        });
     }
 
     /**
