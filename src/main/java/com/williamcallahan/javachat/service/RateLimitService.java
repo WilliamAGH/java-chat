@@ -280,7 +280,13 @@ public class RateLimitService {
      * @param exception OpenAI SDK service exception carrying response headers
      */
     public void recordRateLimitFromOpenAiServiceException(ApiProvider provider, OpenAIServiceException exception) {
-        if (provider == null || exception == null) {
+        if (provider == null) {
+            log.warn("recordRateLimitFromOpenAiServiceException called with null provider; ignoring");
+            return;
+        }
+        if (exception == null) {
+            log.warn("[{}] recordRateLimitFromOpenAiServiceException called with null exception; ignoring",
+                    sanitizeLogValue(provider.getName()));
             return;
         }
         ParsedRateLimitInfo rateLimitInfo = parseRateLimitFromHeaders(exception.headers());
@@ -302,9 +308,23 @@ public class RateLimitService {
     }
 
     /**
-     * Parse rate limit reset time from WebClientResponseException
+     * Records a rate limit by parsing reset time from the exception.
+     * Falls back to error-message heuristics when headers are unavailable.
+     *
+     * @param provider the rate-limited provider (must not be null)
+     * @param error the exception that triggered the rate limit
      */
     public void recordRateLimitFromException(ApiProvider provider, Throwable error) {
+        if (provider == null) {
+            log.warn("recordRateLimitFromException called with null provider; ignoring");
+            return;
+        }
+        if (error == null) {
+            log.warn("[{}] recordRateLimitFromException called with null error; applying default backoff",
+                    sanitizeLogValue(provider.getName()));
+            recordRateLimit(provider, "unknown error");
+            return;
+        }
         if (error instanceof WebClientResponseException webError) {
             ParsedRateLimitInfo info = parseRateLimitHeaders(webError);
 
@@ -339,22 +359,14 @@ public class RateLimitService {
      * Updates both persistent state and in-memory circuit breaker, then logs the event.
      *
      * @param provider the rate-limited provider
-     * @param resetTime the timestamp when the rate limit resets
+     * @param resetTime the timestamp when the rate limit resets (may be null)
      * @param retryAfterSecondsOverride explicit retry-after seconds (0 to compute from resetTime)
      */
     private void applyRateLimit(ApiProvider provider, Instant resetTime, long retryAfterSecondsOverride) {
         String providerName = sanitizeLogValue(provider.getName());
         ApiEndpointState state = getOrCreateEndpointState(provider);
 
-        long retryAfterSeconds;
-        if (retryAfterSecondsOverride > 0) {
-            retryAfterSeconds = retryAfterSecondsOverride;
-        } else if (resetTime != null) {
-            retryAfterSeconds =
-                    Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
-        } else {
-            retryAfterSeconds = 0;
-        }
+        long retryAfterSeconds = computeRetryAfterSeconds(resetTime, retryAfterSecondsOverride);
 
         state.recordRateLimit(retryAfterSeconds);
         rateLimitState.recordRateLimit(provider.getName(), resetTime, provider.getTypicalRateLimitWindow());
@@ -362,8 +374,30 @@ public class RateLimitService {
         log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})", providerName, resetTime, retryAfterSeconds);
     }
 
+    /**
+     * Computes retry-after seconds from explicit override or reset time.
+     * Priority: explicit override > computed from resetTime > zero (immediate retry eligible).
+     */
+    private long computeRetryAfterSeconds(Instant resetTime, long explicitOverride) {
+        if (explicitOverride > 0) {
+            return explicitOverride;
+        }
+        if (resetTime != null) {
+            return Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
+        }
+        return 0;
+    }
+
+    /**
+     * Extracts retry-after seconds from error message text.
+     *
+     * @param errorMessage the error message to parse
+     * @return retry-after seconds, or 0 if no retry information found (signals use default backoff)
+     * @throws IllegalArgumentException if retry pattern found but unparseable
+     */
     private long extractRetryAfter(String errorMessage) {
         if (errorMessage == null) {
+            log.debug("extractRetryAfter called with null errorMessage; returning 0 (use default backoff)");
             return 0;
         }
 
