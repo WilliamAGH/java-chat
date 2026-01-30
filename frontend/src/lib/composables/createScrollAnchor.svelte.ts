@@ -1,13 +1,14 @@
 /**
- * Reactive scroll anchor composable for streaming chat interfaces.
+ * Reactive scroll indicator composable for streaming chat interfaces.
  *
- * Solves the "scroll fighting" problem where auto-scroll hijacks control
- * from users who are reading earlier content. Provides:
+ * Implements an **inverted scroll model** where:
+ * - Auto-scroll is NEVER enabled during streaming
+ * - User scroll position is always respected
+ * - Indicator appears when new content streams off-screen
+ * - Indicator disappears when user scrolls to ~95% of content
  *
- * 1. **Intent detection** - Distinguishes user scrolling from programmatic scrolls
- * 2. **Throttled updates** - Batches rapid scroll-to-bottom calls during streaming
- * 3. **New content tracking** - Counts unseen content when user is scrolled up
- * 4. **Re-engagement** - Jump-to-bottom restores auto-scroll behavior
+ * This approach eliminates "scroll fighting" by removing auto-scroll entirely.
+ * The user is always in control of their scroll position.
  *
  * @example
  * ```svelte
@@ -21,10 +22,17 @@
  *     if (container) scroll.attach(container)
  *   })
  *
- *   // Call on each streaming chunk
+ *   // Call on each streaming chunk - never auto-scrolls, just tracks
  *   function onChunk(text: string) {
  *     appendContent(text)
  *     scroll.onContentAdded()
+ *   }
+ *
+ *   // Call when user sends a message - scrolls once, no anchoring
+ *   async function handleSend(message: string) {
+ *     addMessage(message)
+ *     await scroll.scrollOnce()
+ *     // ... start streaming
  *   }
  * </script>
  *
@@ -43,21 +51,14 @@
 
 import { tick } from 'svelte'
 
-/** Configuration options for scroll anchor behavior. */
+/** Configuration options for scroll indicator behavior. */
 export interface ScrollAnchorOptions {
   /**
-   * Distance from bottom (in pixels) to consider "at bottom".
-   * Users within this threshold are auto-scrolled on new content.
-   * @default 100
+   * Percentage of scroll position to consider "near bottom" (0-1).
+   * When user scrolls past this percentage, the indicator hides.
+   * @default 0.95 (95% - user is within 5% of bottom)
    */
-  threshold?: number
-
-  /**
-   * Minimum interval between scroll-to-bottom calls (in milliseconds).
-   * Prevents scroll spam during rapid streaming chunks.
-   * @default 50
-   */
-  throttleMs?: number
+  nearBottomThreshold?: number
 
   /**
    * Delay before showing the new content indicator (in milliseconds).
@@ -68,52 +69,44 @@ export interface ScrollAnchorOptions {
 }
 
 /** Default configuration values. */
-const DEFAULT_THRESHOLD = 100
-const DEFAULT_THROTTLE_MS = 50
+const DEFAULT_NEAR_BOTTOM_THRESHOLD = 0.95
 const DEFAULT_INDICATOR_DELAY_MS = 150
 
 /**
- * Creates a reactive scroll anchor for chat containers.
+ * Creates a reactive scroll indicator for chat containers.
  *
  * Returns an object with reactive state (via Svelte 5 runes) and
- * methods to wire up scroll behavior.
+ * methods to wire up scroll behavior. Auto-scroll is completely disabled;
+ * only the "new content" indicator and manual jump-to-bottom are provided.
  */
 export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
-  const threshold = options.threshold ?? DEFAULT_THRESHOLD
-  const throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS
+  const nearBottomThreshold = options.nearBottomThreshold ?? DEFAULT_NEAR_BOTTOM_THRESHOLD
   const indicatorDelayMs = options.indicatorDelayMs ?? DEFAULT_INDICATOR_DELAY_MS
 
   // Internal state
   let container: HTMLElement | null = null
-  let lastScrollTop = 0
-  let lastScrollTime = 0
   let indicatorTimeoutId: ReturnType<typeof setTimeout> | null = null
-  let isScrollingProgrammatically = false
 
   // Reactive state (Svelte 5 runes)
-  let isAnchored = $state(true)
   let unseenCount = $state(0)
   let showIndicator = $state(false)
 
   /**
    * Checks if the container is scrolled near the bottom.
+   * Uses percentage-based threshold (default 95%).
    */
   function isNearBottom(): boolean {
     if (!container) return true
     const { scrollTop, scrollHeight, clientHeight } = container
-    return scrollHeight - scrollTop - clientHeight < threshold
-  }
 
-  /**
-   * Detects scroll direction from the last known position.
-   * Returns 'up', 'down', or 'none'.
-   */
-  function detectScrollDirection(): 'up' | 'down' | 'none' {
-    if (!container) return 'none'
-    const currentScrollTop = container.scrollTop
-    if (currentScrollTop < lastScrollTop - 5) return 'up'
-    if (currentScrollTop > lastScrollTop + 5) return 'down'
-    return 'none'
+    // Handle edge case: content fits without scrolling
+    if (scrollHeight <= clientHeight) return true
+
+    // Calculate scroll percentage (0 = top, 1 = bottom)
+    const maxScroll = scrollHeight - clientHeight
+    const scrollPercentage = scrollTop / maxScroll
+
+    return scrollPercentage >= nearBottomThreshold
   }
 
   /**
@@ -125,7 +118,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
       indicatorTimeoutId = null
     }
 
-    if (!isAnchored && unseenCount > 0) {
+    if (unseenCount > 0 && !isNearBottom()) {
       // Delay showing indicator to prevent flicker
       indicatorTimeoutId = setTimeout(() => {
         showIndicator = true
@@ -143,18 +136,11 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     if (!container) return
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    isScrollingProgrammatically = true
 
     container.scrollTo({
       top: container.scrollHeight,
       behavior: prefersReducedMotion ? 'auto' : 'smooth'
     })
-
-    // Reset flag after scroll completes (approximate)
-    setTimeout(() => {
-      isScrollingProgrammatically = false
-      lastScrollTop = container?.scrollTop ?? 0
-    }, prefersReducedMotion ? 0 : 300)
   }
 
   return {
@@ -162,12 +148,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     // Reactive getters (read-only state)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** Whether auto-scroll is currently active. */
-    get isAnchored(): boolean {
-      return isAnchored
-    },
-
-    /** Number of content updates since user scrolled away. */
+    /** Number of content updates since user was not at bottom. */
     get unseenCount(): number {
       return unseenCount
     },
@@ -187,10 +168,6 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      */
     attach(element: HTMLElement | null): void {
       container = element
-      if (container) {
-        lastScrollTop = container.scrollTop
-        isAnchored = isNearBottom()
-      }
     },
 
     /**
@@ -211,63 +188,47 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     /**
      * Handles user scroll events. Bind to `onscroll` on the container.
      *
-     * Detects user intent:
-     * - Scrolling UP = user is reading, disable auto-scroll
-     * - Scrolling to bottom = user wants to follow, enable auto-scroll
+     * When user scrolls to ~95% of content:
+     * - Clears unseen count
+     * - Hides indicator
      */
     onUserScroll(): void {
-      if (!container || isScrollingProgrammatically) return
+      if (!container) return
 
-      const direction = detectScrollDirection()
-      const nearBottom = isNearBottom()
-
-      // User scrolled up - they want to read, disable auto-scroll
-      if (direction === 'up' && !nearBottom) {
-        isAnchored = false
-        updateIndicatorVisibility()
-      }
-
-      // User scrolled back to bottom - re-enable auto-scroll
-      if (nearBottom && !isAnchored) {
-        isAnchored = true
+      if (isNearBottom()) {
+        // User reached near-bottom, clear indicator
         unseenCount = 0
         showIndicator = false
+
         if (indicatorTimeoutId) {
           clearTimeout(indicatorTimeoutId)
           indicatorTimeoutId = null
         }
       }
-
-      lastScrollTop = container.scrollTop
     },
 
     /**
      * Called when new content is added to the container.
      *
-     * If anchored: scrolls to bottom (throttled)
-     * If not anchored: increments unseen count
+     * **Never auto-scrolls.** Only tracks whether content is off-screen
+     * and updates the indicator visibility accordingly.
      */
     onContentAdded(): void {
-      if (isAnchored) {
-        // Throttle scroll-to-bottom calls
-        const now = Date.now()
-        if (now - lastScrollTime >= throttleMs) {
-          lastScrollTime = now
-          void performScroll()
-        }
-      } else {
-        // Track unseen content
+      if (!isNearBottom()) {
+        // User is scrolled up - track unseen content, show indicator
         unseenCount++
         updateIndicatorVisibility()
+      } else {
+        // User is at bottom - no need for indicator
+        // Don't reset unseenCount here; they'll see the content naturally
       }
     },
 
     /**
-     * Programmatically scrolls to bottom and re-enables auto-scroll.
-     * Use this for the "jump to bottom" button click handler.
+     * Clears indicator state and pending timeouts.
+     * Internal helper to avoid duplication in scroll methods.
      */
-    async jumpToBottom(): Promise<void> {
-      isAnchored = true
+    clearIndicatorState(): void {
       unseenCount = 0
       showIndicator = false
 
@@ -275,39 +236,34 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
         clearTimeout(indicatorTimeoutId)
         indicatorTimeoutId = null
       }
+    },
 
+    /**
+     * Scrolls to bottom once. Use when user sends a message.
+     *
+     * Unlike the old `anchor()` + `jumpToBottom()` pattern, this:
+     * - Does NOT enable any auto-scroll behavior
+     * - Simply scrolls once and clears the indicator
+     */
+    async scrollOnce(): Promise<void> {
+      this.clearIndicatorState()
       await performScroll()
     },
 
     /**
-     * Forces auto-scroll to be enabled.
-     * Use when the user sends a new message.
+     * Programmatically scrolls to bottom and clears indicator.
+     * Use this for the "jump to bottom" button click handler.
      */
-    anchor(): void {
-      isAnchored = true
-      unseenCount = 0
-      showIndicator = false
-
-      if (indicatorTimeoutId) {
-        clearTimeout(indicatorTimeoutId)
-        indicatorTimeoutId = null
-      }
+    async jumpToBottom(): Promise<void> {
+      this.clearIndicatorState()
+      await performScroll()
     },
 
     /**
      * Resets all state. Use when clearing chat or switching contexts.
      */
     reset(): void {
-      isAnchored = true
-      unseenCount = 0
-      showIndicator = false
-      lastScrollTop = 0
-      lastScrollTime = 0
-
-      if (indicatorTimeoutId) {
-        clearTimeout(indicatorTimeoutId)
-        indicatorTimeoutId = null
-      }
+      this.clearIndicatorState()
     }
   }
 }

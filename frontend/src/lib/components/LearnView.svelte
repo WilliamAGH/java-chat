@@ -54,7 +54,7 @@
     let messages = $state<MessageWithCitations[]>([]);
     let activeStreamingMessageId = $state<string | null>(null);
 
-    // Scroll anchor for smart auto-scroll behavior
+    // Scroll indicator for new off-screen content during streaming
     const scrollAnchor = createScrollAnchor();
 
     // Streaming state from composable (immediate status clear for LearnView)
@@ -272,16 +272,14 @@
 
     function toggleChatDrawer(): void {
         isChatDrawerOpen = !isChatDrawerOpen;
-        // Re-attach scroll anchor to the new active container and reset state
+        // Re-attach scroll anchor to the new active container
         updateScrollAnchorContainer();
-        scrollAnchor.anchor();
     }
 
     function closeChatDrawer(): void {
         isChatDrawerOpen = false;
-        // Re-attach scroll anchor to desktop container and reset state
+        // Re-attach scroll anchor to desktop container
         updateScrollAnchorContainer();
-        scrollAnchor.anchor();
     }
 
     /** Returns the currently active messages container based on drawer state. */
@@ -359,9 +357,8 @@
             },
         ];
 
-        // User sending = they want to follow the response
-        scrollAnchor.anchor();
-        await scrollAnchor.jumpToBottom();
+        // Scroll once when user sends - no auto-scroll during streaming
+        await scrollAnchor.scrollOnce();
 
         streaming.startStream();
         const assistantMessageId = createChatMessageId(
@@ -447,8 +444,7 @@
             ) {
                 streaming.finishStream();
                 activeStreamingMessageId = null;
-                // Final scroll to ensure we're at the bottom
-                await scrollAnchor.jumpToBottom();
+                // No final scroll - user maintains their position
             }
 
             if (guidedChatStreamVersion === activeStreamVersion) {

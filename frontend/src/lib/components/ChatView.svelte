@@ -26,7 +26,7 @@
     let messagesContainer: HTMLElement | null = $state(null);
     let activeStreamingMessageId = $state<string | null>(null);
 
-    // Scroll anchor for smart auto-scroll behavior
+    // Scroll indicator for new off-screen content during streaming
     const scrollAnchor = createScrollAnchor();
 
     // Attach scroll anchor to container when it mounts
@@ -157,9 +157,8 @@
             },
         ];
 
-        // User sending = they want to follow the response
-        scrollAnchor.anchor();
-        await scrollAnchor.jumpToBottom();
+        // Scroll once when user sends - no auto-scroll during streaming
+        await scrollAnchor.scrollOnce();
 
         // Start streaming
         streaming.startStream();
@@ -172,8 +171,7 @@
         } finally {
             streaming.finishStream();
             activeStreamingMessageId = null;
-            // Final scroll to ensure we're at the bottom
-            await scrollAnchor.jumpToBottom();
+            // No final scroll - user maintains their position
         }
     }
 
