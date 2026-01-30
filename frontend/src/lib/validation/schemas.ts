@@ -31,6 +31,11 @@ export const TextEventPayloadSchema = z.object({
   text: z.string()
 })
 
+/** Provider metadata from SSE provider events. */
+export const ProviderEventSchema = z.object({
+  provider: z.string()
+})
+
 // =============================================================================
 // Citation Schemas
 // =============================================================================
@@ -74,6 +79,7 @@ export const LessonContentResponseSchema = z.object({
 export type StreamStatus = z.infer<typeof StreamStatusSchema>
 export type StreamError = z.infer<typeof StreamErrorSchema>
 export type TextEventPayload = z.infer<typeof TextEventPayloadSchema>
+export type ProviderEvent = z.infer<typeof ProviderEventSchema>
 export type Citation = z.infer<typeof CitationSchema>
 export type GuidedLesson = z.infer<typeof GuidedLessonSchema>
 export type LessonContentResponse = z.infer<typeof LessonContentResponseSchema>

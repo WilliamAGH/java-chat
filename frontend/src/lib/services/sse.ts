@@ -10,9 +10,11 @@ import {
   StreamStatusSchema,
   StreamErrorSchema,
   TextEventPayloadSchema,
+  ProviderEventSchema,
   CitationsArraySchema,
   type StreamStatus,
   type StreamError,
+  type ProviderEvent,
   type Citation
 } from '../validation/schemas'
 import { validateWithSchema } from '../validation/validate'
@@ -21,6 +23,7 @@ import { validateWithSchema } from '../validation/validate'
 const SSE_EVENT_STATUS = 'status'
 const SSE_EVENT_ERROR = 'error'
 const SSE_EVENT_CITATION = 'citation'
+const SSE_EVENT_PROVIDER = 'provider'
 
 /** Optional request options for streaming fetch calls. */
 export interface StreamSseRequestOptions {
@@ -33,6 +36,7 @@ export interface SseCallbacks {
   onStatus?: (status: StreamStatus) => void
   onError?: (error: StreamError) => void
   onCitations?: (citations: Citation[]) => void
+  onProvider?: (provider: ProviderEvent) => void
 }
 
 function isAbortError(error: unknown): boolean {
@@ -99,6 +103,15 @@ function processEvent(
     const validated = validateWithSchema(CitationsArraySchema, parsed, `${source}:citations`)
     if (validated.success) {
       callbacks.onCitations?.(validated.data)
+    }
+    return
+  }
+
+  if (normalizedType === SSE_EVENT_PROVIDER) {
+    const parsed = tryParseJson(eventData, source)
+    const validated = validateWithSchema(ProviderEventSchema, parsed, `${source}:provider`)
+    if (validated.success) {
+      callbacks.onProvider?.(validated.data)
     }
     return
   }
