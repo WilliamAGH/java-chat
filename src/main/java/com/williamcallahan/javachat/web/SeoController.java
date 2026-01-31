@@ -32,19 +32,17 @@ public class SeoController {
     private final SiteUrlResolver siteUrlResolver;
     private final Map<String, PageMetadata> metadataMap = new ConcurrentHashMap<>();
 
-	    // Cache the parsed document to avoid re-reading files, but clone it per request to modify
-	    private Document cachedIndexDocument;
+    // Cache the parsed document to avoid re-reading files, but clone it per request to modify
+    private Document cachedIndexDocument;
 
-	    /**
-	     * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
-	     */
-	    public SeoController(
-	            @Value("classpath:/static/index.html") Resource indexHtml,
-	            SiteUrlResolver siteUrlResolver) {
-	        this.indexHtml = indexHtml;
-	        this.siteUrlResolver = siteUrlResolver;
-	        initMetadata();
-	    }
+    /**
+     * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
+     */
+    public SeoController(@Value("classpath:/static/index.html") Resource indexHtml, SiteUrlResolver siteUrlResolver) {
+        this.indexHtml = indexHtml;
+        this.siteUrlResolver = siteUrlResolver;
+        initMetadata();
+    }
 
     private void initMetadata() {
         String defaultImage = "/mstile-310x310.png";
@@ -52,33 +50,34 @@ public class SeoController {
         PageMetadata base = new PageMetadata(
                 "Java Chat - AI-Powered Java Learning With Citations",
                 "Learn Java faster with an AI tutor: streaming answers, code examples, and citations to official docs.",
-                defaultImage
-        );
+                defaultImage);
 
         metadataMap.put("/", base);
-        metadataMap.put("/chat", new PageMetadata(
-                "Java Chat - Streaming Java Tutor With Citations",
-                "Ask Java questions and get streaming answers with citations to official docs and practical examples.",
-                defaultImage
-        ));
-        
+        metadataMap.put(
+                "/chat",
+                new PageMetadata(
+                        "Java Chat - Streaming Java Tutor With Citations",
+                        "Ask Java questions and get streaming answers with citations to official docs and practical examples.",
+                        defaultImage));
+
         PageMetadata guided = new PageMetadata(
                 "Guided Java Learning - Java Chat",
                 "Structured, step-by-step Java learning paths with examples and explanations.",
-                defaultImage
-        );
-	        metadataMap.put("/guided", guided);
-	        metadataMap.put("/learn", guided);
-	    }
+                defaultImage);
+        metadataMap.put("/guided", guided);
+        metadataMap.put("/learn", guided);
+    }
 
-	    /**
-	     * Serves the SPA index.html with path-specific SEO metadata for crawlers and social previews.
-	     */
-	    @GetMapping(value = {"/", "/chat", "/guided", "/learn"}, produces = MediaType.TEXT_HTML_VALUE)
-	    public ResponseEntity<String> serveIndexWithSeo(HttpServletRequest request) {
-	        try {
-	            Document doc = getIndexDocument();
-            
+    /**
+     * Serves the SPA index.html with path-specific SEO metadata for crawlers and social previews.
+     */
+    @GetMapping(
+            value = {"/", "/chat", "/guided", "/learn"},
+            produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> serveIndexWithSeo(HttpServletRequest request) {
+        try {
+            Document doc = getIndexDocument();
+
             String path = resolvePath(request);
             PageMetadata metadata = metadataMap.getOrDefault(path, metadataMap.get("/"));
             String baseUrl = siteUrlResolver.resolvePublicBaseUrl(request);
@@ -106,7 +105,7 @@ public class SeoController {
         // Basic Metadata
         doc.title(metadata.title);
         setMeta(doc, "name", "description", metadata.description);
-        
+
         // Open Graph
         setMeta(doc, "property", "og:title", metadata.title);
         setMeta(doc, "property", "og:description", metadata.description);
@@ -120,7 +119,7 @@ public class SeoController {
 
         // Canonical Link
         updateCanonicalLink(doc, fullUrl);
-        
+
         // Structured Data (JSON-LD)
         updateJsonLd(doc, fullUrl, metadata.description);
     }
@@ -146,9 +145,8 @@ public class SeoController {
                   "applicationCategory": "EducationalApplication",
                   "operatingSystem": "Web",
                   "description": "__DESCRIPTION__"
-                }"""
-                .replace("__FULL_URL__", escapeJson(fullUrl))
-                .replace("__DESCRIPTION__", escapeJson(description));
+                }""".replace("__FULL_URL__", escapeJson(fullUrl))
+                    .replace("__DESCRIPTION__", escapeJson(description));
             jsonLd.text(json);
         }
     }
@@ -170,7 +168,7 @@ public class SeoController {
             doc.head().appendElement("meta").attr(attrKey, attrValue).attr("content", content);
         }
     }
-    
+
     private String escapeJson(String input) {
         if (input == null) return "";
         return input.replace("\"", "\\\"");

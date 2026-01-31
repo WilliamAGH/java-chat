@@ -5,15 +5,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.williamcallahan.javachat.model.AuditReport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -26,6 +17,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 /**
  * Service for auditing ingested documents against the vector store.
@@ -41,21 +41,26 @@ public class AuditService {
      * but scroll/REST operations require the REST port (6333 default, 8087 in docker).
      */
     private static final Map<Integer, Integer> GRPC_TO_REST_PORT = Map.of(
-        6334, 6333,  // Qdrant default: gRPC -> REST
-        8086, 8087   // Docker compose mapping: gRPC -> REST
-    );
+            6334, 6333, // Qdrant default: gRPC -> REST
+            8086, 8087 // Docker compose mapping: gRPC -> REST
+            );
 
     private final LocalStoreService localStore;
     private final ContentHasher hasher;
+    private final RestTemplate restTemplate;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
+
     @Value("${spring.ai.vectorstore.qdrant.port:6334}")
     private int port;
+
     @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
     private boolean useTls;
+
     @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String apiKey;
+
     @Value("${spring.ai.vectorstore.qdrant.collection-name}")
     private String collection;
 
@@ -64,10 +69,12 @@ public class AuditService {
      *
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
+     * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
      */
-    public AuditService(LocalStoreService localStore, ContentHasher hasher) {
+    public AuditService(LocalStoreService localStore, ContentHasher hasher, RestTemplateBuilder restTemplateBuilder) {
         this.localStore = localStore;
         this.hasher = hasher;
+        this.restTemplate = restTemplateBuilder.build();
     }
 
     /**
@@ -80,7 +87,7 @@ public class AuditService {
     public AuditReport auditByUrl(String url) throws IOException {
         Set<String> expectedHashes = getExpectedHashes(url);
         List<String> qdrantHashes = fetchQdrantHashes(url);
-        
+
         return compareAndReport(url, expectedHashes, qdrantHashes);
     }
 
@@ -97,18 +104,17 @@ public class AuditService {
         }
 
         // pattern: <safeBase><index>_<hash12>.txt
-        Pattern chunkPattern = Pattern.compile(
-            Pattern.quote(safeName) + "_" + "(\\d+)" + "_" + "([0-9a-f]{12})" + "\\.txt"
-        );
+        Pattern chunkPattern =
+                Pattern.compile(Pattern.quote(safeName) + "_" + "(\\d+)" + "_" + "([0-9a-f]{12})" + "\\.txt");
 
         List<Path> parsedFiles = new ArrayList<>();
         try (var stream = Files.walk(parsedRoot)) {
             stream.filter(Files::isRegularFile)
-                .filter(filePath -> {
-                    Path fileName = filePath.getFileName();
-                    return fileName != null && fileName.toString().startsWith(safeBase);
-                })
-                .forEach(parsedFiles::add);
+                    .filter(filePath -> {
+                        Path fileName = filePath.getFileName();
+                        return fileName != null && fileName.toString().startsWith(safeBase);
+                    })
+                    .forEach(parsedFiles::add);
         }
 
         Set<String> expectedHashes = new LinkedHashSet<>();
@@ -145,37 +151,33 @@ public class AuditService {
             duplicateCounts.merge(hashValue, 1, Integer::sum);
         }
         List<String> duplicateHashes = duplicateCounts.entrySet().stream()
-            .filter(countEntry -> countEntry.getValue() != null && countEntry.getValue() > 1)
-            .map(Map.Entry::getKey)
-            .toList();
+                .filter(countEntry -> countEntry.getValue() != null && countEntry.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .toList();
 
-        boolean auditOk = missingHashes.isEmpty()
-            && extraHashes.isEmpty()
-            && duplicateHashes.isEmpty();
+        boolean auditOk = missingHashes.isEmpty() && extraHashes.isEmpty() && duplicateHashes.isEmpty();
         List<String> missingHashesSample = missingHashes.isEmpty()
-            ? List.of()
-            : missingHashes.stream().limit(20).toList();
+                ? List.of()
+                : missingHashes.stream().limit(20).toList();
         List<String> extraHashesSample = extraHashes.isEmpty()
-            ? List.of()
-            : extraHashes.stream().limit(20).toList();
+                ? List.of()
+                : extraHashes.stream().limit(20).toList();
 
         return new AuditReport(
-            url,
-            expectedHashes.size(),
-            qdrantHashes.size(),
-            missingHashes.size(),
-            extraHashes.size(),
-            duplicateHashes,
-            auditOk,
-            missingHashesSample,
-            extraHashesSample
-        );
+                url,
+                expectedHashes.size(),
+                qdrantHashes.size(),
+                missingHashes.size(),
+                extraHashes.size(),
+                duplicateHashes,
+                auditOk,
+                missingHashesSample,
+                extraHashesSample);
     }
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
-        RestTemplate restTemplate = new RestTemplate();
-        
+
         // Build REST base URL with correct port mapping
         // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
         String base = buildQdrantRestBaseUrl();
@@ -187,32 +189,25 @@ public class AuditService {
             headers.set("api-key", apiKey);
         }
 
-        QdrantScrollFilter scrollFilter = new QdrantScrollFilter(
-            List.of(new QdrantScrollMustCondition("url", new QdrantScrollMatch(url)))
-        );
+        QdrantScrollFilter scrollFilter =
+                new QdrantScrollFilter(List.of(new QdrantScrollMustCondition("url", new QdrantScrollMatch(url))));
 
         // Paginate through all results using next_page_offset
         JsonNode nextOffset = null;
         int pageCount = 0;
         int maxPages = 100; // Safety limit to prevent infinite loops
         int pageSize = 1000; // Reduced from 2048 for more reliable pagination
-        
+
         do {
-            QdrantScrollRequest requestBody = new QdrantScrollRequest(
-                scrollFilter,
-                true,
-                pageSize,
-                nextOffset
-            );
+            QdrantScrollRequest requestBody = new QdrantScrollRequest(scrollFilter, true, pageSize, nextOffset);
 
             try {
                 var response = restTemplate.exchange(
-                    endpoint,
-                    org.springframework.http.HttpMethod.POST,
-                    new HttpEntity<>(requestBody, headers),
-                    QdrantScrollResponse.class
-                );
-                
+                        endpoint,
+                        org.springframework.http.HttpMethod.POST,
+                        new HttpEntity<>(requestBody, headers),
+                        QdrantScrollResponse.class);
+
                 QdrantScrollResponse body = response.getBody();
                 if (body != null && body.scrollResult() != null) {
                     hashes.addAll(body.scrollResult().hashes());
@@ -224,54 +219,48 @@ public class AuditService {
                     nextOffset = null;
                 }
                 pageCount++;
-                
+
                 if (pageCount > 1) {
                     log.debug("Scroll page {} fetched, total hashes so far: {}", pageCount, hashes.size());
                 }
-                
+
             } catch (Exception requestFailure) {
                 // Propagate failure so caller knows audit could not complete
                 throw new IllegalStateException(
-                    "Qdrant scroll failed for URL audit (endpoint: " + endpoint + ")", requestFailure);
+                        "Qdrant scroll failed for URL audit (endpoint: " + endpoint + ")", requestFailure);
             }
         } while (nextOffset != null && pageCount < maxPages);
-        
+
         if (pageCount >= maxPages) {
             log.warn("Scroll pagination reached safety limit of {} pages; results may be incomplete", maxPages);
         }
-        
+
         return hashes;
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record QdrantScrollRequest(
-        @JsonProperty("filter") QdrantScrollFilter filter,
-        @JsonProperty("with_payload") boolean withPayload,
-        @JsonProperty("limit") int limit,
-        @JsonProperty("offset") JsonNode offset
-    ) {}
+            @JsonProperty("filter") QdrantScrollFilter filter,
+            @JsonProperty("with_payload") boolean withPayload,
+            @JsonProperty("limit") int limit,
+            @JsonProperty("offset") JsonNode offset) {}
 
-    private record QdrantScrollFilter(
-        @JsonProperty("must") List<QdrantScrollMustCondition> must
-    ) {}
+    private record QdrantScrollFilter(@JsonProperty("must") List<QdrantScrollMustCondition> must) {}
 
     private record QdrantScrollMustCondition(
-        @JsonProperty("key") String key,
-        @JsonProperty("match") QdrantScrollMatch match
-    ) {}
+            @JsonProperty("key") String key,
+            @JsonProperty("match") QdrantScrollMatch match) {}
 
     private record QdrantScrollMatch(@JsonProperty("value") String value) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record QdrantScrollResponse(
-        @JsonProperty("result") QdrantScrollResult scrollResult
-    ) {}
+            @JsonProperty("result") QdrantScrollResult scrollResult) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record QdrantScrollResult(
-        @JsonProperty("points") List<QdrantScrollPoint> points,
-        @JsonProperty("next_page_offset") JsonNode nextPageOffset
-    ) {
+            @JsonProperty("points") List<QdrantScrollPoint> points,
+            @JsonProperty("next_page_offset") JsonNode nextPageOffset) {
         List<String> hashes() {
             if (points == null || points.isEmpty()) {
                 return List.of();
@@ -291,7 +280,8 @@ public class AuditService {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record QdrantScrollPoint(@JsonProperty("payload") QdrantScrollPayload payload) {}
+    private record QdrantScrollPoint(
+            @JsonProperty("payload") QdrantScrollPayload payload) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record QdrantScrollPayload(@JsonProperty("hash") String hash) {}

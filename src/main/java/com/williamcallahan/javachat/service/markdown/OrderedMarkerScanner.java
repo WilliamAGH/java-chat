@@ -71,7 +71,7 @@ final class OrderedMarkerScanner {
                 int posAfterDelimiter = cursor + 1;
                 // Valid if: at end of line, or next char is whitespace
                 return posAfterDelimiter >= trimmedLine.length()
-                    || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
+                        || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
             }
         }
         return false;
@@ -130,7 +130,8 @@ final class OrderedMarkerScanner {
         };
     }
 
-    private static MarkerMatch finalizeMarker(String text, int startIndex, int sequenceEnd, InlineListOrderedKind kind) {
+    private static MarkerMatch finalizeMarker(
+            String text, int startIndex, int sequenceEnd, InlineListOrderedKind kind) {
         if (sequenceEnd >= text.length()) return null;
 
         char markerChar = text.charAt(sequenceEnd);
@@ -138,8 +139,8 @@ final class OrderedMarkerScanner {
 
         // Reject version numbers like 1.8 for numeric markers
         if (kind == InlineListOrderedKind.NUMERIC
-            && sequenceEnd + 1 < text.length()
-            && Character.isDigit(text.charAt(sequenceEnd + 1))) {
+                && sequenceEnd + 1 < text.length()
+                && Character.isDigit(text.charAt(sequenceEnd + 1))) {
             return null;
         }
 
@@ -154,8 +155,7 @@ final class OrderedMarkerScanner {
     private static int readNumericSequence(String text, int index) {
         int cursor = index;
         int digitCount = 0;
-        while (cursor < text.length() && Character.isDigit(text.charAt(cursor))
-            && digitCount < MAX_NUMERIC_DIGITS) {
+        while (cursor < text.length() && Character.isDigit(text.charAt(cursor)) && digitCount < MAX_NUMERIC_DIGITS) {
             digitCount++;
             cursor++;
         }

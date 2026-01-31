@@ -1,10 +1,19 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
-
+import com.williamcallahan.javachat.support.PdfCitationEnhancer;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -12,23 +21,6 @@ import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Locale;
-import java.util.stream.Collectors;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.time.Duration;
-import java.time.Instant;
-
-import org.springframework.core.io.ClassPathResource;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.*;
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
 
 /**
  * Orchestrates guided learning flows over curated lesson metadata using retrieval, enrichment, and streaming chat.
@@ -41,46 +33,69 @@ public class GuidedLearningService {
     private final RetrievalService retrievalService;
     private final EnrichmentService enrichmentService;
     private final ChatService chatService;
-    private final LocalStoreService localStore;
+    private final SystemPromptConfig systemPromptConfig;
+    private final PdfCitationEnhancer pdfCitationEnhancer;
 
     // Public server path of the Think Java book (as mapped by DocsSourceRegistry)
     private static final String THINK_JAVA_PDF_PATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
 
-    /** System guidance for Think Java-grounded responses with learning aid markers. */
-    private static final String THINK_JAVA_GUIDANCE =
-        "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. " +
-        "Use ONLY content grounded in this book for factual claims. " +
-        "Cite sources with [n] markers. Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. " +
-        "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.";
+    /**
+     * Base guidance for Think Java-grounded responses with learning aid markers.
+     *
+     * <p>This template includes a placeholder for the current lesson context, which is
+     * filled in at runtime to keep responses focused on the active topic.</p>
+     */
+    private static final String THINK_JAVA_GUIDANCE_TEMPLATE =
+            "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. "
+                    + "Use ONLY content grounded in this book for factual claims. "
+                    + "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately. "
+                    + "Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. "
+                    + "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.%n%n"
+                    + "## Current Lesson Context%n"
+                    + "%s%n%n"
+                    + "## Topic Handling Rules%n"
+                    + "1. Keep all responses focused on the current lesson topic.%n"
+                    + "2. If the user sends a greeting (hi, hello, hey, etc.) or off-topic message, "
+                    + "acknowledge it briefly and redirect to the lesson topic with a helpful prompt.%n"
+                    + "3. For off-topic Java questions, acknowledge the question and gently steer back to the current lesson, "
+                    + "explaining how the lesson topic relates or suggesting they complete this lesson first.%n"
+                    + "4. Never ignore the lesson context - every response should reinforce learning the current topic.";
 
     private final String jdkVersion;
 
     /**
      * Creates the guided learning orchestrator using retrieval and enrichment services plus the configured JDK version hint.
      */
-    public GuidedLearningService(GuidedTOCProvider tocProvider,
-                                 RetrievalService retrievalService,
-                                 EnrichmentService enrichmentService,
-                                 ChatService chatService,
-                                 LocalStoreService localStore,
-                                 @Value("${app.docs.jdk-version}") String jdkVersion) {
+    public GuidedLearningService(
+            GuidedTOCProvider tocProvider,
+            RetrievalService retrievalService,
+            EnrichmentService enrichmentService,
+            ChatService chatService,
+            SystemPromptConfig systemPromptConfig,
+            PdfCitationEnhancer pdfCitationEnhancer,
+            @Value("${app.docs.jdk-version}") String jdkVersion) {
         this.tocProvider = tocProvider;
         this.retrievalService = retrievalService;
         this.enrichmentService = enrichmentService;
         this.chatService = chatService;
-        this.localStore = localStore;
+        this.systemPromptConfig = systemPromptConfig;
+        this.pdfCitationEnhancer = pdfCitationEnhancer;
         this.jdkVersion = jdkVersion;
     }
 
     /**
      * Returns the guided lesson table of contents.
      */
-    public List<GuidedLesson> getTOC() { return tocProvider.getTOC(); }
+    public List<GuidedLesson> getTOC() {
+        return tocProvider.getTOC();
+    }
 
     /**
      * Returns guided lesson metadata for a slug when present.
      */
-    public Optional<GuidedLesson> getLesson(String slug) { return tocProvider.findBySlug(slug); }
+    public Optional<GuidedLesson> getLesson(String slug) {
+        return tocProvider.findBySlug(slug);
+    }
 
     /**
      * Retrieves citations for a lesson using book-focused retrieval and best-effort PDF page anchoring.
@@ -93,7 +108,7 @@ public class GuidedLearningService {
         List<Document> filtered = filterToBook(docs);
         if (filtered.isEmpty()) return List.of();
         List<Citation> base = retrievalService.toCitations(filtered);
-        return enhancePdfCitationsWithPage(filtered, base);
+        return pdfCitationEnhancer.enhanceWithPageAnchors(filtered, base);
     }
 
     /**
@@ -106,10 +121,14 @@ public class GuidedLearningService {
         String query = buildLessonQuery(lesson);
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
-        List<String> snippets = filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
+        List<String> snippets =
+                filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
         Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
-        logger.debug("GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
-	            enrichment.getHints().size(), enrichment.getReminders().size(), enrichment.getBackground().size());
+        logger.debug(
+                "GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
+                enrichment.getHints().size(),
+                enrichment.getReminders().size(),
+                enrichment.getBackground().size());
         return enrichment;
     }
 
@@ -122,9 +141,10 @@ public class GuidedLearningService {
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        return chatService.streamAnswerWithContext(history, userMessage, filtered, THINK_JAVA_GUIDANCE);
+        String guidance = buildLessonGuidance(lesson);
+        return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
     }
-    
+
     /**
      * Builds a structured prompt for guided learning with intelligent truncation support.
      *
@@ -134,19 +154,72 @@ public class GuidedLearningService {
      * @param history conversation history
      * @param slug lesson slug for context retrieval
      * @param userMessage user's question
-     * @return structured prompt for the OpenAI streaming service
+     * @return guided prompt outcome including structured prompt and context documents
      */
-    public StructuredPrompt buildStructuredGuidedPromptWithContext(
-            List<Message> history,
-            String slug,
-            String userMessage) {
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
+            List<Message> history, String slug, String userMessage) {
         var lesson = tocProvider.findBySlug(slug).orElse(null);
         String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        return chatService.buildStructuredPromptWithContextAndGuidance(
-                history, userMessage, filtered, THINK_JAVA_GUIDANCE);
+        String guidance = buildLessonGuidance(lesson);
+        StructuredPrompt structuredPrompt =
+                chatService.buildStructuredPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
+        return new GuidedChatPromptOutcome(structuredPrompt, filtered);
+    }
+
+    /**
+     * Builds UI-ready citations from Think Java context documents, with best-effort PDF page anchors.
+     *
+     * <p>This method is designed for guided chat streaming: citation generation must never break the
+     * response stream. If citation conversion or page anchor enrichment fails, it returns a best-effort
+     * result and logs diagnostics.</p>
+     *
+     * @param bookContextDocuments retrieved Think Java documents used to ground the response
+     * @return list of citations for display in the UI citation panel
+     */
+    public List<Citation> citationsForBookDocuments(List<Document> bookContextDocuments) {
+        if (bookContextDocuments == null || bookContextDocuments.isEmpty()) {
+            return List.of();
+        }
+        List<Citation> baseCitations;
+        try {
+            baseCitations = retrievalService.toCitations(bookContextDocuments);
+        } catch (RuntimeException conversionFailure) {
+            logger.warn(
+                    "Unable to convert guided context documents into citations (exceptionType={})",
+                    conversionFailure.getClass().getSimpleName());
+            return List.of();
+        }
+
+        try {
+            return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
+        } catch (RuntimeException anchorFailure) {
+            logger.warn(
+                    "Unable to enhance guided citations with PDF page anchors (exceptionType={})",
+                    anchorFailure.getClass().getSimpleName());
+            return baseCitations;
+        }
+    }
+
+    /**
+     * Represents the guided prompt and the Think Java context documents used for grounding.
+     *
+     * <p>Normalizes {@code bookContextDocuments} to an unmodifiable list: {@link List#of()} when null,
+     * otherwise {@link List#copyOf(List)}.</p>
+     *
+     * @param structuredPrompt structured prompt for LLM streaming
+     * @param bookContextDocuments Think Java-only context documents used for grounding and citations
+     * @throws IllegalArgumentException when structuredPrompt is null
+     */
+    public record GuidedChatPromptOutcome(StructuredPrompt structuredPrompt, List<Document> bookContextDocuments) {
+        public GuidedChatPromptOutcome {
+            if (structuredPrompt == null) {
+                throw new IllegalArgumentException("Structured prompt cannot be null");
+            }
+            bookContextDocuments = bookContextDocuments == null ? List.of() : List.copyOf(bookContextDocuments);
+        }
     }
 
     /**
@@ -195,40 +268,39 @@ To run this program, follow these steps:
         List<Document> filtered = filterToBook(docs);
 
         // Guidance: produce a clean, layered markdown lesson body
-        String guidance = String.join(" ",
-            "Create a concise, beautifully formatted Java lesson using markdown only.",
-            "Do NOT include any heading at the top; the UI provides the title.",
-            "Then 1-2 short paragraphs that define and motivate the topic.",
-            "Add a bullet list of 3-5 key points or rules.",
-            "Include one short Java example in a fenced ```java code block with comments.",
-            "Add a small numbered list (1-3 steps) when it helps understanding.",
-            "Use inline [n] citations that correspond to the provided context order.",
-            "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
-            "Do NOT include a conclusion section; keep it compact and practical.",
-            "If context is insufficient, state what is missing briefly."
-        );
+        String guidance = String.join(
+                " ",
+                "Create a concise, beautifully formatted Java lesson using markdown only.",
+                "Do NOT include any heading at the top; the UI provides the title.",
+                "Then 1-2 short paragraphs that define and motivate the topic.",
+                "Add a bullet list of 3-5 key points or rules.",
+                "Include one short Java example in a fenced ```java code block with comments.",
+                "Add a small numbered list (1-3 steps) when it helps understanding.",
+                "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately.",
+                "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
+                "Do NOT include a conclusion section; keep it compact and practical.",
+                "If context is insufficient, state what is missing briefly.");
 
         // We pass a synthetic latestUserMessage that instructs the model to write the lesson
         String latestUserMessage = "Write the lesson for: " + title + "\nFocus on: " + query;
         List<Message> emptyHistory = List.of();
         StringBuilder lessonMarkdownBuilder = new StringBuilder();
-        return chatService.streamAnswerWithContext(emptyHistory, latestUserMessage, filtered, guidance)
+        return chatService
+                .streamAnswerWithContext(emptyHistory, latestUserMessage, filtered, guidance)
                 .doOnNext(lessonMarkdownBuilder::append)
                 .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
     }
 
     // ===== In-memory cache for lesson markdown =====
     private static final long LESSON_MARKDOWN_CACHE_TTL_MINUTES = 30;
-    private static final Duration LESSON_MARKDOWN_CACHE_TTL =
-        Duration.ofMinutes(LESSON_MARKDOWN_CACHE_TTL_MINUTES);
+    private static final Duration LESSON_MARKDOWN_CACHE_TTL = Duration.ofMinutes(LESSON_MARKDOWN_CACHE_TTL_MINUTES);
 
     /**
      * Stores lesson markdown alongside the time it was cached to enforce an in-memory TTL.
      */
     private record LessonMarkdownCacheEntry(String markdown, Instant cachedAt) {}
 
-    private final ConcurrentMap<String, LessonMarkdownCacheEntry> lessonMarkdownCache =
-        new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, LessonMarkdownCacheEntry> lessonMarkdownCache = new ConcurrentHashMap<>();
 
     /**
      * Returns cached lesson markdown when present and not expired.
@@ -259,80 +331,6 @@ To run this program, follow these steps:
         lessonMarkdownCache.put(slug, new LessonMarkdownCacheEntry(markdown, Instant.now()));
     }
 
-    // ===== PDF Pagination heuristics for /pdfs/Think Java - 2nd Edition Book.pdf =====
-    private volatile Integer cachedPdfPages = null;
-
-    private int getThinkJavaPdfPages() {
-        if (cachedPdfPages != null) return cachedPdfPages;
-        synchronized (this) {
-            if (cachedPdfPages != null) return cachedPdfPages;
-            try {
-                ClassPathResource pdfResource = new ClassPathResource("public/pdfs/Think Java - 2nd Edition Book.pdf");
-                try (InputStream pdfStream = pdfResource.getInputStream();
-                     PDDocument document = Loader.loadPDF(pdfStream.readAllBytes())) {
-                    cachedPdfPages = document.getNumberOfPages();
-                }
-            } catch (IOException ioException) {
-                logger.error("Failed to load Think Java PDF for pagination", ioException);
-                throw new IllegalStateException("Unable to read Think Java PDF", ioException);
-            }
-            return cachedPdfPages;
-        }
-    }
-
-    private int totalChunksForUrl(String url) {
-        try {
-            String safe = localStore.toSafeName(url);
-            Path dir = localStore.getParsedDir();
-            if (dir == null) {
-                return 0;
-            }
-            try (var stream = Files.list(dir)) {
-                return (int) stream
-                    .filter(path -> {
-                        Path fileNamePath = path.getFileName();
-                        if (fileNamePath == null) {
-                            return false;
-                        }
-                        String fileName = fileNamePath.toString();
-                        return fileName.startsWith(safe + "_") && fileName.endsWith(".txt");
-                    })
-                    .count();
-            }
-        } catch (IOException ioException) {
-            throw new IllegalStateException("Unable to count local chunks for URL", ioException);
-        }
-    }
-
-    private List<Citation> enhancePdfCitationsWithPage(List<Document> docs, List<Citation> citations) {
-        if (docs.size() != citations.size()) return citations;
-        int pages = getThinkJavaPdfPages();
-        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
-            Document document = docs.get(docIndex);
-            Citation citation = citations.get(docIndex);
-            String url = citation.getUrl();
-            if (url == null || !url.toLowerCase(Locale.ROOT).endsWith(".pdf")) continue;
-            Object chunkIndexMetadata = document.getMetadata().get("chunkIndex");
-            int chunkIndex = -1;
-            try {
-                if (chunkIndexMetadata != null) {
-                    chunkIndex = Integer.parseInt(String.valueOf(chunkIndexMetadata));
-                }
-            } catch (NumberFormatException chunkIndexParseException) {
-                logger.debug("Failed to parse chunkIndex from metadata: {}",
-                    sanitizeForLogText(String.valueOf(chunkIndexMetadata)));
-            }
-            int totalChunks = totalChunksForUrl(url);
-            if (pages > 0 && chunkIndex >= 0 && totalChunks > 0) {
-                int page = Math.max(1, Math.min(pages, (int) Math.round(((chunkIndex + 1.0) / totalChunks) * pages)));
-                String withAnchor = url.contains("#page=") ? url : url + "#page=" + page;
-                citation.setUrl(withAnchor);
-                citation.setAnchor("page=" + page);
-            }
-        }
-        return citations;
-    }
-
     private List<Document> filterToBook(List<Document> docs) {
         List<Document> filtered = new ArrayList<>();
         for (Document document : docs) {
@@ -347,11 +345,59 @@ To run this program, follow these steps:
     private String buildLessonQuery(GuidedLesson lesson) {
         StringBuilder queryBuilder = new StringBuilder();
         if (lesson.getTitle() != null) queryBuilder.append(lesson.getTitle()).append(". ");
-        if (lesson.getSummary() != null) queryBuilder.append(lesson.getSummary()).append(" ");
+        if (lesson.getSummary() != null)
+            queryBuilder.append(lesson.getSummary()).append(" ");
         if (lesson.getKeywords() != null && !lesson.getKeywords().isEmpty()) {
             queryBuilder.append(String.join(", ", lesson.getKeywords()));
         }
         return queryBuilder.toString().trim();
+    }
+
+    /**
+     * Builds complete guidance for a guided learning chat, combining lesson context with system prompts.
+     *
+     * <p>When a lesson is provided, the guidance includes the lesson title, summary, and keywords
+     * to keep responses focused on the current topic. It also integrates the guided learning
+     * mode instructions from SystemPromptConfig.</p>
+     *
+     * @param lesson current lesson or null if no lesson context
+     * @return complete guidance string for the LLM
+     */
+    private String buildLessonGuidance(GuidedLesson lesson) {
+        String lessonContext = buildLessonContextDescription(lesson);
+        String thinkJavaGuidance = String.format(THINK_JAVA_GUIDANCE_TEMPLATE, lessonContext);
+
+        // Combine with guided learning mode instructions from SystemPromptConfig
+        String guidedLearningPrompt = systemPromptConfig.getGuidedLearningPrompt();
+        return systemPromptConfig.buildFullPrompt(thinkJavaGuidance, guidedLearningPrompt);
+    }
+
+    /**
+     * Builds a human-readable description of the current lesson context for the LLM.
+     *
+     * @param lesson current lesson or null
+     * @return description of the lesson context
+     */
+    private String buildLessonContextDescription(GuidedLesson lesson) {
+        if (lesson == null) {
+            return "No specific lesson selected. Provide general Java learning assistance.";
+        }
+
+        StringBuilder contextBuilder = new StringBuilder();
+        contextBuilder
+                .append("The user is currently studying the lesson: **")
+                .append(lesson.getTitle())
+                .append("**");
+
+        if (lesson.getSummary() != null && !lesson.getSummary().isBlank()) {
+            contextBuilder.append("\n\nLesson Summary: ").append(lesson.getSummary());
+        }
+
+        if (lesson.getKeywords() != null && !lesson.getKeywords().isEmpty()) {
+            contextBuilder.append("\n\nKey concepts to cover: ").append(String.join(", ", lesson.getKeywords()));
+        }
+
+        return contextBuilder.toString();
     }
 
     private Enrichment emptyEnrichment() {
@@ -361,12 +407,5 @@ To run this program, follow these steps:
         fallbackEnrichment.setReminders(List.of());
         fallbackEnrichment.setBackground(List.of());
         return fallbackEnrichment;
-    }
-
-    private static String sanitizeForLogText(String rawText) {
-        if (rawText == null) {
-            return "";
-        }
-        return rawText.replace("\r", "\\r").replace("\n", "\\n");
     }
 }

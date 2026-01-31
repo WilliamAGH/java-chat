@@ -1,16 +1,15 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.AuditReport;
-import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.AuditService;
+import jakarta.annotation.security.PermitAll;
+import java.io.IOException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.io.IOException;
 
 /**
  * REST controller for auditing ingested content against the vector store.

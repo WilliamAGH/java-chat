@@ -1,10 +1,10 @@
 package com.williamcallahan.javachat.service.markdown;
 
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests inline list marker parsing and conversion to HTML list elements.
@@ -120,9 +120,8 @@ class InlineListParserTest {
 
     @Test
     void tryConvert_nestedList_extractsNestedSegment() {
-        InlineListParser.Conversion conversion = InlineListParser.tryConvert(
-            "1. Parent: a. Child one b. Child two 2. Another"
-        );
+        InlineListParser.Conversion conversion =
+                InlineListParser.tryConvert("1. Parent: a. Child one b. Child two 2. Another");
 
         assertNotNull(conversion);
         assertEquals("ol", conversion.primaryListElement().tagName());
@@ -169,9 +168,8 @@ class InlineListParserTest {
 
     @Test
     void tryConvert_extractsTrailingTextAfterList() {
-        InlineListParser.Conversion conversion = InlineListParser.tryConvert(
-            "1. First 2. Second. After the list wraps up"
-        );
+        InlineListParser.Conversion conversion =
+                InlineListParser.tryConvert("1. First 2. Second. After the list wraps up");
 
         assertNotNull(conversion);
         assertEquals("Second", conversion.primaryListElement().child(1).text());

@@ -15,4 +15,3 @@ public sealed interface ApiResponse permits ApiErrorResponse, ApiSuccessResponse
      */
     String status();
 }
-

@@ -36,5 +36,4 @@ public class MarkdownService {
     public ProcessedMarkdown processStructured(String markdownText) {
         return unifiedService.process(markdownText);
     }
-
 }

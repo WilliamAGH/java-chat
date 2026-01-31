@@ -12,12 +12,8 @@ package com.williamcallahan.javachat.domain.prompt;
  * @param documentContent extracted text content from the source
  * @param estimatedTokens approximate token count for budget calculations
  */
-public record ContextDocumentSegment(
-        int index,
-        String sourceUrl,
-        String documentContent,
-        int estimatedTokens
-) implements PromptSegment {
+public record ContextDocumentSegment(int index, String sourceUrl, String documentContent, int estimatedTokens)
+        implements PromptSegment {
 
     /** Marker prefix for context document references. */
     public static final String CONTEXT_MARKER = "[CTX ";

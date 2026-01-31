@@ -1,17 +1,16 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.model.Enrichment;
-import jakarta.annotation.security.PermitAll;
 import com.williamcallahan.javachat.service.EnrichmentService;
 import com.williamcallahan.javachat.service.RetrievalService;
+import jakarta.annotation.security.PermitAll;
+import java.util.List;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Exposes enrichment marker generation backed by retrieval and enrichment services.
@@ -27,9 +26,10 @@ public class EnrichmentController {
     /**
      * Creates the enrichment controller using retrieval for context and a service to synthesize enrichment markers.
      */
-    public EnrichmentController(RetrievalService retrievalService,
-                                EnrichmentService enrichmentService,
-                                @Value("${app.docs.jdk-version}") String jdkVersion) {
+    public EnrichmentController(
+            RetrievalService retrievalService,
+            EnrichmentService enrichmentService,
+            @Value("${app.docs.jdk-version}") String jdkVersion) {
         this.retrievalService = retrievalService;
         this.enrichmentService = enrichmentService;
         this.jdkVersion = jdkVersion;

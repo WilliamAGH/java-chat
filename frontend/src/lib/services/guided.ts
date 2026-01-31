@@ -2,66 +2,116 @@
  * Guided learning service for lesson navigation and streaming.
  *
  * @see {@link ./sse.ts} for SSE stream parsing implementation
- * @see {@link ./stream-types.ts} for shared type definitions
+ * @see {@link ../validation/schemas.ts} for type definitions
  */
 
 import { streamSse } from './sse'
-import type { StreamStatus } from './stream-types'
+import {
+  GuidedTOCSchema,
+  GuidedLessonSchema,
+  LessonContentResponseSchema,
+  CitationsArraySchema,
+  type StreamStatus,
+  type Citation,
+  type GuidedLesson,
+  type LessonContentResponse
+} from '../validation/schemas'
+import { validateFetchJson } from '../validation/validate'
+import type { CitationFetchResult } from './chat'
 
-export type { StreamStatus }
-
-/** Lesson metadata from the guided learning TOC. */
-export interface GuidedLesson {
-  slug: string
-  title: string
-  summary: string
-  keywords: string[]
-}
-
-/** Response from the lesson content endpoint. */
-export interface LessonContentResponse {
-  markdown: string
-  cached: boolean
-}
+export type { StreamStatus, GuidedLesson, LessonContentResponse }
 
 /** Callbacks for guided chat streaming with explicit error handling. */
 export interface GuidedStreamCallbacks {
   onChunk: (chunk: string) => void
   onStatus?: (status: StreamStatus) => void
   onError?: (error: Error) => void
+  onCitations?: (citations: Citation[]) => void
+  signal?: AbortSignal
 }
 
 /**
  * Fetch the table of contents for guided learning.
+ * Validates response structure via Zod schema.
+ *
+ * @throws Error if fetch fails or validation fails
  */
 export async function fetchTOC(): Promise<GuidedLesson[]> {
   const response = await fetch('/api/guided/toc')
-  if (!response.ok) {
-    throw new Error(`Failed to fetch TOC: ${response.status}`)
+  const result = await validateFetchJson(response, GuidedTOCSchema, 'fetchTOC [/api/guided/toc]')
+
+  if (!result.success) {
+    throw new Error(`Failed to fetch TOC: ${result.error}`)
   }
-  return response.json()
+
+  return result.data
 }
 
 /**
  * Fetch a single lesson's metadata.
+ * Validates response structure via Zod schema.
+ *
+ * @throws Error if fetch fails or validation fails
  */
 export async function fetchLesson(slug: string): Promise<GuidedLesson> {
   const response = await fetch(`/api/guided/lesson?slug=${encodeURIComponent(slug)}`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch lesson: ${response.status}`)
+  const result = await validateFetchJson(
+    response,
+    GuidedLessonSchema,
+    `fetchLesson [slug=${slug}]`
+  )
+
+  if (!result.success) {
+    throw new Error(`Failed to fetch lesson: ${result.error}`)
   }
-  return response.json()
+
+  return result.data
 }
 
 /**
  * Fetch lesson content as markdown (non-streaming).
+ * Validates response structure via Zod schema.
+ *
+ * @throws Error if fetch fails or validation fails
  */
 export async function fetchLessonContent(slug: string): Promise<LessonContentResponse> {
   const response = await fetch(`/api/guided/content?slug=${encodeURIComponent(slug)}`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch lesson content: ${response.status}`)
+  const result = await validateFetchJson(
+    response,
+    LessonContentResponseSchema,
+    `fetchLessonContent [slug=${slug}]`
+  )
+
+  if (!result.success) {
+    throw new Error(`Failed to fetch lesson content: ${result.error}`)
   }
-  return response.json()
+
+  return result.data
+}
+
+/**
+ * Fetch Think Java-only citations for a guided lesson slug.
+ * Used by LearnView to render lesson sources with proper PDF page anchors.
+ */
+export async function fetchGuidedLessonCitations(slug: string): Promise<CitationFetchResult> {
+  try {
+    const response = await fetch(`/api/guided/citations?slug=${encodeURIComponent(slug)}`)
+    const result = await validateFetchJson(
+      response,
+      CitationsArraySchema,
+      `fetchGuidedLessonCitations [slug=${slug}]`
+    )
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, citations: result.data }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Network error fetching lesson sources'
+    console.error(`[fetchGuidedLessonCitations] Unexpected error for slug="${slug}":`, error)
+    return { success: false, error: errorMessage }
+  }
 }
 
 /**
@@ -75,7 +125,7 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
-  const { onChunk, onStatus, onError } = callbacks
+  const { onChunk, onStatus, onError, onCitations, signal } = callbacks
   let errorNotified = false
 
   try {
@@ -85,12 +135,14 @@ export async function streamGuidedChat(
       {
         onText: onChunk,
         onStatus,
+        onCitations,
         onError: (streamError) => {
           errorNotified = true
           onError?.(new Error(streamError.message))
         }
       },
-      'guided.ts'
+      'guided.ts',
+      { signal }
     )
   } catch (error) {
     // Re-throw after invoking callback to maintain dual error propagation

@@ -54,8 +54,25 @@ else
 fi
 
 # Check Qdrant
-QDRANT_URL="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
-QDRANT_INFO=$(curl -s -H "api-key: $QDRANT_API_KEY" "$QDRANT_URL" 2>/dev/null)
+QDRANT_PROTOCOL="https"
+QDRANT_BASE_URL=""
+if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
+    if [ -n "${QDRANT_REST_PORT:-}" ]; then
+        QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+    else
+        QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}"
+    fi
+else
+    QDRANT_PROTOCOL="http"
+    QDRANT_REST_PORT="${QDRANT_REST_PORT:-8087}"
+    QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+fi
+QDRANT_URL="${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}"
+QDRANT_AUTH=()
+if [ -n "${QDRANT_API_KEY:-}" ]; then
+    QDRANT_AUTH=( -H "api-key: $QDRANT_API_KEY" )
+fi
+QDRANT_INFO=$(curl -s "${QDRANT_AUTH[@]}" "$QDRANT_URL" 2>/dev/null)
 if [ $? -eq 0 ]; then
     VECTOR_COUNT=$(echo "$QDRANT_INFO" | jq -r '.result.points_count' 2>/dev/null || echo "0")
     echo -e "✅ Qdrant: ${GREEN}Connected${NC}"
@@ -206,7 +223,7 @@ echo -e "\n${BOLD}${YELLOW}5️⃣  Results${NC}"
 echo -e "───────────────────────────"
 
 # Final vector count
-FINAL_COUNT=$(curl -s -H "api-key: $QDRANT_API_KEY" "$QDRANT_URL" 2>/dev/null | \
+FINAL_COUNT=$(curl -s "${QDRANT_AUTH[@]}" "$QDRANT_URL" 2>/dev/null | \
     jq -r '.result.points_count' 2>/dev/null || echo "$VECTOR_COUNT")
 
 if [ "$FINAL_COUNT" -gt "$VECTOR_COUNT" ]; then
@@ -233,8 +250,8 @@ if [ "$FINAL_COUNT" -gt "$VECTOR_COUNT" ]; then
         jq '.data[0].embedding' 2>/dev/null)
     
     if [ -n "$SEARCH_VECTOR" ]; then
-        SEARCH_RESULT=$(curl -s -X POST "https://$QDRANT_HOST:6333/collections/$QDRANT_COLLECTION/points/search" \
-            -H "api-key: $QDRANT_API_KEY" \
+        SEARCH_RESULT=$(curl -s -X POST "${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}/points/search" \
+            "${QDRANT_AUTH[@]}" \
             -H "Content-Type: application/json" \
             -d "{\"vector\": $SEARCH_VECTOR, \"limit\": 3, \"with_payload\": true}" 2>/dev/null)
         

@@ -17,13 +17,8 @@ public class CorsConfig {
     private static final String METHOD_OPTIONS = "OPTIONS";
     private static final String HEADER_WILD = "*";
     private static final List<String> ORIGINS_DEF = List.of(LOCAL_ORIGIN, LOOPBACK_ORIGIN);
-    private static final List<String> METHODS_DEF = List.of(
-        METHOD_GET,
-        METHOD_POST,
-        METHOD_PUT,
-        METHOD_DELETE,
-        METHOD_OPTIONS
-    );
+    private static final List<String> METHODS_DEF =
+            List.of(METHOD_GET, METHOD_POST, METHOD_PUT, METHOD_DELETE, METHOD_OPTIONS);
     private static final List<String> HEADERS_DEF = List.of(HEADER_WILD);
     private static final boolean CREDENTIALS_DEF = true;
     private static final long MAX_AGE_DEF = 3_600L;
@@ -44,8 +39,7 @@ public class CorsConfig {
     /**
      * Creates CORS configuration.
      */
-    public CorsConfig() {
-    }
+    public CorsConfig() {}
 
     /**
      * Validates CORS settings.

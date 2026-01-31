@@ -1,4 +1,5 @@
 package com.williamcallahan.javachat.web;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -24,13 +25,9 @@ public abstract class BaseController {
      * @param operation Description of the operation that failed
      * @return Standardized error response
      */
-    protected ResponseEntity<ApiErrorResponse> handleServiceException(
-            Exception e, String operation) {
+    protected ResponseEntity<ApiErrorResponse> handleServiceException(Exception e, String operation) {
         return exceptionBuilder.buildErrorResponse(
-            HttpStatus.INTERNAL_SERVER_ERROR,
-            "Failed to " + operation + ": " + e.getMessage(),
-            e
-        );
+                HttpStatus.INTERNAL_SERVER_ERROR, "Failed to " + operation + ": " + e.getMessage(), e);
     }
 
     /**
@@ -39,12 +36,8 @@ public abstract class BaseController {
      * @param validationException The validation exception
      * @return Bad request error response
      */
-    protected ResponseEntity<ApiErrorResponse> handleValidationException(
-            IllegalArgumentException validationException) {
-        return exceptionBuilder.buildErrorResponse(
-            HttpStatus.BAD_REQUEST,
-            validationException.getMessage()
-        );
+    protected ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
+        return exceptionBuilder.buildErrorResponse(HttpStatus.BAD_REQUEST, validationException.getMessage());
     }
 
     /**

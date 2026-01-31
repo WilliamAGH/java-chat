@@ -1,10 +1,9 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.stereotype.Service;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.stereotype.Service;
 
 /**
  * Factory service for creating standardized Spring AI Document objects
@@ -28,20 +27,14 @@ public class DocumentFactory {
      * @return A properly configured Spring AI Document
      */
     public org.springframework.ai.document.Document createDocument(
-            String text,
-            String url,
-            String title,
-            int chunkIndex,
-            String packageName,
-            String hash) {
+            String text, String url, String title, int chunkIndex, String packageName, String hash) {
 
         Map<String, ?> metadata = Map.of(
-            "url", url,
-            "title", title,
-            "chunkIndex", chunkIndex,
-            "package", packageName,
-            "hash", hash
-        );
+                "url", url,
+                "title", title,
+                "chunkIndex", chunkIndex,
+                "package", packageName,
+                "hash", hash);
 
         // Create and configure the document
         var document = createDocumentWithOptionalId(text, hash);
@@ -59,10 +52,7 @@ public class DocumentFactory {
      * @return A properly configured Spring AI Document
      */
     public org.springframework.ai.document.Document createLocalDocument(String text, String url) {
-        Map<String, ?> metadata = Map.of(
-            "url", url,
-            "title", "Local Doc"
-        );
+        Map<String, ?> metadata = Map.of("url", url, "title", "Local Doc");
 
         var document = new org.springframework.ai.document.Document(text);
         document.getMetadata().putAll(metadata);
@@ -81,9 +71,7 @@ public class DocumentFactory {
      * @throws NullPointerException if any parameter is null
      */
     public org.springframework.ai.document.Document createWithPreservedMetadata(
-            String newText,
-            Map<String, ?> existingMetadata,
-            Map<String, ?> additionalMetadata) {
+            String newText, Map<String, ?> existingMetadata, Map<String, ?> additionalMetadata) {
 
         Objects.requireNonNull(newText, "newText must not be null");
         Objects.requireNonNull(existingMetadata, "existingMetadata must not be null; use Map.of() for empty");

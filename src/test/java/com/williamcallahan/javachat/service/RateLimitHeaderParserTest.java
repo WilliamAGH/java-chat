@@ -1,12 +1,12 @@
 package com.williamcallahan.javachat.service;
 
-import com.openai.core.http.Headers;
-import java.time.Instant;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import com.openai.core.http.Headers;
+import java.time.Instant;
+import org.junit.jupiter.api.Test;
 
 /**
  * Covers header parsing behavior for rate limit calculations.

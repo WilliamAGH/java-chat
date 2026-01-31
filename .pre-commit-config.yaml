@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: spotless-java
+        name: Spotless Java (Gradle, auto-format)
+        entry: ./gradlew spotlessApply --no-daemon
+        language: system
+        pass_filenames: false
+      - id: frontend-check
+        name: Frontend check (Vite/Svelte)
+        entry: bash -lc "cd frontend && npm run check"
+        language: system
+        pass_filenames: false

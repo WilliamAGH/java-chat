@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharsetDecoder;
@@ -10,6 +8,7 @@ import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.springframework.stereotype.Service;
 
 /**
  * Centralized service for file operations to eliminate duplication
@@ -43,7 +42,8 @@ public class FileOperationsService {
         } catch (MalformedInputException mie) {
             // Fallback: decode with replacement to handle non-UTF8 bytes gracefully
             byte[] bytes = Files.readAllBytes(filePath);
-            CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+            CharsetDecoder decoder = StandardCharsets.UTF_8
+                    .newDecoder()
                     .onMalformedInput(CodingErrorAction.REPLACE)
                     .onUnmappableCharacter(CodingErrorAction.REPLACE);
             return decoder.decode(ByteBuffer.wrap(bytes)).toString();

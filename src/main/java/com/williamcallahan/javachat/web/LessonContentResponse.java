@@ -6,7 +6,4 @@ package com.williamcallahan.javachat.web;
  * @param markdown The lesson markdown content
  * @param cached Whether the content was served from cache
  */
-public record LessonContentResponse(
-    String markdown,
-    boolean cached
-) {}
+public record LessonContentResponse(String markdown, boolean cached) {}

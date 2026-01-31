@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.17.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -10,7 +13,15 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "pnpm lint:ox && pnpm lint:ox:typeaware && pnpm lint:es",
+    "lint:ox": "oxlint -c oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
+    "lint:ox:typeaware": "oxlint -c oxlintrc.json --type-aware .",
+    "lint:es": "eslint .",
+    "lint:fix": "oxlint --fix && eslint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "validate": "pnpm format:check && pnpm lint && pnpm check"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
@@ -18,7 +29,14 @@
     "@testing-library/svelte": "^5.3.1",
     "@tsconfig/svelte": "^5.0.4",
     "@vitest/coverage-v8": "^4.0.18",
+    "@typescript-eslint/eslint-plugin": "8.40.0",
+    "@typescript-eslint/parser": "8.40.0",
+    "eslint": "9.33.0",
     "jsdom": "^27.4.0",
+    "lint-staged": "^15.2.10",
+    "oxfmt": "^0.27.0",
+    "oxlint": "1.42.0",
+    "oxlint-tsgolint": "^0.11.2",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.6.0",
@@ -29,6 +47,13 @@
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.3.1",
     "highlight.js": "^11.10.0",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "zod": "^3.25.76"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "oxfmt --write",
+      "oxlint -c oxlintrc.json --type-aware"
+    ]
   }
 }

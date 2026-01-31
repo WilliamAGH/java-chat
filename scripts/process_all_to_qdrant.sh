@@ -73,7 +73,7 @@ fi
 
 # Verify required environment variables based on mode
 if [ "$UPLOAD_MODE" = "upload" ]; then
-    required_vars=("QDRANT_HOST" "QDRANT_PORT" "QDRANT_API_KEY" "QDRANT_COLLECTION" "APP_LOCAL_EMBEDDING_ENABLED")
+    required_vars=("QDRANT_HOST" "QDRANT_PORT" "QDRANT_COLLECTION" "APP_LOCAL_EMBEDDING_ENABLED")
 else
     # Local-only mode doesn't need Qdrant vars
     required_vars=("APP_LOCAL_EMBEDDING_ENABLED")
@@ -137,16 +137,17 @@ check_qdrant_connection() {
     
     log "${YELLOW}Checking Qdrant connection...${NC}"
     
-    # Respect QDRANT_SSL setting for protocol selection
-    local protocol="https"
-    if [ "$QDRANT_SSL" = "false" ] || [ "$QDRANT_SSL" = "0" ] || [ -z "$QDRANT_SSL" ]; then
-        protocol="http"
-        # For local non-TLS, include the port (REST port, not gRPC)
-        local rest_port="${QDRANT_REST_PORT:-6333}"
-        local url="${protocol}://${QDRANT_HOST}:${rest_port}/collections/$QDRANT_COLLECTION"
+    # Use REST API for connectivity checks (not gRPC). For local docker-compose, REST is mapped to 8087.
+    local url
+    if [ "$QDRANT_SSL" = "true" ] || [ "$QDRANT_SSL" = "1" ]; then
+        if [ -n "${QDRANT_REST_PORT:-}" ]; then
+            url="https://${QDRANT_HOST}:${QDRANT_REST_PORT}/collections/$QDRANT_COLLECTION"
+        else
+            url="https://${QDRANT_HOST}/collections/$QDRANT_COLLECTION"
+        fi
     else
-        # For TLS (cloud), port 443 is implicit
-        local url="${protocol}://${QDRANT_HOST}/collections/$QDRANT_COLLECTION"
+        local rest_port="${QDRANT_REST_PORT:-8087}"
+        url="http://${QDRANT_HOST}:${rest_port}/collections/$QDRANT_COLLECTION"
     fi
     
     local curl_opts=(-s -o /dev/null -w "%{http_code}")
@@ -173,6 +174,12 @@ check_qdrant_connection() {
         log "${BLUE}ℹ Collection: $QDRANT_COLLECTION${NC}"
         log "${BLUE}ℹ Current vectors: ${points:-0}${NC}"
         log "${BLUE}ℹ Dimensions: ${dimensions:-unknown}${NC}"
+        return 0
+    elif [ "$response" = "404" ]; then
+        log "${YELLOW}⚠ Qdrant reachable, but collection not found yet (HTTP 404)${NC} ($(percent_complete))"
+        log "${YELLOW}  Collection: $QDRANT_COLLECTION${NC}"
+        log "${YELLOW}  URL: $url${NC}"
+        log "${YELLOW}  If schema init is enabled, the app will create the collection on first use.${NC}"
         return 0
     else
         log "${RED}✗ Failed to connect to Qdrant (HTTP $response)${NC}"
@@ -370,8 +377,23 @@ show_statistics() {
     
     if [ "$UPLOAD_MODE" = "upload" ]; then
         # Get Qdrant statistics
-        local url="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
-        local info=$(curl -s -H "api-key: $QDRANT_API_KEY" "$url")
+        local base_url
+        if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
+            if [ -n "${QDRANT_REST_PORT:-}" ]; then
+                base_url="https://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+            else
+                base_url="https://${QDRANT_HOST}"
+            fi
+        else
+            base_url="http://${QDRANT_HOST}:${QDRANT_REST_PORT:-8087}"
+        fi
+        local url="${base_url}/collections/$QDRANT_COLLECTION"
+        local info_opts=(-s)
+        if [ -n "${QDRANT_API_KEY:-}" ]; then
+            info_opts+=( -H "api-key: $QDRANT_API_KEY" )
+        fi
+        local info
+        info=$(curl "${info_opts[@]}" "$url" || echo "{}")
         local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
         
         log "${BLUE}📊 Qdrant Statistics:${NC}"

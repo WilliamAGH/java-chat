@@ -8,11 +8,7 @@ package com.williamcallahan.javachat.web;
  * @param message The user's chat message (preferred field name for API clients)
  * @param latest The user's chat message (alternative field name used by web UI)
  */
-public record ChatStreamRequest(
-    String sessionId,
-    String message,
-    String latest
-) {
+public record ChatStreamRequest(String sessionId, String message, String latest) {
     private static final String GENERATED_SESSION_PREFIX = "chat-";
 
     /**

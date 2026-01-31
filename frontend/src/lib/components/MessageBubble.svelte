@@ -30,6 +30,9 @@
   // Debounced to avoid flicker during streaming
   $effect(() => {
     if (renderedContent && contentEl) {
+      if (isStreaming) {
+        return cleanupHighlighter
+      }
       // Apply Java language detection before highlighting (client-side DOM operation)
       applyJavaLanguageDetection(contentEl)
       scheduleHighlight(contentEl, isStreaming)
@@ -90,32 +93,34 @@
       </div>
     {/if}
 
-    <div class="bubble-actions">
-      <button
-        type="button"
-        class="action-btn"
-        class:action-btn--success={copyState === 'success'}
-        class:action-btn--error={copyState === 'error'}
-        onclick={() => copyToClipboard(message.content)}
-        title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
-        aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
-      >
-        {#if copyState === 'success'}
-          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
-          </svg>
-        {:else if copyState === 'error'}
-          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
-          </svg>
-        {:else}
-          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
-            <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
-          </svg>
-        {/if}
-      </button>
-    </div>
+    {#if message.role === 'assistant'}
+      <div class="bubble-actions">
+        <button
+          type="button"
+          class="action-btn"
+          class:action-btn--success={copyState === 'success'}
+          class:action-btn--error={copyState === 'error'}
+          onclick={() => copyToClipboard(message.content)}
+          title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
+          aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
+        >
+          {#if copyState === 'success'}
+            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
+            </svg>
+          {:else if copyState === 'error'}
+            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/>
+            </svg>
+          {:else}
+            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"/>
+              <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"/>
+            </svg>
+          {/if}
+        </button>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -156,6 +161,7 @@
   /* Bubble */
   .bubble {
     position: relative;
+    overflow: visible;
     max-width: 85%;
     padding: var(--space-4);
     border-radius: var(--radius-xl);
@@ -313,23 +319,27 @@
     50% { opacity: 0; }
   }
 
-  /* Actions - capability-based visibility */
+  /* Actions - desktop hover only (never on touch / narrow viewports) */
   .bubble-actions {
+    display: none;
     position: absolute;
-    bottom: var(--space-2);
-    right: var(--space-2);
-    opacity: 1; /* Default visible for touch devices */
+    top: var(--space-2);
+    left: calc(100% + var(--space-2));
+    opacity: 0;
+    pointer-events: none;
     transition: opacity var(--duration-fast) var(--ease-out);
   }
 
-  /* Only use hover behavior when device supports it */
-  @media (hover: hover) and (pointer: fine) {
+  /* Only show hover actions on wide viewports with a fine pointer (mouse/trackpad). */
+  @media (hover: hover) and (pointer: fine) and (min-width: 641px) {
     .bubble-actions {
-      opacity: 0;
+      display: block;
     }
 
-    .bubble:hover .bubble-actions {
+    .bubble:hover .bubble-actions,
+    .bubble:focus-within .bubble-actions {
       opacity: 1;
+      pointer-events: auto;
     }
   }
 
@@ -377,17 +387,6 @@
   .action-btn svg {
     width: 14px;
     height: 14px;
-  }
-
-  .message.user .action-btn {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .message.user .action-btn:hover {
-    background: rgba(255, 255, 255, 0.25);
-    color: white;
   }
 
   /* Tablet */

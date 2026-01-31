@@ -1,11 +1,10 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.ai.document.Document;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.ai.document.Document;
+import org.springframework.stereotype.Service;
 
 /**
  * Service for processing text into chunks with consistent metadata and storage.
@@ -51,11 +50,8 @@ public class ChunkProcessingService {
      * @return List of created documents
      * @throws IOException If file operations fail
      */
-    public List<Document> processAndStoreChunks(
-            String text,
-            String url,
-            String title,
-            String packageName) throws IOException {
+    public List<Document> processAndStoreChunks(String text, String url, String title, String packageName)
+            throws IOException {
 
         // Chunk the text with standard parameters
         List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
@@ -73,8 +69,7 @@ public class ChunkProcessingService {
             }
 
             // Create document with standardized metadata
-            Document document = documentFactory.createDocument(
-                chunkText, url, title, chunkIndex, packageName, hash);
+            Document document = documentFactory.createDocument(chunkText, url, title, chunkIndex, packageName, hash);
 
             documents.add(document);
 
@@ -95,11 +90,7 @@ public class ChunkProcessingService {
      * @param packageName The Java package name
      * @return List of documents ready for vector storage
      */
-    public List<Document> processChunksOnly(
-            String text,
-            String url,
-            String title,
-            String packageName) {
+    public List<Document> processChunksOnly(String text, String url, String title, String packageName) {
 
         List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
         List<Document> documents = new ArrayList<>();
@@ -108,8 +99,7 @@ public class ChunkProcessingService {
             String chunkText = chunks.get(chunkIndex);
             String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
 
-            Document document = documentFactory.createDocument(
-                chunkText, url, title, chunkIndex, packageName, hash);
+            Document document = documentFactory.createDocument(chunkText, url, title, chunkIndex, packageName, hash);
 
             documents.add(document);
         }
@@ -122,10 +112,7 @@ public class ChunkProcessingService {
      * for long pages. Adds pageStart/pageEnd metadata to each resulting document.
      */
     public List<Document> processPdfAndStoreWithPages(
-            java.nio.file.Path pdfPath,
-            String url,
-            String title,
-            String packageName) throws java.io.IOException {
+            java.nio.file.Path pdfPath, String url, String title, String packageName) throws java.io.IOException {
 
         List<String> pages = pdfExtractor.extractPageTexts(pdfPath);
         List<Document> pageDocuments = new ArrayList<>();
@@ -141,14 +128,7 @@ public class ChunkProcessingService {
                 String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
                 if (!localStore.isHashIngested(hash)) {
                     Document doc = documentFactory.createDocumentWithPages(
-                            chunkText,
-                            url,
-                            title,
-                            globalIndex,
-                            packageName,
-                            hash,
-                            pageIndex + 1,
-                            pageIndex + 1);
+                            chunkText, url, title, globalIndex, packageName, hash, pageIndex + 1, pageIndex + 1);
                     pageDocuments.add(doc);
                     localStore.saveChunkText(url, globalIndex, chunkText, hash);
                 }

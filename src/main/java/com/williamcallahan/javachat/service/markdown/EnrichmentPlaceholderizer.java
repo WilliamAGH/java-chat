@@ -10,14 +10,13 @@ import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import com.williamcallahan.javachat.domain.markdown.Reminder;
 import com.williamcallahan.javachat.domain.markdown.Warning;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 
 /**
  * Extracts inline enrichment markers and replaces them with HTML placeholders.
@@ -35,11 +34,26 @@ class EnrichmentPlaceholderizer {
      * Defines supported enrichment marker kinds and their rendering metadata.
      */
     private enum EnrichmentKind {
-        HINT("hint", "Helpful Hints", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>"),
-        BACKGROUND("background", "Background Context", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>"),
-        REMINDER("reminder", "Important Reminders", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>"),
-        WARNING("warning", "Warning", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>"),
-        EXAMPLE("example", "Example", "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>");
+        HINT(
+                "hint",
+                "Helpful Hints",
+                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>"),
+        BACKGROUND(
+                "background",
+                "Background Context",
+                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>"),
+        REMINDER(
+                "reminder",
+                "Important Reminders",
+                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>"),
+        WARNING(
+                "warning",
+                "Warning",
+                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>"),
+        EXAMPLE(
+                "example",
+                "Example",
+                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>");
 
         private final String token;
         private final String title;
@@ -75,7 +89,6 @@ class EnrichmentPlaceholderizer {
             }
             return Optional.empty();
         }
-
     }
 
     EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer) {
@@ -84,17 +97,13 @@ class EnrichmentPlaceholderizer {
     }
 
     private record EnrichmentContext(
-        String markdown,
-        List<MarkdownEnrichment> enrichments,
-        Map<String, String> placeholders,
-        StringBuilder outputBuilder
-    ) {}
+            String markdown,
+            List<MarkdownEnrichment> enrichments,
+            Map<String, String> placeholders,
+            StringBuilder outputBuilder) {}
 
     String extractAndPlaceholderizeEnrichments(
-        String markdown,
-        List<MarkdownEnrichment> enrichments,
-        Map<String, String> placeholders
-    ) {
+            String markdown, List<MarkdownEnrichment> enrichments, Map<String, String> placeholders) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
@@ -147,12 +156,7 @@ class EnrichmentPlaceholderizer {
                 EnrichmentParseResult parseResult = parseEnrichmentMarker(markdown, cursor);
                 if (parseResult.isValid()) {
                     EnrichmentProcessingResult processingResult = processEnrichment(
-                        context,
-                        cursor,
-                        parseResult.contentStartIndex(),
-                        parseResult.kind(),
-                        absolutePosition
-                    );
+                            context, cursor, parseResult.contentStartIndex(), parseResult.kind(), absolutePosition);
 
                     if (processingResult != null) {
                         cursor = processingResult.nextIndex();
@@ -254,7 +258,8 @@ class EnrichmentPlaceholderizer {
             }
 
             if (!fenceTracker.isInsideFence()) {
-                CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, scanIndex);
+                CodeFenceStateTracker.BacktickRun backtickRun =
+                        CodeFenceStateTracker.scanBacktickRun(markdown, scanIndex);
                 if (backtickRun != null) {
                     fenceTracker.processCharacter(markdown, scanIndex, isStartOfLine);
                     scanIndex += backtickRun.length();
@@ -281,18 +286,18 @@ class EnrichmentPlaceholderizer {
     }
 
     private EnrichmentProcessingResult processEnrichment(
-        EnrichmentContext context,
-        int openingIndex,
-        int contentStartIndex,
-        EnrichmentKind kind,
-        int absolutePosition
-    ) {
+            EnrichmentContext context,
+            int openingIndex,
+            int contentStartIndex,
+            EnrichmentKind kind,
+            int absolutePosition) {
         int closingIndex = findEnrichmentEndIndex(context.markdown, contentStartIndex);
         if (closingIndex == -1) {
             return null;
         }
 
-        String content = context.markdown.substring(contentStartIndex, closingIndex).trim();
+        String content =
+                context.markdown.substring(contentStartIndex, closingIndex).trim();
         int consumedLength = (closingIndex + 2) - openingIndex;
 
         if (content.isEmpty()) {
@@ -301,7 +306,7 @@ class EnrichmentPlaceholderizer {
 
         MarkdownEnrichment enrichment = createEnrichment(kind, content, absolutePosition);
         context.enrichments.add(enrichment);
-        
+
         String placeholderId = PLACEHOLDER_PREFIX + UUID.randomUUID().toString().replace("-", "");
         context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, content));
         context.outputBuilder.append(placeholderId);
@@ -348,7 +353,7 @@ class EnrichmentPlaceholderizer {
 
         String rawToken = markdown.substring(markerStart + MARKER_START.length(), colonIndex);
         return EnrichmentKind.fromToken(rawToken)
-            .map(kind -> EnrichmentParseResult.of(kind, colonIndex + 1))
-            .orElse(EnrichmentParseResult.invalid());
+                .map(kind -> EnrichmentParseResult.of(kind, colonIndex + 1))
+                .orElse(EnrichmentParseResult.invalid());
     }
 }

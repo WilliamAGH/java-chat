@@ -1,20 +1,19 @@
 package com.williamcallahan.javachat.service;
 
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.model.GuidedLesson;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Service;
-
+import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.Objects;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Service;
 
 /**
  * Loads and caches guided lesson metadata from the classpath to support guided learning flows.
@@ -43,18 +42,15 @@ public class GuidedTOCProvider {
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
-                List<GuidedLesson> loadedLessons = mapper
-                    .readerFor(new TypeReference<List<GuidedLesson>>() {})
-                    .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                    .readValue(tocStream);
+                List<GuidedLesson> loadedLessons = mapper.readerFor(new TypeReference<List<GuidedLesson>>() {})
+                        .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                        .readValue(tocStream);
                 cache = List.copyOf(loadedLessons);
             }
         } catch (IOException exception) {
-            log.warn("Failed to load guided TOC (exceptionType={})", exception.getClass().getName());
-            cache = Collections.emptyList();
-        } finally {
-            tocLoaded = true;
+            throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
         }
+        tocLoaded = true;
         return cache;
     }
 
@@ -65,10 +61,10 @@ public class GuidedTOCProvider {
         if (slug == null || slug.isBlank()) return Optional.empty();
         String normalizedSlug = AsciiTextNormalizer.toLowerAscii(slug);
         return getTOC().stream()
-            .filter(lesson -> {
-                String lessonSlug = lesson.getSlug();
-                return lessonSlug != null && normalizedSlug.equals(AsciiTextNormalizer.toLowerAscii(lessonSlug));
-            })
-            .findFirst();
+                .filter(lesson -> {
+                    String lessonSlug = lesson.getSlug();
+                    return lessonSlug != null && normalizedSlug.equals(AsciiTextNormalizer.toLowerAscii(lessonSlug));
+                })
+                .findFirst();
     }
 }

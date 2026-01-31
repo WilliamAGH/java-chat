@@ -38,7 +38,9 @@ final class RateLimitHeaderParser {
         }
 
         String extractNumber(String normalized) {
-            return normalized.substring(0, normalized.length() - suffix.length()).trim();
+            return normalized
+                    .substring(0, normalized.length() - suffix.length())
+                    .trim();
         }
 
         Duration convert(long amount) {
@@ -114,7 +116,7 @@ final class RateLimitHeaderParser {
         }
         try {
             ZonedDateTime httpDate =
-                ZonedDateTime.parse(trimmed, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+                    ZonedDateTime.parse(trimmed, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
             long seconds = Duration.between(Instant.now(), httpDate.toInstant()).getSeconds();
             return Math.max(0, seconds);
         } catch (RuntimeException parseFailure) {
@@ -136,12 +138,11 @@ final class RateLimitHeaderParser {
         }
 
         long candidateSeconds = minPositive(
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-requests")),
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-tokens")),
-            parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset")),
-            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Requests")),
-            parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Tokens"))
-        );
+                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-requests")),
+                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-tokens")),
+                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset")),
+                parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Requests")),
+                parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Tokens")));
         if (candidateSeconds > 0) {
             return Instant.now().plusSeconds(candidateSeconds);
         }

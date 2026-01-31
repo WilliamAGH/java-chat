@@ -60,8 +60,8 @@ describe('deduplicateCitations', () => {
   })
 
   it('returns empty array for null/undefined input', () => {
-    expect(deduplicateCitations(null as unknown as [])).toEqual([])
-    expect(deduplicateCitations(undefined as unknown as [])).toEqual([])
+    expect(deduplicateCitations(null)).toEqual([])
+    expect(deduplicateCitations(undefined)).toEqual([])
   })
 
   it('removes duplicate URLs', () => {
@@ -70,9 +70,9 @@ describe('deduplicateCitations', () => {
       { url: 'https://b.com', title: 'B' },
       { url: 'https://a.com', title: 'A duplicate' }
     ]
-    const result = deduplicateCitations(citations)
-    expect(result).toHaveLength(2)
-    expect(result.map(c => c.url)).toEqual(['https://a.com', 'https://b.com'])
+    const deduplicatedCitations = deduplicateCitations(citations)
+    expect(deduplicatedCitations).toHaveLength(2)
+    expect(deduplicatedCitations.map(c => c.url)).toEqual(['https://a.com', 'https://b.com'])
   })
 
   it('keeps first occurrence when deduplicating', () => {
@@ -80,8 +80,8 @@ describe('deduplicateCitations', () => {
       { url: 'https://a.com', title: 'First' },
       { url: 'https://a.com', title: 'Second' }
     ]
-    const result = deduplicateCitations(citations)
-    expect(result[0].title).toBe('First')
+    const deduplicatedCitations = deduplicateCitations(citations)
+    expect(deduplicatedCitations[0].title).toBe('First')
   })
 })
 

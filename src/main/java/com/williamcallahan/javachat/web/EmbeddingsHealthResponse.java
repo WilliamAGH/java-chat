@@ -10,12 +10,7 @@ package com.williamcallahan.javachat.web;
  * @param error Error message if unhealthy
  */
 public record EmbeddingsHealthResponse(
-    boolean localEmbeddingEnabled,
-    String serverUrl,
-    String status,
-    Boolean serverReachable,
-    String error
-) {
+        boolean localEmbeddingEnabled, String serverUrl, String status, Boolean serverReachable, String error) {
     /**
      * Creates a healthy response.
      */

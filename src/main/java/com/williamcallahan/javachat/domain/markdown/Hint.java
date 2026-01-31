@@ -5,7 +5,7 @@ package com.williamcallahan.javachat.domain.markdown;
  * Provides helpful tips and suggestions to users.
  */
 public record Hint(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
-    
+
     public Hint {
         if (content == null || content.trim().isEmpty()) {
             throw new IllegalArgumentException("Hint content cannot be null or empty");
@@ -17,7 +17,7 @@ public record Hint(String content, EnrichmentPriority priority, int position) im
             throw new IllegalArgumentException("Hint position must be non-negative");
         }
     }
-    
+
     /**
      * Creates a hint with medium priority.
      * @param content the hint content
@@ -27,7 +27,7 @@ public record Hint(String content, EnrichmentPriority priority, int position) im
     public static Hint create(String content, int position) {
         return new Hint(content, EnrichmentPriority.MEDIUM, position);
     }
-    
+
     @Override
     public String type() {
         return "hint";

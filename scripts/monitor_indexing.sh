@@ -23,15 +23,29 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
     set +a
 fi
 
-# Configuration
-QDRANT_URL="https://$QDRANT_HOST/collections/$QDRANT_COLLECTION"
+# Configuration (use REST API)
+QDRANT_PROTOCOL="https"
+QDRANT_BASE_URL=""
+if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
+    QDRANT_REST_PORT="${QDRANT_REST_PORT:-8087}"
+    QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+else
+    QDRANT_PROTOCOL="http"
+    QDRANT_REST_PORT="${QDRANT_REST_PORT:-8087}"
+    QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+fi
+QDRANT_URL="${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}"
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 REFRESH_INTERVAL=${1:-5}  # Default 5 seconds, or pass as argument
 
 # Function to get Qdrant stats
 get_qdrant_stats() {
-    local response=$(curl -s -H "api-key: $QDRANT_API_KEY" "$QDRANT_URL" 2>/dev/null)
-    if [ $? -eq 0 ]; then
+    local auth=()
+    if [ -n "${QDRANT_API_KEY:-}" ]; then
+        auth=( -H "api-key: $QDRANT_API_KEY" )
+    fi
+    local response
+    if response=$(curl -s "${auth[@]}" "$QDRANT_URL" 2>/dev/null); then
         echo "$response" | jq -r '.result | "\(.points_count)|\(.vectors_count)|\(.indexed_vectors_count)"' 2>/dev/null || echo "0|0|0"
     else
         echo "0|0|0"

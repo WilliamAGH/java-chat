@@ -70,11 +70,7 @@ final class JavadocTypeCanonicalizer {
     }
 
     private static String resolveRelativeQualifiedType(
-        String trimmedType,
-        String packageName,
-        int arrayDimensions,
-        boolean isVarargs
-    ) {
+            String trimmedType, String packageName, int arrayDimensions, boolean isVarargs) {
         if (!Character.isUpperCase(trimmedType.charAt(0))) {
             return null;
         }
@@ -151,14 +147,14 @@ final class JavadocTypeCanonicalizer {
 
     private static boolean isPrimitiveOrVoid(String typeText) {
         return typeText.equals("byte")
-            || typeText.equals("short")
-            || typeText.equals("int")
-            || typeText.equals("long")
-            || typeText.equals("char")
-            || typeText.equals("float")
-            || typeText.equals("double")
-            || typeText.equals("boolean")
-            || typeText.equals("void");
+                || typeText.equals("short")
+                || typeText.equals("int")
+                || typeText.equals("long")
+                || typeText.equals("char")
+                || typeText.equals("float")
+                || typeText.equals("double")
+                || typeText.equals("boolean")
+                || typeText.equals("void");
     }
 
     private static String mapJavaLang(String typeText) {

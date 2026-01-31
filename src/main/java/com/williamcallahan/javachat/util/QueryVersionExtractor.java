@@ -16,10 +16,8 @@ public final class QueryVersionExtractor {
      * Pattern to match Java version references in queries.
      * Matches: "Java 25", "JDK 24", "java25", "jdk-25", "Java SE 24", "JavaSE 25"
      */
-    private static final Pattern VERSION_PATTERN = Pattern.compile(
-        "\\b(?:java\\s*se|javase|java|jdk)[\\s-]*(\\d{1,2})\\b",
-        Pattern.CASE_INSENSITIVE
-    );
+    private static final Pattern VERSION_PATTERN =
+            Pattern.compile("\\b(?:java\\s*se|javase|java|jdk)[\\s-]*(\\d{1,2})\\b", Pattern.CASE_INSENSITIVE);
 
     /**
      * Extract the Java version number from a query string.
@@ -46,8 +44,7 @@ public final class QueryVersionExtractor {
      * @return Optional containing the source identifier if detected, empty otherwise
      */
     public static Optional<String> extractSourceIdentifier(String query) {
-        return extractVersionNumber(query)
-            .map(version -> "java" + version);
+        return extractVersionNumber(query).map(version -> "java" + version);
     }
 
     /**
@@ -58,8 +55,7 @@ public final class QueryVersionExtractor {
      * @return Optional containing filter patterns if version detected, empty otherwise
      */
     public static Optional<VersionFilterPatterns> extractFilterPatterns(String query) {
-        return extractVersionNumber(query)
-            .map(VersionFilterPatterns::new);
+        return extractVersionNumber(query).map(VersionFilterPatterns::new);
     }
 
     /**
@@ -109,9 +105,7 @@ public final class QueryVersionExtractor {
                 return false;
             }
             String lowerUrl = url.toLowerCase(Locale.ROOT);
-            return lowerUrl.contains(javaPattern)
-                || lowerUrl.contains(jdkPattern)
-                || lowerUrl.contains(eaPattern);
+            return lowerUrl.contains(javaPattern) || lowerUrl.contains(jdkPattern) || lowerUrl.contains(eaPattern);
         }
     }
 }

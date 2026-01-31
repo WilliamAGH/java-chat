@@ -14,6 +14,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class QdrantHealthIndicator implements HealthIndicator {
 
+    /** Health detail key for human-readable status message. */
+    private static final String DETAIL_KEY_STATUS = "status";
+    /** Health detail key for time until next health check attempt. */
+    private static final String DETAIL_KEY_NEXT_CHECK_IN = "nextCheckIn";
+
     private final ExternalServiceHealth externalServiceHealth;
 
     /**
@@ -25,25 +30,31 @@ public class QdrantHealthIndicator implements HealthIndicator {
         this.externalServiceHealth = externalServiceHealth;
     }
 
+    /**
+     * Checks Qdrant health by delegating to the centralized external service monitor.
+     *
+     * <p>When healthy, returns UP with a status message. When unhealthy, returns DOWN
+     * with status details and optionally the time until the next retry attempt.
+     *
+     * @return Health.UP when Qdrant is reachable, Health.DOWN otherwise
+     */
     @Override
     public Health health() {
-        ExternalServiceHealth.ServiceInfo info = externalServiceHealth.getServiceInfo(
-            ExternalServiceHealth.SERVICE_QDRANT
-        );
+        ExternalServiceHealth.HealthSnapshot healthSnapshot =
+                externalServiceHealth.getHealthSnapshot(ExternalServiceHealth.SERVICE_QDRANT);
 
-        if (info.isHealthy()) {
+        if (healthSnapshot.isHealthy()) {
             return Health.up()
-                .withDetail("status", info.message())
-                .build();
+                    .withDetail(DETAIL_KEY_STATUS, healthSnapshot.message())
+                    .build();
         }
 
         // Include time until next check for debugging
-        Health.Builder builder = Health.down()
-            .withDetail("status", info.message());
-        
-        if (info.timeUntilNextCheck() != null) {
-            builder.withDetail("nextCheckIn", info.timeUntilNextCheck().toString());
-        }
+        Health.Builder builder = Health.down().withDetail(DETAIL_KEY_STATUS, healthSnapshot.message());
+
+        healthSnapshot
+                .timeUntilNextCheck()
+                .ifPresent(duration -> builder.withDetail(DETAIL_KEY_NEXT_CHECK_IN, duration.toString()));
 
         return builder.build();
     }

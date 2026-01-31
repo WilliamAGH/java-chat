@@ -32,8 +32,7 @@ public class DocumentationConfig {
     /**
      * Creates documentation configuration.
      */
-    public DocumentationConfig() {
-    }
+    public DocumentationConfig() {}
 
     /**
      * Validates documentation settings.

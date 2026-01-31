@@ -6,7 +6,6 @@ import java.io.StringWriter;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
-
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
@@ -28,12 +27,7 @@ public class SitemapController {
     private static final int INITIAL_BUFFER_CAPACITY = 512;
     private static final String SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9";
 
-    private static final List<String> PUBLIC_ROUTES = List.of(
-        "/",
-        "/chat",
-        "/learn",
-        "/guided"
-    );
+    private static final List<String> PUBLIC_ROUTES = List.of("/", "/chat", "/learn", "/guided");
 
     private final SiteUrlResolver siteUrlResolver;
 

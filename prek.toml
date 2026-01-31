@@ -1,0 +1,7 @@
+# Prek configuration for git hooks
+# https://prek.j178.dev/
+
+# Commands to run before each push
+[[pre-push]]
+name = "build-and-test"
+run = "make build && make test"

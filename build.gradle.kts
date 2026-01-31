@@ -4,9 +4,10 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
     id("com.github.spotbugs") version "6.4.8"
     id("pmd")
+    id("com.diffplug.spotless") version "8.1.0"
 }
 
-val javaVersion = 21
+val javaVersion = 25
 val springAiVersion = "1.1.2"
 val openaiVersion = "4.16.0"
 val springDotenvVersion = "5.1.0"
@@ -31,6 +32,7 @@ version = "0.0.1-SNAPSHOT"
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(javaVersion)
+        vendor = JvmVendorSpec.ADOPTIUM
     }
 }
 
@@ -163,13 +165,24 @@ tasks.withType<Pmd>().configureEach {
     }
 }
 
+spotless {
+    java {
+        target("src/main/java/**/*.java", "src/test/java/**/*.java")
+        palantirJavaFormat("2.85.0")
+        removeUnusedImports()
+    }
+}
+
 // Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED"
+        "--add-opens", "java.base/java.util=ALL-UNNAMED",
+        // Suppress sun.misc.Unsafe deprecation warnings from gRPC/Netty (Qdrant client dependency)
+        // See: https://netty.io/wiki/java-24-and-sun.misc.unsafe.html
+        "--sun-misc-unsafe-memory-access=allow"
     )
 }
 
@@ -197,7 +210,10 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     jvmArgs(
         "-Xmx2g",
         "-Dio.netty.handler.ssl.noOpenSsl=true",
-        "-Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
+        "-Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true",
+        // Suppress sun.misc.Unsafe deprecation warnings from gRPC/Netty (Qdrant client dependency)
+        // See: https://netty.io/wiki/java-24-and-sun.misc.unsafe.html
+        "--sun-misc-unsafe-memory-access=allow"
     )
     systemProperty("java.net.preferIPv4Stack", "true")
     // spring.devtools.restart.enabled is controlled by devtools presence on classpath

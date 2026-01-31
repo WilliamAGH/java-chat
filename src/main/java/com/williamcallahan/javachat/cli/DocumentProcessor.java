@@ -66,8 +66,10 @@ public class DocumentProcessor {
     private static final String LOG_COMPLETE_TITLE = "DOCUMENT PROCESSING COMPLETE";
     private static final String LOG_DEDUP_ENABLED = "Deduplication: ENABLED (using content hashes)";
     private static final String LOG_NEXT_STEPS = "Next steps:";
-    private static final String LOG_DOCS_INDEXED = "Documents have been indexed in Qdrant with automatic deduplication.";
-    private static final String LOG_HASH_DESCRIPTION = "Each document chunk is identified by a SHA-256 hash of its content.";
+    private static final String LOG_DOCS_INDEXED =
+            "Documents have been indexed in Qdrant with automatic deduplication.";
+    private static final String LOG_HASH_DESCRIPTION =
+            "Each document chunk is identified by a SHA-256 hash of its content.";
     private static final String LOG_PROCESSING_SET = "Processing documentation set";
     private static final String LOG_FILES_TO_PROCESS = "Files to process: {}";
     private static final String LOG_DUPLICATES_SKIPPED = "  Skipped {} duplicate files (already in Qdrant)";
@@ -98,24 +100,23 @@ public class DocumentProcessor {
     private static final double MILLIS_PER_SECOND = 1_000.0;
 
     private static final String PROCESSING_FAILED_TEMPLATE =
-        "Document processing completed with %d failed documentation set(s)";
+            "Document processing completed with %d failed documentation set(s)";
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
-        "Failed to enumerate files in %s - check directory permissions";
+            "Failed to enumerate files in %s - check directory permissions";
 
     private static final List<DocumentationSet> DOCUMENTATION_SETS = List.of(
-        new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
-        new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_JAVA_25_ALT_NAME, DOCSET_JAVA_25_ALT_PATH),
-        new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH),
-        new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
-        new DocumentationSet(DOCSET_JAVA_25_QUICK_NAME, DOCSET_JAVA_25_QUICK_PATH),
-        new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
-        new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
-        new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH)
-    );
+            new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
+            new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_JAVA_25_ALT_NAME, DOCSET_JAVA_25_ALT_PATH),
+            new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
+            new DocumentationSet(DOCSET_JAVA_25_QUICK_NAME, DOCSET_JAVA_25_QUICK_PATH),
+            new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
+            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
+            new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));
 
     private final DocsIngestionService ingestionService;
     private final ProgressTracker progressTracker;
@@ -126,8 +127,7 @@ public class DocumentProcessor {
      * @param ingestionService service for ingesting documentation into the vector store
      * @param progressTracker tracker for monitoring ingestion progress
      */
-    public DocumentProcessor(final DocsIngestionService ingestionService,
-                             final ProgressTracker progressTracker) {
+    public DocumentProcessor(final DocsIngestionService ingestionService, final ProgressTracker progressTracker) {
         this.ingestionService = ingestionService;
         this.progressTracker = progressTracker;
     }
@@ -157,15 +157,14 @@ public class DocumentProcessor {
 
         final Path basePath = Path.of(config.docsDirectory()).toAbsolutePath().normalize();
         final IngestionTotals totals = DOCUMENTATION_SETS.stream()
-            .map(docSet -> processDocumentationSet(basePath, docSet))
-            .reduce(IngestionTotals.ZERO, this::accumulateOutcome, IngestionTotals::combine);
+                .map(docSet -> processDocumentationSet(basePath, docSet))
+                .reduce(IngestionTotals.ZERO, this::accumulateOutcome, IngestionTotals::combine);
 
         logSummary(config, totals);
 
         if (totals.failedSets() > 0) {
             throw new DocumentProcessingException(
-                String.format(Locale.ROOT, PROCESSING_FAILED_TEMPLATE, totals.failedSets())
-            );
+                    String.format(Locale.ROOT, PROCESSING_FAILED_TEMPLATE, totals.failedSets()));
         }
     }
 
@@ -211,7 +210,7 @@ public class DocumentProcessor {
         final long startMillis = System.currentTimeMillis();
         try {
             final DocsIngestionService.LocalIngestionOutcome outcome =
-                ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
+                    ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
             final int processed = outcome.processedCount();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
@@ -230,9 +229,10 @@ public class DocumentProcessor {
 
         } catch (IOException ioException) {
             if (LOGGER.isErrorEnabled()) {
-                LOGGER.error(LOG_PROCESSING_FAILED,
-                    Integer.toHexString(Objects.hashCode(docSet.displayName())),
-                    ioException.getClass().getSimpleName());
+                LOGGER.error(
+                        LOG_PROCESSING_FAILED,
+                        Integer.toHexString(Objects.hashCode(docSet.displayName())),
+                        ioException.getClass().getSimpleName());
             }
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_STACK_TRACE, ioException);
@@ -243,15 +243,12 @@ public class DocumentProcessor {
 
     private long countEligibleFiles(final Path docsPath) {
         try (Stream<Path> paths = Files.walk(docsPath)) {
-            return paths
-                .filter(path -> !Files.isDirectory(path))
-                .filter(DocumentProcessor::isEligibleFile)
-                .count();
+            return paths.filter(path -> !Files.isDirectory(path))
+                    .filter(DocumentProcessor::isEligibleFile)
+                    .count();
         } catch (IOException ioException) {
             throw new UncheckedIOException(
-                String.format(Locale.ROOT, FILE_ENUMERATION_FAILURE_TEMPLATE, docsPath),
-                ioException
-            );
+                    String.format(Locale.ROOT, FILE_ENUMERATION_FAILURE_TEMPLATE, docsPath), ioException);
         }
     }
 
@@ -281,11 +278,12 @@ public class DocumentProcessor {
         }
         final double elapsedSeconds = Math.max(elapsedMillis, 1) / MILLIS_PER_SECOND;
         final double rate = processed / elapsedSeconds;
-        LOGGER.info(LOG_PROCESSED_STATS,
-            processed,
-            String.format(Locale.ROOT, FORMAT_SECONDS, elapsedSeconds),
-            String.format(Locale.ROOT, FORMAT_RATE, rate),
-            progressTracker.formatPercent());
+        LOGGER.info(
+                LOG_PROCESSED_STATS,
+                processed,
+                String.format(Locale.ROOT, FORMAT_SECONDS, elapsedSeconds),
+                String.format(Locale.ROOT, FORMAT_RATE, rate),
+                progressTracker.formatPercent());
     }
 
     private void logSummary(final EnvironmentConfig config, final IngestionTotals totals) {
@@ -318,12 +316,7 @@ public class DocumentProcessor {
      * Environment configuration consolidated from system environment variables.
      */
     private record EnvironmentConfig(
-        String docsDirectory,
-        String qdrantCollection,
-        String qdrantHost,
-        String qdrantPort,
-        String appPort
-    ) {
+            String docsDirectory, String qdrantCollection, String qdrantHost, String qdrantPort, String appPort) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
         private static final String QDRANT_COLLECTION_DEFAULT = "(not set)";
         private static final String QDRANT_HOST_DEFAULT = "localhost";
@@ -337,12 +330,11 @@ public class DocumentProcessor {
 
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
-                envOrDefault(ENV_DOCS_DIR, DOCS_DIR_DEFAULT),
-                envOrDefault(ENV_QDRANT_COLLECTION, QDRANT_COLLECTION_DEFAULT),
-                envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
-                envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
-                envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT)
-            );
+                    envOrDefault(ENV_DOCS_DIR, DOCS_DIR_DEFAULT),
+                    envOrDefault(ENV_QDRANT_COLLECTION, QDRANT_COLLECTION_DEFAULT),
+                    envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
+                    envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
+                    envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT));
         }
 
         private static String envOrDefault(final String key, final String fallbackText) {
@@ -371,11 +363,10 @@ public class DocumentProcessor {
 
         static IngestionTotals combine(final IngestionTotals left, final IngestionTotals right) {
             return new IngestionTotals(
-                left.processed + right.processed,
-                left.duplicates + right.duplicates,
-                left.skippedSets + right.skippedSets,
-                left.failedSets + right.failedSets
-            );
+                    left.processed + right.processed,
+                    left.duplicates + right.duplicates,
+                    left.skippedSets + right.skippedSets,
+                    left.failedSets + right.failedSets);
         }
     }
 
@@ -384,15 +375,16 @@ public class DocumentProcessor {
      */
     private sealed interface ProcessingOutcome {
         record Success(long processed, long duplicates) implements ProcessingOutcome {}
+
         record Skipped(String setName, String reason) implements ProcessingOutcome {}
+
         record Failed(String setName) implements ProcessingOutcome {}
     }
 
     /**
      * A documentation set to process, defined by display name and relative path.
      */
-    private record DocumentationSet(String displayName, String relativePath) {
-    }
+    private record DocumentationSet(String displayName, String relativePath) {}
 
     /**
      * Thrown when document processing completes but one or more documentation sets failed.

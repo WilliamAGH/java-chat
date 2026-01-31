@@ -1,19 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import com.williamcallahan.javachat.model.Enrichment;
-import com.williamcallahan.javachat.service.ChatMemoryService;
-import com.williamcallahan.javachat.service.GuidedLearningService;
-import com.williamcallahan.javachat.service.MarkdownService;
-import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
-
-import java.util.List;
-
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
@@ -21,9 +7,21 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import org.springframework.context.annotation.Import;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
+import com.williamcallahan.javachat.model.Enrichment;
+import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.service.GuidedLearningService;
+import com.williamcallahan.javachat.service.MarkdownService;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies guided learning endpoints return expected data under WebMvcTest.

@@ -1,13 +1,6 @@
 package com.williamcallahan.javachat.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
 import jakarta.annotation.PostConstruct;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,6 +9,10 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 /**
  * Persists document snapshots, parsed chunks, and ingestion markers on the local filesystem.
@@ -41,10 +38,11 @@ public class LocalStoreService {
     /**
      * Creates the local store using configured directory roots for snapshots, parsed content, and ingest markers.
      */
-    public LocalStoreService(@Value("${app.docs.snapshot-dir}") String snapshotDir,
-                             @Value("${app.docs.parsed-dir}") String parsedDir,
-                             @Value("${app.docs.index-dir}") String indexDir,
-                             ProgressTracker progressTracker) {
+    public LocalStoreService(
+            @Value("${app.docs.snapshot-dir}") String snapshotDir,
+            @Value("${app.docs.parsed-dir}") String parsedDir,
+            @Value("${app.docs.index-dir}") String indexDir,
+            ProgressTracker progressTracker) {
         this.snapshotDirConfig = snapshotDir;
         this.parsedDirConfig = parsedDir;
         this.indexDirConfig = indexDir;
@@ -63,8 +61,7 @@ public class LocalStoreService {
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
-            log.info("Local store directories ready (snapshots={}, parsed={}, index={})",
-                snapshotDir, parsedDir, indexDir);
+            log.info("Local store directories ready");
         } catch (InvalidPathException | IOException exception) {
             throw new IllegalStateException("Failed to create local store directories", exception);
         }
@@ -83,9 +80,7 @@ public class LocalStoreService {
      * Stores a parsed chunk payload for later local search and attribution.
      */
     public void saveChunkText(String url, int index, String text, String hash) throws IOException {
-        String shortHash = hash.length() >= HASH_PREFIX_LENGTH 
-            ? hash.substring(0, HASH_PREFIX_LENGTH) 
-            : hash;
+        String shortHash = hash.length() >= HASH_PREFIX_LENGTH ? hash.substring(0, HASH_PREFIX_LENGTH) : hash;
         Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + shortHash + ".txt");
         ensureParentDirectoryExists(chunkFilePath);
         Files.writeString(chunkFilePath, text, StandardCharsets.UTF_8);
@@ -174,5 +169,4 @@ public class LocalStoreService {
             throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
         }
     }
-
 }

@@ -1,19 +1,19 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.*;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import jakarta.servlet.http.HttpServletResponse;
+import java.time.Duration;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-
-import java.time.Duration;
-import java.util.function.Consumer;
-
-import static com.williamcallahan.javachat.web.SseConstants.*;
 
 /**
  * Shared SSE support utilities for streaming controllers.
@@ -29,9 +29,9 @@ public class SseSupport {
 
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
-        "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
+            "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
-    private final ObjectMapper objectMapper;
+    private final ObjectWriter jsonWriter;
 
     /**
      * Creates SSE support wired to the application's ObjectMapper.
@@ -39,7 +39,7 @@ public class SseSupport {
      * @param objectMapper JSON mapper for safe SSE serialization
      */
     public SseSupport(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+        this.jsonWriter = objectMapper.writer();
     }
 
     /**
@@ -62,11 +62,10 @@ public class SseSupport {
      * @return a shared flux configured for SSE streaming
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
-        return source
-            .filter(chunk -> chunk != null && !chunk.isEmpty())
-            .doOnNext(chunkConsumer)
-            .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
-            .share();
+        return source.filter(chunk -> chunk != null && !chunk.isEmpty())
+                .doOnNext(chunkConsumer)
+                .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
+                .share();
     }
 
     /**
@@ -78,7 +77,7 @@ public class SseSupport {
      */
     public String jsonSerialize(Object payload) {
         try {
-            return objectMapper.writeValueAsString(payload);
+            return jsonWriter.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize SSE data", e);
         }
@@ -94,15 +93,13 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> sseError(String message, String details) {
         String json;
         try {
-            json = objectMapper.writeValueAsString(new ErrorPayload(message, details));
+            json = jsonWriter.writeValueAsString(new ErrorPayload(message, details));
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE error: {}", message, e);
+            log.error("Failed to serialize SSE error payload", e);
             json = ERROR_FALLBACK_JSON;
         }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(EVENT_ERROR)
-            .data(json)
-            .build());
+        return Flux.just(
+                ServerSentEvent.<String>builder().event(EVENT_ERROR).data(json).build());
     }
 
     /**
@@ -116,15 +113,13 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> sseStatus(String message, String details) {
         String json;
         try {
-            json = objectMapper.writeValueAsString(new StatusPayload(message, details));
+            json = jsonWriter.writeValueAsString(new StatusPayload(message, details));
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE status: {}", message, e);
+            log.error("Failed to serialize SSE status payload", e);
             json = ERROR_FALLBACK_JSON;
         }
-        return Flux.just(ServerSentEvent.<String>builder()
-            .event(EVENT_STATUS)
-            .data(json)
-            .build());
+        return Flux.just(
+                ServerSentEvent.<String>builder().event(EVENT_STATUS).data(json).build());
     }
 
     /**
@@ -136,8 +131,10 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> heartbeats(Flux<?> terminateOn) {
         return Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
-            .takeUntilOther(terminateOn.ignoreElements())
-            .map(tick -> ServerSentEvent.<String>builder().comment(COMMENT_KEEPALIVE).build());
+                .takeUntilOther(terminateOn.ignoreElements())
+                .map(tick -> ServerSentEvent.<String>builder()
+                        .comment(COMMENT_KEEPALIVE)
+                        .build());
     }
 
     /**
@@ -149,9 +146,9 @@ public class SseSupport {
      */
     public ServerSentEvent<String> textEvent(String chunk) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_TEXT)
-            .data(jsonSerialize(new ChunkPayload(chunk)))
-            .build();
+                .event(EVENT_TEXT)
+                .data(jsonSerialize(new ChunkPayload(chunk)))
+                .build();
     }
 
     /**
@@ -163,9 +160,9 @@ public class SseSupport {
      */
     public ServerSentEvent<String> statusEvent(String summary, String details) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_STATUS)
-            .data(jsonSerialize(new StatusPayload(summary, details)))
-            .build();
+                .event(EVENT_STATUS)
+                .data(jsonSerialize(new StatusPayload(summary, details)))
+                .build();
     }
 
     /**
@@ -176,9 +173,23 @@ public class SseSupport {
      */
     public ServerSentEvent<String> citationEvent(Object citations) {
         return ServerSentEvent.<String>builder()
-            .event(EVENT_CITATION)
-            .data(jsonSerialize(citations))
-            .build();
+                .event(EVENT_CITATION)
+                .data(jsonSerialize(citations))
+                .build();
+    }
+
+    /**
+     * Creates a provider event indicating which LLM provider is handling the request.
+     * Surfaces provider transparency to end-users per the no-silent-fallback policy.
+     *
+     * @param providerName the name of the LLM provider (e.g., "OpenAI", "GitHub Models")
+     * @return ServerSentEvent with provider metadata payload
+     */
+    public ServerSentEvent<String> providerEvent(String providerName) {
+        return ServerSentEvent.<String>builder()
+                .event(EVENT_PROVIDER)
+                .data(jsonSerialize(new ProviderPayload(providerName)))
+                .build();
     }
 
     /** Payload record for text chunks - preserves whitespace in JSON. */
@@ -189,4 +200,7 @@ public class SseSupport {
 
     /** Payload record for error messages. */
     public record ErrorPayload(String message, String details) {}
+
+    /** Payload record for provider metadata. */
+    public record ProviderPayload(String provider) {}
 }

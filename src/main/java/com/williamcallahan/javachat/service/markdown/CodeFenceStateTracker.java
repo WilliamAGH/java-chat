@@ -103,7 +103,7 @@ final class CodeFenceStateTracker {
             }
             int matchLength = 0;
             while (nextBacktickIndex + matchLength < text.length()
-                && text.charAt(nextBacktickIndex + matchLength) == BACKTICK) {
+                    && text.charAt(nextBacktickIndex + matchLength) == BACKTICK) {
                 matchLength++;
             }
             if (matchLength == runLength) {

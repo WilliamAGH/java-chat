@@ -1,1060 +1,1082 @@
 <script lang="ts">
-  import { fetchTOC, fetchLessonContent, streamGuidedChat, type GuidedLesson } from '../services/guided'
-  import { fetchCitations, type Citation } from '../services/chat'
-  import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
-  import type { ChatMessage } from '../services/chat'
-  import ChatInput from './ChatInput.svelte'
-  import ThinkingIndicator from './ThinkingIndicator.svelte'
-  import StreamingMessagesList from './StreamingMessagesList.svelte'
-  import MobileChatDrawer from './MobileChatDrawer.svelte'
-  import { sanitizeUrl, deduplicateCitations } from '../utils/url'
-  import { highlightCodeBlocks } from '../utils/highlight'
-  import { isNearBottom, scrollToBottom } from '../utils/scroll'
-  import { generateSessionId } from '../utils/session'
-  import { createStreamingState } from '../composables/createStreamingState.svelte'
+    import {
+        fetchTOC,
+        fetchLessonContent,
+        fetchGuidedLessonCitations,
+        streamGuidedChat,
+        type GuidedLesson,
+    } from "../services/guided";
+    import {
+        clearChatSession,
+        type Citation,
+        type ChatMessage,
+    } from "../services/chat";
+    import {
+        parseMarkdown,
+        applyJavaLanguageDetection,
+    } from "../services/markdown";
+    import CitationPanel from "./CitationPanel.svelte";
+    import GuidedLessonChatPanel from "./GuidedLessonChatPanel.svelte";
+    import LessonCitations from "./LessonCitations.svelte";
+    import MessageBubble from "./MessageBubble.svelte";
+    import ThinkingIndicator from "./ThinkingIndicator.svelte";
+    import MobileChatDrawer from "./MobileChatDrawer.svelte";
+    import { deduplicateCitations } from "../utils/url";
+    import { highlightCodeBlocks } from "../utils/highlight";
+    import { generateSessionId } from "../utils/session";
+    import { createChatMessageId } from "../utils/chatMessageId";
+    import { createStreamingState } from "../composables/createStreamingState.svelte";
+    import { createScrollAnchor } from "../composables/createScrollAnchor.svelte";
 
-  // TOC state
-  let lessons = $state<GuidedLesson[]>([])
-  let loadingTOC = $state(true)
-  let tocError = $state<string | null>(null)
+    // TOC state
+    let lessons = $state<GuidedLesson[]>([]);
+    let loadingTOC = $state(true);
+    let tocError = $state<string | null>(null);
 
-  // Lesson state
-  let selectedLesson = $state<GuidedLesson | null>(null)
-  let lessonMarkdown = $state('')
-  let lessonError = $state<string | null>(null)
-  let loadingLesson = $state(false)
+    // Lesson state
+    let selectedLesson = $state<GuidedLesson | null>(null);
+    let lessonMarkdown = $state("");
+    let lessonError = $state<string | null>(null);
+    let loadingLesson = $state(false);
 
-  // Lesson-level citations (sources for the lesson topic)
-  let lessonCitations = $state<Citation[]>([])
-  let lessonCitationsError = $state<string | null>(null)
-  let lessonCitationsLoaded = $state(false)
+    // Lesson-level citations (sources for the lesson topic)
+    let lessonCitations = $state<Citation[]>([]);
+    let lessonCitationsError = $state<string | null>(null);
+    let lessonCitationsLoaded = $state(false);
 
-  // Chat state - per-lesson persistence
-  const chatHistoryByLesson = new Map<string, ChatMessage[]>()
-  let messages = $state<ChatMessage[]>([])
-  let shouldAutoScroll = $state(true)
-
-  // Streaming state from composable (immediate status clear for LearnView)
-  const streaming = createStreamingState()
-
-  // Desktop container ref for scroll management
-  let desktopMessagesContainer: HTMLElement | null = $state(null)
-  // Component ref for mobile drawer to access its scroll container
-  let mobileDrawer: MobileChatDrawer | null = $state(null)
-
-  // Mobile chat drawer state
-  let isChatDrawerOpen = $state(false)
-
-  // Element refs
-  let lessonContentEl: HTMLElement | null = $state(null)
-  let lessonContentPanelEl: HTMLElement | null = $state(null)
-
-  // Session ID for chat continuity
-  const sessionId = generateSessionId('guided')
-
-  // Rendered lesson content - SSR-safe parsing without DOM operations
-  let renderedLesson = $derived(
-    lessonMarkdown ? parseMarkdown(lessonMarkdown) : ''
-  )
-
-  // Load TOC on mount
-  $effect(() => {
-    loadTOC()
-  })
-
-  async function loadTOC(): Promise<void> {
-    loadingTOC = true
-    tocError = null
-
-    try {
-      lessons = await fetchTOC()
-    } catch (error) {
-      tocError = error instanceof Error ? error.message : 'Failed to load lessons'
-      lessons = []
-    } finally {
-      loadingTOC = false
-    }
-  }
-
-  async function selectLesson(lesson: GuidedLesson): Promise<void> {
-    const targetSlug = lesson.slug
-
-    // Save current chat history before switching lessons
-    if (selectedLesson && messages.length > 0) {
-      chatHistoryByLesson.set(selectedLesson.slug, [...messages])
+    /** Chat message type enriched with streamed citations. */
+    interface MessageWithCitations extends ChatMessage {
+        citations?: Citation[];
     }
 
-    // Reset state atomically before async operation
-    selectedLesson = lesson
-    loadingLesson = true
-    lessonMarkdown = ''
-    lessonError = null
-    lessonCitations = []
-    lessonCitationsError = null
-    lessonCitationsLoaded = false
-    isChatDrawerOpen = false
+    // Chat state - per-lesson persistence
+    const chatHistoryByLesson = new Map<string, MessageWithCitations[]>();
+    let messages = $state<MessageWithCitations[]>([]);
+    let activeStreamingMessageId = $state<string | null>(null);
 
-    // Restore chat history for this lesson if it exists
-    messages = chatHistoryByLesson.get(lesson.slug) ?? []
+    // Scroll indicator for new off-screen content during streaming
+    const scrollAnchor = createScrollAnchor();
 
-    try {
-      const response = await fetchLessonContent(lesson.slug)
-      // Guard against stale response if user switched lessons
-      if (selectedLesson?.slug !== targetSlug) return
-      lessonMarkdown = response.markdown
+    // Streaming state from composable (immediate status clear for LearnView)
+    const streaming = createStreamingState();
 
-      // Fetch citations for the lesson topic (non-blocking, with explicit error tracking)
-      fetchCitations(lesson.title).then((result) => {
-        // Guard against stale citation response
-        if (selectedLesson?.slug !== targetSlug) return
+    // Cleanup scroll anchor on unmount
+    $effect(() => {
+        return () => {
+            scrollAnchor.cleanup();
+        };
+    });
 
-        // Preserve scroll position before updating citations
-        const scrollTop = lessonContentPanelEl?.scrollTop ?? 0
+    let hasStreamingContent = $derived.by(() => {
+        if (!streaming.isStreaming || !activeStreamingMessageId) return false;
+        const activeMessage = messages.find(
+            (existingMessage) =>
+                existingMessage.messageId === activeStreamingMessageId,
+        );
+        return !!activeMessage?.content;
+    });
 
-        if (result.success) {
-          lessonCitations = deduplicateCitations(result.citations)
-        } else {
-          lessonCitationsError = result.error
+    // Desktop chat panel ref for scroll management
+    let desktopChatPanel: GuidedLessonChatPanel | null = $state(null);
+    // Component ref for mobile drawer to access its scroll container
+    let mobileDrawer: MobileChatDrawer | null = $state(null);
+
+    // Mobile chat drawer state
+    let isChatDrawerOpen = $state(false);
+
+    // Attach scroll anchor to the active container when components mount
+    $effect(() => {
+        // Re-run when drawer state or panel refs change
+        const container = isChatDrawerOpen
+            ? mobileDrawer?.getMessagesContainer()
+            : desktopChatPanel?.getMessagesContainer();
+        if (container) {
+            scrollAnchor.attach(container);
         }
-        lessonCitationsLoaded = true
+    });
 
-        // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
-        requestAnimationFrame(() => {
-          if (lessonContentPanelEl && scrollTop > 0) {
-            lessonContentPanelEl.scrollTop = scrollTop
-          }
-        })
-      }).catch((error) => {
-        // Guard against stale citation error
-        if (selectedLesson?.slug !== targetSlug) return
-        lessonCitationsError = error instanceof Error ? error.message : 'Failed to load lesson sources'
-        lessonCitationsLoaded = true
-      })
-    } catch (error) {
-      if (selectedLesson?.slug !== targetSlug) return
-      lessonError = error instanceof Error ? error.message : 'Failed to load lesson'
-      lessonMarkdown = ''
-    } finally {
-      if (selectedLesson?.slug === targetSlug) {
-        loadingLesson = false
-      }
-    }
-  }
+    // Element refs
+    let lessonContentEl: HTMLElement | null = $state(null);
+    let lessonContentPanelEl: HTMLElement | null = $state(null);
 
-  function goBack(): void {
-    // Save current chat history before going back
-    if (selectedLesson && messages.length > 0) {
-      chatHistoryByLesson.set(selectedLesson.slug, [...messages])
-    }
+    // Session IDs per lesson for backend conversation isolation
+    // Each lesson gets its own session ID to prevent conversation bleeding across topics
+    const sessionIdsByLesson = new Map<string, string>();
 
-    // Cancel any in-flight stream
-    streaming.reset()
-    isChatDrawerOpen = false
-    selectedLesson = null
-    lessonMarkdown = ''
-    lessonError = null
-    lessonCitations = []
-    lessonCitationsError = null
-    lessonCitationsLoaded = false
-    messages = []
-  }
+    let guidedChatAbortController: AbortController | null = null;
+    let guidedChatStreamVersion = 0;
 
-  function clearChat(): void {
-    if (selectedLesson) {
-      chatHistoryByLesson.delete(selectedLesson.slug)
-    }
-    messages = []
-  }
-
-  function toggleChatDrawer(): void {
-    isChatDrawerOpen = !isChatDrawerOpen
-    // Reset auto-scroll when switching between desktop/drawer views
-    shouldAutoScroll = true
-  }
-
-  function closeChatDrawer(): void {
-    isChatDrawerOpen = false
-    // Reset auto-scroll to ensure desktop view scrolls properly
-    shouldAutoScroll = true
-  }
-
-  /** Returns the currently active messages container based on drawer state. */
-  function getActiveMessagesContainer(): HTMLElement | null {
-    return isChatDrawerOpen ? mobileDrawer?.getMessagesContainer() ?? null : desktopMessagesContainer
-  }
-
-  function checkAutoScroll(): void {
-    shouldAutoScroll = isNearBottom(getActiveMessagesContainer())
-  }
-
-  async function doScrollToBottom(): Promise<void> {
-    await scrollToBottom(getActiveMessagesContainer(), shouldAutoScroll)
-  }
-
-  async function handleSend(message: string): Promise<void> {
-    if (!message.trim() || streaming.isStreaming || !selectedLesson) return
-
-    const streamLessonSlug = selectedLesson.slug
-    const userQuery = message.trim()
-
-    messages = [...messages, {
-      role: 'user',
-      content: userQuery,
-      timestamp: Date.now()
-    }]
-
-    shouldAutoScroll = true
-    await doScrollToBottom()
-
-    streaming.startStream()
-
-    try {
-      await streamGuidedChat(sessionId, selectedLesson.slug, userQuery, {
-        onChunk: (chunk) => {
-          // Guard: ignore chunks if user navigated away
-          if (selectedLesson?.slug !== streamLessonSlug) return
-          streaming.appendContent(chunk)
-          doScrollToBottom()
-        },
-        onStatus: (status) => {
-          // Guard: ignore status if user navigated away
-          if (selectedLesson?.slug !== streamLessonSlug) return
-          streaming.updateStatus(status)
-        },
-        onError: (streamError) => {
-          console.error('Stream error during processing:', streamError)
+    /**
+     * Gets or creates a session ID for a specific lesson.
+     * Each lesson gets its own backend session to prevent conversation bleeding.
+     */
+    function getSessionIdForLesson(slug: string): string {
+        let lessonSessionId = sessionIdsByLesson.get(slug);
+        if (!lessonSessionId) {
+            lessonSessionId = generateSessionId(`guided:${slug}`);
+            sessionIdsByLesson.set(slug, lessonSessionId);
         }
-      })
-
-      // Guard: don't add message if user navigated away
-      if (selectedLesson?.slug !== streamLessonSlug) return
-      messages = [...messages, {
-        role: 'assistant',
-        content: streaming.streamingContent,
-        timestamp: Date.now()
-      }]
-    } catch (error) {
-      if (selectedLesson?.slug !== streamLessonSlug) return
-      const errorMessage = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.'
-      messages = [...messages, {
-        role: 'assistant',
-        content: errorMessage,
-        timestamp: Date.now(),
-        isError: true
-      }]
-    } finally {
-      // Guard: only reset streaming state if still on same lesson
-      if (selectedLesson?.slug === streamLessonSlug) {
-        streaming.finishStream()
-        await doScrollToBottom()
-      }
+        return lessonSessionId;
     }
-  }
 
-  // Apply Java language detection and highlight code blocks after lesson content renders
-  // Uses shared utility with cancellation support
-  $effect(() => {
-    const contentElement = lessonContentEl
-    if (!renderedLesson || !contentElement) return
-
-    let isCancelled = false
-
-    // Apply Java language detection before highlighting (client-side DOM operation)
-    applyJavaLanguageDetection(contentElement)
-
-    highlightCodeBlocks(contentElement).catch((highlightError) => {
-      if (!isCancelled) {
-        console.warn('[LearnView] Code highlighting failed:', highlightError)
-      }
-    })
-
-    // Cleanup function runs when effect re-runs or component unmounts
-    return () => {
-      isCancelled = true
+    function cancelInFlightGuidedChatStream(): void {
+        guidedChatStreamVersion++;
+        if (guidedChatAbortController) {
+            guidedChatAbortController.abort();
+            guidedChatAbortController = null;
+        }
+        streaming.reset();
+        activeStreamingMessageId = null;
     }
-  })
+
+    // Rendered lesson content - SSR-safe parsing without DOM operations
+    let renderedLesson = $derived(
+        lessonMarkdown ? parseMarkdown(lessonMarkdown) : "",
+    );
+
+    // Load TOC on mount
+    $effect(() => {
+        loadTOC();
+    });
+
+    async function loadTOC(): Promise<void> {
+        loadingTOC = true;
+        tocError = null;
+
+        try {
+            lessons = await fetchTOC();
+        } catch (error) {
+            tocError =
+                error instanceof Error
+                    ? error.message
+                    : "Failed to load lessons";
+            lessons = [];
+        } finally {
+            loadingTOC = false;
+        }
+    }
+
+    async function selectLesson(lesson: GuidedLesson): Promise<void> {
+        const targetSlug = lesson.slug;
+
+        // Save current chat history before switching lessons
+        if (selectedLesson && messages.length > 0) {
+            chatHistoryByLesson.set(selectedLesson.slug, [...messages]);
+        }
+
+        // Reset state atomically before async operation
+        selectedLesson = lesson;
+        loadingLesson = true;
+        lessonMarkdown = "";
+        lessonError = null;
+        lessonCitations = [];
+        lessonCitationsError = null;
+        lessonCitationsLoaded = false;
+        isChatDrawerOpen = false;
+
+        // Restore chat history for this lesson if it exists
+        messages = chatHistoryByLesson.get(lesson.slug) ?? [];
+
+        try {
+            const response = await fetchLessonContent(lesson.slug);
+            // Guard against stale response if user switched lessons
+            if (selectedLesson?.slug !== targetSlug) return;
+            lessonMarkdown = response.markdown;
+
+            // Fetch citations for the lesson topic (Think Java-only, with explicit error tracking)
+            fetchGuidedLessonCitations(lesson.slug)
+                .then((result) => {
+                    // Guard against stale citation response
+                    if (selectedLesson?.slug !== targetSlug) return;
+
+                    // Preserve scroll position before updating citations
+                    const scrollTop = lessonContentPanelEl?.scrollTop ?? 0;
+
+                    if (result.success) {
+                        lessonCitations = deduplicateCitations(
+                            result.citations,
+                        );
+                    } else {
+                        lessonCitationsError = result.error;
+                    }
+                    lessonCitationsLoaded = true;
+
+                    // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
+                    requestAnimationFrame(() => {
+                        if (lessonContentPanelEl && scrollTop > 0) {
+                            lessonContentPanelEl.scrollTop = scrollTop;
+                        }
+                    });
+                })
+                .catch((error) => {
+                    // Guard against stale citation error
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    lessonCitationsError =
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to load lesson sources";
+                    lessonCitationsLoaded = true;
+                });
+        } catch (error) {
+            if (selectedLesson?.slug !== targetSlug) return;
+            lessonError =
+                error instanceof Error
+                    ? error.message
+                    : "Failed to load lesson";
+            lessonMarkdown = "";
+        } finally {
+            if (selectedLesson?.slug === targetSlug) {
+                loadingLesson = false;
+            }
+        }
+    }
+
+    function goBack(): void {
+        // Save current chat history before going back
+        if (selectedLesson && messages.length > 0) {
+            chatHistoryByLesson.set(selectedLesson.slug, [...messages]);
+        }
+
+        // Cancel any in-flight stream
+        cancelInFlightGuidedChatStream();
+        isChatDrawerOpen = false;
+        selectedLesson = null;
+        lessonMarkdown = "";
+        lessonError = null;
+        lessonCitations = [];
+        lessonCitationsError = null;
+        lessonCitationsLoaded = false;
+        messages = [];
+    }
+
+    function clearChat(): void {
+        cancelInFlightGuidedChatStream();
+        if (selectedLesson) {
+            const lessonSlug = selectedLesson.slug;
+            const lessonSessionId = sessionIdsByLesson.get(lessonSlug);
+            if (lessonSessionId) {
+                sessionIdsByLesson.delete(lessonSlug);
+                void clearChatSession(lessonSessionId).catch((error) => {
+                    console.warn(
+                        `[LearnView] Failed to clear backend session for lesson: ${lessonSlug}`,
+                        error,
+                    );
+                });
+            }
+
+            chatHistoryByLesson.delete(lessonSlug);
+        }
+
+        messages = [];
+    }
+
+    function toggleChatDrawer(): void {
+        isChatDrawerOpen = !isChatDrawerOpen;
+        // Re-attach scroll anchor to the new active container
+        updateScrollAnchorContainer();
+    }
+
+    function closeChatDrawer(): void {
+        isChatDrawerOpen = false;
+        // Re-attach scroll anchor to desktop container
+        updateScrollAnchorContainer();
+    }
+
+    /** Returns the currently active messages container based on drawer state. */
+    function getActiveMessagesContainer(): HTMLElement | null {
+        return isChatDrawerOpen
+            ? (mobileDrawer?.getMessagesContainer() ?? null)
+            : (desktopChatPanel?.getMessagesContainer() ?? null);
+    }
+
+    /** Updates the scroll anchor to track the active container. */
+    function updateScrollAnchorContainer(): void {
+        // Use setTimeout to ensure DOM has updated after drawer state change
+        setTimeout(() => {
+            scrollAnchor.attach(getActiveMessagesContainer());
+        }, 0);
+    }
+
+    function findMessageIndex(messageId: string): number {
+        return messages.findIndex(
+            (existingMessage) => existingMessage.messageId === messageId,
+        );
+    }
+
+    function ensureAssistantMessage(messageId: string): void {
+        if (findMessageIndex(messageId) >= 0) return;
+        messages = [
+            ...messages,
+            {
+                messageId,
+                role: "assistant",
+                content: "",
+                timestamp: Date.now(),
+            },
+        ];
+    }
+
+    function updateAssistantMessage(
+        messageId: string,
+        updater: (message: MessageWithCitations) => MessageWithCitations,
+    ): void {
+        const targetIndex = findMessageIndex(messageId);
+        if (targetIndex < 0) return;
+
+        const existingMessage = messages[targetIndex];
+        const updatedMessage = updater(existingMessage);
+
+        messages = [
+            ...messages.slice(0, targetIndex),
+            updatedMessage,
+            ...messages.slice(targetIndex + 1),
+        ];
+    }
+
+    async function handleSend(message: string): Promise<void> {
+        if (!message.trim() || streaming.isStreaming || !selectedLesson) return;
+
+        guidedChatStreamVersion++;
+        const activeStreamVersion = guidedChatStreamVersion;
+
+        guidedChatAbortController?.abort();
+        guidedChatAbortController = new AbortController();
+        const abortSignal = guidedChatAbortController.signal;
+
+        const streamLessonSlug = selectedLesson.slug;
+        const userQuery = message.trim();
+        const lessonSessionId = getSessionIdForLesson(streamLessonSlug);
+
+        messages = [
+            ...messages,
+            {
+                messageId: createChatMessageId("guided", lessonSessionId),
+                role: "user",
+                content: userQuery,
+                timestamp: Date.now(),
+            },
+        ];
+
+        // Scroll once when user sends - no auto-scroll during streaming
+        await scrollAnchor.scrollOnce();
+
+        streaming.startStream();
+        const assistantMessageId = createChatMessageId(
+            "guided",
+            lessonSessionId,
+        );
+        activeStreamingMessageId = assistantMessageId;
+
+        // Track new message for scroll indicator (counts messages, not chunks)
+        scrollAnchor.onNewMessageStarted();
+
+        try {
+            await streamGuidedChat(
+                lessonSessionId,
+                streamLessonSlug,
+                userQuery,
+                {
+                    signal: abortSignal,
+                    onChunk: (chunk) => {
+                        // Guard: ignore chunks if user navigated away
+                        if (selectedLesson?.slug !== streamLessonSlug) return;
+                        if (guidedChatStreamVersion !== activeStreamVersion)
+                            return;
+                        if (abortSignal.aborted) return;
+                        ensureAssistantMessage(assistantMessageId);
+                        updateAssistantMessage(
+                            assistantMessageId,
+                            (existingMessage) => ({
+                                ...existingMessage,
+                                content: existingMessage.content + chunk,
+                            }),
+                        );
+                        scrollAnchor.onContentAdded();
+                    },
+                    onStatus: (status) => {
+                        // Guard: ignore status if user navigated away
+                        if (selectedLesson?.slug !== streamLessonSlug) return;
+                        if (guidedChatStreamVersion !== activeStreamVersion)
+                            return;
+                        if (abortSignal.aborted) return;
+                        streaming.updateStatus(status);
+                    },
+                    onCitations: (citations) => {
+                        // Guard: ignore citations if user navigated away
+                        if (selectedLesson?.slug !== streamLessonSlug) return;
+                        if (guidedChatStreamVersion !== activeStreamVersion)
+                            return;
+                        if (abortSignal.aborted) return;
+                        ensureAssistantMessage(assistantMessageId);
+                        updateAssistantMessage(
+                            assistantMessageId,
+                            (existingMessage) => ({
+                                ...existingMessage,
+                                citations,
+                            }),
+                        );
+                    },
+                    onError: (streamError) => {
+                        console.error(
+                            "Stream error during processing:",
+                            streamError,
+                        );
+                    },
+                },
+            );
+        } catch (error) {
+            if (selectedLesson?.slug !== streamLessonSlug) return;
+            if (guidedChatStreamVersion !== activeStreamVersion) return;
+            if (abortSignal.aborted) return;
+            const errorMessage =
+                error instanceof Error
+                    ? error.message
+                    : "Sorry, I encountered an error. Please try again.";
+            ensureAssistantMessage(assistantMessageId);
+            updateAssistantMessage(assistantMessageId, (existingMessage) => ({
+                ...existingMessage,
+                content: errorMessage,
+                isError: true,
+            }));
+        } finally {
+            // Guard: only reset streaming state if still on same lesson
+            if (
+                selectedLesson?.slug === streamLessonSlug &&
+                guidedChatStreamVersion === activeStreamVersion &&
+                !abortSignal.aborted
+            ) {
+                streaming.finishStream();
+                activeStreamingMessageId = null;
+                // No final scroll - user maintains their position
+            }
+
+            if (guidedChatStreamVersion === activeStreamVersion) {
+                guidedChatAbortController = null;
+            }
+        }
+    }
+
+    // Apply Java language detection and highlight code blocks after lesson content renders
+    // Uses shared utility with cancellation support
+    $effect(() => {
+        const contentElement = lessonContentEl;
+        if (!renderedLesson || !contentElement) return;
+
+        let isCancelled = false;
+
+        // Apply Java language detection before highlighting (client-side DOM operation)
+        applyJavaLanguageDetection(contentElement);
+
+        highlightCodeBlocks(contentElement).catch((highlightError) => {
+            if (!isCancelled) {
+                console.warn(
+                    "[LearnView] Code highlighting failed:",
+                    highlightError,
+                );
+            }
+        });
+
+        // Cleanup function runs when effect re-runs or component unmounts
+        return () => {
+            isCancelled = true;
+        };
+    });
 </script>
 
 <div class="learn-view">
-  {#if !selectedLesson}
-    <!-- TOC View -->
-    <div class="toc-container">
-      <div class="toc-inner">
-        <div class="toc-header">
-          <h1 class="toc-title">
-            <span class="title-serif">Learn</span>
-            <span class="title-accent">Java</span>
-          </h1>
-          <p class="toc-subtitle">
-            Learn Java programming interactively with live lessons, real documentation, and AI. Select a topic to begin!
-          </p>
-        </div>
-
-        {#if loadingTOC}
-          <div class="loading-state">
-            <ThinkingIndicator statusMessage="Loading lessons" />
-          </div>
-        {:else if tocError}
-          <div class="error-state">
-            <p>{tocError}</p>
-            <button type="button" class="retry-btn" onclick={loadTOC}>Try Again</button>
-          </div>
-        {:else}
-          <div class="lessons-grid">
-            {#each lessons as lesson, index}
-              <button
-                type="button"
-                class="lesson-card"
-                onclick={() => selectLesson(lesson)}
-                style:animation-delay="{index * 50}ms"
-              >
-                <span class="lesson-number">{index + 1}</span>
-                <div class="lesson-info">
-                  <span class="lesson-title">{lesson.title}</span>
-                  <span class="lesson-summary">{lesson.summary}</span>
+    {#if !selectedLesson}
+        <!-- TOC View -->
+        <div class="toc-container">
+            <div class="toc-inner">
+                <div class="toc-header">
+                    <h1 class="toc-title">
+                        <span class="title-serif">Learn</span>
+                        <span class="title-accent">Java</span>
+                    </h1>
+                    <p class="toc-subtitle">
+                        Learn Java programming interactively with live lessons,
+                        real documentation, and AI. Select a topic to begin!
+                    </p>
                 </div>
-                <svg class="lesson-arrow" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z" clip-rule="evenodd"/>
-                </svg>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    </div>
-  {:else}
-    <!-- Lesson View -->
-    <div class="lesson-container">
-      <!-- Lesson Header - full width with inner constraint -->
-      <div class="lesson-header">
-        <div class="lesson-header-inner">
-          <button type="button" class="back-btn" onclick={goBack}>
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd"/>
-            </svg>
-            <span>All Lessons</span>
-          </button>
-          <h2 class="lesson-title-header">{selectedLesson.title}</h2>
+
+                {#if loadingTOC}
+                    <div class="loading-state">
+                        <ThinkingIndicator statusMessage="Loading lessons" />
+                    </div>
+                {:else if tocError}
+                    <div class="error-state">
+                        <p>{tocError}</p>
+                        <button
+                            type="button"
+                            class="retry-btn"
+                            onclick={loadTOC}>Try Again</button
+                        >
+                    </div>
+                {:else}
+                    <div class="lessons-grid">
+                        {#each lessons as lesson, index}
+                            <button
+                                type="button"
+                                class="lesson-card"
+                                onclick={() => selectLesson(lesson)}
+                                style:animation-delay="{index * 50}ms"
+                            >
+                                <span class="lesson-number">{index + 1}</span>
+                                <div class="lesson-info">
+                                    <span class="lesson-title"
+                                        >{lesson.title}</span
+                                    >
+                                    <span class="lesson-summary"
+                                        >{lesson.summary}</span
+                                    >
+                                </div>
+                                <svg
+                                    class="lesson-arrow"
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        fill-rule="evenodd"
+                                        d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z"
+                                        clip-rule="evenodd"
+                                    />
+                                </svg>
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
         </div>
-      </div>
-
-      <!-- Two-column layout: Content + Chat (desktop) -->
-      <div class="lesson-layout">
-        <!-- Lesson Content Panel -->
-        <div class="lesson-content-panel" bind:this={lessonContentPanelEl}>
-          {#if loadingLesson}
-            <div class="loading-state">
-              <ThinkingIndicator statusMessage="Loading lesson" />
-            </div>
-          {:else if lessonError}
-            <div class="error-state">
-              <p>{lessonError}</p>
-              <button type="button" class="retry-btn" onclick={() => selectedLesson && selectLesson(selectedLesson)}>
-                Try Again
-              </button>
-            </div>
-          {:else}
-            <div class="lesson-content" bind:this={lessonContentEl}>
-              {@html renderedLesson}
-            </div>
-
-            <!-- Lesson-level citations -->
-            {#if lessonCitationsLoaded && lessonCitationsError}
-              <div class="lesson-citations lesson-citations--error">
-                <span class="lesson-citations-error">Unable to load lesson sources</span>
-              </div>
-            {:else if lessonCitationsLoaded && lessonCitations.length > 0}
-              <div class="lesson-citations">
-                <div class="lesson-citations-header">
-                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd"/>
-                  </svg>
-                  <span>Lesson Sources ({lessonCitations.length})</span>
+    {:else}
+        <!-- Lesson View -->
+        <div class="lesson-container">
+            <!-- Lesson Header - full width with inner constraint -->
+            <div class="lesson-header">
+                <div class="lesson-header-inner">
+                    <button type="button" class="back-btn" onclick={goBack}>
+                        <svg
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path
+                                fill-rule="evenodd"
+                                d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+                                clip-rule="evenodd"
+                            />
+                        </svg>
+                        <span>All Lessons</span>
+                    </button>
+                    <h2 class="lesson-title-header">{selectedLesson.title}</h2>
                 </div>
-                <ul class="lesson-citations-list">
-                  {#each lessonCitations as citation (citation.url)}
-                    <li>
-                      <a href={sanitizeUrl(citation.url)} target="_blank" rel="noopener noreferrer">
-                        {citation.title || citation.url}
-                      </a>
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/if}
-          {/if}
-        </div>
+            </div>
 
-        <!-- Chat Panel (Desktop only) -->
-        <div class="chat-panel chat-panel--desktop">
-          <div class="chat-panel-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/>
-            </svg>
-            <span>Ask about this lesson</span>
-            {#if messages.length > 0}
-              <button type="button" class="clear-chat-btn" onclick={clearChat} title="Clear chat">
-                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd"/>
-                </svg>
-              </button>
-            {/if}
-          </div>
+            <!-- Two-column layout: Content + Chat (desktop) -->
+            <div class="lesson-layout">
+                <!-- Lesson Content Panel -->
+                <div
+                    class="lesson-content-panel"
+                    bind:this={lessonContentPanelEl}
+                >
+                    {#if loadingLesson}
+                        <div class="loading-state">
+                            <ThinkingIndicator statusMessage="Loading lesson" />
+                        </div>
+                    {:else if lessonError}
+                        <div class="error-state">
+                            <p>{lessonError}</p>
+                            <button
+                                type="button"
+                                class="retry-btn"
+                                onclick={() =>
+                                    selectedLesson &&
+                                    selectLesson(selectedLesson)}
+                            >
+                                Try Again
+                            </button>
+                        </div>
+                    {:else}
+                        <div class="lesson-content" bind:this={lessonContentEl}>
+                            {@html renderedLesson}
+                        </div>
 
-          <div
-            class="messages-container"
-            bind:this={desktopMessagesContainer}
-            onscroll={checkAutoScroll}
-          >
-            {#if messages.length === 0 && !streaming.isStreaming}
-              <div class="chat-empty">
-                <p>Have questions about <strong>{selectedLesson.title}</strong>?</p>
-                <p class="hint">Ask anything about the concepts in this lesson.</p>
-              </div>
-            {:else}
-              <StreamingMessagesList
+                        <LessonCitations
+                            citations={lessonCitations}
+                            loaded={lessonCitationsLoaded}
+                            error={lessonCitationsError}
+                            slug={selectedLesson.slug}
+                        />
+                    {/if}
+                </div>
+
+                <!-- Chat Panel (Desktop only) -->
+                <GuidedLessonChatPanel
+                    bind:this={desktopChatPanel}
+                    {messages}
+                    isStreaming={streaming.isStreaming}
+                    statusMessage={streaming.statusMessage}
+                    statusDetails={streaming.statusDetails}
+                    hasContent={hasStreamingContent}
+                    streamingMessageId={activeStreamingMessageId}
+                    lessonTitle={selectedLesson.title}
+                    showScrollIndicator={scrollAnchor.showIndicator}
+                    unseenCount={scrollAnchor.unseenCount}
+                    onClear={clearChat}
+                    onSend={handleSend}
+                    onScroll={scrollAnchor.onUserScroll}
+                    onJumpToBottom={scrollAnchor.jumpToBottom}
+                />
+            </div>
+
+            <!-- Mobile Chat FAB + Drawer -->
+            <MobileChatDrawer
+                bind:this={mobileDrawer}
+                isOpen={isChatDrawerOpen}
                 {messages}
                 isStreaming={streaming.isStreaming}
-                streamingContent={streaming.streamingContent}
                 statusMessage={streaming.statusMessage}
                 statusDetails={streaming.statusDetails}
-              />
-            {/if}
-          </div>
-
-          <ChatInput onSend={handleSend} disabled={streaming.isStreaming} placeholder="Ask about this lesson..." />
+                hasContent={hasStreamingContent}
+                streamingMessageId={activeStreamingMessageId}
+                title="Ask about this lesson"
+                emptyStateSubject={selectedLesson.title}
+                placeholder="Ask about this lesson..."
+                showScrollIndicator={scrollAnchor.showIndicator}
+                unseenCount={scrollAnchor.unseenCount}
+                onToggle={toggleChatDrawer}
+                onClose={closeChatDrawer}
+                onClear={clearChat}
+                onSend={handleSend}
+                onScroll={scrollAnchor.onUserScroll}
+                onJumpToBottom={scrollAnchor.jumpToBottom}
+            >
+                {#snippet messageRenderer({ message, index, isStreaming })}
+                    {@const typedMessage = message as MessageWithCitations}
+                    <div class="message-with-citations">
+                        <MessageBubble
+                            message={typedMessage}
+                            {index}
+                            {isStreaming}
+                        />
+                        {#if typedMessage.role === "assistant" && typedMessage.citations && typedMessage.citations.length > 0 && !typedMessage.isError}
+                            <CitationPanel citations={typedMessage.citations} />
+                        {/if}
+                    </div>
+                {/snippet}
+            </MobileChatDrawer>
         </div>
-      </div>
-
-      <!-- Mobile Chat FAB + Drawer -->
-      <MobileChatDrawer
-        bind:this={mobileDrawer}
-        isOpen={isChatDrawerOpen}
-        {messages}
-        isStreaming={streaming.isStreaming}
-        streamingContent={streaming.streamingContent}
-        statusMessage={streaming.statusMessage}
-        statusDetails={streaming.statusDetails}
-        title="Ask about this lesson"
-        emptyStateSubject={selectedLesson.title}
-        placeholder="Ask about this lesson..."
-        onToggle={toggleChatDrawer}
-        onClose={closeChatDrawer}
-        onClear={clearChat}
-        onSend={handleSend}
-        onScroll={checkAutoScroll}
-      />
-    </div>
-  {/if}
+    {/if}
 </div>
 
 <style>
-  .learn-view {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* TOC Container */
-  .toc-container {
-    flex: 1;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: var(--space-8);
-  }
-
-  .toc-inner {
-    max-width: 720px;
-    width: 100%;
-  }
-
-  .toc-header {
-    text-align: center;
-    margin-bottom: var(--space-10);
-  }
-
-  .toc-title {
-    font-size: var(--text-4xl);
-    font-weight: 400;
-    line-height: var(--leading-tight);
-    margin-bottom: var(--space-4);
-  }
-
-  .title-serif {
-    font-family: var(--font-serif);
-    color: var(--color-text-secondary);
-  }
-
-  .title-accent {
-    font-family: var(--font-sans);
-    font-weight: 600;
-    color: var(--color-accent);
-  }
-
-  .toc-subtitle {
-    font-size: var(--text-lg);
-    line-height: var(--leading-relaxed);
-    color: var(--color-text-secondary);
-  }
-
-  /* Lessons Grid */
-  .lessons-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .lesson-card {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-4) var(--space-5);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    text-align: left;
-    transition: all var(--duration-fast) var(--ease-out);
-    animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
-  }
-
-  /* Hover effects only for devices with hover capability */
-  @media (hover: hover) and (pointer: fine) {
-    .lesson-card:hover {
-      background: var(--color-bg-tertiary);
-      border-color: var(--color-border-default);
-      transform: translateX(4px);
+    .learn-view {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
-    .lesson-card:hover .lesson-arrow {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  .lesson-number {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: var(--color-accent-subtle);
-    border: 1px solid var(--color-accent-muted);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--color-accent);
-  }
-
-  .lesson-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .lesson-title {
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .lesson-summary {
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .lesson-arrow {
-    flex-shrink: 0;
-    width: 20px;
-    height: 20px;
-    color: var(--color-accent);
-    opacity: 0.6; /* Default visible for touch devices */
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  /* Only hide arrow by default on hover-capable devices */
-  @media (hover: hover) and (pointer: fine) {
-    .lesson-arrow {
-      opacity: 0;
-      transform: translateX(-8px);
-    }
-  }
-
-  /* Loading/Error States */
-  .loading-state,
-  .error-state {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-    padding: var(--space-12);
-    color: var(--color-text-secondary);
-  }
-
-  .retry-btn {
-    padding: var(--space-2) var(--space-4);
-    background: var(--color-accent);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out);
-  }
-
-  .retry-btn:hover {
-    background: var(--color-accent-hover);
-  }
-
-  /* Lesson Container */
-  .lesson-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .lesson-header {
-    flex-shrink: 0;
-    padding: var(--space-4) var(--space-6);
-    border-bottom: 1px solid var(--color-border-subtle);
-    background: var(--color-bg-secondary);
-  }
-
-  .lesson-header-inner {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    max-width: 1400px;
-    margin: 0 auto;
-    width: 100%;
-  }
-
-  .back-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: transparent;
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    line-height: 1;
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  .back-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .back-btn svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .lesson-title-header {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-weight: 500;
-    color: var(--color-text-primary);
-    letter-spacing: var(--tracking-tight);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1;
-    margin: 0;
-    padding-bottom: 2px;
-  }
-
-  /* Two-column Layout */
-  .lesson-layout {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 460px;
-    grid-template-rows: 1fr;
-    overflow: hidden;
-    min-height: 0; /* Critical for flex-in-grid scrolling */
-    max-height: 100%; /* Prevent grid from expanding beyond parent */
-  }
-
-  /* Lesson Content Panel */
-  .lesson-content-panel {
-    position: relative; /* For absolute positioning of loading state */
-    min-height: 0; /* Critical for grid/flex scrolling */
-    overflow-y: auto;
-    overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
-    padding: var(--space-6);
-  }
-
-  .lesson-content {
-    max-width: 720px;
-    margin: 0 auto;
-    font-size: var(--text-base);
-    line-height: var(--leading-relaxed);
-    color: var(--color-text-primary);
-  }
-
-  .lesson-content :global(h1),
-  .lesson-content :global(h2),
-  .lesson-content :global(h3) {
-    font-family: var(--font-serif);
-    font-weight: 500;
-    margin: var(--space-8) 0 var(--space-4);
-    letter-spacing: var(--tracking-tight);
-  }
-
-  .lesson-content :global(h1:first-child),
-  .lesson-content :global(h2:first-child) {
-    margin-top: 0;
-  }
-
-  .lesson-content :global(h1) { font-size: var(--text-2xl); }
-  .lesson-content :global(h2) { font-size: var(--text-xl); }
-  .lesson-content :global(h3) { font-size: var(--text-lg); }
-
-  .lesson-content :global(p) {
-    margin: 0 0 var(--space-4);
-  }
-
-  .lesson-content :global(ul),
-  .lesson-content :global(ol) {
-    margin: 0 0 var(--space-4);
-    padding-left: var(--space-6);
-  }
-
-  .lesson-content :global(li) {
-    margin-bottom: var(--space-2);
-  }
-
-  .lesson-content :global(pre) {
-    margin: var(--space-4) 0;
-    padding: var(--space-4);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    overflow-x: auto;
-    font-size: var(--text-sm);
-  }
-
-  .lesson-content :global(pre code) {
-    background: none;
-    padding: 0;
-    border: none;
-  }
-
-  .lesson-content :global(code:not(pre code)) {
-    padding: 0.125em 0.375em;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-sm);
-    font-size: 0.9em;
-  }
-
-  .lesson-content :global(blockquote) {
-    margin: var(--space-4) 0;
-    padding: var(--space-3) var(--space-4);
-    border-left: 3px solid var(--color-accent);
-    background: var(--color-surface-subtle);
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    font-style: italic;
-    color: var(--color-text-secondary);
-  }
-
-  /* Lesson-level Citations */
-  .lesson-citations {
-    max-width: 720px;
-    margin: var(--space-8) auto 0;
-    padding: var(--space-4);
-    background: var(--color-surface-subtle);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-  }
-
-  .lesson-citations--error {
-    padding: var(--space-3);
-  }
-
-  .lesson-citations-error {
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-    font-style: italic;
-  }
-
-  .lesson-citations-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--color-border-subtle);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-text-secondary);
-  }
-
-  .lesson-citations-header svg {
-    width: 16px;
-    height: 16px;
-    color: var(--color-accent);
-  }
-
-  .lesson-citations-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .lesson-citations-list li {
-    margin: 0;
-  }
-
-  .lesson-citations-list a {
-    display: block;
-    padding: var(--space-2);
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    color: var(--color-accent);
-    text-decoration: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  .lesson-citations-list a:hover {
-    background: var(--color-bg-secondary);
-    border-color: var(--color-accent-muted);
-  }
-
-  /* Chat Panel - Pinned Frame */
-  .chat-panel {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0; /* Critical: allows flex children to shrink for scrolling */
-    overflow: hidden; /* Contains scrolling to messages-container only */
-    background: var(--color-bg-primary);
-    border-left: 1px solid var(--color-border-default);
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
-    position: relative;
-  }
-
-  /* Subtle pinned indicator line at top */
-  .chat-panel::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--color-accent-muted) 0%, var(--color-accent) 50%, var(--color-accent-muted) 100%);
-    opacity: 0.6;
-    z-index: 1;
-  }
-
-  .chat-panel-header {
-    flex-shrink: 0; /* Never shrink - stays at top */
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--color-border-subtle);
-    background: var(--color-bg-secondary);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-secondary);
-  }
-
-  .chat-panel-header > svg {
-    flex-shrink: 0;
-    width: 18px;
-    height: 18px;
-    color: var(--color-accent);
-  }
-
-  .chat-panel-header > span {
-    flex: 1;
-  }
-
-  .clear-chat-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-md);
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
-  }
-
-  .clear-chat-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-secondary);
-  }
-
-  .clear-chat-btn svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .messages-container {
-    flex: 1; /* Takes all remaining space between header and input */
-    min-height: 0; /* Critical: allows overflow scroll to work in flexbox */
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: var(--space-4);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .messages-container {
-      scroll-behavior: smooth;
-    }
-  }
-
-  .chat-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    text-align: center;
-    color: var(--color-text-secondary);
-    padding: var(--space-6);
-  }
-
-  .chat-empty p {
-    margin: 0;
-  }
-
-  .chat-empty .hint {
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-    margin-top: var(--space-2);
-  }
-
-  /* ChatInput pinned within chat-panel - the :global selector targets ChatInput's wrapper */
-  .chat-panel :global(.input-area) {
-    flex-shrink: 0; /* Never shrink - stays pinned at bottom */
-    border-top: 1px solid var(--color-border-subtle);
-    background: var(--color-bg-secondary);
-    padding: var(--space-3);
-  }
-
-  .chat-panel :global(.input-container) {
-    max-width: none; /* Use full width within panel */
-  }
-
-  .chat-panel :global(.input-hint) {
-    display: none; /* Hide hints in compact panel view */
-  }
-
-  /* Intermediate breakpoint: narrower chat panel on medium screens */
-  @media (max-width: 1280px) and (min-width: 1025px) {
-    .lesson-layout {
-      grid-template-columns: 1fr 400px;
-    }
-  }
-
-  /* Responsive: Stack on smaller screens with flexible heights */
-  @media (max-width: 1024px) {
-    /* Hide desktop chat panel (mobile uses MobileChatDrawer component) */
-    .chat-panel--desktop {
-      display: none;
-    }
-
-    /* Lesson content takes full height on mobile */
-    .lesson-layout {
-      display: block;
-    }
-
-    .lesson-content-panel {
-      height: 100%;
-      border-right: none;
-      border-bottom: none;
-      overflow-y: auto;
-    }
-  }
-
-  @media (max-width: 768px) {
+    /* TOC Container */
     .toc-container {
-      padding: var(--space-4);
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: var(--space-8);
+    }
+
+    .toc-inner {
+        max-width: 720px;
+        width: 100%;
+    }
+
+    .toc-header {
+        text-align: center;
+        margin-bottom: var(--space-10);
     }
 
     .toc-title {
-      font-size: var(--text-2xl);
+        font-size: var(--text-4xl);
+        font-weight: 400;
+        line-height: var(--leading-tight);
+        margin-bottom: var(--space-4);
+    }
+
+    .title-serif {
+        font-family: var(--font-serif);
+        color: var(--color-text-secondary);
+    }
+
+    .title-accent {
+        font-family: var(--font-sans);
+        font-weight: 600;
+        color: var(--color-accent);
     }
 
     .toc-subtitle {
-      font-size: var(--text-base);
+        font-size: var(--text-lg);
+        line-height: var(--leading-relaxed);
+        color: var(--color-text-secondary);
     }
 
-    .lesson-header {
-      padding: var(--space-3) var(--space-4);
-    }
-
-    .lesson-title-header {
-      font-size: var(--text-lg);
-    }
-
-    .lesson-content-panel {
-      padding: var(--space-4);
-    }
-  }
-
-  @media (max-width: 640px) {
-    .toc-header {
-      margin-bottom: var(--space-6);
+    /* Lessons Grid */
+    .lessons-grid {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
     }
 
     .lesson-card {
-      padding: var(--space-3) var(--space-4);
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        padding: var(--space-4) var(--space-5);
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        text-align: left;
+        transition: all var(--duration-fast) var(--ease-out);
+        animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
+    }
+
+    /* Hover effects only for devices with hover capability */
+    @media (hover: hover) and (pointer: fine) {
+        .lesson-card:hover {
+            background: var(--color-bg-tertiary);
+            border-color: var(--color-border-default);
+            transform: translateX(4px);
+        }
+
+        .lesson-card:hover .lesson-arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
     }
 
     .lesson-number {
-      width: 28px;
-      height: 28px;
-      font-size: var(--text-xs);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        background: var(--color-accent-subtle);
+        border: 1px solid var(--color-accent-muted);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-accent);
+    }
+
+    .lesson-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 0;
     }
 
     .lesson-title {
-      font-size: var(--text-sm);
+        font-size: var(--text-base);
+        font-weight: 600;
+        color: var(--color-text-primary);
     }
 
     .lesson-summary {
-      font-size: var(--text-xs);
+        font-size: var(--text-sm);
+        color: var(--color-text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .back-btn span {
-      display: none;
+    .lesson-arrow {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        color: var(--color-accent);
+        opacity: 0.6; /* Default visible for touch devices */
+        transition: all var(--duration-fast) var(--ease-out);
     }
-  }
+
+    /* Only hide arrow by default on hover-capable devices */
+    @media (hover: hover) and (pointer: fine) {
+        .lesson-arrow {
+            opacity: 0;
+            transform: translateX(-8px);
+        }
+    }
+
+    /* Loading/Error States */
+    .loading-state,
+    .error-state {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-4);
+        padding: var(--space-12);
+        color: var(--color-text-secondary);
+    }
+
+    .retry-btn {
+        padding: var(--space-2) var(--space-4);
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition: background var(--duration-fast) var(--ease-out);
+    }
+
+    .retry-btn:hover {
+        background: var(--color-accent-hover);
+    }
+
+    /* Lesson Container */
+    .lesson-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .lesson-header {
+        flex-shrink: 0;
+        padding: var(--space-4) var(--space-6);
+        border-bottom: 1px solid var(--color-border-subtle);
+        background: var(--color-bg-secondary);
+    }
+
+    .lesson-header-inner {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        max-width: 1400px;
+        margin: 0 auto;
+        width: 100%;
+    }
+
+    .back-btn {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        background: transparent;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        line-height: 1;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: all var(--duration-fast) var(--ease-out);
+    }
+
+    .back-btn:hover {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-primary);
+    }
+
+    .back-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .lesson-title-header {
+        font-family: var(--font-serif);
+        font-size: var(--text-xl);
+        font-weight: 500;
+        color: var(--color-text-primary);
+        letter-spacing: var(--tracking-tight);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1;
+        margin: 0;
+        padding-bottom: 2px;
+    }
+
+    /* Two-column Layout */
+    .lesson-layout {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 460px;
+        grid-template-rows: 1fr;
+        overflow: hidden;
+        min-height: 0; /* Critical for flex-in-grid scrolling */
+        max-height: 100%; /* Prevent grid from expanding beyond parent */
+    }
+
+    /* Lesson Content Panel */
+    .lesson-content-panel {
+        position: relative; /* For absolute positioning of loading state */
+        min-height: 0; /* Critical for grid/flex scrolling */
+        overflow-y: auto;
+        overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
+        padding: var(--space-6);
+    }
+
+    .lesson-content {
+        max-width: 720px;
+        margin: 0 auto;
+        font-size: var(--text-base);
+        line-height: var(--leading-relaxed);
+        color: var(--color-text-primary);
+    }
+
+    .lesson-content :global(h1),
+    .lesson-content :global(h2),
+    .lesson-content :global(h3) {
+        font-family: var(--font-serif);
+        font-weight: 500;
+        margin: var(--space-8) 0 var(--space-4);
+        letter-spacing: var(--tracking-tight);
+    }
+
+    .lesson-content :global(h1:first-child),
+    .lesson-content :global(h2:first-child) {
+        margin-top: 0;
+    }
+
+    .lesson-content :global(h1) {
+        font-size: var(--text-2xl);
+    }
+    .lesson-content :global(h2) {
+        font-size: var(--text-xl);
+    }
+    .lesson-content :global(h3) {
+        font-size: var(--text-lg);
+    }
+
+    .lesson-content :global(p) {
+        margin: 0 0 var(--space-4);
+    }
+
+    .lesson-content :global(ul),
+    .lesson-content :global(ol) {
+        margin: 0 0 var(--space-4);
+        padding-left: var(--space-6);
+    }
+
+    .lesson-content :global(li) {
+        margin-bottom: var(--space-2);
+    }
+
+    .lesson-content :global(pre) {
+        margin: var(--space-4) 0;
+        padding: var(--space-4);
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        overflow-x: auto;
+        font-size: var(--text-sm);
+    }
+
+    .lesson-content :global(pre code) {
+        background: none;
+        padding: 0;
+        border: none;
+    }
+
+    .lesson-content :global(code:not(pre code)) {
+        padding: 0.125em 0.375em;
+        background: var(--color-bg-tertiary);
+        border-radius: var(--radius-sm);
+        font-size: 0.9em;
+    }
+
+    .lesson-content :global(blockquote) {
+        margin: var(--space-4) 0;
+        padding: var(--space-3) var(--space-4);
+        border-left: 3px solid var(--color-accent);
+        background: var(--color-surface-subtle);
+        border-radius: 0 var(--radius-md) var(--radius-md) 0;
+        font-style: italic;
+        color: var(--color-text-secondary);
+    }
+
+    /* Intermediate breakpoint: narrower chat panel on medium screens */
+    @media (max-width: 1280px) and (min-width: 1025px) {
+        .lesson-layout {
+            grid-template-columns: 1fr 400px;
+        }
+    }
+
+    /* Responsive: Stack on smaller screens with flexible heights */
+    @media (max-width: 1024px) {
+        /* Lesson content takes full height on mobile */
+        .lesson-layout {
+            display: block;
+        }
+
+        .lesson-content-panel {
+            height: 100%;
+            border-right: none;
+            border-bottom: none;
+            overflow-y: auto;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .toc-container {
+            padding: var(--space-4);
+        }
+
+        .toc-title {
+            font-size: var(--text-2xl);
+        }
+
+        .toc-subtitle {
+            font-size: var(--text-base);
+        }
+
+        .lesson-header {
+            padding: var(--space-3) var(--space-4);
+        }
+
+        .lesson-title-header {
+            font-size: var(--text-lg);
+        }
+
+        .lesson-content-panel {
+            padding: var(--space-4);
+        }
+    }
+
+    @media (max-width: 640px) {
+        .toc-header {
+            margin-bottom: var(--space-6);
+        }
+
+        .lesson-card {
+            padding: var(--space-3) var(--space-4);
+        }
+
+        .lesson-number {
+            width: 28px;
+            height: 28px;
+            font-size: var(--text-xs);
+        }
+
+        .lesson-title {
+            font-size: var(--text-sm);
+        }
+
+        .lesson-summary {
+            font-size: var(--text-xs);
+        }
+
+        .back-btn span {
+            display: none;
+        }
+    }
 </style>

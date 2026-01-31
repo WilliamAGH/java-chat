@@ -1,22 +1,23 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Covers list formatting scenarios for markdown processing.
  */
 class ComprehensiveListFormattingTest {
-    
+
     private MarkdownService markdownService;
-    
+
     @BeforeEach
     void setUp() {
         markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
-    
+
     @Test
     void testNumberedListWithPeriod() {
         String input = "The types are:1. boolean 2. byte 3. int 4. long";
@@ -32,7 +33,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>int</li>"), "Should contain third item");
         assertTrue(html.contains("<li>long</li>"), "Should contain fourth item");
     }
-    
+
     @Test
     void testNumberedListWithParenthesis() {
         String input = "The steps include:1) Setup 2) Configure 3) Deploy";
@@ -47,7 +48,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>Configure</li>"), "Should contain second item");
         assertTrue(html.contains("<li>Deploy</li>"), "Should contain third item");
     }
-    
+
     @Test
     void testRomanNumeralsLowercase() {
         String input = "The stages are:i. Planning ii. Development iii. Testing";
@@ -92,7 +93,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>High accuracy</li>"), "Should contain second item");
         assertTrue(html.contains("<li>Low latency</li>"), "Should contain third item");
     }
-    
+
     @Test
     void testAsteriskBulletList() {
         String input = "Benefits are:* Cost effective* Time saving* Easy to use";
@@ -136,7 +137,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>primitives</li>"), "Should contain first item");
         assertTrue(html.contains("<li>references</li>"), "Should contain second item");
     }
-    
+
     @Test
     void testListIntroducedByKeywords() {
         String input = "The benefits include 1. performance 2. reliability 3. scalability";
@@ -151,7 +152,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>reliability</li>"), "Should contain second item");
         assertTrue(html.contains("<li>scalability</li>"), "Should contain third item");
     }
-    
+
     @Test
     void testDirectAttachmentToPunctuation() {
         String input = "See below:1.First item.2.Second item!3.Third item";
@@ -166,7 +167,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>Second item</li>"), "Should contain second item");
         assertTrue(html.contains("<li>Third item</li>"), "Should contain third item");
     }
-    
+
     @Test
     void testSpecialBulletCharacters() {
         String input = "Options:• First option• Second option• Third option";
@@ -181,7 +182,7 @@ class ComprehensiveListFormattingTest {
         assertTrue(html.contains("<li>Second option</li>"), "Should contain second item");
         assertTrue(html.contains("<li>Third option</li>"), "Should contain third item");
     }
-    
+
     @Test
     void testNoFalsePositivesInSentences() {
         // These should NOT be converted to lists
@@ -205,10 +206,11 @@ class ComprehensiveListFormattingTest {
         System.out.println("Math expression preserved: " + !html2.contains("<ol>") + !html2.contains("<ul>"));
         System.out.println("Normal sentences preserved: " + !html3.contains("<ol>") + !html3.contains("<ul>"));
     }
-    
+
     @Test
     void testComplexRealWorldExample() {
-        String input = "Java provides:1. Primitive types:a. boolean: true/false b. byte: 8-bit 2. Reference types:- Arrays- Classes- Interfaces";
+        String input =
+                "Java provides:1. Primitive types:a. boolean: true/false b. byte: 8-bit 2. Reference types:- Arrays- Classes- Interfaces";
         String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Complex real-world example");

@@ -24,59 +24,26 @@ final class SpringDocsUrlNormalizer {
     private static final int FIRST_PATH_SEGMENT_INDEX = 1;
     private static final int URL_BUFFER_PADDING = 64;
 
-    private static final String[] DOCS_CURRENT_REFERENCE_SEQUENCE = {
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        REFERENCE_SEGMENT
-    };
+    private static final String[] DOCS_CURRENT_REFERENCE_SEQUENCE = {DOCS_SEGMENT, CURRENT_SEGMENT, REFERENCE_SEGMENT};
     private static final String[] REFERENCE_ROOT_SEQUENCE = {REFERENCE_SEGMENT};
     private static final String[] FRAMEWORK_API_CURRENT_SEQUENCE = {
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        API_SEGMENT,
-        CURRENT_SEGMENT,
-        JAVADOC_API_SEGMENT
+        DOCS_SEGMENT, CURRENT_SEGMENT, API_SEGMENT, CURRENT_SEGMENT, JAVADOC_API_SEGMENT
     };
     private static final String[] FRAMEWORK_API_JAVA_SEQUENCE = {
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        JAVADOC_API_SEGMENT,
-        JAVA_SEGMENT
+        DOCS_SEGMENT, CURRENT_SEGMENT, JAVADOC_API_SEGMENT, JAVA_SEGMENT
     };
-    private static final String[] BOOT_API_JAVA_SEQUENCE = {
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        API_SEGMENT,
-        JAVA_SEGMENT
-    };
+    private static final String[] BOOT_API_JAVA_SEQUENCE = {DOCS_SEGMENT, CURRENT_SEGMENT, API_SEGMENT, JAVA_SEGMENT};
 
-    private static final SpringDocsUrlPrefix SPRING_FRAMEWORK_REFERENCE_PREFIX = new SpringDocsUrlPrefix(
-        SPRING_FRAMEWORK_SEGMENT,
-        REFERENCE_SEGMENT,
-        CURRENT_SEGMENT,
-        null
-    );
-    private static final SpringDocsUrlPrefix SPRING_FRAMEWORK_JAVADOC_PREFIX = new SpringDocsUrlPrefix(
-        SPRING_FRAMEWORK_SEGMENT,
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        JAVADOC_API_SEGMENT
-    );
-    private static final SpringDocsUrlPrefix SPRING_BOOT_REFERENCE_PREFIX = new SpringDocsUrlPrefix(
-        SPRING_BOOT_SEGMENT,
-        REFERENCE_SEGMENT,
-        CURRENT_SEGMENT,
-        null
-    );
-    private static final SpringDocsUrlPrefix SPRING_BOOT_API_PREFIX = new SpringDocsUrlPrefix(
-        SPRING_BOOT_SEGMENT,
-        DOCS_SEGMENT,
-        CURRENT_SEGMENT,
-        API_SEGMENT
-    );
+    private static final SpringDocsUrlPrefix SPRING_FRAMEWORK_REFERENCE_PREFIX =
+            new SpringDocsUrlPrefix(SPRING_FRAMEWORK_SEGMENT, REFERENCE_SEGMENT, CURRENT_SEGMENT, null);
+    private static final SpringDocsUrlPrefix SPRING_FRAMEWORK_JAVADOC_PREFIX =
+            new SpringDocsUrlPrefix(SPRING_FRAMEWORK_SEGMENT, DOCS_SEGMENT, CURRENT_SEGMENT, JAVADOC_API_SEGMENT);
+    private static final SpringDocsUrlPrefix SPRING_BOOT_REFERENCE_PREFIX =
+            new SpringDocsUrlPrefix(SPRING_BOOT_SEGMENT, REFERENCE_SEGMENT, CURRENT_SEGMENT, null);
+    private static final SpringDocsUrlPrefix SPRING_BOOT_API_PREFIX =
+            new SpringDocsUrlPrefix(SPRING_BOOT_SEGMENT, DOCS_SEGMENT, CURRENT_SEGMENT, API_SEGMENT);
 
-    private SpringDocsUrlNormalizer() {
-    }
+    private SpringDocsUrlNormalizer() {}
 
     static String normalize(final String url) {
         String normalizedUrl = url;
@@ -197,18 +164,15 @@ final class SpringDocsUrlNormalizer {
         return normalizedUrl;
     }
 
-    private static String buildUrl(
-        final SpringDocsUrlPrefix prefix,
-        final String[] segments,
-        final int startIndex
-    ) {
+    private static String buildUrl(final SpringDocsUrlPrefix prefix, final String[] segments, final int startIndex) {
         final StringBuilder urlBuilder = new StringBuilder(SPRING_DOCS_PREFIX.length() + URL_BUFFER_PADDING);
-        urlBuilder.append(SPRING_DOCS_PREFIX)
-            .append(prefix.projectSegment())
-            .append(PATH_SEPARATOR)
-            .append(prefix.primarySegment())
-            .append(PATH_SEPARATOR)
-            .append(prefix.secondarySegment());
+        urlBuilder
+                .append(SPRING_DOCS_PREFIX)
+                .append(prefix.projectSegment())
+                .append(PATH_SEPARATOR)
+                .append(prefix.primarySegment())
+                .append(PATH_SEPARATOR)
+                .append(prefix.secondarySegment());
         if (prefix.tertiarySegment() != null) {
             urlBuilder.append(PATH_SEPARATOR).append(prefix.tertiarySegment());
         }
@@ -219,10 +183,7 @@ final class SpringDocsUrlNormalizer {
     }
 
     private static boolean matchesSequence(
-        final String[] segments,
-        final int startIndex,
-        final String[] expectedSegments
-    ) {
+            final String[] segments, final int startIndex, final String[] expectedSegments) {
         final int expectedLength = expectedSegments.length;
         boolean matches = false;
         if (segments.length >= startIndex + expectedLength) {
@@ -254,17 +215,12 @@ final class SpringDocsUrlNormalizer {
         boolean isVersion = false;
         if (text != null && !text.isEmpty()) {
             final char firstChar = text.charAt(0);
-            isVersion = text.contains(VERSION_SEPARATOR)
-                && (Character.isDigit(firstChar) || firstChar == VERSION_PREFIX);
+            isVersion =
+                    text.contains(VERSION_SEPARATOR) && (Character.isDigit(firstChar) || firstChar == VERSION_PREFIX);
         }
         return isVersion;
     }
 
     private record SpringDocsUrlPrefix(
-        String projectSegment,
-        String primarySegment,
-        String secondarySegment,
-        String tertiarySegment
-    ) {
-    }
+            String projectSegment, String primarySegment, String secondarySegment, String tertiarySegment) {}
 }

@@ -1,17 +1,18 @@
 package com.williamcallahan.javachat.config;
 
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
-import reactor.netty.http.client.HttpClient;
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
+
 /**
  * Spring configuration for AI clients and HTTP settings.
  */
@@ -29,8 +30,7 @@ public class AiConfig {
     /**
      * Creates the AI configuration.
      */
-    public AiConfig() {
-    }
+    public AiConfig() {}
 
     /**
      * Builds the chat client for Spring AI.
@@ -54,11 +54,10 @@ public class AiConfig {
         // Configure HTTP client with increased timeouts for GitHub Models API
         // GitHub Models can be slower than OpenAI, especially for complex requests
         final HttpClient httpClient = HttpClient.create()
-            .responseTimeout(Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES))
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS);
+                .responseTimeout(Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES))
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS);
 
-        return WebClient.builder()
-            .clientConnector(new ReactorClientHttpConnector(httpClient));
+        return WebClient.builder().clientConnector(new ReactorClientHttpConnector(httpClient));
     }
 
     /**
@@ -70,7 +69,8 @@ public class AiConfig {
     public RestClient.Builder restClientBuilder() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
-        requestFactory.setReadTimeout((int) Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES).toMillis());
+        requestFactory.setReadTimeout(
+                (int) Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES).toMillis());
         return RestClient.builder().requestFactory(requestFactory);
     }
 }

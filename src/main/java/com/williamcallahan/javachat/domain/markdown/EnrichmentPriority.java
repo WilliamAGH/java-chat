@@ -9,33 +9,33 @@ public enum EnrichmentPriority {
      * Critical warnings that must be shown prominently.
      */
     CRITICAL(100),
-    
+
     /**
      * High priority items like warnings and important reminders.
      */
     HIGH(75),
-    
+
     /**
      * Medium priority items like hints and examples.
      */
     MEDIUM(50),
-    
+
     /**
      * Low priority items like background information.
      */
     LOW(25),
-    
+
     /**
      * Informational items with minimal visual impact.
      */
     INFO(10);
-    
+
     private final int value;
-    
+
     EnrichmentPriority(int value) {
         this.value = value;
     }
-    
+
     /**
      * Gets the numeric priority value.
      * @return priority value (higher = more important)
@@ -43,7 +43,7 @@ public enum EnrichmentPriority {
     public int getValue() {
         return value;
     }
-    
+
     /**
      * Compares this priority with another.
      * @param other the other priority

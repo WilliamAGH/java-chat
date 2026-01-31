@@ -1,18 +1,17 @@
 package com.williamcallahan.javachat.application.prompt;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies structure-aware prompt truncation preserves semantic boundaries.
@@ -32,8 +31,7 @@ class PromptTruncatorTest {
                 new SystemSegment("System instructions", 50),
                 List.of(new ContextDocumentSegment(1, "url1", "content1", 100)),
                 List.of(new ConversationTurnSegment("user", "Hello", 10)),
-                new CurrentQuerySegment("What is Java?", 20)
-        );
+                new CurrentQuerySegment("What is Java?", 20));
 
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500, false);
 
@@ -49,11 +47,9 @@ class PromptTruncatorTest {
                 List.of(
                         new ContextDocumentSegment(1, "url1", "doc1", 200),
                         new ContextDocumentSegment(2, "url2", "doc2", 200),
-                        new ContextDocumentSegment(3, "url3", "doc3", 200)
-                ),
+                        new ContextDocumentSegment(3, "url3", "doc3", 200)),
                 List.of(new ConversationTurnSegment("user", "history", 50)),
-                new CurrentQuerySegment("query", 50)
-        );
+                new CurrentQuerySegment("query", 50));
 
         // Total: 100 + 600 + 50 + 50 = 800 tokens
         // Limit 350: 100 (system) + 50 (query) = 150 reserved, 200 available
@@ -75,10 +71,8 @@ class PromptTruncatorTest {
                 List.of(
                         new ConversationTurnSegment("user", "old1", 100),
                         new ConversationTurnSegment("assistant", "old2", 100),
-                        new ConversationTurnSegment("user", "recent", 100)
-                ),
-                new CurrentQuerySegment("query", 50)
-        );
+                        new ConversationTurnSegment("user", "recent", 100)),
+                new CurrentQuerySegment("query", 50));
 
         // Total: 100 + 0 + 300 + 50 = 450 tokens
         // Limit 300: 100 + 50 = 150 reserved, 150 available
@@ -100,8 +94,7 @@ class PromptTruncatorTest {
                 new SystemSegment("Critical system instructions", 200),
                 List.of(new ContextDocumentSegment(1, "url", "doc", 100)),
                 List.of(new ConversationTurnSegment("user", "history", 100)),
-                new CurrentQuerySegment("Important question", 200)
-        );
+                new CurrentQuerySegment("Important question", 200));
 
         // Limit smaller than system + query alone
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350, true);
@@ -122,11 +115,9 @@ class PromptTruncatorTest {
                 new SystemSegment("System", 100),
                 List.of(
                         new ContextDocumentSegment(1, "url1", "doc1", 500),
-                        new ContextDocumentSegment(2, "url2", "doc2", 500)
-                ),
+                        new ContextDocumentSegment(2, "url2", "doc2", 500)),
                 List.of(),
-                new CurrentQuerySegment("query", 50)
-        );
+                new CurrentQuerySegment("query", 50));
 
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 400, true);
 
@@ -140,8 +131,7 @@ class PromptTruncatorTest {
                 new SystemSegment("System", 100),
                 List.of(new ContextDocumentSegment(1, "url1", "doc1", 500)),
                 List.of(),
-                new CurrentQuerySegment("query", 50)
-        );
+                new CurrentQuerySegment("query", 50));
 
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 200, false);
 
@@ -157,11 +147,9 @@ class PromptTruncatorTest {
                 List.of(
                         new ContextDocumentSegment(1, "url1", "doc1", 100),
                         new ContextDocumentSegment(2, "url2", "doc2", 100),
-                        new ContextDocumentSegment(3, "url3", "doc3", 100)
-                ),
+                        new ContextDocumentSegment(3, "url3", "doc3", 100)),
                 List.of(),
-                new CurrentQuerySegment("query", 50)
-        );
+                new CurrentQuerySegment("query", 50));
 
         // Should keep first 2 docs (most relevant), re-indexed as 1 and 2
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350, false);
@@ -182,11 +170,7 @@ class PromptTruncatorTest {
     @Test
     void handlesEmptyContextAndHistory() {
         StructuredPrompt prompt = new StructuredPrompt(
-                new SystemSegment("System", 100),
-                List.of(),
-                List.of(),
-                new CurrentQuerySegment("query", 50)
-        );
+                new SystemSegment("System", 100), List.of(), List.of(), new CurrentQuerySegment("query", 50));
 
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 200, false);
 
@@ -206,10 +190,8 @@ class PromptTruncatorTest {
                 List.of(),
                 List.of(
                         new ConversationTurnSegment("user", "question", 20),
-                        new ConversationTurnSegment("assistant", "answer", 20)
-                ),
-                new CurrentQuerySegment("follow-up", 20)
-        );
+                        new ConversationTurnSegment("assistant", "answer", 20)),
+                new CurrentQuerySegment("follow-up", 20));
 
         PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 500, false);
 

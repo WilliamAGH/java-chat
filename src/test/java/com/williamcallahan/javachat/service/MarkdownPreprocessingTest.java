@@ -1,22 +1,23 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Verifies preprocessing rules applied before markdown rendering.
  */
 class MarkdownPreprocessingTest {
-    
+
     private MarkdownService markdownService;
-    
+
     @BeforeEach
     void setUp() {
         markdownService = new MarkdownService(new UnifiedMarkdownService());
     }
-    
+
     @Test
     void testColonDashListPattern() {
         String input = "The remainder operator has several uses, such as:- Checking divisibility- Extracting digits";
@@ -30,7 +31,7 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("<li>Checking divisibility</li>"), "Should contain first list item");
         assertTrue(html.contains("<li>Extracting digits</li>"), "Should contain second list item");
     }
-    
+
     @Test
     void testInlineNumberedList() {
         String input = "The primitive types are:1. boolean: true or false. 2. byte: 8-bit signed.";
@@ -45,7 +46,7 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("<li>boolean"), "Should contain first list item");
         assertTrue(html.contains("<li>byte"), "Should contain second list item");
     }
-    
+
     @Test
     void testInlineTripleBackticksRemainText() {
         String input = "Use ``` to denote a code fence in markdown.";
@@ -64,7 +65,7 @@ class MarkdownPreprocessingTest {
         assertFalse(html.contains("java. lang"), "Package names must not be split");
         assertTrue(html.contains("href=\"https://example.com/Test\""), "URL should remain intact");
     }
-    
+
     @Test
     void testCodeBlockSpacing() {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
@@ -79,7 +80,7 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("<code class=\"language-java\">"), "Should contain code with language class");
         assertTrue(html.contains("int x = 10 % 3"), "Should contain code content");
     }
-    
+
     @Test
     void testClosingFenceSeparatesProse() {
         String input = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
@@ -105,7 +106,7 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("{{warning:still code}}"), "Markers inside fences should not render as cards");
         assertTrue(html.contains("After fence."), "Prose after fence should render");
     }
-    
+
     @Test
     void testColonDirectlyBeforeCodeFence() {
         // This is the exact issue from the screenshot
@@ -121,7 +122,7 @@ class MarkdownPreprocessingTest {
         assertTrue(html.contains("<code"), "HTML should contain <code> tag");
         assertTrue(html.contains("import java.util.Scanner"), "Should contain code content");
     }
-    
+
     @Test
     void testPeriodDirectlyBeforeCodeFence() {
         String input = "Here is the code.```python\nprint('hello')";
@@ -138,7 +139,8 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testJavaCodeBlockWithComplexLanguageTag() {
-        String input = "Here's a Java example:```java\npublic class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n```";
+        String input =
+                "Here's a Java example:```java\npublic class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n```";
         String html = markdownService.processStructured(input).html();
 
         assertTrue(html.contains("<pre>"), "HTML should contain <pre> tag");
@@ -148,7 +150,8 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testMultipleJavaCodeBlocks() {
-        String input = "First example:```java\nSystem.out.println(\"First\");\n```\n\nSecond example:```java\nSystem.out.println(\"Second\");\n```";
+        String input =
+                "First example:```java\nSystem.out.println(\"First\");\n```\n\nSecond example:```java\nSystem.out.println(\"Second\");\n```";
         String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Multiple Java code blocks");
@@ -164,7 +167,8 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testJavaCodeBlockAfterColon() {
-        String input = "The solution is:```java\npublic static void main(String[] args) {\n    // Java code here\n}\n```";
+        String input =
+                "The solution is:```java\npublic static void main(String[] args) {\n    // Java code here\n}\n```";
         String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block after colon");
@@ -178,7 +182,8 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testJavaCodeBlockWithSpecialCharacters() {
-        String input = "Advanced Java features:```java\n// Using generics and lambdas\nList<String> names = Arrays.asList(\"Alice\", \"Bob\");\nnames.stream().filter(name -> name.length() > 3).forEach(System.out::println);\n```";
+        String input =
+                "Advanced Java features:```java\n// Using generics and lambdas\nList<String> names = Arrays.asList(\"Alice\", \"Bob\");\nnames.stream().filter(name -> name.length() > 3).forEach(System.out::println);\n```";
         String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block with special characters");
@@ -205,7 +210,8 @@ class MarkdownPreprocessingTest {
 
     @Test
     void testJavaCodeBlockWithAnnotations() {
-        String input = "Spring Boot example:```java\n@RestController\npublic class UserController {\n    @GetMapping(\"/users\")\n    public List<User> getUsers() {\n        return userService.findAll();\n    }\n}\n```";
+        String input =
+                "Spring Boot example:```java\n@RestController\npublic class UserController {\n    @GetMapping(\"/users\")\n    public List<User> getUsers() {\n        return userService.findAll();\n    }\n}\n```";
         String html = markdownService.processStructured(input).html();
 
         System.out.println("\nTest: Java code block with annotations");

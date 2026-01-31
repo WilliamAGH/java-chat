@@ -1,20 +1,19 @@
 package com.williamcallahan.javachat.service;
 
+import jakarta.annotation.PostConstruct;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
-import jakarta.annotation.PostConstruct;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Monitors external service health with exponential backoff for failed services.
@@ -26,6 +25,12 @@ public class ExternalServiceHealth {
 
     /** Known external service identifiers for type-safe health checks. */
     public static final String SERVICE_QDRANT = "qdrant";
+
+    // Health snapshot message templates
+    private static final String HEALTHY_MSG_TEMPLATE = "Healthy (checked %s ago)";
+    private static final String UNHEALTHY_CHECKING_MSG = "Unhealthy (checking now...)";
+    private static final String UNHEALTHY_NEXT_CHECK_TEMPLATE = "Unhealthy (failed %d times, next check in %s)";
+    private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
 
     private final WebClient webClient;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
@@ -58,6 +63,9 @@ public class ExternalServiceHealth {
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
     private static final Duration HEALTHY_CHECK_INTERVAL = Duration.ofHours(1);
+
+    /** Timeout for external service health check requests. */
+    private static final Duration HEALTH_CHECK_TIMEOUT = Duration.ofSeconds(5);
 
     /**
      * Creates the health monitor with a WebClient for outbound checks.
@@ -112,37 +120,38 @@ public class ExternalServiceHealth {
     }
 
     /**
-     * Returns detailed status information for a service.
+     * Provides detailed status information for a service.
      *
      * @param serviceName logical service name
      * @return service status details for UI/diagnostics
      */
-    public ServiceInfo getServiceInfo(String serviceName) {
+    public HealthSnapshot getHealthSnapshot(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
         if (status == null) {
-            return new ServiceInfo(serviceName, true, "Unknown service", null);
+            return new HealthSnapshot(serviceName, true, UNKNOWN_SERVICE_MSG, null);
         }
 
         String message;
         Duration timeUntilNextCheck = null;
 
         if (status.isHealthy.get()) {
-            message = String.format("Healthy (checked %s ago)",
-                formatDuration(Duration.between(status.lastCheck, Instant.now())));
+            message = String.format(
+                    HEALTHY_MSG_TEMPLATE, formatDuration(Duration.between(status.lastCheck, Instant.now())));
         } else {
-            timeUntilNextCheck = Duration.between(Instant.now(),
-                status.lastCheck.plus(status.currentBackoff));
+            timeUntilNextCheck = Duration.between(Instant.now(), status.lastCheck.plus(status.currentBackoff));
 
             if (timeUntilNextCheck.isNegative()) {
-                message = "Unhealthy (checking now...)";
+                message = UNHEALTHY_CHECKING_MSG;
                 timeUntilNextCheck = Duration.ZERO;
             } else {
-                message = String.format("Unhealthy (failed %d times, next check in %s)",
-                    status.consecutiveFailures.get(), formatDuration(timeUntilNextCheck));
+                message = String.format(
+                        UNHEALTHY_NEXT_CHECK_TEMPLATE,
+                        status.consecutiveFailures.get(),
+                        formatDuration(timeUntilNextCheck));
             }
         }
 
-        return new ServiceInfo(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
+        return new HealthSnapshot(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
     }
 
     /**
@@ -184,20 +193,21 @@ public class ExternalServiceHealth {
         }
 
         requestSpec
-            .retrieve()
-            .toBodilessEntity()
-            .timeout(Duration.ofSeconds(5))
-            .doOnSuccess(response -> {
-                status.markHealthy();
-                log.debug("Qdrant health check succeeded");
-            })
-            .doOnError(error -> {
-                status.markUnhealthy();
-                log.warn("Qdrant health check failed (exception type: {}) - Will retry in {}",
-                    error.getClass().getSimpleName(), formatDuration(status.currentBackoff));
-            })
-            .onErrorResume(error -> Mono.empty())
-            .subscribe();
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(HEALTH_CHECK_TIMEOUT)
+                .subscribe(
+                        response -> {
+                            status.markHealthy();
+                            log.debug("Qdrant health check succeeded");
+                        },
+                        error -> {
+                            status.markUnhealthy();
+                            log.warn(
+                                    "Qdrant health check failed (exception type: {}) - Will retry in {}",
+                                    error.getClass().getSimpleName(),
+                                    formatDuration(status.currentBackoff));
+                        });
     }
 
     /**
@@ -311,49 +321,46 @@ public class ExternalServiceHealth {
     }
 
     /**
-     * Public DTO for service health information
+     * Immutable snapshot of service health status for UI and diagnostics.
      */
-    public static class ServiceInfo {
+    public static class HealthSnapshot {
         private final String name;
         private final boolean healthy;
         private final String message;
-        private final Duration timeUntilNextCheck;
+        private final Optional<Duration> timeUntilNextCheck;
 
         /**
          * Creates a snapshot of service health status.
+         *
+         * @param name service identifier
+         * @param isHealthy current health state
+         * @param message human-readable status description
+         * @param timeUntilNextCheck time until next check (null wraps to empty Optional)
          */
-        public ServiceInfo(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
+        public HealthSnapshot(String name, boolean isHealthy, String message, Duration timeUntilNextCheck) {
             this.name = name;
             this.healthy = isHealthy;
             this.message = message;
-            this.timeUntilNextCheck = timeUntilNextCheck;
+            this.timeUntilNextCheck = Optional.ofNullable(timeUntilNextCheck);
         }
 
-        /**
-         * Returns the service identifier.
-         */
+        /** Provides the service identifier. */
         public String name() {
             return name;
         }
 
-        /**
-         * Indicates whether the service is currently healthy.
-         */
+        /** Indicates whether the service is currently healthy. */
         public boolean isHealthy() {
             return healthy;
         }
 
-        /**
-         * Describes the current health state in human-readable form.
-         */
+        /** Describes the current health state in human-readable form. */
         public String message() {
             return message;
         }
 
-        /**
-         * Returns the time until the next scheduled check, if applicable.
-         */
-        public Duration timeUntilNextCheck() {
+        /** Provides the time until the next scheduled check, if applicable. */
+        public Optional<Duration> timeUntilNextCheck() {
             return timeUntilNextCheck;
         }
     }

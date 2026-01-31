@@ -177,16 +177,11 @@ interface HasUrl {
  * Deduplicates an array of objects by URL (case-insensitive).
  * Filters out objects with missing or invalid URL properties.
  *
- * @param citations - Array of objects with url property
+ * @param citations - Array of objects with url property (null/undefined treated as empty)
  * @returns Deduplicated array preserving original order
- * @throws Warning logged if input is not an array (indicates caller bug)
  */
-export function deduplicateCitations<T extends HasUrl>(citations: T[]): T[] {
-  if (!Array.isArray(citations)) {
-    console.warn('[url.ts] deduplicateCitations received non-array input:', {
-      receivedType: typeof citations,
-      value: citations
-    })
+export function deduplicateCitations<T extends HasUrl>(citations: readonly T[] | null | undefined): T[] {
+  if (!citations || citations.length === 0) {
     return []
   }
   const seen = new Set<string>()

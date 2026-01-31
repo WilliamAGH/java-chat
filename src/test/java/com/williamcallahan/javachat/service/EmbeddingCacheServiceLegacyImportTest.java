@@ -1,13 +1,10 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mockito;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.vectorstore.VectorStore;
-
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
@@ -18,9 +15,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.zip.GZIPOutputStream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.VectorStore;
 
 /**
  * Verifies legacy embedding cache imports remain compatible with new metadata handling.
@@ -32,12 +31,8 @@ final class EmbeddingCacheServiceLegacyImportTest {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         ObjectMapper objectMapper = new ObjectMapper();
 
-        EmbeddingCacheService cacheService = new EmbeddingCacheService(
-            tempDir.toString(),
-            embeddingModel,
-            vectorStore,
-            objectMapper
-        );
+        EmbeddingCacheService cacheService =
+                new EmbeddingCacheService(tempDir.toString(), embeddingModel, vectorStore, objectMapper);
 
         Path legacyCachePath = tempDir.resolve("legacy_cache.gz");
         writeLegacyCache(legacyCachePath);
@@ -68,7 +63,7 @@ final class EmbeddingCacheServiceLegacyImportTest {
         EmbeddingCacheService.CachedEmbedding legacyEntry = new EmbeddingCacheService.CachedEmbedding();
         legacyEntry.id = "legacy-id";
         legacyEntry.content = "Legacy content";
-        legacyEntry.embedding = new float[] { 0.1f, 0.2f, 0.3f };
+        legacyEntry.embedding = new float[] {0.1f, 0.2f, 0.3f};
         legacyEntry.createdAt = LocalDateTime.of(2024, 1, 1, 0, 0);
         legacyEntry.uploaded = true;
 
@@ -81,15 +76,15 @@ final class EmbeddingCacheServiceLegacyImportTest {
         entries.add(legacyEntry);
 
         try (OutputStream fileOutputStream = Files.newOutputStream(legacyCachePath);
-             GZIPOutputStream gzipOutputStream = new GZIPOutputStream(fileOutputStream);
-             ObjectOutputStream objectOutputStream = new ObjectOutputStream(gzipOutputStream)) {
+                GZIPOutputStream gzipOutputStream = new GZIPOutputStream(fileOutputStream);
+                ObjectOutputStream objectOutputStream = new ObjectOutputStream(gzipOutputStream)) {
             objectOutputStream.writeObject(entries);
         }
     }
 
     private static JsonNode readGzipJson(Path gzipPath, ObjectMapper objectMapper) throws IOException {
         try (var fileInputStream = Files.newInputStream(gzipPath);
-             var gzipInputStream = new java.util.zip.GZIPInputStream(fileInputStream)) {
+                var gzipInputStream = new java.util.zip.GZIPInputStream(fileInputStream)) {
             return objectMapper.readTree(gzipInputStream);
         }
     }

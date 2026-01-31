@@ -6,23 +6,21 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.TextNode;
-import org.springframework.ai.document.Document;
-
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.ai.document.Document;
 
 /**
  * Captures a cached embedding payload with metadata for disk persistence.
  */
 @JsonAutoDetect(
-    fieldVisibility = JsonAutoDetect.Visibility.ANY,
-    getterVisibility = JsonAutoDetect.Visibility.NONE,
-    isGetterVisibility = JsonAutoDetect.Visibility.NONE,
-    setterVisibility = JsonAutoDetect.Visibility.NONE
-)
+        fieldVisibility = JsonAutoDetect.Visibility.ANY,
+        getterVisibility = JsonAutoDetect.Visibility.NONE,
+        isGetterVisibility = JsonAutoDetect.Visibility.NONE,
+        setterVisibility = JsonAutoDetect.Visibility.NONE)
 @JsonIgnoreProperties(ignoreUnknown = true)
 final class EmbeddingCacheEntry {
     private String id;
@@ -100,32 +98,29 @@ final class EmbeddingCacheEntry {
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 record EmbeddingCacheMetadata(
-    @JsonProperty("url") String url,
-    @JsonProperty("title") String title,
-    @JsonProperty("chunkIndex") Integer chunkIndex,
-    @JsonProperty("package") String packageName,
-    @JsonProperty("hash") String hash,
-    @JsonProperty("pageStart") Integer pageStart,
-    @JsonProperty("pageEnd") Integer pageEnd,
-    @JsonProperty("retrievalSource") String retrievalSource,
-    @JsonProperty("fallbackReason") String fallbackReason,
-    @JsonProperty("additionalMetadata") Map<String, JsonNode> additionalMetadata
-) {
+        @JsonProperty("url") String url,
+        @JsonProperty("title") String title,
+        @JsonProperty("chunkIndex") Integer chunkIndex,
+        @JsonProperty("package") String packageName,
+        @JsonProperty("hash") String hash,
+        @JsonProperty("pageStart") Integer pageStart,
+        @JsonProperty("pageEnd") Integer pageEnd,
+        @JsonProperty("retrievalSource") String retrievalSource,
+        @JsonProperty("fallbackReason") String fallbackReason,
+        @JsonProperty("additionalMetadata") Map<String, JsonNode> additionalMetadata) {
     private static final Set<String> KNOWN_KEYS = Set.of(
-        "url",
-        "title",
-        "chunkIndex",
-        "package",
-        "hash",
-        "pageStart",
-        "pageEnd",
-        "retrievalSource",
-        "fallbackReason"
-    );
+            "url",
+            "title",
+            "chunkIndex",
+            "package",
+            "hash",
+            "pageStart",
+            "pageEnd",
+            "retrievalSource",
+            "fallbackReason");
 
-    private static final EmbeddingCacheMetadata EMPTY = new EmbeddingCacheMetadata(
-        null, null, null, null, null, null, null, null, null, Map.of()
-    );
+    private static final EmbeddingCacheMetadata EMPTY =
+            new EmbeddingCacheMetadata(null, null, null, null, null, null, null, null, null, Map.of());
 
     static EmbeddingCacheMetadata empty() {
         return EMPTY;
@@ -151,17 +146,16 @@ record EmbeddingCacheMetadata(
         Map<String, JsonNode> additionalMetadata = additionalMetadataFrom(springMetadata);
 
         return new EmbeddingCacheMetadata(
-            blankToNull(url),
-            blankToNull(title),
-            chunkIndex,
-            blankToNull(packageName),
-            blankToNull(hash),
-            pageStart,
-            pageEnd,
-            blankToNull(retrievalSource),
-            blankToNull(fallbackReason),
-            additionalMetadata
-        );
+                blankToNull(url),
+                blankToNull(title),
+                chunkIndex,
+                blankToNull(packageName),
+                blankToNull(hash),
+                pageStart,
+                pageEnd,
+                blankToNull(retrievalSource),
+                blankToNull(fallbackReason),
+                additionalMetadata);
     }
 
     static EmbeddingCacheMetadata fromLegacyMetadataMap(Map<?, ?> legacyMetadata) {
@@ -182,17 +176,16 @@ record EmbeddingCacheMetadata(
         Map<String, JsonNode> additionalMetadata = additionalMetadataFromLegacy(legacyMetadata);
 
         return new EmbeddingCacheMetadata(
-            blankToNull(url),
-            blankToNull(title),
-            chunkIndex,
-            blankToNull(packageName),
-            blankToNull(hash),
-            pageStart,
-            pageEnd,
-            blankToNull(retrievalSource),
-            blankToNull(fallbackReason),
-            additionalMetadata
-        );
+                blankToNull(url),
+                blankToNull(title),
+                chunkIndex,
+                blankToNull(packageName),
+                blankToNull(hash),
+                pageStart,
+                pageEnd,
+                blankToNull(retrievalSource),
+                blankToNull(fallbackReason),
+                additionalMetadata);
     }
 
     void applyTo(Document document) {
@@ -278,7 +271,9 @@ record EmbeddingCacheMetadata(
     private static Map<String, JsonNode> additionalMetadataFromLegacy(Map<?, ?> sourceMetadata) {
         LinkedHashMap<String, JsonNode> additionalMetadata = new LinkedHashMap<>();
         sourceMetadata.forEach((legacyKey, legacyValue) -> {
-            if (!(legacyKey instanceof String metadataKey) || metadataKey.isBlank() || KNOWN_KEYS.contains(metadataKey)) {
+            if (!(legacyKey instanceof String metadataKey)
+                    || metadataKey.isBlank()
+                    || KNOWN_KEYS.contains(metadataKey)) {
                 return;
             }
             JsonNode node = jsonNodeFrom(legacyValue);

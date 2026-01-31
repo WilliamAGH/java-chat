@@ -27,8 +27,7 @@ public class LocalEmbedding {
     /**
      * Creates local embedding configuration.
      */
-    public LocalEmbedding() {
-    }
+    public LocalEmbedding() {}
 
     /**
      * Validates local embedding settings.

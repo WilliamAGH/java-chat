@@ -37,8 +37,7 @@ public class RetrievalAugmentationConfig {
     /**
      * Creates retrieval augmentation configuration.
      */
-    public RetrievalAugmentationConfig() {
-    }
+    public RetrievalAugmentationConfig() {}
 
     private static final String RETURN_K_BOUND_MSG = "%s must be less than or equal to %s (got %d > %d).";
     private static final String OVERLAP_BOUND_MSG = "%s must be less than %s (got %d >= %d).";
@@ -54,12 +53,12 @@ public class RetrievalAugmentationConfig {
         requireNonNegativeCount(CITE_KEY, searchCitations);
         requireLambdaRange();
         if (searchReturnK > searchTopK) {
-            throw new IllegalArgumentException(String.format(
-                Locale.ROOT, RETURN_K_BOUND_MSG, RETURN_K_KEY, TOP_K_KEY, searchReturnK, searchTopK));
+            throw new IllegalArgumentException(
+                    String.format(Locale.ROOT, RETURN_K_BOUND_MSG, RETURN_K_KEY, TOP_K_KEY, searchReturnK, searchTopK));
         }
         if (overlapTokens >= chunkMaxTokens) {
             throw new IllegalArgumentException(String.format(
-                Locale.ROOT, OVERLAP_BOUND_MSG, OVERLAP_KEY, CHUNK_MAX_KEY, overlapTokens, chunkMaxTokens));
+                    Locale.ROOT, OVERLAP_BOUND_MSG, OVERLAP_KEY, CHUNK_MAX_KEY, overlapTokens, chunkMaxTokens));
         }
     }
 
@@ -185,13 +184,8 @@ public class RetrievalAugmentationConfig {
 
     private void requireLambdaRange() {
         if (searchMmrLambda < MMR_MIN || searchMmrLambda > MMR_MAX) {
-            throw new IllegalArgumentException(String.format(
-                Locale.ROOT,
-                RANGE_FMT,
-                MMR_KEY,
-                Double.toString(MMR_MIN),
-                Double.toString(MMR_MAX)
-            ));
+            throw new IllegalArgumentException(
+                    String.format(Locale.ROOT, RANGE_FMT, MMR_KEY, Double.toString(MMR_MIN), Double.toString(MMR_MAX)));
         }
     }
 }

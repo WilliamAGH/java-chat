@@ -51,43 +51,47 @@ public final class RetrySupport {
      * @throws RuntimeException if all retries are exhausted or a non-transient error occurs
      */
     public static <T> T executeWithRetry(
-            Supplier<T> operation, 
-            String operationName,
-            int maxAttempts,
-            Duration initialBackoff) {
+            Supplier<T> operation, String operationName, int maxAttempts, Duration initialBackoff) {
 
         String safeOperationName = sanitizeLogValue(operationName);
-        
+
         if (maxAttempts < 1) {
             throw new IllegalArgumentException("maxAttempts must be at least 1");
         }
         RuntimeException lastException = null;
         Duration currentBackoff = initialBackoff;
-        
+
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 return operation.get();
             } catch (RuntimeException exception) {
                 lastException = exception;
-                
+
                 // Check if this is a transient error worth retrying
                 if (!RetrievalErrorClassifier.isTransientVectorStoreError(exception)) {
-                    log.warn("{} failed with non-transient error on attempt {}/{}, not retrying",
-                        safeOperationName, attempt, maxAttempts);
+                    log.warn(
+                            "{} failed with non-transient error on attempt {}/{}, not retrying",
+                            safeOperationName,
+                            attempt,
+                            maxAttempts);
                     throw exception;
                 }
-                
+
                 if (attempt < maxAttempts) {
-                    log.warn("{} failed with transient error on attempt {}/{}, retrying in {}ms",
-                        safeOperationName, attempt, maxAttempts, currentBackoff.toMillis());
-                    
+                    log.warn(
+                            "{} failed with transient error on attempt {}/{}, retrying in {}ms",
+                            safeOperationName,
+                            attempt,
+                            maxAttempts,
+                            currentBackoff.toMillis());
+
                     try {
                         Thread.sleep(currentBackoff.toMillis());
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         throw new IllegalStateException("Retry interrupted", interrupted);
                     }
-                    
+
                     // Exponential backoff with cap
                     long nextBackoffMillis = (long) (currentBackoff.toMillis() * DEFAULT_MULTIPLIER);
                     currentBackoff = Duration.ofMillis(Math.min(nextBackoffMillis, MAX_BACKOFF.toMillis()));
@@ -96,7 +100,7 @@ public final class RetrySupport {
                 }
             }
         }
-        
+
         // Guard for static analysis: loop always sets lastException before reaching here
         if (lastException == null) {
             throw new IllegalStateException("Retry loop completed without exception - should not happen");
@@ -111,10 +115,12 @@ public final class RetrySupport {
      * @param operationName name for logging purposes
      */
     public static void executeWithRetry(Runnable operation, String operationName) {
-        executeWithRetry(() -> {
-            operation.run();
-            return null;
-        }, operationName);
+        executeWithRetry(
+                () -> {
+                    operation.run();
+                    return null;
+                },
+                operationName);
     }
 
     private static String sanitizeLogValue(String rawValue) {
