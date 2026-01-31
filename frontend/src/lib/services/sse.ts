@@ -18,6 +18,7 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateWithSchema } from '../validation/validate'
+import { csrfHeader } from './csrf'
 
 /** SSE event types emitted by streaming endpoints. */
 const SSE_EVENT_STATUS = 'status'
@@ -154,7 +155,8 @@ export async function streamSse(
     response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...csrfHeader()
       },
       body: JSON.stringify(body),
       signal: abortSignal

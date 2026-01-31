@@ -13,6 +13,7 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
+import { csrfHeader } from './csrf'
 
 export type { StreamStatus, StreamError, Citation }
 
@@ -77,7 +78,10 @@ export async function clearChatSession(sessionId: string): Promise<void> {
   }
 
   const response = await fetch(`/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`, {
-    method: 'POST'
+    method: 'POST',
+    headers: {
+      ...csrfHeader()
+    }
   })
 
   if (!response.ok) {
