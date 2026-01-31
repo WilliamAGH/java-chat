@@ -18,7 +18,14 @@ function readCookie(cookieName: string): string | null {
   }
 
   const tokenText = cookieEntry.slice(cookieName.length + 1)
-  return tokenText ? decodeURIComponent(tokenText) : null
+  if (!tokenText) {
+    return null
+  }
+  try {
+    return decodeURIComponent(tokenText)
+  } catch {
+    return null
+  }
 }
 
 export function csrfHeader(): Record<string, string> {
