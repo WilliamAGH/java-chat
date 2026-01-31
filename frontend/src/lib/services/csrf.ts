@@ -1,4 +1,7 @@
+/** Spring Security's default CSRF cookie name for SPA clients. */
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
+
+/** Header name expected by Spring Security's CsrfTokenRequestAttributeHandler. */
 const CSRF_HEADER_NAME = 'X-XSRF-TOKEN'
 
 function readCookie(cookieName: string): string | null {
