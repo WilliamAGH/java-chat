@@ -129,6 +129,20 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
   }
 
   /**
+   * Clears indicator state and pending timeouts.
+   * Internal helper that doesn't rely on `this` binding.
+   */
+  function clearIndicatorStateInternal(): void {
+    unseenCount = 0
+    showIndicator = false
+
+    if (indicatorTimeoutId) {
+      clearTimeout(indicatorTimeoutId)
+      indicatorTimeoutId = null
+    }
+  }
+
+  /**
    * Performs the actual scroll-to-bottom with motion preferences.
    */
   async function performScroll(): Promise<void> {
@@ -208,34 +222,41 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
     },
 
     /**
-     * Called when new content is added to the container.
+     * Called when a new message starts streaming.
      *
-     * **Never auto-scrolls.** Only tracks whether content is off-screen
-     * and updates the indicator visibility accordingly.
+     * Increments the unseen message count (not chunk count) when user
+     * is scrolled away from bottom. Call this once per new assistant
+     * message, not on every streaming chunk.
      */
-    onContentAdded(): void {
+    onNewMessageStarted(): void {
       if (!isNearBottom()) {
-        // User is scrolled up - track unseen content, show indicator
         unseenCount++
         updateIndicatorVisibility()
-      } else {
-        // User is at bottom - no need for indicator
-        // Don't reset unseenCount here; they'll see the content naturally
       }
     },
 
     /**
+     * Called when new content is added to the container (streaming chunks).
+     *
+     * **Never auto-scrolls.** Only updates indicator visibility based on
+     * current scroll position. Does NOT increment the count—use
+     * `onNewMessageStarted()` when a new message begins.
+     */
+    onContentAdded(): void {
+      if (!isNearBottom()) {
+        // User is scrolled up - update visibility but don't increment count
+        // (count is incremented once per message via onNewMessageStarted)
+        updateIndicatorVisibility()
+      }
+      // User at bottom - no need for indicator
+    },
+
+    /**
      * Clears indicator state and pending timeouts.
-     * Internal helper to avoid duplication in scroll methods.
+     * Public API that delegates to internal helper.
      */
     clearIndicatorState(): void {
-      unseenCount = 0
-      showIndicator = false
-
-      if (indicatorTimeoutId) {
-        clearTimeout(indicatorTimeoutId)
-        indicatorTimeoutId = null
-      }
+      clearIndicatorStateInternal()
     },
 
     /**
@@ -246,16 +267,19 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * - Simply scrolls once and clears the indicator
      */
     async scrollOnce(): Promise<void> {
-      this.clearIndicatorState()
+      clearIndicatorStateInternal()
       await performScroll()
     },
 
     /**
      * Programmatically scrolls to bottom and clears indicator.
      * Use this for the "jump to bottom" button click handler.
+     *
+     * Note: Uses internal function reference to avoid `this` binding
+     * issues when passed as a callback prop.
      */
     async jumpToBottom(): Promise<void> {
-      this.clearIndicatorState()
+      clearIndicatorStateInternal()
       await performScroll()
     },
 
@@ -263,7 +287,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Resets all state. Use when clearing chat or switching contexts.
      */
     reset(): void {
-      this.clearIndicatorState()
+      clearIndicatorStateInternal()
     }
   }
 }

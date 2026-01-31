@@ -164,6 +164,9 @@
         streaming.startStream();
         activeStreamingMessageId = createChatMessageId("chat", sessionId);
 
+        // Track new message for scroll indicator (counts messages, not chunks)
+        scrollAnchor.onNewMessageStarted();
+
         try {
             const assistantMessageId = activeStreamingMessageId;
             if (!assistantMessageId) return;

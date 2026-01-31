@@ -367,6 +367,9 @@
         );
         activeStreamingMessageId = assistantMessageId;
 
+        // Track new message for scroll indicator (counts messages, not chunks)
+        scrollAnchor.onNewMessageStarted();
+
         try {
             await streamGuidedChat(
                 lessonSessionId,
