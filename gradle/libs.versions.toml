@@ -1,0 +1,137 @@
+[versions]
+# Java toolchain
+java = "25"
+
+# Spring ecosystem
+spring-boot = "3.5.10"
+spring-dependency-management = "1.1.7"
+spring-ai = "1.1.2"
+spring-dotenv = "5.1.0"
+
+# AI/ML
+openai = "4.16.0"
+
+# Processing libraries
+jsoup = "1.22.1"
+flexmark = "0.64.8"
+pdfbox = "3.0.6"
+jtokkit = "1.1.0"
+
+# Performance
+fastutil = "8.5.18"
+caffeine = "3.2.3"
+
+# gRPC/Networking
+grpc = "1.78.0"
+
+# Code quality plugins
+spotbugs-plugin = "6.4.8"
+spotbugs = "4.9.8"
+findsecbugs = "1.14.0"
+pmd = "7.20.0"
+spotless = "8.1.0"
+palantir-java-format = "2.85.0"
+
+[libraries]
+# Spring Boot starters
+spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-starter-aop = { module = "org.springframework.boot:spring-boot-starter-aop" }
+spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client" }
+spring-boot-starter-logging = { module = "org.springframework.boot:spring-boot-starter-logging" }
+spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-boot-devtools = { module = "org.springframework.boot:spring-boot-devtools" }
+spring-boot-configuration-processor = { module = "org.springframework.boot:spring-boot-configuration-processor" }
+
+# Logging
+logback-classic = { module = "ch.qos.logback:logback-classic" }
+
+# Jackson
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
+
+# Spring AI
+spring-ai-advisors-vector-store = { module = "org.springframework.ai:spring-ai-advisors-vector-store" }
+spring-ai-starter-model-openai = { module = "org.springframework.ai:spring-ai-starter-model-openai" }
+spring-ai-starter-vector-store-qdrant = { module = "org.springframework.ai:spring-ai-starter-vector-store-qdrant" }
+
+# OpenAI SDK
+openai-java = { module = "com.openai:openai-java", version.ref = "openai" }
+
+# Spring dotenv
+spring-dotenv = { module = "me.paulschwarz:spring-dotenv", version.ref = "spring-dotenv" }
+
+# HTML parsing
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+
+# High-performance collections
+fastutil = { module = "it.unimi.dsi:fastutil", version.ref = "fastutil" }
+
+# Token counting
+jtokkit = { module = "com.knuddels:jtokkit", version.ref = "jtokkit" }
+
+# Markdown processing
+flexmark = { module = "com.vladsch.flexmark:flexmark", version.ref = "flexmark" }
+flexmark-ext-tables = { module = "com.vladsch.flexmark:flexmark-ext-tables", version.ref = "flexmark" }
+flexmark-ext-gfm-strikethrough = { module = "com.vladsch.flexmark:flexmark-ext-gfm-strikethrough", version.ref = "flexmark" }
+flexmark-ext-gfm-tasklist = { module = "com.vladsch.flexmark:flexmark-ext-gfm-tasklist", version.ref = "flexmark" }
+flexmark-ext-autolink = { module = "com.vladsch.flexmark:flexmark-ext-autolink", version.ref = "flexmark" }
+
+# Caching
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+
+# gRPC
+grpc-core = { module = "io.grpc:grpc-core" }
+
+# PDF processing
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+
+# Netty macOS DNS resolver
+netty-resolver-dns-native-macos = { module = "io.netty:netty-resolver-dns-native-macos" }
+netty-resolver-dns-classes-macos = { module = "io.netty:netty-resolver-dns-classes-macos" }
+
+# Testing
+spring-security-test = { module = "org.springframework.security:spring-security-test" }
+reactor-test = { module = "io.projectreactor:reactor-test" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+# SpotBugs plugins
+findsecbugs-plugin = { module = "com.h3xstream.findsecbugs:findsecbugs-plugin", version.ref = "findsecbugs" }
+
+[bundles]
+spring-boot-web = [
+    "spring-boot-starter-web",
+    "spring-boot-starter-webflux",
+    "spring-boot-starter-actuator",
+    "spring-boot-starter-validation",
+    "spring-boot-starter-aop",
+    "spring-boot-starter-oauth2-client",
+]
+spring-ai = [
+    "spring-ai-advisors-vector-store",
+    "spring-ai-starter-model-openai",
+    "spring-ai-starter-vector-store-qdrant",
+]
+flexmark-all = [
+    "flexmark",
+    "flexmark-ext-tables",
+    "flexmark-ext-gfm-strikethrough",
+    "flexmark-ext-gfm-tasklist",
+    "flexmark-ext-autolink",
+]
+netty-macos = [
+    "netty-resolver-dns-native-macos",
+    "netty-resolver-dns-classes-macos",
+]
+testing = [
+    "spring-boot-starter-test",
+    "spring-security-test",
+    "reactor-test",
+]
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "spring-dependency-management" }
+spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs-plugin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

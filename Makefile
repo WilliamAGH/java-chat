@@ -1,25 +1,7 @@
-SHELL := /bin/bash
+# Java Chat Makefile
+# See config/make/common.mk for shared variables and functions
 
-APP_NAME := java-chat
-GRADLEW := ./gradlew
-QDRANT_COMPOSE_FILE := docker-compose-qdrant.yml
-
-# Terminal colors for output prefixing
-RED    := \033[0;31m
-GREEN  := \033[0;32m
-YELLOW := \033[0;33m
-CYAN   := \033[0;36m
-NC     := \033[0m
-
-# Compute JAR lazily so it's resolved after the build runs
-# Use a function instead of variable to evaluate at runtime
-# Exclude -plain.jar which is the non-bootable archive
-get_jar = $(shell ls -t build/libs/*.jar 2>/dev/null | grep -v '\-plain\.jar' | head -n 1)
-
-# Export color codes and paths for use in scripts
-export RED GREEN YELLOW CYAN NC
-export PROJECT_ROOT := $(shell pwd)
-export JAR_PATH = $(call get_jar)
+include config/make/common.mk
 
 .PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
 
@@ -35,7 +17,7 @@ build: frontend-build ## Build the project (skip tests)
 	$(GRADLEW) build -x test
 
 test: ## Run tests (loads .env if present)
-	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
+	@$(call load_env); \
 	  $(GRADLEW) test
 
 lint: lint-ast ## Run static analysis (Java: SpotBugs + PMD + ast-grep, Frontend: svelte-check)
@@ -45,108 +27,57 @@ lint: lint-ast ## Run static analysis (Java: SpotBugs + PMD + ast-grep, Frontend
 lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@command -v ast-grep >/dev/null 2>&1 || { echo "$(RED)Error: 'ast-grep' not found. Install: brew install ast-grep$(NC)" >&2; exit 1; }
 	@echo "$(CYAN)Running ast-grep rules...$(NC)"
-	@ast-grep scan src/main/java/
+	@ast-grep scan -c config/sgconfig.yml src/main/java/
 
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
 
 hooks: ## Install git hooks via prek
 	@command -v prek >/dev/null 2>&1 || { echo "Error: 'prek' not found. Install it first: https://prek.j178.dev/" >&2; exit 1; }
-	prek install --install-hooks
+	prek install --install-hooks -c config/prek.toml
 
 run: build ## Run the packaged jar (loads .env if present)
-	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
-	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
-	    exit 1; \
-	  fi; \
-	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
-	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
+	@$(call load_env); \
+	  $(call validate_api_keys); \
+	  SERVER_PORT=$$($(call get_server_port)); \
 	  echo "Ensuring port $$SERVER_PORT is free..." >&2; \
-	  PIDS=$$(lsof -ti tcp:$$SERVER_PORT 2>/dev/null || true); echo "Found PIDs on port $$SERVER_PORT: '$$PIDS'" >&2; if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$SERVER_PORT: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 2; fi; \
+	  $(call free_port,$$SERVER_PORT); \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
-	  APP_ARGS=(--server.port=$$SERVER_PORT); \
-	  if [ -n "$$GITHUB_TOKEN" ]; then \
-	    APP_ARGS+=( \
-	      --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-	      --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-	      --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	      --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
-	    ); \
-	  elif [ -n "$$OPENAI_API_KEY" ]; then \
-	    APP_ARGS+=( \
-	      --spring.ai.openai.api-key="$$OPENAI_API_KEY" \
-	    ); \
-	  fi; \
-	  # Add conservative JVM memory limits to prevent OS-level SIGKILL (exit 137) under memory pressure
-	  # Tuned for local dev: override via JAVA_OPTS env if needed
-	  # --sun-misc-unsafe-memory-access=allow suppresses gRPC/Netty Unsafe warnings (see netty.io/wiki/java-24-and-sun.misc.unsafe.html)
-	  JAVA_OPTS="$${JAVA_OPTS:- -XX:+IgnoreUnrecognizedVMOptions -Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxRAMPercentage=70 -XX:MaxDirectMemorySize=256m -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true --sun-misc-unsafe-memory-access=allow}"; \
+	  $(call build_app_args,$$SERVER_PORT); \
+	  JAVA_OPTS="$${JAVA_OPTS:- $(DEFAULT_JAVA_OPTS)}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
 dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops both)
 	@echo "$(YELLOW)Starting full-stack development environment...$(NC)"
 	@echo "$(CYAN)Frontend: http://localhost:5173/$(NC)"
-	@echo "$(YELLOW)Backend API: http://localhost:8085/api/$(NC)"
+	@echo "$(YELLOW)Backend API: http://localhost:$(DEFAULT_PORT)/api/$(NC)"
 	@echo ""
-	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
-	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
-	    exit 1; \
-	  fi; \
+	@$(call load_env); \
+	  $(call validate_api_keys); \
 	  trap 'kill 0' INT TERM; \
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
-	  (if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	   APP_ARGS=(--server.port=8085); \
-	   if [ -n "$$GITHUB_TOKEN" ]; then \
-	     APP_ARGS+=( \
-	       --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-	       --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-	       --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	       --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
-	     ); \
-	   elif [ -n "$$OPENAI_API_KEY" ]; then \
-	     APP_ARGS+=( \
-	       --spring.ai.openai.api-key="$$OPENAI_API_KEY" \
-	     ); \
-	   fi; \
+	  ($(call load_env); \
+	   $(call build_app_args,$(DEFAULT_PORT)); \
 	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	   --args="$${APP_ARGS[*]}" \
-	   -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true" 2>&1 \
+	   -Dorg.gradle.jvmargs="$(GRADLE_JVM_ARGS)" 2>&1 \
 	   | awk '{print "\033[33m[java]\033[0m " $$0; fflush()}') & \
 	  wait
 
 dev-backend: ## Run only Spring Boot backend (dev profile)
-	@if [ -f .env ]; then set -a; source .env; set +a; fi; \
-	  if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
-	    echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
-	    exit 1; \
-	  fi; \
-	  SERVER_PORT=$${PORT:-$${port:-8085}}; \
-	  LIVERELOAD_PORT=$${LIVERELOAD_PORT:-35730}; \
-	  if [ $$SERVER_PORT -lt 8085 ] || [ $$SERVER_PORT -gt 8090 ]; then echo "Requested port $$SERVER_PORT is outside allowed range 8085-8090; using 8085" >&2; SERVER_PORT=8085; fi; \
+	@$(call load_env); \
+	  $(call validate_api_keys); \
+	  SERVER_PORT=$$($(call get_server_port)); \
+	  LIVERELOAD_PORT=$${LIVERELOAD_PORT:-$(DEFAULT_LIVERELOAD_PORT)}; \
 	  echo "Ensuring ports $$SERVER_PORT and $$LIVERELOAD_PORT are free..." >&2; \
-	  for port in $$SERVER_PORT $$LIVERELOAD_PORT; do \
-	    PIDS=$$(lsof -ti tcp:$$port 2>/dev/null || true); \
-	    if [ -n "$$PIDS" ]; then echo "Killing process(es) on port $$port: $$PIDS" >&2; kill -9 $$PIDS 2>/dev/null || true; sleep 1; fi; \
-	  done; \
+	  $(call free_port,$$SERVER_PORT); \
+	  $(call free_port,$$LIVERELOAD_PORT); \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
-	  APP_ARGS=(--server.port=$$SERVER_PORT --spring.devtools.livereload.port=$$LIVERELOAD_PORT); \
-	  if [ -n "$$GITHUB_TOKEN" ]; then \
-	    APP_ARGS+=( \
-	      --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-	      --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-	      --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	      --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
-	    ); \
-	  elif [ -n "$$OPENAI_API_KEY" ]; then \
-	    APP_ARGS+=( \
-	      --spring.ai.openai.api-key="$$OPENAI_API_KEY" \
-	    ); \
-	  fi; \
+	  $(call build_app_args,$$SERVER_PORT); \
+	  APP_ARGS+=(--spring.devtools.livereload.port=$$LIVERELOAD_PORT); \
 	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	    --args="$${APP_ARGS[*]}" \
-	    -Dorg.gradle.jvmargs="-Xmx2g -Dspring.devtools.restart.enabled=true -Djava.net.preferIPv4Stack=true -Dio.netty.handler.ssl.noOpenSsl=true -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true"
+	    -Dorg.gradle.jvmargs="$(GRADLE_JVM_ARGS)"
 
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install
@@ -156,8 +87,7 @@ frontend-build: frontend-install ## Build frontend for production
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)
 	@for p in 8086 8087; do \
-	  PIDS=$$(lsof -ti tcp:$$p || true); \
-	  if [ -n "$$PIDS" ]; then echo "Freeing port $$p by killing: $$PIDS" >&2; kill -9 $$PIDS || true; sleep 1; fi; \
+	  $(call free_port,$$p); \
 	done; \
 	docker compose -f $(QDRANT_COMPOSE_FILE) up -d
 
@@ -171,13 +101,13 @@ compose-ps: ## List Docker Compose services
 	docker compose -f $(QDRANT_COMPOSE_FILE) ps
 
 health: ## Check app health endpoint
-	curl -sS http://localhost:$${PORT:-8085}/actuator/health
+	curl -sS http://localhost:$${PORT:-$(DEFAULT_PORT)}/actuator/health
 
 ingest: ## Ingest first 1000 docs (adjust maxPages=)
-	curl -sS -X POST "http://localhost:$${PORT:-8085}/api/ingest?maxPages=1000"
+	curl -sS -X POST "http://localhost:$${PORT:-$(DEFAULT_PORT)}/api/ingest?maxPages=1000"
 
 citations: ## Try a citations lookup
-	curl -sS "http://localhost:$${PORT:-8085}/api/chat/citations?q=records"
+	curl -sS "http://localhost:$${PORT:-$(DEFAULT_PORT)}/api/chat/citations?q=records"
 
 fetch-all: ## Fetch all documentation with deduplication
 	./scripts/fetch_all_docs.sh
@@ -193,4 +123,4 @@ full-pipeline: ## Complete pipeline: fetch docs, process, and upload to Qdrant
 	@echo "Step 2: Processing and uploading to Qdrant..."
 	@./scripts/process_all_to_qdrant.sh
 	@echo ""
-	@echo "✅ Full pipeline complete!"
+	@echo "Full pipeline complete!"
