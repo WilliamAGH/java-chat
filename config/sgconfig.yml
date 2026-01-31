@@ -2,4 +2,4 @@
 # See: https://ast-grep.github.io/reference/sgconfig.html
 
 ruleDirs:
-  - rules/ast-grep
+  - ast-grep
