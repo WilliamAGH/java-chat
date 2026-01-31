@@ -76,8 +76,8 @@ public class OpenAIStreamingService {
         }
     }
 
-    private OpenAIClient clientPrimary; // Prefer GitHub Models when available
-    private OpenAIClient clientSecondary; // Fallback to OpenAI when available
+    private OpenAIClient clientPrimary; // GitHub Models client when configured
+    private OpenAIClient clientSecondary; // OpenAI client when configured
     private volatile boolean isAvailable = false;
     private final RateLimitService rateLimitManager;
     private final Chunker chunker;
@@ -219,7 +219,7 @@ public class OpenAIStreamingService {
                     OpenAIClient streamingClient = selectClientForStreaming();
 
                     if (streamingClient == null) {
-                        String error = "All LLM providers unavailable - check rate limits and API credentials";
+                        String error = "LLM providers unavailable - active provider is rate limited or misconfigured";
                         log.error("[LLM] {}", error);
                         return Mono.<StreamingResult>error(new IllegalStateException(error));
                     }
@@ -290,7 +290,7 @@ public class OpenAIStreamingService {
         return Mono.defer(() -> {
                     OpenAIClient blockingClient = selectClientForBlocking();
                     if (blockingClient == null) {
-                        String error = "All LLM providers unavailable - check rate limits and API credentials";
+                        String error = "LLM providers unavailable - active provider is rate limited or misconfigured";
                         log.error("[LLM] {}", error);
                         return Mono.error(new IllegalStateException(error));
                     }
@@ -478,7 +478,6 @@ public class OpenAIStreamingService {
     }
 
     private OpenAIClient selectClientForStreaming() {
-        // Prefer OpenAI when available (more reliable, shorter rate limit windows)
         if (clientSecondary != null) {
             if (rateLimitManager == null || rateLimitManager.isProviderAvailable(RateLimitService.ApiProvider.OPENAI)) {
                 log.debug(
@@ -486,10 +485,15 @@ public class OpenAIStreamingService {
                         RateLimitService.ApiProvider.OPENAI.ordinal());
                 return clientSecondary;
             }
+            log.warn("OpenAI provider unavailable (rate limited); fallback disabled");
+            return null;
         }
 
-        // Try GitHub Models if not in backoff and not rate limited
-        if (clientPrimary != null && !isPrimaryInBackoff()) {
+        if (clientPrimary != null) {
+            if (isPrimaryInBackoff()) {
+                log.warn("GitHub Models provider unavailable (backoff active); fallback disabled");
+                return null;
+            }
             if (rateLimitManager == null
                     || rateLimitManager.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS)) {
                 log.debug(
@@ -497,20 +501,8 @@ public class OpenAIStreamingService {
                         RateLimitService.ApiProvider.GITHUB_MODELS.ordinal());
                 return clientPrimary;
             }
-        }
-
-        // All providers marked as rate limited - try OpenAI anyway (short rate limit windows).
-        // Let the API decide if we're actually still rate limited.
-        if (clientSecondary != null) {
-            log.warn("All providers marked as rate limited; attempting OpenAI anyway "
-                    + "(typical rate limits are 1-60 seconds)");
-            return clientSecondary;
-        }
-
-        // OpenAI not configured - try GitHub Models as last resort
-        if (clientPrimary != null) {
-            log.warn("All providers marked as rate limited; attempting GitHub Models as last resort");
-            return clientPrimary;
+            log.warn("GitHub Models provider unavailable (rate limited); fallback disabled");
+            return null;
         }
 
         log.error("No LLM clients configured - check OPENAI_API_KEY and GITHUB_TOKEN environment variables");
