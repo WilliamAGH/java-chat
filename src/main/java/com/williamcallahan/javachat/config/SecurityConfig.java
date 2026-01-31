@@ -82,8 +82,7 @@ public class SecurityConfig {
         CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
 
         http.cors(c -> c.configurationSource(corsConfigurationSource))
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
-                        .csrfTokenRequestHandler(requestHandler))
+                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository).csrfTokenRequestHandler(requestHandler))
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/",
                                 "/index.html",
