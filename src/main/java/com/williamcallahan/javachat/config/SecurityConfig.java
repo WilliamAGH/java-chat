@@ -1,6 +1,10 @@
 package com.williamcallahan.javachat.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfTokenCookieFilter;
+import com.williamcallahan.javachat.adapters.in.web.security.ExpiringCookieCsrfTokenRepository;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
@@ -24,6 +28,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfig {
     private static final String WILDCARD_ORIGIN = "*";
+    private static final long CSRF_TOKEN_TTL_MINUTES = 15L;
 
     /**
      * CORS configuration source for Spring Security filter chain integration.
@@ -76,13 +81,19 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     public SecurityFilterChain appSecurityFilterChain(
-            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
-        CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        csrfTokenRepository.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+            HttpSecurity http, CorsConfigurationSource corsConfigurationSource, ObjectMapper objectMapper)
+            throws Exception {
+        CookieCsrfTokenRepository cookieRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        cookieRepository.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+        Duration csrfTokenTtl = Duration.ofMinutes(CSRF_TOKEN_TTL_MINUTES);
+        ExpiringCookieCsrfTokenRepository csrfTokenRepository =
+                new ExpiringCookieCsrfTokenRepository(cookieRepository, csrfTokenTtl);
         CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
+        CsrfAccessDeniedHandler accessDeniedHandler = new CsrfAccessDeniedHandler(objectMapper);
 
         http.cors(c -> c.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository).csrfTokenRequestHandler(requestHandler))
+                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/",
                                 "/index.html",
