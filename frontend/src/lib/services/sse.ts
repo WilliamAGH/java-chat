@@ -18,7 +18,7 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateWithSchema } from '../validation/validate'
-import { csrfHeader } from './csrf'
+import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from './csrf'
 
 /** SSE event types emitted by streaming endpoints. */
 const SSE_EVENT_STATUS = 'status'
@@ -152,15 +152,19 @@ export async function streamSse(
   let response: Response
 
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...csrfHeader()
+    response = await fetchWithCsrfRetry(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...csrfHeader()
+        },
+        body: JSON.stringify(body),
+        signal: abortSignal
       },
-      body: JSON.stringify(body),
-      signal: abortSignal
-    })
+      `streamSse:${source}`
+    )
   } catch (fetchError) {
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return
@@ -169,7 +173,10 @@ export async function streamSse(
   }
 
   if (!response.ok) {
-    const httpError = new Error(`HTTP ${response.status}: ${response.statusText}`)
+    const apiMessage = await extractApiErrorMessage(response, `streamSse:${source}`)
+    const errorMessage =
+      apiMessage ?? `HTTP ${response.status}: ${response.statusText || 'Request failed'}`
+    const httpError = new Error(errorMessage)
     callbacks.onError?.({ message: httpError.message })
     throw httpError
   }

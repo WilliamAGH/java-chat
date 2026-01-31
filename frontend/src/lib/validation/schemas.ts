@@ -73,6 +73,17 @@ export const LessonContentResponseSchema = z.object({
 })
 
 // =============================================================================
+// Error Response Schemas
+// =============================================================================
+
+/** Standard API error response payload. */
+export const ApiErrorResponseSchema = z.object({
+  status: z.string(),
+  message: z.string(),
+  details: z.string().nullable().optional()
+})
+
+// =============================================================================
 // Inferred Types (export for service layer)
 // =============================================================================
 
@@ -83,3 +94,4 @@ export type ProviderEvent = z.infer<typeof ProviderEventSchema>
 export type Citation = z.infer<typeof CitationSchema>
 export type GuidedLesson = z.infer<typeof GuidedLessonSchema>
 export type LessonContentResponse = z.infer<typeof LessonContentResponseSchema>
+export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>

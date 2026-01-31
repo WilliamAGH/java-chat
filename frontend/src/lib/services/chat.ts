@@ -13,7 +13,7 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
-import { csrfHeader } from './csrf'
+import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from './csrf'
 
 export type { StreamStatus, StreamError, Citation }
 
@@ -77,17 +77,22 @@ export async function clearChatSession(sessionId: string): Promise<void> {
     throw new Error('Session ID is required')
   }
 
-  const response = await fetch(`/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`, {
-    method: 'POST',
-    headers: {
-      ...csrfHeader()
-    }
-  })
+  const response = await fetchWithCsrfRetry(
+    `/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`,
+    {
+      method: 'POST',
+      headers: {
+        ...csrfHeader()
+      }
+    },
+    'clearChatSession'
+  )
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => '')
-    const suffix = errorBody ? `: ${errorBody}` : ''
-    throw new Error(`Failed to clear chat session (HTTP ${response.status})${suffix}`)
+    const apiMessage = await extractApiErrorMessage(response, 'clearChatSession')
+    const fallback = `HTTP ${response.status}`
+    const suffix = apiMessage ? `: ${apiMessage}` : `: ${fallback}`
+    throw new Error(`Failed to clear chat session${suffix}`)
   }
 }
 

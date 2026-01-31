@@ -2,6 +2,7 @@
   import Header from './lib/components/Header.svelte'
   import ChatView from './lib/components/ChatView.svelte'
   import LearnView from './lib/components/LearnView.svelte'
+  import ToastContainer from './lib/components/ToastContainer.svelte'
 
   let currentView = $state<'chat' | 'learn'>('chat')
 </script>
@@ -16,6 +17,8 @@
       <LearnView />
     {/if}
   </main>
+
+  <ToastContainer />
 </div>
 
 <style>
