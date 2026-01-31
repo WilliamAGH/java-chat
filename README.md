@@ -1,6 +1,8 @@
 # Java Chat
 
-AI-powered Java learning with **streaming answers**, **citations**, and **guided lessons** grounded in ingested documentation (RAG).
+[![Java Chat Application](src/main/resources/static/images/java-chat-app.png)](https://javachat.ai)
+
+Learn programming in Java and more with **streaming answers**, **citations**, and **guided lessons** grounded with a deep knowledge base of ingested documentation (RAG).
 
 Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 
@@ -64,4 +66,4 @@ See `CONTRIBUTING.md`.
 
 ## License
 
-See `LICENSE`.
+See `LICENSE.md`.
