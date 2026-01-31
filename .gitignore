@@ -5,6 +5,7 @@ data/snapshots/
 data/parsed/
 data/index/
 data/
+bin/
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
