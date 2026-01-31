@@ -36,7 +36,7 @@ RUN chmod +x gradlew
 
 # 2. Build configuration (changes occasionally)
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
-COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
+COPY config/pmd/pmd-ruleset.xml config/spotbugs/spotbugs-exclude.xml config/spotbugs/spotbugs-include.xml ./
 
 # 3. Download dependencies with cache mount (quiet to avoid verbose tree)
 RUN --mount=type=cache,target=/root/.gradle \
