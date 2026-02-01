@@ -150,7 +150,7 @@ public class HtmlContentExtractor {
                         sb.append("\n```\n").append(rawCode).append("\n```\n");
                     }
                     case "ul", "ol" -> {
-                        child.select("li").forEach(li -> sb.append("\n• ").append(li.text()));
+                        appendListItems(child, sb, 0);
                         sb.append("\n");
                     }
                     case "table" -> {
@@ -196,6 +196,31 @@ public class HtmlContentExtractor {
                 || text.startsWith("skip")
                 || text.startsWith("hide")
                 || text.startsWith("show");
+    }
+
+    private void appendListItems(Element listElement, StringBuilder sb, int depth) {
+        if (listElement == null) {
+            return;
+        }
+        for (Element li : listElement.children()) {
+            if (!"li".equals(li.tagName())) {
+                continue;
+            }
+            String itemText = li.ownText().trim();
+            if (!itemText.isEmpty()) {
+                sb.append("\n");
+                if (depth > 0) {
+                    sb.append("  ".repeat(depth));
+                }
+                sb.append("• ").append(itemText);
+            }
+            Elements nestedLists = li.select("> ul, > ol");
+            if (!nestedLists.isEmpty()) {
+                for (Element nestedList : nestedLists) {
+                    appendListItems(nestedList, sb, depth + 1);
+                }
+            }
+        }
     }
 
     /**
