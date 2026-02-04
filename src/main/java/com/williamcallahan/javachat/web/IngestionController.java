@@ -1,12 +1,20 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.domain.ingestion.IngestionErrorResponse;
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalResponse;
+import com.williamcallahan.javachat.domain.ingestion.IngestionResponse;
+import com.williamcallahan.javachat.domain.ingestion.IngestionRunOutcome;
 import com.williamcallahan.javachat.service.DocsIngestionService;
 import jakarta.annotation.security.PermitAll;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.io.IOException;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -40,7 +48,7 @@ public class IngestionController extends BaseController {
      * Starts an ingestion run that crawls and ingests up to the requested number of pages.
      */
     @PostMapping
-    public ResponseEntity<? extends ApiResponse> ingest(
+    public ResponseEntity<? extends IngestionResponse> ingest(
             @RequestParam(name = "maxPages", defaultValue = "100")
                     @Min(value = 1, message = "maxPages must be at least 1")
                     @Max(value = MAX_ALLOWED_PAGES, message = "maxPages cannot exceed " + MAX_ALLOWED_PAGES)
@@ -50,18 +58,25 @@ public class IngestionController extends BaseController {
             log.info("Starting ingestion for up to {} pages", maxPages);
             docsIngestionService.crawlAndIngest(maxPages);
 
-            return createSuccessResponse(String.format("Ingestion completed for up to %d pages", maxPages));
+            return ResponseEntity.ok(
+                    IngestionRunOutcome.success(String.format("Ingestion completed for up to %d pages", maxPages)));
 
         } catch (IOException ioException) {
             log.error(
                     "IO error during ingestion (exception type: {})",
                     ioException.getClass().getSimpleName());
-            return handleServiceException(ioException, "ingest documents");
+            return buildIngestionError(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to ingest documents: " + ioException.getMessage(),
+                    ioException);
         } catch (RuntimeException runtimeException) {
             log.error(
                     "Unexpected error during ingestion (exception type: {})",
                     runtimeException.getClass().getSimpleName());
-            return handleServiceException(runtimeException, "perform ingestion");
+            return buildIngestionError(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to perform ingestion: " + runtimeException.getMessage(),
+                    runtimeException);
         }
     }
 
@@ -69,26 +84,34 @@ public class IngestionController extends BaseController {
      * Ingests documents from a local directory, primarily for offline or development workflows.
      */
     @PostMapping("/local")
-    public ResponseEntity<? extends ApiResponse> ingestLocal(
+    public ResponseEntity<? extends IngestionLocalResponse> ingestLocal(
             @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000") @Min(1) @Max(1000000) int maxFiles) {
         try {
             DocsIngestionService.LocalIngestionOutcome outcome =
                     docsIngestionService.ingestLocalDirectory(directory, maxFiles);
-            return ResponseEntity.ok(
-                    IngestionLocalResponse.success(outcome.processedCount(), directory, outcome.failures()));
+            List<IngestionLocalFailure> failures = outcome.failures().stream()
+                    .map(failure -> new IngestionLocalFailure(failure.filePath(), failure.phase(), failure.details()))
+                    .toList();
+            return ResponseEntity.ok(IngestionLocalOutcome.success(outcome.processedCount(), directory, failures));
         } catch (IllegalArgumentException illegalArgumentException) {
-            return handleValidationException(illegalArgumentException);
+            return buildIngestionValidationError(illegalArgumentException);
         } catch (IOException ioException) {
             log.error(
                     "Local ingestion IO error (exception type: {})",
                     ioException.getClass().getSimpleName());
-            return handleServiceException(ioException, "perform local ingestion");
+            return buildIngestionError(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to perform local ingestion: " + ioException.getMessage(),
+                    ioException);
         } catch (RuntimeException runtimeException) {
             log.error(
                     "Local ingestion error (exception type: {})",
                     runtimeException.getClass().getSimpleName());
-            return handleServiceException(runtimeException, "perform local ingestion");
+            return buildIngestionError(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to perform local ingestion: " + runtimeException.getMessage(),
+                    runtimeException);
         }
     }
 
@@ -96,7 +119,20 @@ public class IngestionController extends BaseController {
      * Returns a standardized validation error response for invalid ingestion request parameters.
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
-        return super.handleValidationException(validationException);
+    public ResponseEntity<IngestionErrorResponse> handleIngestionValidationException(
+            IllegalArgumentException validationException) {
+        return buildIngestionValidationError(validationException);
+    }
+
+    private ResponseEntity<IngestionErrorResponse> buildIngestionValidationError(
+            IllegalArgumentException validationException) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(IngestionErrorResponse.error(validationException.getMessage()));
+    }
+
+    private ResponseEntity<IngestionErrorResponse> buildIngestionError(
+            HttpStatus status, String message, Exception exception) {
+        String details = describeException(exception);
+        return ResponseEntity.status(status).body(IngestionErrorResponse.error(message, details));
     }
 }
