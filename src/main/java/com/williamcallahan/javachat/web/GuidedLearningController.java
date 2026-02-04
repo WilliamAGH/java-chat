@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.*;
 
+import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -272,7 +273,7 @@ public class GuidedLearningController extends BaseController {
      * @return standardized bad request error response
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
+    public ResponseEntity<ApiResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);
     }
 }

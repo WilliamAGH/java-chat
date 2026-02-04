@@ -1,13 +1,21 @@
-package com.williamcallahan.javachat.web;
+package com.williamcallahan.javachat.domain.errors;
+
+import java.util.Objects;
 
 /**
- * Represents a standardized JSON error payload returned by API endpoints.
+ * Describes a standard JSON error payload that API clients can interpret uniformly.
  *
  * @param status fixed status indicator (typically "error")
  * @param message user-facing error message
  * @param details optional diagnostic details suitable for clients
  */
 public record ApiErrorResponse(String status, String message, String details) implements ApiResponse {
+    private static final String STATUS_ERROR = "error";
+
+    public ApiErrorResponse {
+        Objects.requireNonNull(status, "Status is required");
+        Objects.requireNonNull(message, "Error message is required");
+    }
 
     /**
      * Creates an error response with no diagnostic details.
@@ -16,7 +24,7 @@ public record ApiErrorResponse(String status, String message, String details) im
      * @return standardized error payload
      */
     public static ApiErrorResponse error(String message) {
-        return new ApiErrorResponse("error", message, null);
+        return new ApiErrorResponse(STATUS_ERROR, message, null);
     }
 
     /**
@@ -27,6 +35,6 @@ public record ApiErrorResponse(String status, String message, String details) im
      * @return standardized error payload
      */
     public static ApiErrorResponse error(String message, String details) {
-        return new ApiErrorResponse("error", message, details);
+        return new ApiErrorResponse(STATUS_ERROR, message, details);
     }
 }

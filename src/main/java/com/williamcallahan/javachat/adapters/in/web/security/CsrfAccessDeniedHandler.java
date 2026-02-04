@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.adapters.in.web.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.williamcallahan.javachat.web.ApiErrorResponse;
+import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
