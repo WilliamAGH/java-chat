@@ -235,8 +235,16 @@
     font-size: var(--text-xl);
   }
 
+  .assistant-content :global(h1) {
+    font-size: var(--text-2xl);
+  }
+
   .assistant-content :global(h3) {
     font-size: var(--text-lg);
+  }
+
+  .assistant-content :global(h4) {
+    font-size: var(--text-base);
   }
 
   .assistant-content :global(ul),
