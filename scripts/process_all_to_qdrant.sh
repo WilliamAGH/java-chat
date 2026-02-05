@@ -16,7 +16,7 @@ LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 CACHE_DIR="$PROJECT_ROOT/data/embeddings-cache"
 
 # Parse command line arguments
-UPLOAD_MODE="upload"  # Default to upload mode (with cache as fallback)
+UPLOAD_MODE="upload"  # Default to upload mode
 DOCS_SETS_FILTER=""
 for arg in "$@"; do
     case $arg in
@@ -32,7 +32,7 @@ for arg in "$@"; do
         --help|-h)
             echo "Usage: $0 [--local-only | --upload]"
             echo "  --local-only : Cache embeddings locally without uploading"
-            echo "  --upload     : Upload to Qdrant (default, with auto-fallback to cache if Qdrant fails)"
+            echo "  --upload     : Upload to Qdrant (default)"
             echo "  --doc-sets   : Comma-separated doc set ids or paths (e.g., java25-complete,java/java25-complete)"
             exit 0
             ;;
@@ -66,11 +66,16 @@ echo "Docs root: $DOCS_ROOT"
 echo "Cache directory: $CACHE_DIR"
 echo ""
 
-# Load environment variables
+# Load environment variables (respect any pre-set overrides from caller)
+PRESET_APP_LOCAL_EMBEDDING_ENABLED="${APP_LOCAL_EMBEDDING_ENABLED:-}"
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
+    if [ -n "$PRESET_APP_LOCAL_EMBEDDING_ENABLED" ]; then
+        APP_LOCAL_EMBEDDING_ENABLED="$PRESET_APP_LOCAL_EMBEDDING_ENABLED"
+        export APP_LOCAL_EMBEDDING_ENABLED
+    fi
     echo -e "${GREEN}✓ Environment variables loaded${NC}"
 else
     echo -e "${RED}✗ .env file not found${NC}"
@@ -79,7 +84,7 @@ fi
 
 # Verify required environment variables based on mode
 if [ "$UPLOAD_MODE" = "upload" ]; then
-    required_vars=("QDRANT_HOST" "QDRANT_PORT" "QDRANT_COLLECTION" "APP_LOCAL_EMBEDDING_ENABLED")
+    required_vars=("QDRANT_HOST" "QDRANT_PORT" "APP_LOCAL_EMBEDDING_ENABLED")
 else
     # Local-only mode doesn't need Qdrant vars
     required_vars=("APP_LOCAL_EMBEDDING_ENABLED")
@@ -135,58 +140,68 @@ percent_complete() {
 }
 
 
+# Hybrid collection names (must match application.properties defaults / env overrides)
+HYBRID_COLLECTIONS=(
+    "${QDRANT_COLLECTION_BOOKS:-java-chat-books}"
+    "${QDRANT_COLLECTION_DOCS:-java-docs}"
+    "${QDRANT_COLLECTION_ARTICLES:-java-articles}"
+    "${QDRANT_COLLECTION_PDFS:-java-pdfs}"
+)
+
+# Build Qdrant REST base URL from host/port/tls settings
+qdrant_rest_base_url() {
+    if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
+        if [ -n "${QDRANT_REST_PORT:-}" ]; then
+            echo "https://${QDRANT_HOST}:${QDRANT_REST_PORT}"
+        else
+            echo "https://${QDRANT_HOST}"
+        fi
+    else
+        echo "http://${QDRANT_HOST}:${QDRANT_REST_PORT:-8087}"
+    fi
+}
+
 # Function to check Qdrant connection (only in upload mode)
 check_qdrant_connection() {
     if [ "$UPLOAD_MODE" = "local-only" ]; then
         log "${YELLOW}ℹ Running in local-only mode - Qdrant connection not required${NC}"
         return 0
     fi
-    
+
     log "${YELLOW}Checking Qdrant connection...${NC}"
-    
+
     # Use REST API for connectivity checks (not gRPC). For local docker-compose, REST is mapped to 8087.
-    local url
-    if [ "$QDRANT_SSL" = "true" ] || [ "$QDRANT_SSL" = "1" ]; then
-        if [ -n "${QDRANT_REST_PORT:-}" ]; then
-            url="https://${QDRANT_HOST}:${QDRANT_REST_PORT}/collections/$QDRANT_COLLECTION"
-        else
-            url="https://${QDRANT_HOST}/collections/$QDRANT_COLLECTION"
-        fi
-    else
-        local rest_port="${QDRANT_REST_PORT:-8087}"
-        url="http://${QDRANT_HOST}:${rest_port}/collections/$QDRANT_COLLECTION"
-    fi
-    
+    local base_url
+    base_url=$(qdrant_rest_base_url)
+    local url="${base_url}/collections"
+
     local curl_opts=(-s -o /dev/null -w "%{http_code}")
-    if [ -n "$QDRANT_API_KEY" ]; then
+    if [ -n "${QDRANT_API_KEY:-}" ]; then
         curl_opts+=(-H "api-key: $QDRANT_API_KEY")
     fi
-    
+
     local response
     response=$(curl "${curl_opts[@]}" "$url" || echo "000")
-    
+
     if [ "$response" = "200" ]; then
         log "${GREEN}✓ Qdrant connection successful${NC} ($(percent_complete))"
-        
-        # Get collection info
+
+        # Show per-collection vector counts
         local info_opts=(-s)
-        if [ -n "$QDRANT_API_KEY" ]; then
+        if [ -n "${QDRANT_API_KEY:-}" ]; then
             info_opts+=(-H "api-key: $QDRANT_API_KEY")
         fi
-        local info
-        info=$(curl "${info_opts[@]}" "$url" || echo "{}")
-        local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
-        local dimensions=$(echo "$info" | grep -o '"size":[0-9]*' | head -1 | cut -d: -f2)
-        
-        log "${BLUE}ℹ Collection: $QDRANT_COLLECTION${NC}"
-        log "${BLUE}ℹ Current vectors: ${points:-0}${NC}"
-        log "${BLUE}ℹ Dimensions: ${dimensions:-unknown}${NC}"
-        return 0
-    elif [ "$response" = "404" ]; then
-        log "${YELLOW}⚠ Qdrant reachable, but collection not found yet (HTTP 404)${NC} ($(percent_complete))"
-        log "${YELLOW}  Collection: $QDRANT_COLLECTION${NC}"
-        log "${YELLOW}  URL: $url${NC}"
-        log "${YELLOW}  If schema init is enabled, the app will create the collection on first use.${NC}"
+        for coll in "${HYBRID_COLLECTIONS[@]}"; do
+            local coll_url="${base_url}/collections/${coll}"
+            local info
+            info=$(curl "${info_opts[@]}" "$coll_url" 2>/dev/null || echo "{}")
+            local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
+            if [ -n "$points" ]; then
+                log "${BLUE}ℹ ${coll}: ${points} vectors${NC}"
+            else
+                log "${YELLOW}ℹ ${coll}: not created yet${NC}"
+            fi
+        done
         return 0
     else
         log "${RED}✗ Failed to connect to Qdrant (HTTP $response)${NC}"
@@ -293,9 +308,14 @@ fi
     # Run DocumentProcessor with cli profile for document ingestion
     cd "$PROJECT_ROOT"
     if [ -f .env ]; then
+        PRESET_APP_LOCAL_EMBEDDING_ENABLED="${APP_LOCAL_EMBEDDING_ENABLED:-}"
         set -a
         source .env
         set +a
+        if [ -n "$PRESET_APP_LOCAL_EMBEDDING_ENABLED" ]; then
+            APP_LOCAL_EMBEDDING_ENABLED="$PRESET_APP_LOCAL_EMBEDDING_ENABLED"
+            export APP_LOCAL_EMBEDDING_ENABLED
+        fi
     fi
     
     # Run with cli profile to trigger DocumentProcessor
@@ -400,29 +420,26 @@ show_statistics() {
     log "=============================================="
     
     if [ "$UPLOAD_MODE" = "upload" ]; then
-        # Get Qdrant statistics
+        # Get Qdrant statistics across all hybrid collections
         local base_url
-        if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
-            if [ -n "${QDRANT_REST_PORT:-}" ]; then
-                base_url="https://${QDRANT_HOST}:${QDRANT_REST_PORT}"
-            else
-                base_url="https://${QDRANT_HOST}"
-            fi
-        else
-            base_url="http://${QDRANT_HOST}:${QDRANT_REST_PORT:-8087}"
-        fi
-        local url="${base_url}/collections/$QDRANT_COLLECTION"
+        base_url=$(qdrant_rest_base_url)
         local info_opts=(-s)
         if [ -n "${QDRANT_API_KEY:-}" ]; then
-            info_opts+=( -H "api-key: $QDRANT_API_KEY" )
+            info_opts+=(-H "api-key: $QDRANT_API_KEY")
         fi
-        local info
-        info=$(curl "${info_opts[@]}" "$url" || echo "{}")
-        local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
-        
+
+        local total_points=0
         log "${BLUE}📊 Qdrant Statistics:${NC}"
-        log "  - Collection: $QDRANT_COLLECTION"
-        log "  - Total vectors: ${points:-0}"
+        for coll in "${HYBRID_COLLECTIONS[@]}"; do
+            local coll_url="${base_url}/collections/${coll}"
+            local info
+            info=$(curl "${info_opts[@]}" "$coll_url" 2>/dev/null || echo "{}")
+            local points=$(echo "$info" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
+            points=${points:-0}
+            total_points=$((total_points + points))
+            log "  - ${coll}: ${points} vectors"
+        done
+        log "  - Total vectors: ${total_points}"
         log "  - Host: $QDRANT_HOST"
     else
         log "${BLUE}📊 Local Cache Statistics:${NC}"
@@ -482,12 +499,8 @@ main() {
     fi
     
     if ! check_embedding_server; then
-        log "${YELLOW}⚠ Warning: Embedding server issues detected${NC}"
-        read -p "Continue anyway? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+        log "${RED}✗ Embedding provider check failed; refusing to ingest with missing embeddings${NC}"
+        exit 1
     fi
     
     # Process documents
