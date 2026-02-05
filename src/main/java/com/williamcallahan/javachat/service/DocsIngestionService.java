@@ -227,38 +227,47 @@ public class DocsIngestionService {
 
     private boolean containsDisallowedVersionedSpringReference(
             String normalizedPath, String springMarker, java.util.function.Predicate<String> versionDisallowed) {
+        return extractReferenceSubdirectory(normalizedPath, springMarker)
+                .filter(this::isVersionedOrSnapshot)
+                .filter(subdir -> isSnapshot(subdir) || versionDisallowed.test(subdir))
+                .isPresent();
+    }
+
+    private Optional<String> extractReferenceSubdirectory(String normalizedPath, String springMarker) {
         if (normalizedPath == null || normalizedPath.isBlank() || springMarker == null || springMarker.isBlank()) {
-            return false;
+            return Optional.empty();
         }
         String marker = "/" + springMarker;
         int springIndex = normalizedPath.indexOf(marker);
         if (springIndex < 0) {
-            return false;
+            return Optional.empty();
         }
         int referenceIndex = normalizedPath.indexOf("/reference/", springIndex);
         if (referenceIndex < 0) {
-            return false;
+            return Optional.empty();
         }
         int versionStart = referenceIndex + "/reference/".length();
         if (versionStart >= normalizedPath.length()) {
-            return false;
+            return Optional.empty();
         }
         int versionEnd = normalizedPath.indexOf('/', versionStart);
         if (versionEnd < 0) {
             versionEnd = normalizedPath.length();
         }
-        String referenceChild = normalizedPath.substring(versionStart, versionEnd);
-        if (referenceChild.isBlank()) {
-            return false;
-        }
-        if (referenceChild.contains("SNAPSHOT")) {
-            return true;
-        }
-        char first = referenceChild.charAt(0);
-        if (!(first >= '0' && first <= '9')) {
-            return false;
-        }
-        return versionDisallowed.test(referenceChild);
+        String subdirectory = normalizedPath.substring(versionStart, versionEnd);
+        return subdirectory.isBlank() ? Optional.empty() : Optional.of(subdirectory);
+    }
+
+    private boolean isVersionedOrSnapshot(String subdirectory) {
+        return isSnapshot(subdirectory) || startsWithDigit(subdirectory);
+    }
+
+    private boolean isSnapshot(String subdirectory) {
+        return subdirectory.contains("SNAPSHOT");
+    }
+
+    private boolean startsWithDigit(String subdirectory) {
+        return !subdirectory.isEmpty() && Character.isDigit(subdirectory.charAt(0));
     }
 
     private LocalFileProcessingOutcome processLocalFile(Path root, Path file) {
