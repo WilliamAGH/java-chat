@@ -38,8 +38,7 @@ public class EmbeddingCacheService {
     private static final Logger CACHE_LOG = LoggerFactory.getLogger("EMBEDDING_CACHE");
     private static final String CACHE_FILE_NAME = "embeddings_cache.gz";
     private static final String CORRUPT_CACHE_PREFIX = "embeddings_cache.corrupt.";
-    private static final DateTimeFormatter CACHE_TIMESTAMP_FORMAT =
-            DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
+    private static final DateTimeFormatter CACHE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     private final ObjectMapper cacheMapper;
     private final Path cacheDir;
