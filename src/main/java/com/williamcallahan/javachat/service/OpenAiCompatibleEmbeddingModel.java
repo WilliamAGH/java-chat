@@ -4,6 +4,7 @@ import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.RequestOptions;
 import com.openai.core.Timeout;
+import com.openai.errors.OpenAIServiceException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
@@ -19,31 +20,21 @@ import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 
 /**
- * Simple OpenAI-compatible EmbeddingModel.
- * Uses the OpenAI Java SDK to call `/embeddings` against the configured base URL.
+ * OpenAI-compatible embedding model that fails fast on provider errors.
+ *
+ * <p>Uses the OpenAI Java SDK to call `/embeddings` against the configured base URL and
+ * propagates HTTP failures so invalid embeddings are never cached.</p>
  */
 public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
 
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
+    private static final int MAX_ERROR_SNIPPET = 512;
 
     private final OpenAIClient client;
     private final String modelName;
     private final int dimensionsHint;
-
-    /**
-     * Wraps remote embedding API failures as a runtime exception with concise context.
-     */
-    private static final class EmbeddingApiResponseException extends IllegalStateException {
-        private EmbeddingApiResponseException(String message, Exception cause) {
-            super(message, cause);
-        }
-
-        private EmbeddingApiResponseException(String message) {
-            super(message);
-        }
-    }
 
     /**
      * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
@@ -78,6 +69,10 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
 
     /**
      * Calls the OpenAI-compatible embeddings endpoint for all inputs in the request.
+     *
+     * @param request embedding request payload
+     * @return embedding response
+     * @throws EmbeddingServiceUnavailableException when the provider returns an HTTP error
      */
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
@@ -95,14 +90,17 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
             CreateEmbeddingResponse response = client.embeddings().create(params, requestOptions);
             List<Embedding> embeddings = parseResponse(response, instructions.size());
             return new EmbeddingResponse(embeddings);
-
-        } catch (EmbeddingApiResponseException exception) {
-            throw exception;
+        } catch (OpenAIServiceException exception) {
+            String details = sanitizeMessage(exception.getMessage());
+            String failureMessage = details.isBlank()
+                    ? "Remote embedding provider returned HTTP " + exception.statusCode()
+                    : "Remote embedding provider returned HTTP " + exception.statusCode() + ": " + details;
+            throw new EmbeddingServiceUnavailableException(failureMessage, exception);
         } catch (RuntimeException exception) {
             log.warn(
                     "[EMBEDDING] Remote embedding call failed (exception type: {})",
                     exception.getClass().getSimpleName());
-            throw new EmbeddingApiResponseException("Remote embedding call failed", exception);
+            throw new EmbeddingServiceUnavailableException("Remote embedding call failed", exception);
         }
     }
 
@@ -118,11 +116,11 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
 
     private List<Embedding> parseResponse(CreateEmbeddingResponse response, int expectedCount) {
         if (response == null) {
-            throw new EmbeddingApiResponseException("Remote embedding response was null");
+            throw new EmbeddingServiceUnavailableException("Remote embedding response was null");
         }
         List<com.openai.models.embeddings.Embedding> data = response.data();
         if (data.isEmpty()) {
-            throw new EmbeddingApiResponseException("Remote embedding response missing embedding entries");
+            throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding entries");
         }
 
         List<Embedding> embeddingsByIndex = new ArrayList<>(expectedCount);
@@ -133,7 +131,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
         for (int itemIndex = 0; itemIndex < data.size(); itemIndex++) {
             com.openai.models.embeddings.Embedding item = data.get(itemIndex);
             if (item == null) {
-                throw new EmbeddingApiResponseException(
+                throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response contained null entry at index " + itemIndex);
             }
             int targetIndex = safeEmbeddingIndex(itemIndex, item, expectedCount);
@@ -148,7 +146,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
         for (int index = 0; index < expectedCount; index++) {
             Embedding embedding = embeddingsByIndex.get(index);
             if (embedding == null) {
-                throw new EmbeddingApiResponseException(
+                throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response missing embedding for index " + index);
             }
             orderedEmbeddings.add(embedding);
@@ -181,30 +179,45 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
 
     /**
      * Embeds a single document by delegating to the remote embeddings endpoint.
+     *
+     * @param document document to embed
+     * @return embedding vector
+     * @throws EmbeddingServiceUnavailableException when the provider returns invalid data
      */
     @Override
     public float[] embed(org.springframework.ai.document.Document document) {
         EmbeddingRequest embeddingRequest = new EmbeddingRequest(List.of(document.getText()), null);
         EmbeddingResponse embeddingResponse = call(embeddingRequest);
         if (embeddingResponse.getResults().isEmpty()) {
-            throw new EmbeddingApiResponseException("Embedding response was empty");
+            throw new EmbeddingServiceUnavailableException("Remote embedding response was empty");
         }
         return embeddingResponse.getResults().get(0).getOutput();
     }
 
     private float[] toFloatVector(List<Float> embeddingEntries) {
         if (embeddingEntries == null || embeddingEntries.isEmpty()) {
-            throw new EmbeddingApiResponseException("Remote embedding response missing embedding values");
+            throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding values");
         }
         float[] vector = new float[embeddingEntries.size()];
         for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
             Float entry = embeddingEntries.get(vectorIndex);
             if (entry == null) {
-                throw new EmbeddingApiResponseException("Null embedding value at index " + vectorIndex);
+                throw new EmbeddingServiceUnavailableException("Null embedding value at index " + vectorIndex);
             }
             vector[vectorIndex] = entry;
         }
         return vector;
+    }
+
+    private static String sanitizeMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        String sanitized = message.replace("\r", " ").replace("\n", " ").trim();
+        if (sanitized.length() > MAX_ERROR_SNIPPET) {
+            return sanitized.substring(0, MAX_ERROR_SNIPPET) + "...";
+        }
+        return sanitized;
     }
 
     /**

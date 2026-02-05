@@ -22,8 +22,6 @@ public class LocalEmbedding {
     private String serverUrl = URL_DEF;
     private String model = MODEL_DEF;
     private int dimensions = DIM_DEF;
-    private boolean hashFallback;
-
     /**
      * Creates local embedding configuration.
      */
@@ -113,24 +111,6 @@ public class LocalEmbedding {
      */
     public void setDimensions(final int dimensions) {
         this.dimensions = dimensions;
-    }
-
-    /**
-     * Returns whether hash fallback is used when the local model is disabled.
-     *
-     * @return whether hash fallback is used when the local model is disabled
-     */
-    public boolean isUseHashWhenDisabled() {
-        return hashFallback;
-    }
-
-    /**
-     * Sets whether hash fallback is used when the local model is disabled.
-     *
-     * @param hashFallback whether hash fallback is used when the local model is disabled
-     */
-    public void setUseHashWhenDisabled(final boolean hashFallback) {
-        this.hashFallback = hashFallback;
     }
 
     private static String requireNonNullText(final String propertyKey, final String text) {
