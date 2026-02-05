@@ -104,6 +104,52 @@ quarantine_incomplete_dir() {
     mv "$dir" "$quarantine_dir"
 }
 
+quarantine_path() {
+    local dir="$1"
+    local name="$2"
+
+    if [ "$CLEAN_INCOMPLETE" != "true" ]; then
+        return 0
+    fi
+    if [ -z "$dir" ] || [ ! -e "$dir" ]; then
+        return 0
+    fi
+
+    local quarantine_root="$DOCS_ROOT/.quarantine"
+    local timestamp
+    timestamp="$(date -u +%Y%m%d_%H%M%S)"
+    mkdir -p "$quarantine_root"
+
+    local base
+    base="$(basename "$dir")"
+    local quarantine_dir="$quarantine_root/${base}.${timestamp}"
+    log "${YELLOW}⚠ Quarantining legacy mirror path: $name -> $quarantine_dir${NC}"
+    mv "$dir" "$quarantine_dir"
+}
+
+quarantine_versioned_reference_subdirs() {
+    local target_dir="$1"
+    local name="$2"
+
+    if [ "$CLEAN_INCOMPLETE" != "true" ]; then
+        return 0
+    fi
+    if [ -z "$target_dir" ] || [ ! -d "$target_dir/reference" ]; then
+        return 0
+    fi
+
+    shopt -s nullglob
+    local child
+    for child in "$target_dir/reference/"*; do
+        local child_base
+        child_base="$(basename "$child")"
+        if [[ "$child_base" =~ ^[0-9] ]] || [[ "$child_base" == *SNAPSHOT* ]]; then
+            quarantine_path "$child" "$name reference/$child_base"
+        fi
+    done
+    shopt -u nullglob
+}
+
 # Function to fetch documentation with wget (incremental via timestamping)
 fetch_docs() {
     local url="$1"
@@ -123,6 +169,14 @@ fetch_docs() {
     fi
     if [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
         quarantine_incomplete_dir "$target_dir" "$name" "$existing_count" "$min_files"
+    fi
+
+    # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
+    if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
+        quarantine_path "$target_dir/api/current" "$name legacy api/current"
+    fi
+    if [[ "$name" == *"Spring Framework Reference"* ]] || [[ "$name" == *"Spring AI Reference"* ]]; then
+        quarantine_versioned_reference_subdirs "$target_dir" "$name"
     fi
 
     log "${YELLOW}Fetching $name...${NC}"
