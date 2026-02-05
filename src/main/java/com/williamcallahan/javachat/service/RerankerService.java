@@ -100,6 +100,8 @@ public class RerankerService {
         prompt.append("You are a document re-ranker for the Java learning assistant system.\n");
         prompt.append("Reorder the following documents by relevance to the query.\n");
         prompt.append("Consider Java-specific context, version relevance, and learning value.\n");
+        prompt.append("Prefer official documentation over blogs or third-party sources.\n");
+        prompt.append("Prefer stable release documentation over early-access or preview content.\n");
         prompt.append("Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
 

@@ -48,6 +48,7 @@ public class GuidedLearningService {
     private static final String THINK_JAVA_GUIDANCE_TEMPLATE =
             "You are a Java learning assistant guiding the user through 'Think Java — 2nd Edition'. "
                     + "Use ONLY content grounded in this book for factual claims. "
+                    + "If the book does not cover a topic, say so plainly and ask before stepping outside the book. "
                     + "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately. "
                     + "Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. "
                     + "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.%n%n"
