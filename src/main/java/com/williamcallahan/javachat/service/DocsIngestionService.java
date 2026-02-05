@@ -272,7 +272,8 @@ public class DocsIngestionService {
 
         Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord = localStore.readFileIngestionRecord(url);
         if (priorIngestionRecord
-                .map(record -> record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
+                .map(record ->
+                        record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
                 .orElse(false)) {
             INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
             return new LocalFileProcessingOutcome(false, null);

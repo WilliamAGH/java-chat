@@ -347,7 +347,9 @@ public class EmbeddingCacheService {
             return 0;
         }
         int removed = 0;
-        for (Iterator<Map.Entry<String, EmbeddingCacheEntry>> it = memoryCache.entrySet().iterator(); it.hasNext(); ) {
+        for (Iterator<Map.Entry<String, EmbeddingCacheEntry>> it =
+                        memoryCache.entrySet().iterator();
+                it.hasNext(); ) {
             Map.Entry<String, EmbeddingCacheEntry> entry = it.next();
             EmbeddingCacheEntry cachedEmbedding = entry.getValue();
             if (cachedEmbedding == null) {
