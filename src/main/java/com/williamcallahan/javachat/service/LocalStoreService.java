@@ -134,7 +134,8 @@ public class LocalStoreService {
             return false;
         }
         return readFileIngestionRecord(url)
-                .map(record -> record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
+                .map(record ->
+                        record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
                 .orElse(false);
     }
 
@@ -293,7 +294,8 @@ public class LocalStoreService {
             } else if (trimmed.startsWith("mtime=")) {
                 mtime = parseLongSafely(trimmed.substring("mtime=".length()));
             } else if (trimmed.startsWith(FILE_MARKER_HASH_PREFIX)) {
-                String hash = trimmed.substring(FILE_MARKER_HASH_PREFIX.length()).trim();
+                String hash =
+                        trimmed.substring(FILE_MARKER_HASH_PREFIX.length()).trim();
                 if (!hash.isBlank()) {
                     hashes.add(hash);
                 }

@@ -27,8 +27,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class DocsIngestionService {
     private static final String DEFAULT_DOCS_ROOT = "data/docs";
-    private static final String SPRING_BOOT_REFERENCE_PATH = "/data/docs/spring-boot/reference.html";
-    private static final String SPRING_BOOT_REFERENCE_URL = "https://docs.spring.io/spring-boot/reference/";
     private static final String FILE_URL_PREFIX = "file://";
     private static final String API_PATH_SEGMENT = "/api/";
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(30);
@@ -122,8 +120,9 @@ public class DocsIngestionService {
                 }
             }
 
-            List<org.springframework.ai.document.Document> documents =
+            ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome =
                     chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+            List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
 
             if (!documents.isEmpty()) {
                 INDEXING_LOG.info("[INDEXING] Processing {} documents", documents.size());
@@ -189,8 +188,49 @@ public class DocsIngestionService {
         if (fileNamePath == null) {
             return false;
         }
+        if (shouldSkipVersionedSpringReference(path)) {
+            return false;
+        }
         String name = fileNamePath.toString().toLowerCase(Locale.ROOT);
         return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
+    }
+
+    private boolean shouldSkipVersionedSpringReference(Path path) {
+        if (path == null) {
+            return false;
+        }
+        String normalized = path.toAbsolutePath().normalize().toString().replace('\\', '/');
+        return containsVersionedSpringReference(normalized, "spring-framework")
+                || containsVersionedSpringReference(normalized, "spring-ai");
+    }
+
+    private boolean containsVersionedSpringReference(String normalizedPath, String springMarker) {
+        if (normalizedPath == null || normalizedPath.isBlank() || springMarker == null || springMarker.isBlank()) {
+            return false;
+        }
+        String marker = "/" + springMarker;
+        int springIndex = normalizedPath.indexOf(marker);
+        if (springIndex < 0) {
+            return false;
+        }
+        int referenceIndex = normalizedPath.indexOf("/reference/", springIndex);
+        if (referenceIndex < 0) {
+            return false;
+        }
+        int versionStart = referenceIndex + "/reference/".length();
+        if (versionStart >= normalizedPath.length()) {
+            return false;
+        }
+        int versionEnd = normalizedPath.indexOf('/', versionStart);
+        if (versionEnd < 0) {
+            versionEnd = normalizedPath.length();
+        }
+        String referenceChild = normalizedPath.substring(versionStart, versionEnd);
+        if (referenceChild.isBlank()) {
+            return false;
+        }
+        char first = referenceChild.charAt(0);
+        return (first >= '0' && first <= '9') || referenceChild.contains("SNAPSHOT");
     }
 
     private LocalFileProcessingOutcome processLocalFile(Path root, Path file) {
@@ -220,6 +260,15 @@ public class DocsIngestionService {
         if (localStore.isFileIngestedAndUnchanged(url, fileSizeBytes, lastModifiedMillis)) {
             INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
             return new LocalFileProcessingOutcome(false, null);
+        }
+        boolean requiresFullReindex = localStore.readFileIngestionRecord(url)
+                .map(record -> record.fileSizeBytes() != fileSizeBytes || record.lastModifiedMillis() != lastModifiedMillis)
+                .orElse(false);
+        if (requiresFullReindex) {
+            LocalFileProcessingOutcome pruneOutcome = prunePreviouslyIngestedFile(url, file);
+            if (pruneOutcome != null) {
+                return pruneOutcome;
+            }
         }
         String title;
         String bodyText = null;
@@ -253,12 +302,16 @@ public class DocsIngestionService {
             }
         }
 
-        List<org.springframework.ai.document.Document> documents;
+        ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
         try {
             if (fileName.endsWith(".pdf")) {
-                documents = chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
+                chunkingOutcome = requiresFullReindex
+                        ? chunkProcessingService.processPdfAndStoreWithPagesForce(file, url, title, packageName)
+                        : chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
             } else {
-                documents = chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+                chunkingOutcome = requiresFullReindex
+                        ? chunkProcessingService.processAndStoreChunksForce(bodyText, url, title, packageName)
+                        : chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
             }
         } catch (IOException chunkingException) {
             log.error(
@@ -267,14 +320,57 @@ public class DocsIngestionService {
             return new LocalFileProcessingOutcome(false, failure(file, "chunking", chunkingException));
         }
 
+        List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
         if (!documents.isEmpty()) {
             applyProvenanceMetadata(documents, deriveProvenance(root, file, url));
             return processDocuments(file, url, fileSizeBytes, lastModifiedMillis, documents, fileStartMillis);
+        } else if (chunkingOutcome.skippedAllChunks()) {
+            INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
+            markFileIngested(url, fileSizeBytes, lastModifiedMillis, List.of());
+            return new LocalFileProcessingOutcome(false, null);
+        } else if (chunkingOutcome.generatedNoChunks()) {
+            INDEXING_LOG.debug("[INDEXING] Skipping file that produced no chunks");
+            return new LocalFileProcessingOutcome(
+                    false, new LocalIngestionFailure(file.toString(), "empty-document", "No content to chunk"));
         } else {
             INDEXING_LOG.debug("[INDEXING] Skipping empty document");
             return new LocalFileProcessingOutcome(
                     false, new LocalIngestionFailure(file.toString(), "empty-document", "No chunks generated"));
         }
+    }
+
+    private LocalFileProcessingOutcome prunePreviouslyIngestedFile(String url, Path file) {
+        try {
+            if (!localOnlyMode) {
+                String expression = buildUrlDeleteExpression(url);
+                RetrySupport.executeWithRetry(
+                        () -> {
+                            vectorStore.delete(expression);
+                            return null;
+                        },
+                        "Qdrant delete");
+            }
+            localStore.deleteParsedChunksForUrl(url);
+            localStore.deleteFileIngestionRecord(url);
+            return null;
+        } catch (IOException ioException) {
+            return new LocalFileProcessingOutcome(false, failure(file, "prune-local", ioException));
+        } catch (RuntimeException vectorStoreException) {
+            return new LocalFileProcessingOutcome(false, failure(file, "prune-vector-store", vectorStoreException));
+        }
+    }
+
+    private String buildUrlDeleteExpression(String url) {
+        Objects.requireNonNull(url, "url must not be null");
+        String quoted;
+        if (!url.contains("\"")) {
+            quoted = "\"" + url + "\"";
+        } else if (!url.contains("'")) {
+            quoted = "'" + url + "'";
+        } else {
+            throw new IllegalArgumentException("URL contains both quote types and cannot be safely deleted: " + url);
+        }
+        return "url == " + quoted;
     }
 
     private Provenance deriveProvenance(Path root, Path file, String url) {
@@ -473,7 +569,7 @@ public class DocsIngestionService {
             // Don't mark when we fell back to cache in upload mode - allows future re-upload
             if (storageResult.usedPrimaryDestination()) {
                 markDocumentsIngested(documents);
-                markFileIngested(url, fileSizeBytes, lastModifiedMillis);
+                markFileIngested(url, fileSizeBytes, lastModifiedMillis, extractChunkHashes(documents));
             }
 
             return new LocalFileProcessingOutcome(true, null);
@@ -511,17 +607,38 @@ public class DocsIngestionService {
         }
     }
 
-    private void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis) {
+    private void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes) {
         if (url == null || url.isBlank()) {
             return;
         }
         try {
-            localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis);
+            localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis, chunkHashes);
         } catch (IOException exception) {
             log.warn(
                     "Failed to mark file as ingested (exception type: {})",
                     exception.getClass().getSimpleName());
         }
+    }
+
+    private List<String> extractChunkHashes(List<org.springframework.ai.document.Document> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return List.of();
+        }
+        List<String> hashes = new ArrayList<>(documents.size());
+        for (org.springframework.ai.document.Document doc : documents) {
+            if (doc == null) {
+                continue;
+            }
+            Object hashValue = doc.getMetadata().get("hash");
+            if (hashValue == null) {
+                continue;
+            }
+            String hash = hashValue.toString();
+            if (!hash.isBlank()) {
+                hashes.add(hash);
+            }
+        }
+        return List.copyOf(hashes);
     }
 
     /**
@@ -643,16 +760,7 @@ public class DocsIngestionService {
 
     private String mapLocalPathToUrl(final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
-        return DocsSourceRegistry.resolveLocalPath(absolutePath)
-                .or(() -> mapKnownMirrorUrl(absolutePath))
-                .orElse(FILE_URL_PREFIX + absolutePath);
-    }
-
-    private Optional<String> mapKnownMirrorUrl(final String absolutePath) {
-        if (absolutePath.contains(SPRING_BOOT_REFERENCE_PATH)) {
-            return Optional.of(SPRING_BOOT_REFERENCE_URL);
-        }
-        return Optional.empty();
+        return DocsSourceRegistry.resolveLocalPath(absolutePath).orElse(FILE_URL_PREFIX + absolutePath);
     }
 
     private String extractTitleFromMetadata(String metadata, String fileName) {
