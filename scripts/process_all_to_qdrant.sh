@@ -121,7 +121,8 @@ percent_complete() {
         parsed_count=$(find "$parsed_dir" -type f -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
     fi
     if [ -d "$index_dir" ]; then
-        indexed_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
+        # Exclude file-level ingestion markers (file_*.marker); count only chunk hash markers
+        indexed_count=$(find "$index_dir" -maxdepth 1 -type f ! -name "file_*.marker" 2>/dev/null | wc -l | tr -d ' ')
     fi
     
     if [ "$parsed_count" -gt 0 ]; then
@@ -453,7 +454,7 @@ show_statistics() {
     # Get actual deduplication statistics from Java app
     local index_dir="$PROJECT_ROOT/data/index"
     if [ -d "$index_dir" ]; then
-        local chunk_count=$(ls -1 "$index_dir" 2>/dev/null | wc -l | tr -d ' ')
+        local chunk_count=$(find "$index_dir" -maxdepth 1 -type f ! -name "file_*.marker" 2>/dev/null | wc -l | tr -d ' ')
         log ""
         log "${BLUE}🔒 Deduplication Statistics:${NC}"
         log "  - Processed chunks (unique hashes): $chunk_count"

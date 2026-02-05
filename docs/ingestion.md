@@ -21,6 +21,12 @@ This runs `scripts/fetch_all_docs.sh` (requires `wget`). Source URLs live in:
 
 - `src/main/resources/docs-sources.properties`
 
+Optional flags:
+
+```bash
+./scripts/fetch_all_docs.sh --include-quick
+```
+
 ## Process + upload to Qdrant
 
 Run the processor:
@@ -60,6 +66,7 @@ Deduplication is based on per-chunk SHA‑256 markers stored locally:
 
 - `data/index/` contains one file per ingested chunk hash
 - `data/parsed/` contains chunk text snapshots used for local fallback search and debugging
+- `data/index/file_*.marker` (optional) records file-level fingerprints so re-runs can skip unchanged files
 
 See [local store directories](domains/local-store-directories.md) for details.
 

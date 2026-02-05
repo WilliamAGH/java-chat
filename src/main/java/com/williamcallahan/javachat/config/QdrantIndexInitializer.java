@@ -124,6 +124,12 @@ public class QdrantIndexInitializer {
             createPayloadIndex("url", SCHEMA_TYPE_KEYWORD);
             createPayloadIndex("hash", SCHEMA_TYPE_KEYWORD);
             createPayloadIndex("chunkIndex", SCHEMA_TYPE_INTEGER);
+            createPayloadIndex("docSet", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("docPath", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("sourceName", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("sourceKind", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("docVersion", SCHEMA_TYPE_KEYWORD);
+            createPayloadIndex("docType", SCHEMA_TYPE_KEYWORD);
         } catch (RuntimeException indexCreationException) {
             log.warn(
                     "Unable to ensure Qdrant payload indexes (exception type: {})",
