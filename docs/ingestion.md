@@ -45,6 +45,15 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 ./scripts/process_all_to_qdrant.sh --upload
 ```
 
+### Doc set filtering (CLI)
+
+Limit ingestion to specific doc sets by id or path:
+
+```bash
+./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete
+./scripts/process_all_to_qdrant.sh --upload --doc-sets=java/java25-complete,spring-boot-complete
+```
+
 ## Deduplication markers
 
 Deduplication is based on per-chunk SHA‑256 markers stored locally:

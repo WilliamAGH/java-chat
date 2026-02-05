@@ -33,6 +33,9 @@ public final class DocsSourceRegistry {
 
     private static final String JAVA24_API_BASE_KEY = "JAVA24_API_BASE";
     private static final String JAVA25_API_BASE_KEY = "JAVA25_API_BASE";
+    private static final String ORACLE_JAVASE_BASE_KEY = "ORACLE_JAVASE_BASE";
+    private static final String IBM_ARTICLES_BASE_KEY = "IBM_ARTICLES_BASE";
+    private static final String JETBRAINS_IDEA_2025_09_BASE_KEY = "JETBRAINS_IDEA_2025_09_BASE";
     private static final String SPRING_BOOT_API_BASE_KEY = "SPRING_BOOT_API_BASE";
     private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_BASE_KEY = "SPRING_AI_API_BASE";
@@ -40,7 +43,10 @@ public final class DocsSourceRegistry {
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
 
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
-    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/docs/api/";
+    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/";
+    private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
+    private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
+    private static final String DEFAULT_JETBRAINS_IDEA_2025_09_BASE = "https://blog.jetbrains.com/idea/2025/09/";
     private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/docs/current/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
@@ -52,7 +58,6 @@ public final class DocsSourceRegistry {
     private static final String LOCAL_DOCS_JAVA24_COMPLETE = LOCAL_DOCS_ROOT + "java/java24-complete/";
     private static final String LOCAL_DOCS_JAVA25 = LOCAL_DOCS_ROOT + "java25/";
     private static final String LOCAL_DOCS_JAVA25_NESTED = LOCAL_DOCS_ROOT + "java/java25/";
-    private static final String LOCAL_DOCS_JAVA25_EA_COMPLETE = LOCAL_DOCS_ROOT + "java/java25-ea-complete/";
     private static final String LOCAL_DOCS_JAVA25_COMPLETE = LOCAL_DOCS_ROOT + "java/java25-complete/";
     private static final String LOCAL_DOCS_SPRING_BOOT = LOCAL_DOCS_ROOT + "spring-boot/";
     private static final String LOCAL_DOCS_SPRING_BOOT_COMPLETE = LOCAL_DOCS_ROOT + "spring-boot-complete/";
@@ -61,6 +66,9 @@ public final class DocsSourceRegistry {
     private static final String LOCAL_DOCS_SPRING_AI = LOCAL_DOCS_ROOT + "spring-ai/";
     private static final String LOCAL_DOCS_SPRING_AI_COMPLETE = LOCAL_DOCS_ROOT + "spring-ai-complete/";
     private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
+    private static final String LOCAL_DOCS_ORACLE_JAVASE = LOCAL_DOCS_ROOT + "oracle/javase/";
+    private static final String LOCAL_DOCS_IBM_ARTICLES = LOCAL_DOCS_ROOT + "ibm/articles/";
+    private static final String LOCAL_DOCS_JETBRAINS_IDEA_2025_09 = LOCAL_DOCS_ROOT + "jetbrains/idea/2025/09/";
 
     private static final String PUBLIC_PDFS_BASE = "/pdfs/";
     private static final String PDF_EXTENSION = ".pdf";
@@ -74,6 +82,10 @@ public final class DocsSourceRegistry {
 
     public static final String JAVA24_API_BASE = resolveSetting(JAVA24_API_BASE_KEY, DEFAULT_JAVA24);
     public static final String JAVA25_API_BASE = resolveSetting(JAVA25_API_BASE_KEY, DEFAULT_JAVA25);
+    public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
+    public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
+    public static final String JETBRAINS_IDEA_2025_09_BASE =
+            resolveSetting(JETBRAINS_IDEA_2025_09_BASE_KEY, DEFAULT_JETBRAINS_IDEA_2025_09_BASE);
     public static final String SPRING_BOOT_API_BASE =
             resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
@@ -121,10 +133,9 @@ public final class DocsSourceRegistry {
         prefixLookup.put(LOCAL_DOCS_JAVA24_NESTED, JAVA24_API_BASE);
         prefixLookup.put(LOCAL_DOCS_JAVA24_COMPLETE, JAVA24_API_BASE);
 
-        // Java SE 25 API (Oracle) - includes alternate local paths for backwards compatibility
+        // Java SE 25 documentation (Oracle) - includes alternate local paths for backwards compatibility
         prefixLookup.put(LOCAL_DOCS_JAVA25, JAVA25_API_BASE);
         prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA25_EA_COMPLETE, JAVA25_API_BASE);
         prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_API_BASE);
 
         // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
@@ -138,6 +149,11 @@ public final class DocsSourceRegistry {
         // Spring AI API documentation
         prefixLookup.put(LOCAL_DOCS_SPRING_AI, SPRING_AI_API_BASE);
         prefixLookup.put(LOCAL_DOCS_SPRING_AI_COMPLETE, SPRING_AI_API_BASE);
+
+        // External Java 25 sources
+        prefixLookup.put(LOCAL_DOCS_ORACLE_JAVASE, ORACLE_JAVASE_BASE);
+        prefixLookup.put(LOCAL_DOCS_IBM_ARTICLES, IBM_ARTICLES_BASE);
+        prefixLookup.put(LOCAL_DOCS_JETBRAINS_IDEA_2025_09, JETBRAINS_IDEA_2025_09_BASE);
 
         return prefixLookup;
     }

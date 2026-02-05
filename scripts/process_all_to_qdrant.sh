@@ -2,9 +2,10 @@
 
 # Consolidated Document Processor with Hash-based Deduplication
 # This script processes all documentation with option for local caching or Qdrant upload
-# Usage: ./process_all_to_qdrant.sh [--local-only | --upload]
+# Usage: ./process_all_to_qdrant.sh [--local-only | --upload] [--doc-sets=docset1,docset2]
 #   --local-only: Cache embeddings locally without uploading to Qdrant (default)
 #   --upload: Upload cached embeddings to Qdrant
+#   --doc-sets: Comma-separated doc set ids or paths (e.g., java25-complete,java/java25-complete)
 
 set -e
 
@@ -16,6 +17,7 @@ CACHE_DIR="$PROJECT_ROOT/data/embeddings-cache"
 
 # Parse command line arguments
 UPLOAD_MODE="upload"  # Default to upload mode (with cache as fallback)
+DOCS_SETS_FILTER=""
 for arg in "$@"; do
     case $arg in
         --local-only)
@@ -24,10 +26,14 @@ for arg in "$@"; do
         --upload)
             UPLOAD_MODE="upload"
             ;;
+        --doc-sets=*)
+            DOCS_SETS_FILTER="${arg#*=}"
+            ;;
         --help|-h)
             echo "Usage: $0 [--local-only | --upload]"
             echo "  --local-only : Cache embeddings locally without uploading"
             echo "  --upload     : Upload to Qdrant (default, with auto-fallback to cache if Qdrant fails)"
+            echo "  --doc-sets   : Comma-separated doc set ids or paths (e.g., java25-complete,java/java25-complete)"
             exit 0
             ;;
         *)
@@ -267,17 +273,20 @@ process_documents() {
     # Build the application using Gradle task
     log "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT"
-    if ./gradlew buildForScripts --quiet >> "$LOG_FILE" 2>&1; then
+    if ./gradlew buildForScripts --no-configuration-cache --quiet >> "$LOG_FILE" 2>&1; then
         log "${GREEN}✓ Application built successfully${NC} ($(percent_complete))"
     else
         log "${RED}✗ Failed to build application${NC}"
         return 1
     fi
     
-    # Set environment variable for upload mode
-    export EMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE"
-    
-    # Start the application with document processor
+# Set environment variable for upload mode
+export EMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE"
+if [ -n "$DOCS_SETS_FILTER" ]; then
+    export DOCS_SETS="$DOCS_SETS_FILTER"
+fi
+
+# Start the application with document processor
     log "${YELLOW}Starting document processor in ${CYAN}${UPLOAD_MODE}${YELLOW} mode...${NC}"
     
     # Run DocumentProcessor with cli profile for document ingestion
@@ -289,10 +298,16 @@ process_documents() {
     fi
     
     # Run with cli profile to trigger DocumentProcessor
+    local app_jar
+    app_jar=$(ls -1 build/libs/*.jar 2>/dev/null | grep -v -- "-plain.jar" | head -1 || true)
+    if [ -z "$app_jar" ]; then
+        log "${RED}✗ Failed to locate runnable JAR (expected build/libs/* without -plain)${NC}"
+        return 1
+    fi
     java -Dspring.profiles.active=cli \
          -DEMBEDDINGS_UPLOAD_MODE="$UPLOAD_MODE" \
          -DDOCS_DIR="$DOCS_ROOT" \
-         -jar build/libs/*.jar >> "$LOG_FILE" 2>&1 &
+         -jar "$app_jar" >> "$LOG_FILE" 2>&1 &
     local APP_PID=$!
     
     log "${BLUE}ℹ Application started with PID: $APP_PID${NC}"
@@ -336,8 +351,12 @@ process_documents() {
         local elapsed=$((current_time - start_time))
         
         # Get detailed progress
-        local sets_count=$(grep -c "✓ Processed" "$LOG_FILE" 2>/dev/null || echo "0")
-        local files_count=$(grep -c "✔ Completed processing file:" "$LOG_FILE" 2>/dev/null || echo "0")
+        local sets_count=$(grep -c "✓ Processed" "$LOG_FILE" 2>/dev/null || true)
+        local files_count=$(grep -c "✔ Completed processing file:" "$LOG_FILE" 2>/dev/null || true)
+        sets_count=$(echo "${sets_count:-0}" | tr -dc '0-9')
+        files_count=$(echo "${files_count:-0}" | tr -dc '0-9')
+        sets_count=${sets_count:-0}
+        files_count=${files_count:-0}
         local current_set=$(grep "Processing:" "$LOG_FILE" 2>/dev/null | tail -1 | cut -d: -f2 | xargs)
         local percent=$(percent_complete)
         
