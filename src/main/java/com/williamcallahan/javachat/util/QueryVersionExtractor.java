@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.util;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -71,7 +72,7 @@ public final class QueryVersionExtractor {
             return query;
         }
         String v = version.get();
-        return String.format("JDK %s Java %s release features documentation: %s", v, v, query);
+        return String.format("JDK %s Java SE %s Java %s release features documentation: %s", v, v, v, query);
     }
 
     /**
@@ -79,15 +80,13 @@ public final class QueryVersionExtractor {
      */
     public static final class VersionFilterPatterns {
         private final String versionNumber;
-        private final String javaPattern;
-        private final String jdkPattern;
-        private final String eaPattern;
+        private final List<String> urlTokens;
+        private final List<String> textTokens;
 
         VersionFilterPatterns(String versionNumber) {
             this.versionNumber = versionNumber;
-            this.javaPattern = "java" + versionNumber;
-            this.jdkPattern = "jdk" + versionNumber;
-            this.eaPattern = "jdk" + versionNumber + "/docs";
+            this.urlTokens = buildUrlTokens(versionNumber);
+            this.textTokens = buildTextTokens(versionNumber);
         }
 
         public String versionNumber() {
@@ -101,11 +100,52 @@ public final class QueryVersionExtractor {
          * @return true if URL contains version-specific patterns
          */
         public boolean matchesUrl(String url) {
-            if (url == null) {
+            return matchesAny(url, urlTokens);
+        }
+
+        /**
+         * Check if metadata (URL/title) matches any version patterns.
+         *
+         * @param url the document URL to check
+         * @param title the document title to check
+         * @return true if URL or title contains version-specific patterns
+         */
+        public boolean matchesMetadata(String url, String title) {
+            return matchesUrl(url) || matchesText(title);
+        }
+
+        private boolean matchesText(String text) {
+            return matchesAny(text, textTokens);
+        }
+
+        private static boolean matchesAny(String text, List<String> tokens) {
+            if (text == null || tokens == null || tokens.isEmpty()) {
                 return false;
             }
-            String lowerUrl = url.toLowerCase(Locale.ROOT);
-            return lowerUrl.contains(javaPattern) || lowerUrl.contains(jdkPattern) || lowerUrl.contains(eaPattern);
+            String lower = text.toLowerCase(Locale.ROOT);
+            for (String token : tokens) {
+                if (lower.contains(token)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static List<String> buildUrlTokens(String versionNumber) {
+            String v = versionNumber;
+            return List.of(
+                    "java" + v,
+                    "jdk" + v,
+                    "java-" + v,
+                    "jdk-" + v,
+                    "/javase/" + v,
+                    "/java/javase/" + v,
+                    "/java/se/" + v);
+        }
+
+        private static List<String> buildTextTokens(String versionNumber) {
+            String v = versionNumber;
+            return List.of("java se " + v, "jdk " + v);
         }
     }
 }

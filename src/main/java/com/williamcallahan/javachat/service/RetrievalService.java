@@ -205,14 +205,15 @@ public class RetrievalService {
         if (versionFilter.isPresent()) {
             VersionFilterPatterns filter = versionFilter.get();
             List<Document> versionMatchedDocs = docs.stream()
-                    .filter(doc ->
-                            filter.matchesUrl(String.valueOf(doc.getMetadata().get(METADATA_URL))))
+                    .filter(doc -> filter.matchesMetadata(
+                            stringMetadataValue(doc.getMetadata(), METADATA_URL),
+                            stringMetadataValue(doc.getMetadata(), METADATA_TITLE)))
                     .collect(Collectors.toList());
 
             log.info("Version filter matched {} of {} documents", versionMatchedDocs.size(), docs.size());
 
             // Use version-matched docs if we have enough, otherwise fall back to all docs
-            if (versionMatchedDocs.size() >= 2) {
+            if (!versionMatchedDocs.isEmpty()) {
                 docs = versionMatchedDocs;
             } else {
                 log.info(
