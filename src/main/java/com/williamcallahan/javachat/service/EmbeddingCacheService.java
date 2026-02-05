@@ -324,6 +324,49 @@ public class EmbeddingCacheService {
     }
 
     /**
+     * Removes cached embeddings associated with obsolete chunk hashes.
+     *
+     * <p>This supports incremental doc refresh by ensuring that cached embeddings do not
+     * accumulate for chunks that were removed or replaced in an updated source file.
+     *
+     * @param chunkHashes chunk hashes to evict (ignored when empty)
+     * @return number of cache entries removed
+     */
+    public int evictByChunkHashes(List<String> chunkHashes) {
+        if (chunkHashes == null || chunkHashes.isEmpty()) {
+            return 0;
+        }
+        Set<String> obsolete = new HashSet<>();
+        for (String hash : chunkHashes) {
+            if (hash == null || hash.isBlank()) {
+                continue;
+            }
+            obsolete.add(hash);
+        }
+        if (obsolete.isEmpty()) {
+            return 0;
+        }
+        int removed = 0;
+        for (Iterator<Map.Entry<String, EmbeddingCacheEntry>> it = memoryCache.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, EmbeddingCacheEntry> entry = it.next();
+            EmbeddingCacheEntry cachedEmbedding = entry.getValue();
+            if (cachedEmbedding == null) {
+                continue;
+            }
+            String hash = cachedEmbedding.getMetadata().hash();
+            if (hash != null && obsolete.contains(hash)) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            saveIncrementalCache();
+            CACHE_LOG.info("Evicted {} cached embeddings for obsolete chunks", removed);
+        }
+        return removed;
+    }
+
+    /**
      * Saves timestamped snapshot of current cache
      */
     public void saveSnapshot() throws IOException {

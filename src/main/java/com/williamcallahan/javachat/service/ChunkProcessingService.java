@@ -56,6 +56,7 @@ public class ChunkProcessingService {
         // Chunk the text with standard parameters
         List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
         List<Document> documents = new ArrayList<>();
+        List<String> allChunkHashes = new ArrayList<>(Math.max(0, chunks.size()));
         int skipped = 0;
 
         for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
@@ -63,6 +64,7 @@ public class ChunkProcessingService {
 
             // Generate standardized hash
             String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
+            allChunkHashes.add(hash);
 
             // Skip if already processed (deduplication)
             if (localStore.isHashIngested(hash)) {
@@ -80,7 +82,7 @@ public class ChunkProcessingService {
             localStore.saveChunkText(url, chunkIndex, chunkText, hash);
         }
 
-        return new ChunkProcessingOutcome(List.copyOf(documents), chunks.size(), skipped);
+        return new ChunkProcessingOutcome(List.copyOf(documents), List.copyOf(allChunkHashes), chunks.size(), skipped);
     }
 
     /**
@@ -102,16 +104,18 @@ public class ChunkProcessingService {
 
         List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
         List<Document> documents = new ArrayList<>();
+        List<String> allChunkHashes = new ArrayList<>(Math.max(0, chunks.size()));
 
         for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
             String chunkText = chunks.get(chunkIndex);
             String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
+            allChunkHashes.add(hash);
             Document document = documentFactory.createDocument(chunkText, url, title, chunkIndex, packageName, hash);
             documents.add(document);
             localStore.saveChunkText(url, chunkIndex, chunkText, hash);
         }
 
-        return new ChunkProcessingOutcome(List.copyOf(documents), chunks.size(), 0);
+        return new ChunkProcessingOutcome(List.copyOf(documents), List.copyOf(allChunkHashes), chunks.size(), 0);
     }
 
     /**
@@ -149,6 +153,7 @@ public class ChunkProcessingService {
 
         List<String> pages = pdfExtractor.extractPageTexts(pdfPath);
         List<Document> pageDocuments = new ArrayList<>();
+        List<String> allChunkHashes = new ArrayList<>();
         int globalIndex = 0;
         int totalChunks = 0;
         int skipped = 0;
@@ -162,6 +167,7 @@ public class ChunkProcessingService {
             for (String chunkText : pageChunks) {
                 totalChunks++;
                 String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
+                allChunkHashes.add(hash);
                 if (!localStore.isHashIngested(hash)) {
                     Document doc = documentFactory.createDocumentWithPages(
                             chunkText, url, title, globalIndex, packageName, hash, pageIndex + 1, pageIndex + 1);
@@ -173,7 +179,8 @@ public class ChunkProcessingService {
                 globalIndex++;
             }
         }
-        return new ChunkProcessingOutcome(List.copyOf(pageDocuments), totalChunks, skipped);
+        return new ChunkProcessingOutcome(
+                List.copyOf(pageDocuments), List.copyOf(allChunkHashes), totalChunks, skipped);
     }
 
     /**
@@ -193,6 +200,7 @@ public class ChunkProcessingService {
 
         List<String> pages = pdfExtractor.extractPageTexts(pdfPath);
         List<Document> pageDocuments = new ArrayList<>();
+        List<String> allChunkHashes = new ArrayList<>();
         int globalIndex = 0;
         int totalChunks = 0;
 
@@ -206,6 +214,7 @@ public class ChunkProcessingService {
             for (String chunkText : pageChunks) {
                 totalChunks++;
                 String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
+                allChunkHashes.add(hash);
                 Document doc = documentFactory.createDocumentWithPages(
                         chunkText, url, title, globalIndex, packageName, hash, pageIndex + 1, pageIndex + 1);
                 pageDocuments.add(doc);
@@ -213,17 +222,25 @@ public class ChunkProcessingService {
                 globalIndex++;
             }
         }
-        return new ChunkProcessingOutcome(List.copyOf(pageDocuments), totalChunks, 0);
+        return new ChunkProcessingOutcome(List.copyOf(pageDocuments), List.copyOf(allChunkHashes), totalChunks, 0);
     }
 
-    record ChunkProcessingOutcome(List<Document> documents, int totalChunks, int skippedChunks) {
+    record ChunkProcessingOutcome(
+            List<Document> documents, List<String> allChunkHashes, int totalChunks, int skippedChunks) {
         ChunkProcessingOutcome {
             documents = documents == null ? List.of() : List.copyOf(documents);
+            allChunkHashes = allChunkHashes == null ? List.of() : List.copyOf(allChunkHashes);
             if (totalChunks < 0) {
                 throw new IllegalArgumentException("totalChunks must be non-negative");
             }
             if (skippedChunks < 0) {
                 throw new IllegalArgumentException("skippedChunks must be non-negative");
+            }
+            if (skippedChunks > totalChunks) {
+                throw new IllegalArgumentException("skippedChunks must not exceed totalChunks");
+            }
+            if (allChunkHashes.size() != totalChunks) {
+                throw new IllegalArgumentException("allChunkHashes must have one entry per chunk");
             }
         }
 
@@ -232,7 +249,7 @@ public class ChunkProcessingService {
         }
 
         boolean skippedAllChunks() {
-            return totalChunks > 0 && documents.isEmpty();
+            return totalChunks > 0 && skippedChunks == totalChunks;
         }
     }
 }
