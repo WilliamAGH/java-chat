@@ -67,6 +67,21 @@ log() {
     echo -e "$1"
 }
 
+extract_meta_version() {
+    local file_path="$1"
+    if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+        echo ""
+        return 0
+    fi
+    local line
+    line="$(grep -E '<meta name="version" content="[^"]+"' "$file_path" 2>/dev/null | head -n 1 || true)"
+    if [ -z "$line" ]; then
+        echo ""
+        return 0
+    fi
+    echo "$line" | sed -E 's/.*content="([^"]+)".*/\1/'
+}
+
 count_html_files() {
     local dir="$1"
     if [ -d "$dir" ]; then
@@ -234,7 +249,7 @@ fetch_docs() {
 # Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX
 DOC_SOURCES=(
     "${JAVA24_API_BASE:-https://docs.oracle.com/en/java/javase/24/docs/api/}|$DOCS_ROOT/java/java24-complete|Java 24 Complete API|5|9000|"
-    "${JAVA25_API_BASE:-https://docs.oracle.com/en/java/javase/25/docs/api/}|$DOCS_ROOT/java/java25-complete|Java 25 Documentation|5|8000|"
+    "${JAVA25_API_BASE:-https://docs.oracle.com/en/java/javase/25/docs/api/}|$DOCS_ROOT/java/java25-complete|Java 25 Documentation|5|9000|"
     "${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|$DOCS_ROOT/oracle/javase|Java 25 Release Notes Issues|3|1|"
     "${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|$DOCS_ROOT/ibm/articles|IBM Java 25 Overview|1|1|"
     "${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|$DOCS_ROOT/jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1|"
@@ -247,9 +262,10 @@ DOC_SOURCES=(
     "${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT"
     "${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Javadoc (current)|1|7000|"
 
-    # Spring AI (current) - avoid pulling older reference versions under /reference/1.0, etc.
+    # Spring AI reference (stable) - avoid pulling older reference versions under /reference/1.0, etc.
     "${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|$DOCS_ROOT/spring-ai-complete|Spring AI Reference (current)|1|200|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT"
-    "${SPRING_AI_API_BASE:-https://docs.spring.io/spring-ai/reference/api/}|$DOCS_ROOT/spring-ai-complete|Spring AI API (current)|1|200|"
+    "${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|$DOCS_ROOT/spring-ai-complete|Spring AI API (stable)|2|500|"
+    "${SPRING_AI_API_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|$DOCS_ROOT/spring-ai-complete|Spring AI API (2.x)|2|500|"
 )
 
 if [ "$INCLUDE_QUICK" = "true" ]; then
@@ -299,6 +315,10 @@ log "  - Clean incomplete mirrors: $CLEAN_INCOMPLETE"
 TOTAL_HTML=$(find "$DOCS_ROOT" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')
 TOTAL_FILES=$(find "$DOCS_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')
 
+SPRING_BOOT_REFERENCE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-boot-complete/reference/index.html")"
+SPRING_FRAMEWORK_REFERENCE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-framework-complete/reference/index.html")"
+SPRING_AI_REFERENCE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-ai-complete/reference/index.html")"
+
 log "  - Total HTML files: $TOTAL_HTML"
 log "  - Total files: $TOTAL_FILES"
 log "  - Documentation root: $DOCS_ROOT"
@@ -317,6 +337,11 @@ cat > "$METADATA_FILE" << EOF
     "failed": $TOTAL_FAILED,
     "total_html_files": $TOTAL_HTML,
     "total_files": $TOTAL_FILES
+  },
+  "versions": {
+    "spring_boot_reference": "$(echo "$SPRING_BOOT_REFERENCE_VERSION")",
+    "spring_framework_reference": "$(echo "$SPRING_FRAMEWORK_REFERENCE_VERSION")",
+    "spring_ai_reference": "$(echo "$SPRING_AI_REFERENCE_VERSION")"
   },
   "directories": {
     "java24_complete": "$(find "$DOCS_ROOT/java/java24-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
