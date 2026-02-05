@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.AuditReport;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -61,8 +62,7 @@ public class AuditService {
     @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String apiKey;
 
-    @Value("${spring.ai.vectorstore.qdrant.collection-name}")
-    private String collection;
+    private final AppProperties appProperties;
 
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
@@ -70,11 +70,17 @@ public class AuditService {
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
      * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
+     * @param appProperties application configuration for collection names
      */
-    public AuditService(LocalStoreService localStore, ContentHasher hasher, RestTemplateBuilder restTemplateBuilder) {
+    public AuditService(
+            LocalStoreService localStore,
+            ContentHasher hasher,
+            RestTemplateBuilder restTemplateBuilder,
+            AppProperties appProperties) {
         this.localStore = localStore;
         this.hasher = hasher;
         this.restTemplate = restTemplateBuilder.build();
+        this.appProperties = appProperties;
     }
 
     /**
@@ -177,11 +183,23 @@ public class AuditService {
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
+        AppProperties.QdrantCollections collections = appProperties.getQdrant().getCollections();
+        List<String> collectionNames = List.of(
+                collections.getBooks(), collections.getDocs(), collections.getArticles(), collections.getPdfs());
+
+        for (String collectionName : collectionNames) {
+            hashes.addAll(fetchQdrantHashesFromCollection(url, collectionName));
+        }
+        return hashes;
+    }
+
+    private List<String> fetchQdrantHashesFromCollection(String url, String collectionName) {
+        List<String> hashes = new ArrayList<>();
 
         // Build REST base URL with correct port mapping
         // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
         String base = buildQdrantRestBaseUrl();
-        String endpoint = base + "/collections/" + collection + "/points/scroll";
+        String endpoint = base + "/collections/" + collectionName + "/points/scroll";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

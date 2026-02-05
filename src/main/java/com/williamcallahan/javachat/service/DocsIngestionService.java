@@ -2,8 +2,6 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import com.williamcallahan.javachat.support.RetrievalErrorClassifier;
-import com.williamcallahan.javachat.support.RetrySupport;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,7 +16,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -28,16 +25,25 @@ import org.springframework.stereotype.Service;
 @Service
 public class DocsIngestionService {
     private static final String DEFAULT_DOCS_ROOT = "data/docs";
+    private static final String QUARANTINE_DIR_NAME = ".quarantine";
     private static final String FILE_URL_PREFIX = "file://";
     private static final String API_PATH_SEGMENT = "/api/";
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(30);
     private static final int PACKAGE_EXTRACTION_SNIPPET_LENGTH = 100;
+    private static final int MIN_GUARD_TEXT_LENGTH = 1000;
+    private static final int MIN_GUARD_WORD_COUNT = 150;
+    private static final double MIN_GUARD_ALPHA_RATIO = 0.4;
+    private static final String GUARD_LOADING_TOKEN = "loading";
+    private static final String GUARD_PAGE_TOKEN = "page";
+    private static final String GUARD_ENABLE_JS_TOKEN = "enable javascript";
+    private static final java.time.format.DateTimeFormatter QUARANTINE_TIMESTAMP_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     private final ProgressTracker progressTracker;
     private static final Logger log = LoggerFactory.getLogger(DocsIngestionService.class);
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private final String rootUrl;
-    private final VectorStore vectorStore;
+    private final HybridVectorService hybridVectorService;
     private final ChunkProcessingService chunkProcessingService;
     private final ContentHasher hasher;
     private final LocalStoreService localStore;
@@ -45,13 +51,14 @@ public class DocsIngestionService {
     private final HtmlContentExtractor htmlExtractor;
     private final PdfContentExtractor pdfExtractor;
     private final EmbeddingCacheService embeddingCache;
+    private final QdrantCollectionRouter collectionRouter;
     private final boolean localOnlyMode;
 
     /**
      * Wires ingestion dependencies and determines whether to upload or cache embeddings.
      *
      * @param rootUrl root URL for documentation crawling
-     * @param vectorStore vector store for embeddings
+     * @param hybridVectorService gRPC-based hybrid vector upsert service
      * @param chunkProcessingService chunk processing pipeline
      * @param hasher content hash helper for deterministic vector IDs
      * @param localStore local snapshot and chunk storage
@@ -60,11 +67,12 @@ public class DocsIngestionService {
      * @param pdfExtractor PDF content extractor
      * @param progressTracker ingestion progress tracker
      * @param embeddingCache embedding cache for local-only mode
+     * @param collectionRouter routes documents to the correct Qdrant collection
      * @param uploadMode ingestion upload mode
      */
     public DocsIngestionService(
             @Value("${app.docs.root-url}") String rootUrl,
-            VectorStore vectorStore,
+            HybridVectorService hybridVectorService,
             ChunkProcessingService chunkProcessingService,
             ContentHasher hasher,
             LocalStoreService localStore,
@@ -73,9 +81,10 @@ public class DocsIngestionService {
             PdfContentExtractor pdfExtractor,
             ProgressTracker progressTracker,
             EmbeddingCacheService embeddingCache,
+            QdrantCollectionRouter collectionRouter,
             @Value("${EMBEDDINGS_UPLOAD_MODE:upload}") String uploadMode) {
         this.rootUrl = rootUrl;
-        this.vectorStore = vectorStore;
+        this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
         this.chunkProcessingService = chunkProcessingService;
         this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.localStore = localStore;
@@ -84,6 +93,7 @@ public class DocsIngestionService {
         this.pdfExtractor = pdfExtractor;
         this.progressTracker = progressTracker;
         this.embeddingCache = embeddingCache;
+        this.collectionRouter = Objects.requireNonNull(collectionRouter, "collectionRouter");
         this.localOnlyMode = "local-only".equals(uploadMode);
 
         if (localOnlyMode) {
@@ -140,10 +150,8 @@ public class DocsIngestionService {
             if (!documents.isEmpty()) {
                 INDEXING_LOG.info("[INDEXING] Processing {} documents", documents.size());
                 try {
-                    DocumentStorageResult storageResult = storeDocumentsWithRetry(documents);
-                    if (storageResult.usedPrimaryDestination()) {
-                        markDocumentsIngested(documents);
-                    }
+                    storeDocumentsWithRetry(QdrantCollectionKind.DOCS, documents);
+                    markDocumentsIngested(documents);
                 } catch (RuntimeException storageException) {
                     String destination = localOnlyMode ? "cache" : "Qdrant";
                     INDEXING_LOG.error("[INDEXING] Failed to store documents");
@@ -294,6 +302,10 @@ public class DocsIngestionService {
             return new LocalFileProcessingOutcome(false, failure(file, "file-attributes", attributeException));
         }
 
+        Provenance provenance = deriveProvenance(root, file, url);
+        QdrantCollectionKind collectionKind =
+                collectionRouter.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
+
         Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord = localStore.readFileIngestionRecord(url);
         if (priorIngestionRecord
                 .map(record ->
@@ -307,7 +319,8 @@ public class DocsIngestionService {
                         record.fileSizeBytes() != fileSizeBytes || record.lastModifiedMillis() != lastModifiedMillis)
                 .orElse(false);
         if (requiresFullReindex) {
-            LocalFileProcessingOutcome pruneOutcome = prunePreviouslyIngestedFile(url, file, priorIngestionRecord);
+            LocalFileProcessingOutcome pruneOutcome =
+                    prunePreviouslyIngestedFile(collectionKind, url, file, priorIngestionRecord);
             if (pruneOutcome != null) {
                 return pruneOutcome;
             }
@@ -342,6 +355,18 @@ public class DocsIngestionService {
                         htmlReadException.getClass().getSimpleName());
                 return new LocalFileProcessingOutcome(false, failure(file, "html-read", htmlReadException));
             }
+
+            ContentGuardOutcome guardOutcome = evaluateContentGuard(bodyText);
+            if (!guardOutcome.isAcceptable()) {
+                LocalFileProcessingOutcome quarantineOutcome =
+                        quarantineInvalidContent(file, guardOutcome.rejectionReason());
+                return quarantineOutcome == null
+                        ? new LocalFileProcessingOutcome(
+                                false,
+                                new LocalIngestionFailure(
+                                        file.toString(), "content-guard", guardOutcome.rejectionReason()))
+                        : quarantineOutcome;
+            }
         }
 
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
@@ -364,8 +389,9 @@ public class DocsIngestionService {
 
         List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
         if (!documents.isEmpty()) {
-            applyProvenanceMetadata(documents, deriveProvenance(root, file, url));
+            applyProvenanceMetadata(documents, provenance);
             return processDocuments(
+                    collectionKind,
                     file,
                     url,
                     fileSizeBytes,
@@ -389,16 +415,13 @@ public class DocsIngestionService {
     }
 
     private LocalFileProcessingOutcome prunePreviouslyIngestedFile(
-            String url, Path file, Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) {
+            QdrantCollectionKind collectionKind,
+            String url,
+            Path file,
+            Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) {
         try {
             if (!localOnlyMode) {
-                String expression = buildUrlDeleteExpression(url);
-                RetrySupport.executeWithRetry(
-                        () -> {
-                            vectorStore.delete(expression);
-                            return null;
-                        },
-                        "Qdrant delete");
+                hybridVectorService.deleteByUrl(collectionKind, url);
             }
             List<String> priorChunkHashes = resolveChunkHashesForPrune(url, priorIngestionRecord);
             if (!priorChunkHashes.isEmpty()) {
@@ -413,19 +436,6 @@ public class DocsIngestionService {
         } catch (RuntimeException runtimeException) {
             return new LocalFileProcessingOutcome(false, failure(file, "prune-runtime", runtimeException));
         }
-    }
-
-    private String buildUrlDeleteExpression(String url) {
-        Objects.requireNonNull(url, "url must not be null");
-        String quoted;
-        if (!url.contains("\"")) {
-            quoted = "\"" + url + "\"";
-        } else if (!url.contains("'")) {
-            quoted = "'" + url + "'";
-        } else {
-            throw new IllegalArgumentException("URL contains both quote types and cannot be safely deleted: " + url);
-        }
-        return "url == " + quoted;
     }
 
     private List<String> resolveChunkHashesForPrune(
@@ -598,6 +608,9 @@ public class DocsIngestionService {
 
     private static String deriveDocType(String docSet, String url) {
         String normalized = docSet == null ? "" : docSet.replace('\\', '/');
+        if (normalized.startsWith("books")) {
+            return "book";
+        }
         if (normalized.startsWith("java/")) {
             return "api-docs";
         }
@@ -611,6 +624,9 @@ public class DocsIngestionService {
             String lower = AsciiTextNormalizer.toLowerAscii(url);
             if (lower.contains("docs.oracle.com/en/java/javase/")) {
                 return "api-docs";
+            }
+            if (lower.contains("/pdfs/")) {
+                return "pdf";
             }
         }
         return "";
@@ -653,10 +669,123 @@ public class DocsIngestionService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
+    private ContentGuardOutcome evaluateContentGuard(String bodyText) {
+        if (bodyText == null || bodyText.isBlank()) {
+            return ContentGuardOutcome.rejected("empty body text");
+        }
+
+        int textLength = bodyText.length();
+        if (textLength < MIN_GUARD_TEXT_LENGTH) {
+            return ContentGuardOutcome.rejected("body text too short (length=" + textLength + ")");
+        }
+
+        WordAlphaStats stats = scanWordAndAlphaStats(bodyText);
+        if (stats.wordCount() < MIN_GUARD_WORD_COUNT) {
+            return ContentGuardOutcome.rejected("word count too low (words=" + stats.wordCount() + ")");
+        }
+        if (stats.alphaRatio() < MIN_GUARD_ALPHA_RATIO) {
+            return ContentGuardOutcome.rejected(
+                    String.format(Locale.ROOT, "alpha ratio too low (ratio=%.2f)", stats.alphaRatio()));
+        }
+
+        String normalized = AsciiTextNormalizer.toLowerAscii(bodyText);
+        boolean hasLoadingPage = normalized.contains(GUARD_LOADING_TOKEN) && normalized.contains(GUARD_PAGE_TOKEN);
+        boolean hasEnableJavascript = normalized.contains(GUARD_ENABLE_JS_TOKEN);
+        if (hasLoadingPage || hasEnableJavascript) {
+            return ContentGuardOutcome.rejected("page appears to require JavaScript (loading/enable javascript)");
+        }
+
+        return ContentGuardOutcome.accepted();
+    }
+
+    private WordAlphaStats scanWordAndAlphaStats(String bodyText) {
+        int wordCount = 0;
+        int alphaCount = 0;
+        int nonWhitespaceCount = 0;
+        boolean inWord = false;
+
+        for (int index = 0; index < bodyText.length(); index++) {
+            char ch = bodyText.charAt(index);
+            if (!Character.isWhitespace(ch)) {
+                nonWhitespaceCount++;
+            }
+            if (Character.isLetter(ch)) {
+                alphaCount++;
+            }
+            boolean wordChar = Character.isLetterOrDigit(ch);
+            if (wordChar && !inWord) {
+                wordCount++;
+                inWord = true;
+            } else if (!wordChar) {
+                inWord = false;
+            }
+        }
+
+        double alphaRatio = nonWhitespaceCount == 0 ? 0.0 : (double) alphaCount / nonWhitespaceCount;
+        return new WordAlphaStats(wordCount, alphaRatio);
+    }
+
+    private LocalFileProcessingOutcome quarantineInvalidContent(Path file, String rejectionReason) {
+        try {
+            Path quarantineTarget = buildQuarantineTarget(file);
+            Files.createDirectories(quarantineTarget.getParent());
+            Files.move(file, quarantineTarget, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            INDEXING_LOG.warn(
+                    "[INDEXING] ⚠ Content guard rejected file; quarantined to {} (reason={})",
+                    quarantineTarget,
+                    rejectionReason);
+            return new LocalFileProcessingOutcome(
+                    false,
+                    new LocalIngestionFailure(file.toString(), "content-guard", "quarantined: " + rejectionReason));
+        } catch (IOException quarantineException) {
+            log.warn(
+                    "Failed to quarantine invalid content (exception type: {})",
+                    quarantineException.getClass().getSimpleName());
+            return new LocalFileProcessingOutcome(false, failure(file, "content-guard", quarantineException));
+        }
+    }
+
+    private Path buildQuarantineTarget(Path file) {
+        Path baseDocsDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
+        Path absoluteFile = file.toAbsolutePath().normalize();
+        Path relativePath = absoluteFile.startsWith(baseDocsDir)
+                ? baseDocsDir.relativize(absoluteFile)
+                : Path.of(absoluteFile.getFileName().toString());
+
+        String timestamp = java.time.LocalDateTime.now().format(QUARANTINE_TIMESTAMP_FORMAT);
+        String originalName = relativePath.getFileName().toString();
+        String quarantinedName = appendTimestamp(originalName, timestamp);
+
+        Path quarantineRoot = baseDocsDir.resolve(QUARANTINE_DIR_NAME);
+        Path targetParent = quarantineRoot.resolve(relativePath).getParent();
+        return targetParent.resolve(quarantinedName);
+    }
+
+    private String appendTimestamp(String fileName, String timestamp) {
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            return fileName.substring(0, dotIndex) + "." + timestamp + fileName.substring(dotIndex);
+        }
+        return fileName + "." + timestamp;
+    }
+
+    private record WordAlphaStats(int wordCount, double alphaRatio) {}
+
+    private record ContentGuardOutcome(boolean isAcceptable, String rejectionReason) {
+        static ContentGuardOutcome accepted() {
+            return new ContentGuardOutcome(true, "");
+        }
+
+        static ContentGuardOutcome rejected(String reason) {
+            return new ContentGuardOutcome(false, reason == null ? "invalid content" : reason);
+        }
+    }
+
     private record Provenance(
             String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {}
 
     private LocalFileProcessingOutcome processDocuments(
+            QdrantCollectionKind collectionKind,
             Path file,
             String url,
             long fileSizeBytes,
@@ -667,12 +796,11 @@ public class DocsIngestionService {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
         try {
-            DocumentStorageResult storageResult = storeDocumentsWithRetry(documents);
+            storeDocumentsWithRetry(collectionKind, documents);
 
             // Per-file completion summary (end-to-end, including extraction + embedding + indexing)
             long totalDuration = System.currentTimeMillis() - fileStartMillis;
-            String destination =
-                    localOnlyMode ? "cache" : (storageResult.usedPrimaryDestination() ? "Qdrant" : "cache (fallback)");
+            String destination = localOnlyMode ? "cache" : "Qdrant";
             INDEXING_LOG.info(
                     "[INDEXING] ✔ Completed processing {}/{} chunks to {} in {}ms (end-to-end) ({})",
                     documents.size(),
@@ -681,31 +809,20 @@ public class DocsIngestionService {
                     totalDuration,
                     progressTracker.formatPercent());
 
-            // Mark hashes as processed only after confirmed primary destination write
-            // Don't mark when we fell back to cache in upload mode - allows future re-upload
-            if (storageResult.usedPrimaryDestination()) {
-                markDocumentsIngested(documents);
-                markFileIngested(url, fileSizeBytes, lastModifiedMillis, allChunkHashes);
-            }
+            // Mark hashes as processed only after confirmed destination write.
+            markDocumentsIngested(documents);
+            markFileIngested(url, fileSizeBytes, lastModifiedMillis, allChunkHashes);
 
             return new LocalFileProcessingOutcome(true, null);
         } catch (RuntimeException indexingException) {
-            // Non-transient errors from storeDocumentsWithRetry propagate to abort the run
-            if (!RetrievalErrorClassifier.isTransientVectorStoreError(indexingException)) {
-                throw indexingException;
-            }
-            String operation = localOnlyMode ? "cache" : "index";
-            INDEXING_LOG.error(
-                    "[INDEXING] ✗ Failed to {} file (exception type: {})",
-                    operation,
-                    indexingException.getClass().getSimpleName());
-            return new LocalFileProcessingOutcome(false, failure(file, operation, indexingException));
+            // Strict propagation: do not continue ingesting after destination write failures.
+            throw indexingException;
         }
     }
 
     /**
      * Marks all document hashes as ingested after successful storage.
-     * Logs warnings for individual failures but does not abort.
+     * Fails fast on persistence errors to avoid inconsistent incremental state.
      */
     private void markDocumentsIngested(List<org.springframework.ai.document.Document> documents) {
         for (org.springframework.ai.document.Document doc : documents) {
@@ -716,9 +833,7 @@ public class DocsIngestionService {
             try {
                 localStore.markHashIngested(hashMetadata.toString());
             } catch (IOException markHashException) {
-                log.warn(
-                        "Failed to mark hash as ingested (exception type: {})",
-                        markHashException.getClass().getSimpleName());
+                throw new IllegalStateException("Failed to mark hash as ingested: " + hashMetadata, markHashException);
             }
         }
     }
@@ -730,9 +845,7 @@ public class DocsIngestionService {
         try {
             localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis, chunkHashes);
         } catch (IOException exception) {
-            log.warn(
-                    "Failed to mark file as ingested (exception type: {})",
-                    exception.getClass().getSimpleName());
+            throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
         }
     }
 
@@ -740,7 +853,18 @@ public class DocsIngestionService {
      * Stores documents to vector store with retry logic, or local cache based on mode.
      * Returns a result indicating storage success and whether primary destination was used.
      */
-    private DocumentStorageResult storeDocumentsWithRetry(List<org.springframework.ai.document.Document> documents) {
+    private void storeDocumentsWithRetry(List<org.springframework.ai.document.Document> documents) {
+        storeDocumentsWithRetry(QdrantCollectionKind.DOCS, documents);
+    }
+
+    /**
+     * Stores documents to the correct Qdrant collection (upload mode) or to the local cache (local-only mode).
+     *
+     * <p>In upload mode, a single gRPC upsert writes both dense and sparse named vectors
+     * atomically for each document.</p>
+     */
+    private void storeDocumentsWithRetry(
+            QdrantCollectionKind collectionKind, List<org.springframework.ai.document.Document> documents) {
         long startTime = System.currentTimeMillis();
 
         if (localOnlyMode) {
@@ -751,52 +875,25 @@ public class DocsIngestionService {
                     documents.size(),
                     duration,
                     progressTracker.formatPercent());
-            return new DocumentStorageResult(true, true);
+            return;
         }
 
-        // Upload mode with retry and fallback
         try {
-            RetrySupport.executeWithRetry(
-                    () -> {
-                        vectorStore.add(documents);
-                        return null;
-                    },
-                    "Qdrant upload");
+            hybridVectorService.upsert(collectionKind, documents);
+
             long duration = System.currentTimeMillis() - startTime;
             INDEXING_LOG.info(
-                    "[INDEXING] ✓ Added {} vectors to Qdrant in {}ms ({})",
+                    "[INDEXING] ✓ Added {} hybrid vectors to Qdrant in {}ms ({})",
                     documents.size(),
                     duration,
                     progressTracker.formatPercent());
-            return new DocumentStorageResult(true, true);
         } catch (RuntimeException qdrantError) {
-            if (RetrievalErrorClassifier.isTransientVectorStoreError(qdrantError)) {
-                INDEXING_LOG.warn(
-                        "[INDEXING] Qdrant upload failed after retries ({}), falling back to local cache",
-                        qdrantError.getClass().getSimpleName());
-                embeddingCache.getOrComputeEmbeddings(documents);
-                long duration = System.currentTimeMillis() - startTime;
-                INDEXING_LOG.info(
-                        "[INDEXING] ✓ Cached {} vectors locally (fallback) in {}ms ({})",
-                        documents.size(),
-                        duration,
-                        progressTracker.formatPercent());
-                return new DocumentStorageResult(true, false);
-            }
             INDEXING_LOG.error(
-                    "[INDEXING] Qdrant upload failed with non-transient error ({}), not falling back",
+                    "[INDEXING] Qdrant hybrid upsert failed (exception type: {})",
                     qdrantError.getClass().getSimpleName());
             throw qdrantError;
         }
     }
-
-    /**
-     * Result of document storage operation.
-     *
-     * @param succeeded true if documents were stored successfully (to any destination)
-     * @param usedPrimaryDestination true if stored to the intended destination (Qdrant in upload mode, cache in local mode)
-     */
-    private record DocumentStorageResult(boolean succeeded, boolean usedPrimaryDestination) {}
 
     /**
      * Constructs a failure record with exception-specific diagnostic context.

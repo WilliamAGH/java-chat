@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.vectorstore.VectorStore;
 
 /**
  * Verifies legacy embedding cache imports remain compatible with new metadata handling.
@@ -28,11 +27,12 @@ final class EmbeddingCacheServiceLegacyImportTest {
     @Test
     void importsLegacyJavaSerializedCacheAndPreservesAdditionalMetadata(@TempDir Path tempDir) throws IOException {
         EmbeddingModel embeddingModel = Mockito.mock(EmbeddingModel.class);
-        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
+        QdrantCollectionRouter collectionRouter = Mockito.mock(QdrantCollectionRouter.class);
         ObjectMapper objectMapper = new ObjectMapper();
 
-        EmbeddingCacheService cacheService =
-                new EmbeddingCacheService(tempDir.toString(), embeddingModel, vectorStore, objectMapper);
+        EmbeddingCacheService cacheService = new EmbeddingCacheService(
+                tempDir.toString(), embeddingModel, hybridVectorService, collectionRouter, objectMapper);
 
         Path legacyCachePath = tempDir.resolve("legacy_cache.gz");
         writeLegacyCache(legacyCachePath);

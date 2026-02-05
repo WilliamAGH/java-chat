@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
@@ -11,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -33,6 +36,7 @@ public class ExternalServiceHealth {
     private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
 
     private final WebClient webClient;
+    private final AppProperties appProperties;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
 
     /** Qdrant gRPC default port. */
@@ -56,9 +60,6 @@ public class ExternalServiceHealth {
     @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String qdrantApiKey;
 
-    @Value("${spring.ai.vectorstore.qdrant.collection-name:java-chat}")
-    private String qdrantCollection;
-
     // Health check intervals
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
     private static final Duration MAX_CHECK_INTERVAL = Duration.ofDays(1);
@@ -71,9 +72,11 @@ public class ExternalServiceHealth {
      * Creates the health monitor with a WebClient for outbound checks.
      *
      * @param webClientBuilder WebClient builder for outbound checks
+     * @param appProperties application configuration for Qdrant collection names
      */
-    public ExternalServiceHealth(WebClient.Builder webClientBuilder) {
+    public ExternalServiceHealth(WebClient.Builder webClientBuilder, AppProperties appProperties) {
         this.webClient = webClientBuilder.build();
+        this.appProperties = appProperties;
     }
 
     /**
@@ -84,10 +87,21 @@ public class ExternalServiceHealth {
         // Initialize service statuses
         serviceStatuses.put(SERVICE_QDRANT, new ServiceStatus(SERVICE_QDRANT));
 
-        // Perform initial health checks
-        checkQdrantHealth();
+        // Connectivity-only check during bean initialization to avoid racing collection provisioning.
+        checkQdrantConnectivity();
 
         log.info("ExternalServiceHealth initialized, monitoring {} services", serviceStatuses.size());
+    }
+
+    /**
+     * Verifies Qdrant collections after the application has finished startup initialization.
+     *
+     * <p>Hybrid collections may be created on {@link ApplicationReadyEvent}; this avoids false negatives
+     * during early startup while still enforcing collection presence after initialization.</p>
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void verifyQdrantCollectionsAfterStartup() {
+        checkQdrantHealth();
     }
 
     /**

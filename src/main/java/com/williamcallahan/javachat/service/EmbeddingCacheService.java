@@ -25,7 +25,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -43,7 +42,8 @@ public class EmbeddingCacheService {
     private final ObjectMapper cacheMapper;
     private final Path cacheDir;
     private final EmbeddingModel embeddingModel;
-    private final VectorStore vectorStore;
+    private final HybridVectorService hybridVectorService;
+    private final QdrantCollectionRouter collectionRouter;
     /** In-memory cache for fast lookup of computed embeddings */
     private final Map<String, EmbeddingCacheEntry> memoryCache = new ConcurrentHashMap<>();
 
@@ -54,6 +54,8 @@ public class EmbeddingCacheService {
     private static final int AUTO_SAVE_THRESHOLD = 50; // Save every 50 embeddings
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final Object cacheFileLock = new Object();
+    private final java.util.concurrent.atomic.AtomicReference<RuntimeException> persistenceFailure =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     /**
      * Wraps cache persistence failures as a runtime exception suitable for Spring initialization paths.
@@ -98,11 +100,13 @@ public class EmbeddingCacheService {
     public EmbeddingCacheService(
             @Value("${app.embeddings.cache-dir:./data/embeddings-cache}") String cacheDir,
             EmbeddingModel embeddingModel,
-            VectorStore vectorStore,
+            HybridVectorService hybridVectorService,
+            QdrantCollectionRouter collectionRouter,
             ObjectMapper objectMapper) {
         this.cacheDir = Path.of(cacheDir);
         this.embeddingModel = embeddingModel;
-        this.vectorStore = vectorStore;
+        this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
+        this.collectionRouter = Objects.requireNonNull(collectionRouter, "collectionRouter");
         this.cacheMapper = objectMapper
                 .copy()
                 .registerModule(new JavaTimeModule())
@@ -129,7 +133,7 @@ public class EmbeddingCacheService {
             try {
                 scheduler.shutdown();
                 CACHE_LOG.info("Saving cache before shutdown...");
-                saveIncrementalCache();
+                saveIncrementalCacheStrict();
                 CACHE_LOG.info("Cache saved successfully. Total embeddings cached: {}", memoryCache.size());
             } catch (RuntimeException exception) {
                 CACHE_LOG.error(
@@ -145,13 +149,11 @@ public class EmbeddingCacheService {
                         if (embeddingsSinceLastSave.get() > 0) {
                             CACHE_LOG.info(
                                     "Periodic save: {} new embeddings since last save", embeddingsSinceLastSave.get());
-                            saveIncrementalCache();
+                            saveIncrementalCacheStrict();
                             embeddingsSinceLastSave.set(0);
                         }
                     } catch (RuntimeException exception) {
-                        CACHE_LOG.error(
-                                "Periodic save failed (exception type: {})",
-                                exception.getClass().getSimpleName());
+                        markPersistenceFailure("Periodic save failed", exception);
                     }
                 },
                 2,
@@ -165,6 +167,7 @@ public class EmbeddingCacheService {
      * @return List of embedding vectors
      */
     public List<float[]> getOrComputeEmbeddings(List<Document> documents) {
+        throwIfPersistenceFailed();
         List<float[]> embeddings = new ArrayList<>();
         List<Document> toCompute = new ArrayList<>();
         Map<Integer, Integer> indexMapping = new HashMap<>();
@@ -204,8 +207,12 @@ public class EmbeddingCacheService {
                 int originalIndex = indexMapping.get(computedIndex);
                 embeddings.set(originalIndex, embeddingVector);
 
+                String pointId = sourceDocument.getId();
+                if (pointId == null || pointId.isBlank()) {
+                    pointId = UUID.randomUUID().toString();
+                }
                 EmbeddingCacheEntry cachedEmbedding = new EmbeddingCacheEntry(
-                        UUID.randomUUID().toString(),
+                        pointId,
                         sourceDocument.getText(),
                         embeddingVector,
                         EmbeddingCacheMetadata.fromDocument(sourceDocument));
@@ -216,7 +223,7 @@ public class EmbeddingCacheService {
                 // Auto-save every N embeddings
                 if (embeddingsSinceLastSave.incrementAndGet() >= AUTO_SAVE_THRESHOLD) {
                     CACHE_LOG.info("Auto-saving cache after {} new embeddings...", AUTO_SAVE_THRESHOLD);
-                    saveIncrementalCache();
+                    saveIncrementalCacheStrict();
                     embeddingsSinceLastSave.set(0);
                     CACHE_LOG.info("Auto-save completed. Total cached: {}", memoryCache.size());
                 }
@@ -224,7 +231,7 @@ public class EmbeddingCacheService {
 
             // Final save after batch completion
             if (embeddingsSinceLastSave.get() > 0) {
-                saveIncrementalCache();
+                saveIncrementalCacheStrict();
                 embeddingsSinceLastSave.set(0);
             }
         }
@@ -273,6 +280,7 @@ public class EmbeddingCacheService {
      * @return Number of successfully uploaded embeddings
      */
     public int uploadPendingToVectorStore(int batchSize) {
+        throwIfPersistenceFailed();
         List<EmbeddingCacheEntry> pendingEmbeddings = memoryCache.values().stream()
                 .filter(cachedEmbedding -> !cachedEmbedding.isUploaded())
                 .collect(Collectors.toList());
@@ -292,11 +300,8 @@ public class EmbeddingCacheService {
             int batchEndIndex = Math.min(batchStartIndex + batchSize, pendingEmbeddings.size());
             List<EmbeddingCacheEntry> batch = pendingEmbeddings.subList(batchStartIndex, batchEndIndex);
 
-            List<Document> documents =
-                    batch.stream().map(EmbeddingCacheEntry::toDocument).collect(Collectors.toList());
-
             try {
-                vectorStore.add(documents);
+                uploadBatchStrict(batch);
 
                 for (EmbeddingCacheEntry cachedEmbedding : batch) {
                     cachedEmbedding.setUploaded(true);
@@ -318,7 +323,7 @@ public class EmbeddingCacheService {
             }
         }
 
-        saveIncrementalCache();
+        saveIncrementalCacheStrict();
         CACHE_LOG.info("Successfully uploaded {} embeddings to vector store", uploadedCount);
         return uploadedCount;
     }
@@ -333,6 +338,7 @@ public class EmbeddingCacheService {
      * @return number of cache entries removed
      */
     public int evictByChunkHashes(List<String> chunkHashes) {
+        throwIfPersistenceFailed();
         if (chunkHashes == null || chunkHashes.isEmpty()) {
             return 0;
         }
@@ -362,7 +368,7 @@ public class EmbeddingCacheService {
             }
         }
         if (removed > 0) {
-            saveIncrementalCache();
+            saveIncrementalCacheStrict();
             CACHE_LOG.info("Evicted {} cached embeddings for obsolete chunks", removed);
         }
         return removed;
@@ -372,9 +378,101 @@ public class EmbeddingCacheService {
      * Saves timestamped snapshot of current cache
      */
     public void saveSnapshot() throws IOException {
+        throwIfPersistenceFailed();
         String timestamp = LocalDateTime.now().format(CACHE_TIMESTAMP_FORMAT);
         String filename = String.format("embeddings_snapshot_%s.gz", timestamp);
         exportCache(filename);
+    }
+
+    private void uploadBatchStrict(List<EmbeddingCacheEntry> batch) {
+        Map<QdrantCollectionKind, List<EmbeddingCacheEntry>> byCollection = batch.stream()
+                .collect(Collectors.groupingBy(entry -> {
+                    EmbeddingCacheMetadata meta = entry.getMetadata();
+                    return collectionRouter.route(meta.docSet(), meta.docPath(), meta.docType(), meta.url());
+                }));
+
+        for (Map.Entry<QdrantCollectionKind, List<EmbeddingCacheEntry>> group : byCollection.entrySet()) {
+            QdrantCollectionKind kind = group.getKey();
+            List<EmbeddingCacheEntry> entries = group.getValue();
+            if (entries == null || entries.isEmpty()) {
+                continue;
+            }
+
+            List<org.springframework.ai.document.Document> documents = new ArrayList<>(entries.size());
+            List<float[]> embeddings = new ArrayList<>(entries.size());
+
+            int skippedInvalid = 0;
+            for (EmbeddingCacheEntry entry : entries) {
+                if (entry == null) {
+                    skippedInvalid++;
+                    continue;
+                }
+                String pointId = entry.getId();
+                float[] vector = entry.getEmbedding();
+                if (pointId == null || pointId.isBlank() || vector == null || vector.length == 0) {
+                    skippedInvalid++;
+                    continue;
+                }
+
+                Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+                EmbeddingCacheMetadata meta = entry.getMetadata();
+                if (meta.url() != null) metadata.put("url", meta.url());
+                if (meta.title() != null) metadata.put("title", meta.title());
+                if (meta.packageName() != null) metadata.put("package", meta.packageName());
+                if (meta.hash() != null) metadata.put("hash", meta.hash());
+                if (meta.docSet() != null) metadata.put("docSet", meta.docSet());
+                if (meta.docPath() != null) metadata.put("docPath", meta.docPath());
+                if (meta.sourceName() != null) metadata.put("sourceName", meta.sourceName());
+                if (meta.sourceKind() != null) metadata.put("sourceKind", meta.sourceKind());
+                if (meta.docVersion() != null) metadata.put("docVersion", meta.docVersion());
+                if (meta.docType() != null) metadata.put("docType", meta.docType());
+                if (meta.chunkIndex() != null) metadata.put("chunkIndex", meta.chunkIndex());
+
+                org.springframework.ai.document.Document doc = org.springframework.ai.document.Document.builder()
+                        .id(pointId)
+                        .text(entry.getContent())
+                        .metadata(metadata)
+                        .build();
+                documents.add(doc);
+                embeddings.add(vector);
+            }
+
+            if (skippedInvalid > 0) {
+                CACHE_LOG.warn(
+                        "Skipped {} invalid cache entries (missing id or embedding) for collection {}",
+                        skippedInvalid,
+                        kind);
+            }
+            if (documents.isEmpty()) {
+                throw new IllegalStateException("All " + entries.size() + " cache entries for collection " + kind
+                        + " were invalid (missing id or embedding vector)");
+            }
+            hybridVectorService.upsertWithEmbeddings(kind, documents, embeddings);
+        }
+    }
+
+    private void throwIfPersistenceFailed() {
+        RuntimeException failure = persistenceFailure.get();
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private void markPersistenceFailure(String message, RuntimeException exception) {
+        EmbeddingCacheOperationException failure = new EmbeddingCacheOperationException(message, exception);
+        if (persistenceFailure.compareAndSet(null, failure)) {
+            CACHE_LOG.error("{}; stopping scheduler", message, exception);
+            scheduler.shutdown();
+        }
+        throw failure;
+    }
+
+    private void saveIncrementalCacheStrict() {
+        try {
+            saveIncrementalCache();
+        } catch (RuntimeException exception) {
+            markPersistenceFailure("Cache save failed", exception);
+        }
     }
 
     /**
@@ -428,6 +526,8 @@ public class EmbeddingCacheService {
                         "Could not load existing cache (exception type: {})",
                         exception.getClass().getSimpleName());
                 quarantineCorruptCache(latestCache, exception);
+                throw new EmbeddingCacheOperationException(
+                        "Embeddings cache file was invalid and was quarantined", exception);
             }
         }
     }
@@ -501,6 +601,7 @@ public class EmbeddingCacheService {
             CACHE_LOG.error(
                     "Failed to move invalid cache file (exception type: {})",
                     moveException.getClass().getSimpleName());
+            throw new EmbeddingCacheOperationException("Failed to quarantine invalid cache file", moveException);
         }
     }
 
