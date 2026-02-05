@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -301,11 +300,10 @@ public class DocumentProcessor {
             }
         }
         if (selectedSets.isEmpty()) {
-            throw new DocumentProcessingException(
-                    String.format(
-                            Locale.ROOT,
-                            "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                            formatDocSetSummary(DOCUMENTATION_SETS)));
+            throw new DocumentProcessingException(String.format(
+                    Locale.ROOT,
+                    "DOCS_SETS matched no documentation sets. Available doc sets: %s",
+                    formatDocSetSummary(DOCUMENTATION_SETS)));
         }
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_DOCSET_FILTER, filter);
