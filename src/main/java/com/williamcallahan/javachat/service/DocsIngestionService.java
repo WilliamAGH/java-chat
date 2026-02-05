@@ -5,6 +5,7 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.RetrievalErrorClassifier;
 import com.williamcallahan.javachat.support.RetrySupport;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -38,6 +39,7 @@ public class DocsIngestionService {
     private final String rootUrl;
     private final VectorStore vectorStore;
     private final ChunkProcessingService chunkProcessingService;
+    private final ContentHasher hasher;
     private final LocalStoreService localStore;
     private final FileOperationsService fileOperationsService;
     private final HtmlContentExtractor htmlExtractor;
@@ -51,6 +53,7 @@ public class DocsIngestionService {
      * @param rootUrl root URL for documentation crawling
      * @param vectorStore vector store for embeddings
      * @param chunkProcessingService chunk processing pipeline
+     * @param hasher content hash helper for deterministic vector IDs
      * @param localStore local snapshot and chunk storage
      * @param fileOperationsService file IO helper
      * @param htmlExtractor HTML content extractor
@@ -63,6 +66,7 @@ public class DocsIngestionService {
             @Value("${app.docs.root-url}") String rootUrl,
             VectorStore vectorStore,
             ChunkProcessingService chunkProcessingService,
+            ContentHasher hasher,
             LocalStoreService localStore,
             FileOperationsService fileOperationsService,
             HtmlContentExtractor htmlExtractor,
@@ -73,6 +77,7 @@ public class DocsIngestionService {
         this.rootUrl = rootUrl;
         this.vectorStore = vectorStore;
         this.chunkProcessingService = chunkProcessingService;
+        this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.localStore = localStore;
         this.fileOperationsService = fileOperationsService;
         this.htmlExtractor = htmlExtractor;
@@ -122,8 +127,16 @@ public class DocsIngestionService {
 
             ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome =
                     chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
-            List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
+            if (chunkingOutcome.generatedNoChunks()) {
+                INDEXING_LOG.debug("[INDEXING] No chunks generated for URL");
+                continue;
+            }
+            if (chunkingOutcome.skippedAllChunks()) {
+                INDEXING_LOG.debug("[INDEXING] Skipping URL (all chunks already ingested)");
+                continue;
+            }
 
+            List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
             if (!documents.isEmpty()) {
                 INDEXING_LOG.info("[INDEXING] Processing {} documents", documents.size());
                 try {
@@ -137,7 +150,7 @@ public class DocsIngestionService {
                     throw new IOException("Failed to store documents to " + destination, storageException);
                 }
             } else {
-                INDEXING_LOG.warn("[INDEXING] No documents to add for URL");
+                INDEXING_LOG.debug("[INDEXING] No documents to add for URL");
             }
         }
     }
@@ -257,17 +270,19 @@ public class DocsIngestionService {
             return new LocalFileProcessingOutcome(false, failure(file, "file-attributes", attributeException));
         }
 
-        if (localStore.isFileIngestedAndUnchanged(url, fileSizeBytes, lastModifiedMillis)) {
+        Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord = localStore.readFileIngestionRecord(url);
+        if (priorIngestionRecord
+                .map(record -> record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
+                .orElse(false)) {
             INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
             return new LocalFileProcessingOutcome(false, null);
         }
-        boolean requiresFullReindex = localStore
-                .readFileIngestionRecord(url)
+        boolean requiresFullReindex = priorIngestionRecord
                 .map(record ->
                         record.fileSizeBytes() != fileSizeBytes || record.lastModifiedMillis() != lastModifiedMillis)
                 .orElse(false);
         if (requiresFullReindex) {
-            LocalFileProcessingOutcome pruneOutcome = prunePreviouslyIngestedFile(url, file);
+            LocalFileProcessingOutcome pruneOutcome = prunePreviouslyIngestedFile(url, file, priorIngestionRecord);
             if (pruneOutcome != null) {
                 return pruneOutcome;
             }
@@ -325,10 +340,17 @@ public class DocsIngestionService {
         List<org.springframework.ai.document.Document> documents = chunkingOutcome.documents();
         if (!documents.isEmpty()) {
             applyProvenanceMetadata(documents, deriveProvenance(root, file, url));
-            return processDocuments(file, url, fileSizeBytes, lastModifiedMillis, documents, fileStartMillis);
+            return processDocuments(
+                    file,
+                    url,
+                    fileSizeBytes,
+                    lastModifiedMillis,
+                    documents,
+                    chunkingOutcome.allChunkHashes(),
+                    fileStartMillis);
         } else if (chunkingOutcome.skippedAllChunks()) {
             INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
-            markFileIngested(url, fileSizeBytes, lastModifiedMillis, List.of());
+            markFileIngested(url, fileSizeBytes, lastModifiedMillis, chunkingOutcome.allChunkHashes());
             return new LocalFileProcessingOutcome(false, null);
         } else if (chunkingOutcome.generatedNoChunks()) {
             INDEXING_LOG.debug("[INDEXING] Skipping file that produced no chunks");
@@ -341,7 +363,8 @@ public class DocsIngestionService {
         }
     }
 
-    private LocalFileProcessingOutcome prunePreviouslyIngestedFile(String url, Path file) {
+    private LocalFileProcessingOutcome prunePreviouslyIngestedFile(
+            String url, Path file, Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) {
         try {
             if (!localOnlyMode) {
                 String expression = buildUrlDeleteExpression(url);
@@ -352,13 +375,18 @@ public class DocsIngestionService {
                         },
                         "Qdrant delete");
             }
+            List<String> priorChunkHashes = resolveChunkHashesForPrune(url, priorIngestionRecord);
+            if (!priorChunkHashes.isEmpty()) {
+                localStore.deleteChunkIngestionMarkers(priorChunkHashes);
+                embeddingCache.evictByChunkHashes(priorChunkHashes);
+            }
             localStore.deleteParsedChunksForUrl(url);
             localStore.deleteFileIngestionRecord(url);
             return null;
         } catch (IOException ioException) {
             return new LocalFileProcessingOutcome(false, failure(file, "prune-local", ioException));
-        } catch (RuntimeException vectorStoreException) {
-            return new LocalFileProcessingOutcome(false, failure(file, "prune-vector-store", vectorStoreException));
+        } catch (RuntimeException runtimeException) {
+            return new LocalFileProcessingOutcome(false, failure(file, "prune-runtime", runtimeException));
         }
     }
 
@@ -373,6 +401,66 @@ public class DocsIngestionService {
             throw new IllegalArgumentException("URL contains both quote types and cannot be safely deleted: " + url);
         }
         return "url == " + quoted;
+    }
+
+    private List<String> resolveChunkHashesForPrune(
+            String url, Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) throws IOException {
+        if (priorIngestionRecord != null && priorIngestionRecord.isPresent()) {
+            List<String> hashes = priorIngestionRecord.get().chunkHashes();
+            if (hashes != null && !hashes.isEmpty()) {
+                return hashes;
+            }
+        }
+        return reconstructChunkHashesFromParsedChunks(url);
+    }
+
+    private List<String> reconstructChunkHashesFromParsedChunks(String url) throws IOException {
+        if (url == null || url.isBlank()) {
+            return List.of();
+        }
+        Path parsedDir = localStore.getParsedDir();
+        if (parsedDir == null || !Files.isDirectory(parsedDir)) {
+            return List.of();
+        }
+
+        String safeName = localStore.toSafeName(url);
+        String prefix = safeName + "_";
+        Set<String> hashes = new LinkedHashSet<>();
+
+        try (var stream = Files.newDirectoryStream(parsedDir, path -> {
+            Path fileNamePath = path.getFileName();
+            if (fileNamePath == null) {
+                return false;
+            }
+            String fileName = fileNamePath.toString();
+            return fileName.startsWith(prefix) && fileName.endsWith(".txt");
+        })) {
+            for (Path chunkPath : stream) {
+                Path fileNamePath = chunkPath.getFileName();
+                if (fileNamePath == null) {
+                    continue;
+                }
+                String fileName = fileNamePath.toString();
+                String remainder = fileName.substring(prefix.length());
+                int underscore = remainder.indexOf('_');
+                if (underscore <= 0) {
+                    continue;
+                }
+                String indexToken = remainder.substring(0, underscore);
+                int chunkIndex;
+                try {
+                    chunkIndex = Integer.parseInt(indexToken);
+                } catch (NumberFormatException nfe) {
+                    continue;
+                }
+                String chunkText = Files.readString(chunkPath, StandardCharsets.UTF_8);
+                String hash = hasher.generateChunkHash(url, chunkIndex, chunkText == null ? "" : chunkText);
+                if (!hash.isBlank()) {
+                    hashes.add(hash);
+                }
+            }
+        }
+        return List.copyOf(hashes);
     }
 
     private Provenance deriveProvenance(Path root, Path file, String url) {
@@ -549,6 +637,7 @@ public class DocsIngestionService {
             long fileSizeBytes,
             long lastModifiedMillis,
             List<org.springframework.ai.document.Document> documents,
+            List<String> allChunkHashes,
             long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
@@ -571,7 +660,7 @@ public class DocsIngestionService {
             // Don't mark when we fell back to cache in upload mode - allows future re-upload
             if (storageResult.usedPrimaryDestination()) {
                 markDocumentsIngested(documents);
-                markFileIngested(url, fileSizeBytes, lastModifiedMillis, extractChunkHashes(documents));
+                markFileIngested(url, fileSizeBytes, lastModifiedMillis, allChunkHashes);
             }
 
             return new LocalFileProcessingOutcome(true, null);
@@ -620,27 +709,6 @@ public class DocsIngestionService {
                     "Failed to mark file as ingested (exception type: {})",
                     exception.getClass().getSimpleName());
         }
-    }
-
-    private List<String> extractChunkHashes(List<org.springframework.ai.document.Document> documents) {
-        if (documents == null || documents.isEmpty()) {
-            return List.of();
-        }
-        List<String> hashes = new ArrayList<>(documents.size());
-        for (org.springframework.ai.document.Document doc : documents) {
-            if (doc == null) {
-                continue;
-            }
-            Object hashValue = doc.getMetadata().get("hash");
-            if (hashValue == null) {
-                continue;
-            }
-            String hash = hashValue.toString();
-            if (!hash.isBlank()) {
-                hashes.add(hash);
-            }
-        }
-        return List.copyOf(hashes);
     }
 
     /**
