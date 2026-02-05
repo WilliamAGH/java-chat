@@ -3,6 +3,8 @@ package com.williamcallahan.javachat.service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Objects;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -43,5 +45,20 @@ public class ContentHasher {
     public String generateChunkHash(String url, int chunkIndex, String text) {
         String hashInput = url + "#" + chunkIndex + ":" + text;
         return sha256(hashInput);
+    }
+
+    /**
+     * Produces a deterministic UUID string from a stable hash input.
+     *
+     * @param hash stable hash text
+     * @return UUID string derived from the hash
+     */
+    public String uuidFromHash(String hash) {
+        Objects.requireNonNull(hash, "hash must not be null");
+        if (hash.isBlank()) {
+            throw new IllegalArgumentException("hash must not be blank");
+        }
+        UUID uuid = UUID.nameUUIDFromBytes(hash.getBytes(StandardCharsets.UTF_8));
+        return uuid.toString();
     }
 }
