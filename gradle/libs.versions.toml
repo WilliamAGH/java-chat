@@ -21,6 +21,9 @@ jtokkit = "1.1.0"
 fastutil = "8.5.18"
 caffeine = "3.2.3"
 
+# Qdrant
+qdrant-client = "1.16.2"
+
 # gRPC/Networking
 grpc = "1.78.0"
 
@@ -81,6 +84,9 @@ flexmark-ext-autolink = { module = "com.vladsch.flexmark:flexmark-ext-autolink",
 # Caching
 caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
 
+# Qdrant client
+qdrant-client = { module = "io.qdrant:client", version.ref = "qdrant-client" }
+
 # gRPC
 grpc-core = { module = "io.grpc:grpc-core" }
 
@@ -109,9 +115,7 @@ spring-boot-web = [
     "spring-boot-starter-oauth2-client",
 ]
 spring-ai = [
-    "spring-ai-advisors-vector-store",
     "spring-ai-starter-model-openai",
-    "spring-ai-starter-vector-store-qdrant",
 ]
 flexmark-all = [
     "flexmark",

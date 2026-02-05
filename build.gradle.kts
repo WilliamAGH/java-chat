@@ -78,6 +78,9 @@ dependencies {
     // Caching
     implementation(libs.caffeine)
 
+    // Qdrant Java gRPC client for hybrid vector operations
+    implementation(libs.qdrant.client)
+
     // gRPC (version managed by BOM)
     implementation(libs.grpc.core)
 

@@ -4,7 +4,11 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -64,7 +68,7 @@ public class AppProperties {
         requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
         requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
-        requireConfiguredSection(qdrant, QDRANT_KEY);
+        requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
@@ -231,6 +235,12 @@ public class AppProperties {
     /** Qdrant vector store settings. */
     public static class Qdrant {
         private boolean ensurePayloadIndexes = true;
+        private QdrantCollections collections = new QdrantCollections();
+        private String denseVectorName = "dense";
+        private String sparseVectorName = "bm25";
+        private boolean ensureCollections = true;
+        private int prefetchLimit = 20;
+        private Duration queryTimeout = Duration.ofSeconds(5);
 
         public boolean isEnsurePayloadIndexes() {
             return ensurePayloadIndexes;
@@ -238,6 +248,165 @@ public class AppProperties {
 
         public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) {
             this.ensurePayloadIndexes = ensurePayloadIndexes;
+        }
+
+        /**
+         * Returns the configured collection names used for routing ingested content.
+         *
+         * <p>Collections are used to split content by source type (books, docs, articles, PDFs)
+         * while still allowing cross-collection retrieval.
+         */
+        public QdrantCollections getCollections() {
+            return collections;
+        }
+
+        public void setCollections(QdrantCollections collections) {
+            this.collections = requireConfiguredSection(collections, QDRANT_KEY + ".collections");
+        }
+
+        /**
+         * Returns the configured dense vector name used for embeddings.
+         *
+         * <p>This name must match the collection schema's {@code vectors} key when using
+         * named-vector mode (required for storing dense + sparse vectors in a single point).</p>
+         */
+        public String getDenseVectorName() {
+            return denseVectorName;
+        }
+
+        public void setDenseVectorName(String denseVectorName) {
+            this.denseVectorName = denseVectorName;
+        }
+
+        /**
+         * Returns the configured sparse vector name used for lexical (hybrid) retrieval.
+         *
+         * <p>This name must match the collection schema's {@code sparse_vectors} key.
+         */
+        public String getSparseVectorName() {
+            return sparseVectorName;
+        }
+
+        public void setSparseVectorName(String sparseVectorName) {
+            this.sparseVectorName = sparseVectorName;
+        }
+
+        /**
+         * Returns the timeout budget for hybrid query fan-out.
+         */
+        public Duration getQueryTimeout() {
+            return queryTimeout;
+        }
+
+        public void setQueryTimeout(Duration queryTimeout) {
+            this.queryTimeout = queryTimeout;
+        }
+
+        /**
+         * Returns whether the application should ensure hybrid-capable collections exist at startup.
+         */
+        public boolean isEnsureCollections() {
+            return ensureCollections;
+        }
+
+        public void setEnsureCollections(boolean ensureCollections) {
+            this.ensureCollections = ensureCollections;
+        }
+
+        /**
+         * Returns the per-collection prefetch limit for hybrid queries.
+         *
+         * <p>Controls how many candidates each dense/sparse prefetch stage retrieves
+         * before RRF fusion selects the final results.</p>
+         */
+        public int getPrefetchLimit() {
+            return prefetchLimit;
+        }
+
+        public void setPrefetchLimit(int prefetchLimit) {
+            this.prefetchLimit = prefetchLimit;
+        }
+
+        Qdrant validateConfiguration() {
+            if (collections == null) {
+                throw new IllegalArgumentException("app.qdrant.collections must not be null");
+            }
+            collections.validateConfiguration();
+
+            if (denseVectorName == null || denseVectorName.isBlank()) {
+                throw new IllegalArgumentException("app.qdrant.dense-vector-name must not be blank");
+            }
+            if (sparseVectorName == null || sparseVectorName.isBlank()) {
+                throw new IllegalArgumentException("app.qdrant.sparse-vector-name must not be blank");
+            }
+            if (prefetchLimit <= 0) {
+                throw new IllegalArgumentException("app.qdrant.prefetch-limit must be positive, got: " + prefetchLimit);
+            }
+            if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
+                throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");
+            }
+            return this;
+        }
+    }
+
+    /**
+     * Qdrant collection names used by the ingestion and retrieval pipelines.
+     */
+    public static class QdrantCollections {
+        private String books = "java-chat-books";
+        private String docs = "java-docs";
+        private String articles = "java-articles";
+        private String pdfs = "java-pdfs";
+
+        public String getBooks() {
+            return books;
+        }
+
+        public void setBooks(String books) {
+            this.books = books;
+        }
+
+        public String getDocs() {
+            return docs;
+        }
+
+        public void setDocs(String docs) {
+            this.docs = docs;
+        }
+
+        public String getArticles() {
+            return articles;
+        }
+
+        public void setArticles(String articles) {
+            this.articles = articles;
+        }
+
+        public String getPdfs() {
+            return pdfs;
+        }
+
+        public void setPdfs(String pdfs) {
+            this.pdfs = pdfs;
+        }
+
+        public List<String> all() {
+            return List.of(books, docs, articles, pdfs);
+        }
+
+        QdrantCollections validateConfiguration() {
+            List<String> all = all();
+            Set<String> unique = new LinkedHashSet<>();
+            for (String name : all) {
+                if (name == null || name.isBlank()) {
+                    throw new IllegalArgumentException("app.qdrant.collections.* must not be blank");
+                }
+                unique.add(name);
+            }
+            if (unique.size() != all.size()) {
+                throw new IllegalArgumentException("app.qdrant.collections.* must be distinct");
+            }
+            return this;
         }
     }
 
