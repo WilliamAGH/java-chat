@@ -337,6 +337,10 @@ fi
                 sleep 2  # Give the app a moment to stabilize
                 trigger_cache_upload
             fi
+
+            if rg -q "Moved invalid cache file" "$LOG_FILE"; then
+                log "${YELLOW}⚠ Detected invalid embeddings cache file(s). Check data/embeddings-cache for quarantine entries.${NC}"
+            fi
             
             break
         fi

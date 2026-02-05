@@ -36,6 +36,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class EmbeddingCacheService {
     private static final Logger CACHE_LOG = LoggerFactory.getLogger("EMBEDDING_CACHE");
+    private static final String CACHE_FILE_NAME = "embeddings_cache.gz";
+    private static final String CORRUPT_CACHE_PREFIX = "embeddings_cache.corrupt.";
+    private static final DateTimeFormatter CACHE_TIMESTAMP_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     private final ObjectMapper cacheMapper;
     private final Path cacheDir;
@@ -324,7 +328,7 @@ public class EmbeddingCacheService {
      * Saves timestamped snapshot of current cache
      */
     public void saveSnapshot() throws IOException {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String timestamp = LocalDateTime.now().format(CACHE_TIMESTAMP_FORMAT);
         String filename = String.format("embeddings_snapshot_%s.gz", timestamp);
         exportCache(filename);
     }
@@ -370,7 +374,7 @@ public class EmbeddingCacheService {
             String cacheDirectory) {}
 
     private void loadExistingCache() {
-        Path latestCache = cacheDir.resolve("embeddings_cache.gz");
+        Path latestCache = cacheDir.resolve(CACHE_FILE_NAME);
         if (Files.exists(latestCache)) {
             try {
                 importCacheFromPath(latestCache);
@@ -379,14 +383,14 @@ public class EmbeddingCacheService {
                 CACHE_LOG.error(
                         "Could not load existing cache (exception type: {})",
                         exception.getClass().getSimpleName());
-                throw new EmbeddingCacheOperationException("Failed to load existing cache", exception);
+                quarantineCorruptCache(latestCache, exception);
             }
         }
     }
 
     private void saveIncrementalCache() {
         try {
-            exportCache("embeddings_cache.gz");
+            exportCache(CACHE_FILE_NAME);
         } catch (IOException exception) {
             CACHE_LOG.error(
                     "Failed to save incremental cache (exception type: {})",
@@ -433,6 +437,26 @@ public class EmbeddingCacheService {
 
                 CACHE_LOG.info("Successfully imported {} embeddings", importedEmbeddings.size());
             }
+        }
+    }
+
+    private void quarantineCorruptCache(Path cachePath, Exception exception) {
+        if (cachePath == null || !Files.exists(cachePath)) {
+            return;
+        }
+        String timestamp = LocalDateTime.now().format(CACHE_TIMESTAMP_FORMAT);
+        String quarantineName = CORRUPT_CACHE_PREFIX + timestamp + ".gz";
+        Path quarantinePath = cacheDir.resolve(quarantineName);
+        try {
+            Files.move(cachePath, quarantinePath);
+            CACHE_LOG.warn(
+                    "Moved invalid cache file to {} (reason: {})",
+                    quarantinePath.getFileName(),
+                    exception.getClass().getSimpleName());
+        } catch (IOException moveException) {
+            CACHE_LOG.error(
+                    "Failed to move invalid cache file (exception type: {})",
+                    moveException.getClass().getSimpleName());
         }
     }
 
