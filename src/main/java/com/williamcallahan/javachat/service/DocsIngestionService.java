@@ -261,8 +261,10 @@ public class DocsIngestionService {
             INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
             return new LocalFileProcessingOutcome(false, null);
         }
-        boolean requiresFullReindex = localStore.readFileIngestionRecord(url)
-                .map(record -> record.fileSizeBytes() != fileSizeBytes || record.lastModifiedMillis() != lastModifiedMillis)
+        boolean requiresFullReindex = localStore
+                .readFileIngestionRecord(url)
+                .map(record ->
+                        record.fileSizeBytes() != fileSizeBytes || record.lastModifiedMillis() != lastModifiedMillis)
                 .orElse(false);
         if (requiresFullReindex) {
             LocalFileProcessingOutcome pruneOutcome = prunePreviouslyIngestedFile(url, file);
