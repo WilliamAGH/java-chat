@@ -4,6 +4,8 @@ import com.williamcallahan.javachat.config.AppProperties;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,6 +19,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 /**
  * Monitors external service health with exponential backoff for failed services.
@@ -183,26 +186,16 @@ public class ExternalServiceHealth {
         checkQdrantHealth();
     }
 
-    private void checkQdrantHealth() {
+    private void checkQdrantConnectivity() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
 
-        String protocol = qdrantSsl ? "https" : "http";
-        String healthUrl;
+        String base = buildQdrantRestBaseUrl();
+        String connectivityPath = qdrantSsl ? "/collections" : "/health";
+        String url = base + connectivityPath;
 
-        if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-            // For Qdrant Cloud, check collections endpoint instead of /health (which returns 403)
-            healthUrl = String.format("%s://%s/collections", protocol, qdrantHost);
-        } else {
-            // For local instances, map gRPC port to REST port
-            int restPort = mapGrpcPortToRestPort(qdrantPort);
-            healthUrl = String.format("%s://%s:%d/health", protocol, qdrantHost, restPort);
-        }
-
-        var requestSpec = webClient.get().uri(healthUrl);
-
-        // Add API key for cloud instances
-        if (qdrantSsl && qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+        var requestSpec = webClient.get().uri(url);
+        if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
             requestSpec = requestSpec.header("api-key", qdrantApiKey);
         }
 
@@ -210,10 +203,50 @@ public class ExternalServiceHealth {
                 .retrieve()
                 .toBodilessEntity()
                 .timeout(HEALTH_CHECK_TIMEOUT)
+                .subscribe(response -> status.markHealthy(), error -> {
+                    status.markUnhealthy();
+                    log.warn(
+                            "Qdrant connectivity check failed (exception type: {}) - Will retry in {}",
+                            error.getClass().getSimpleName(),
+                            formatDuration(status.currentBackoff));
+                });
+    }
+
+    private void checkQdrantHealth() {
+        ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
+        if (status == null) return;
+
+        List<String> collections = appProperties.getQdrant().getCollections().all();
+        if (collections.isEmpty()) {
+            status.markUnhealthy();
+            log.warn("Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
+            return;
+        }
+
+        String base = buildQdrantRestBaseUrl();
+        List<Mono<Void>> checks = new ArrayList<>(collections.size());
+        for (String collection : collections) {
+            if (collection == null || collection.isBlank()) {
+                continue;
+            }
+            String url = base + "/collections/" + collection;
+            var requestSpec = webClient.get().uri(url);
+            if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+                requestSpec = requestSpec.header("api-key", qdrantApiKey);
+            }
+            checks.add(requestSpec
+                    .retrieve()
+                    .toBodilessEntity()
+                    .timeout(HEALTH_CHECK_TIMEOUT)
+                    .then());
+        }
+
+        Mono.whenDelayError(checks)
+                .timeout(HEALTH_CHECK_TIMEOUT)
                 .subscribe(
-                        response -> {
+                        ignored -> {
                             status.markHealthy();
-                            log.debug("Qdrant health check succeeded");
+                            log.debug("Qdrant health check succeeded (all collections present)");
                         },
                         error -> {
                             status.markUnhealthy();
@@ -222,6 +255,14 @@ public class ExternalServiceHealth {
                                     error.getClass().getSimpleName(),
                                     formatDuration(status.currentBackoff));
                         });
+    }
+
+    private String buildQdrantRestBaseUrl() {
+        if (qdrantSsl) {
+            return "https://" + qdrantHost;
+        }
+        int restPort = mapGrpcPortToRestPort(qdrantPort);
+        return "http://" + qdrantHost + ":" + restPort;
     }
 
     /**
