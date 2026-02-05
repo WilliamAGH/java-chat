@@ -36,6 +36,10 @@ public final class DocsSourceRegistry {
     private static final String ORACLE_JAVASE_BASE_KEY = "ORACLE_JAVASE_BASE";
     private static final String IBM_ARTICLES_BASE_KEY = "IBM_ARTICLES_BASE";
     private static final String JETBRAINS_IDEA_2025_09_BASE_KEY = "JETBRAINS_IDEA_2025_09_BASE";
+    private static final String SPRING_BOOT_BASE_KEY = "SPRING_BOOT_BASE";
+    private static final String SPRING_FRAMEWORK_BASE_KEY = "SPRING_FRAMEWORK_BASE";
+    private static final String SPRING_AI_BASE_KEY = "SPRING_AI_BASE";
+
     private static final String SPRING_BOOT_API_BASE_KEY = "SPRING_BOOT_API_BASE";
     private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_BASE_KEY = "SPRING_AI_API_BASE";
@@ -43,14 +47,19 @@ public final class DocsSourceRegistry {
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
 
     private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
-    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/";
+    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/docs/api/";
     private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
     private static final String DEFAULT_JETBRAINS_IDEA_2025_09_BASE = "https://blog.jetbrains.com/idea/2025/09/";
-    private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/docs/current/api/";
+
+    private static final String DEFAULT_SPRING_BOOT_BASE = "https://docs.spring.io/spring-boot/";
+    private static final String DEFAULT_SPRING_FRAMEWORK_BASE = "https://docs.spring.io/spring-framework/";
+    private static final String DEFAULT_SPRING_AI_BASE = "https://docs.spring.io/spring-ai/";
+
+    private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
-    private static final String DEFAULT_SPRING_AI_API_BASE = "https://docs.spring.io/spring-ai/reference/1.0/api/";
+    private static final String DEFAULT_SPRING_AI_API_BASE = "https://docs.spring.io/spring-ai/reference/api/";
 
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
     private static final String LOCAL_DOCS_JAVA24 = LOCAL_DOCS_ROOT + "java24/";
@@ -86,6 +95,12 @@ public final class DocsSourceRegistry {
     public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
     public static final String JETBRAINS_IDEA_2025_09_BASE =
             resolveSetting(JETBRAINS_IDEA_2025_09_BASE_KEY, DEFAULT_JETBRAINS_IDEA_2025_09_BASE);
+
+    public static final String SPRING_BOOT_BASE = resolveSetting(SPRING_BOOT_BASE_KEY, DEFAULT_SPRING_BOOT_BASE);
+    public static final String SPRING_FRAMEWORK_BASE =
+            resolveSetting(SPRING_FRAMEWORK_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_BASE);
+    public static final String SPRING_AI_BASE = resolveSetting(SPRING_AI_BASE_KEY, DEFAULT_SPRING_AI_BASE);
+
     public static final String SPRING_BOOT_API_BASE =
             resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
@@ -138,17 +153,17 @@ public final class DocsSourceRegistry {
         prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_API_BASE);
         prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_API_BASE);
 
-        // Spring Boot API documentation - map to base URL without /api/ since local structure includes it
-        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT_COMPLETE, SPRING_BOOT_API_BASE);
+        // Spring Boot documentation
+        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT_COMPLETE, SPRING_BOOT_BASE);
 
-        // Spring Framework API documentation
-        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK, SPRING_FRAMEWORK_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE, SPRING_FRAMEWORK_API_BASE);
+        // Spring Framework documentation
+        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK, SPRING_FRAMEWORK_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE, SPRING_FRAMEWORK_BASE);
 
-        // Spring AI API documentation
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI, SPRING_AI_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_COMPLETE, SPRING_AI_API_BASE);
+        // Spring AI documentation
+        prefixLookup.put(LOCAL_DOCS_SPRING_AI, SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_SPRING_AI_COMPLETE, SPRING_AI_BASE);
 
         // External Java 25 sources
         prefixLookup.put(LOCAL_DOCS_ORACLE_JAVASE, ORACLE_JAVASE_BASE);
@@ -237,7 +252,9 @@ public final class DocsSourceRegistry {
         result = result.replace("/api/api/", "/api/");
         // Fix malformed Spring docs paths that accidentally include '/java/' segment
         if (result.contains(SPRING_DOCS_HTTPS_PREFIX)) {
-            result = result.replace("/spring-boot/docs/current/api/java/", "/spring-boot/docs/current/api/");
+            // Legacy path normalization for older local mirrors
+            result = result.replace("/spring-boot/docs/current/api/java/", "/spring-boot/api/java/");
+            result = result.replace("/spring-boot/docs/current/api/", "/spring-boot/api/");
             result = result.replace(
                     "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
         }
