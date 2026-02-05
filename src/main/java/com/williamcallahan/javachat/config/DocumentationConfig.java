@@ -7,8 +7,8 @@ import java.util.Locale;
  */
 public class DocumentationConfig {
 
-    private static final String ROOT_URL_DEF = "https://docs.oracle.com/en/java/javase/24/";
-    private static final int JDK_DEF = 24;
+    private static final String ROOT_URL_DEF = "https://docs.oracle.com/en/java/javase/25/";
+    private static final int JDK_DEF = 25;
     private static final String SNAP_DIR_DEF = "data/snapshots";
     private static final String PARSED_DIR_DEF = "data/parsed";
     private static final String INDEX_DIR_DEF = "data/index";

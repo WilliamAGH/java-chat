@@ -55,7 +55,7 @@ public class SystemPromptConfig {
             - Be explicit about version-specific features when relevant
             """;
 
-    @Value("${DOCS_JDK_VERSION:24}")
+    @Value("${DOCS_JDK_VERSION:25}")
     private String jdkVersion;
 
     /**
