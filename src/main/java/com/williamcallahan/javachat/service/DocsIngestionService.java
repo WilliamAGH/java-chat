@@ -213,11 +213,20 @@ public class DocsIngestionService {
             return false;
         }
         String normalized = path.toAbsolutePath().normalize().toString().replace('\\', '/');
-        return containsVersionedSpringReference(normalized, "spring-framework")
-                || containsVersionedSpringReference(normalized, "spring-ai");
+        return shouldSkipSpringFrameworkReference(normalized) || shouldSkipSpringAiReference(normalized);
     }
 
-    private boolean containsVersionedSpringReference(String normalizedPath, String springMarker) {
+    private boolean shouldSkipSpringFrameworkReference(String normalizedPath) {
+        return containsDisallowedVersionedSpringReference(normalizedPath, "spring-framework", version -> true);
+    }
+
+    private boolean shouldSkipSpringAiReference(String normalizedPath) {
+        return containsDisallowedVersionedSpringReference(
+                normalizedPath, "spring-ai", version -> !version.startsWith("2."));
+    }
+
+    private boolean containsDisallowedVersionedSpringReference(
+            String normalizedPath, String springMarker, java.util.function.Predicate<String> versionDisallowed) {
         if (normalizedPath == null || normalizedPath.isBlank() || springMarker == null || springMarker.isBlank()) {
             return false;
         }
@@ -242,8 +251,14 @@ public class DocsIngestionService {
         if (referenceChild.isBlank()) {
             return false;
         }
+        if (referenceChild.contains("SNAPSHOT")) {
+            return true;
+        }
         char first = referenceChild.charAt(0);
-        return (first >= '0' && first <= '9') || referenceChild.contains("SNAPSHOT");
+        if (!(first >= '0' && first <= '9')) {
+            return false;
+        }
+        return versionDisallowed.test(referenceChild);
     }
 
     private LocalFileProcessingOutcome processLocalFile(Path root, Path file) {
