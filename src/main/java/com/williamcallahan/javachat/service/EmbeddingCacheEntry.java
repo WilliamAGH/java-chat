@@ -103,6 +103,12 @@ record EmbeddingCacheMetadata(
         @JsonProperty("chunkIndex") Integer chunkIndex,
         @JsonProperty("package") String packageName,
         @JsonProperty("hash") String hash,
+        @JsonProperty("docSet") String docSet,
+        @JsonProperty("docPath") String docPath,
+        @JsonProperty("sourceName") String sourceName,
+        @JsonProperty("sourceKind") String sourceKind,
+        @JsonProperty("docVersion") String docVersion,
+        @JsonProperty("docType") String docType,
         @JsonProperty("pageStart") Integer pageStart,
         @JsonProperty("pageEnd") Integer pageEnd,
         @JsonProperty("retrievalSource") String retrievalSource,
@@ -114,13 +120,19 @@ record EmbeddingCacheMetadata(
             "chunkIndex",
             "package",
             "hash",
+            "docSet",
+            "docPath",
+            "sourceName",
+            "sourceKind",
+            "docVersion",
+            "docType",
             "pageStart",
             "pageEnd",
             "retrievalSource",
             "fallbackReason");
 
-    private static final EmbeddingCacheMetadata EMPTY =
-            new EmbeddingCacheMetadata(null, null, null, null, null, null, null, null, null, Map.of());
+    private static final EmbeddingCacheMetadata EMPTY = new EmbeddingCacheMetadata(
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, Map.of());
 
     static EmbeddingCacheMetadata empty() {
         return EMPTY;
@@ -138,6 +150,12 @@ record EmbeddingCacheMetadata(
         Integer chunkIndex = coerceInteger(springMetadata.get("chunkIndex"));
         String packageName = stringOrEmpty(springMetadata, "package");
         String hash = stringOrEmpty(springMetadata, "hash");
+        String docSet = stringOrEmpty(springMetadata, "docSet");
+        String docPath = stringOrEmpty(springMetadata, "docPath");
+        String sourceName = stringOrEmpty(springMetadata, "sourceName");
+        String sourceKind = stringOrEmpty(springMetadata, "sourceKind");
+        String docVersion = stringOrEmpty(springMetadata, "docVersion");
+        String docType = stringOrEmpty(springMetadata, "docType");
         Integer pageStart = coerceInteger(springMetadata.get("pageStart"));
         Integer pageEnd = coerceInteger(springMetadata.get("pageEnd"));
         String retrievalSource = stringOrEmpty(springMetadata, "retrievalSource");
@@ -151,6 +169,12 @@ record EmbeddingCacheMetadata(
                 chunkIndex,
                 blankToNull(packageName),
                 blankToNull(hash),
+                blankToNull(docSet),
+                blankToNull(docPath),
+                blankToNull(sourceName),
+                blankToNull(sourceKind),
+                blankToNull(docVersion),
+                blankToNull(docType),
                 pageStart,
                 pageEnd,
                 blankToNull(retrievalSource),
@@ -168,6 +192,12 @@ record EmbeddingCacheMetadata(
         Integer chunkIndex = coerceInteger(legacyMetadata.get("chunkIndex"));
         String packageName = stringOrEmptyLegacy(legacyMetadata, "package");
         String hash = stringOrEmptyLegacy(legacyMetadata, "hash");
+        String docSet = stringOrEmptyLegacy(legacyMetadata, "docSet");
+        String docPath = stringOrEmptyLegacy(legacyMetadata, "docPath");
+        String sourceName = stringOrEmptyLegacy(legacyMetadata, "sourceName");
+        String sourceKind = stringOrEmptyLegacy(legacyMetadata, "sourceKind");
+        String docVersion = stringOrEmptyLegacy(legacyMetadata, "docVersion");
+        String docType = stringOrEmptyLegacy(legacyMetadata, "docType");
         Integer pageStart = coerceInteger(legacyMetadata.get("pageStart"));
         Integer pageEnd = coerceInteger(legacyMetadata.get("pageEnd"));
         String retrievalSource = stringOrEmptyLegacy(legacyMetadata, "retrievalSource");
@@ -181,6 +211,12 @@ record EmbeddingCacheMetadata(
                 chunkIndex,
                 blankToNull(packageName),
                 blankToNull(hash),
+                blankToNull(docSet),
+                blankToNull(docPath),
+                blankToNull(sourceName),
+                blankToNull(sourceKind),
+                blankToNull(docVersion),
+                blankToNull(docType),
                 pageStart,
                 pageEnd,
                 blankToNull(retrievalSource),
@@ -204,6 +240,24 @@ record EmbeddingCacheMetadata(
         }
         if (hash != null && !hash.isBlank()) {
             document.getMetadata().put("hash", hash);
+        }
+        if (docSet != null && !docSet.isBlank()) {
+            document.getMetadata().put("docSet", docSet);
+        }
+        if (docPath != null && !docPath.isBlank()) {
+            document.getMetadata().put("docPath", docPath);
+        }
+        if (sourceName != null && !sourceName.isBlank()) {
+            document.getMetadata().put("sourceName", sourceName);
+        }
+        if (sourceKind != null && !sourceKind.isBlank()) {
+            document.getMetadata().put("sourceKind", sourceKind);
+        }
+        if (docVersion != null && !docVersion.isBlank()) {
+            document.getMetadata().put("docVersion", docVersion);
+        }
+        if (docType != null && !docType.isBlank()) {
+            document.getMetadata().put("docType", docType);
         }
         if (pageStart != null) {
             document.getMetadata().put("pageStart", pageStart);

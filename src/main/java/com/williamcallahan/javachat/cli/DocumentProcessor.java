@@ -113,7 +113,7 @@ public class DocumentProcessor {
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
             "Failed to enumerate files in %s - check directory permissions";
 
-    private static final List<DocumentationSet> DOCUMENTATION_SETS = List.of(
+    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = List.of(
             new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
             new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
             new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
@@ -122,12 +122,18 @@ public class DocumentProcessor {
             new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
             new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
             new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH),
+            new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH));
+
+    private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
             new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
             new DocumentationSet(DOCSET_JAVA_25_QUICK_NAME, DOCSET_JAVA_25_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));
+
+    private static final List<DocumentationSet> ALL_DOCUMENTATION_SETS = Stream.concat(
+                    BASE_DOCUMENTATION_SETS.stream(), QUICK_DOCUMENTATION_SETS.stream())
+            .toList();
 
     private final DocsIngestionService ingestionService;
     private final ProgressTracker progressTracker;
@@ -287,14 +293,17 @@ public class DocumentProcessor {
     private List<DocumentationSet> selectDocumentationSets(final EnvironmentConfig config) {
         final String filter = config.docSetFilter();
         if (filter == null || filter.isBlank()) {
-            return DOCUMENTATION_SETS;
+            if (config.includeQuickSets()) {
+                return ALL_DOCUMENTATION_SETS;
+            }
+            return BASE_DOCUMENTATION_SETS;
         }
         final Set<String> tokens = parseDocSetFilter(filter);
         if (tokens.isEmpty() || tokens.contains("all")) {
-            return DOCUMENTATION_SETS;
+            return ALL_DOCUMENTATION_SETS;
         }
         final List<DocumentationSet> selectedSets = new ArrayList<>();
-        for (DocumentationSet docSet : DOCUMENTATION_SETS) {
+        for (DocumentationSet docSet : ALL_DOCUMENTATION_SETS) {
             if (docSet.matchesAny(tokens)) {
                 selectedSets.add(docSet);
             }
@@ -303,7 +312,7 @@ public class DocumentProcessor {
             throw new DocumentProcessingException(String.format(
                     Locale.ROOT,
                     "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                    formatDocSetSummary(DOCUMENTATION_SETS)));
+                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
         }
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_DOCSET_FILTER, filter);
@@ -388,7 +397,8 @@ public class DocumentProcessor {
             String qdrantHost,
             String qdrantPort,
             String appPort,
-            String docSetFilter) {
+            String docSetFilter,
+            boolean includeQuickSets) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
         private static final String QDRANT_COLLECTION_DEFAULT = "(not set)";
         private static final String QDRANT_HOST_DEFAULT = "localhost";
@@ -400,6 +410,7 @@ public class DocumentProcessor {
         private static final String ENV_QDRANT_PORT = "QDRANT_PORT";
         private static final String ENV_APP_PORT = "PORT";
         private static final String ENV_DOCS_SETS = "DOCS_SETS";
+        private static final String ENV_DOCS_INCLUDE_QUICK = "DOCS_INCLUDE_QUICK";
 
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
@@ -408,12 +419,22 @@ public class DocumentProcessor {
                     envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
                     envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
                     envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT),
-                    envOrDefault(ENV_DOCS_SETS, ""));
+                    envOrDefault(ENV_DOCS_SETS, ""),
+                    envBooleanOrDefault(ENV_DOCS_INCLUDE_QUICK, false));
         }
 
         private static String envOrDefault(final String key, final String fallbackText) {
             final String envSetting = System.getenv(key);
             return envSetting == null || envSetting.isBlank() ? fallbackText : envSetting;
+        }
+
+        private static boolean envBooleanOrDefault(final String key, final boolean fallbackValue) {
+            final String envSetting = System.getenv(key);
+            if (envSetting == null || envSetting.isBlank()) {
+                return fallbackValue;
+            }
+            final String normalized = envSetting.trim().toLowerCase(Locale.ROOT);
+            return "true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized);
         }
     }
 

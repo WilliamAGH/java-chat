@@ -28,8 +28,7 @@ import org.springframework.stereotype.Service;
 public class DocsIngestionService {
     private static final String DEFAULT_DOCS_ROOT = "data/docs";
     private static final String SPRING_BOOT_REFERENCE_PATH = "/data/docs/spring-boot/reference.html";
-    private static final String SPRING_BOOT_REFERENCE_URL =
-            "https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/";
+    private static final String SPRING_BOOT_REFERENCE_URL = "https://docs.spring.io/spring-boot/reference/";
     private static final String FILE_URL_PREFIX = "file://";
     private static final String API_PATH_SEGMENT = "/api/";
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(30);
@@ -174,7 +173,7 @@ public class DocsIngestionService {
                 Path file = pathIterator.next();
                 if (file.getFileName() == null) continue;
 
-                LocalFileProcessingOutcome outcome = processLocalFile(file);
+                LocalFileProcessingOutcome outcome = processLocalFile(root, file);
                 if (outcome.processed()) {
                     processedCount.incrementAndGet();
                 } else if (outcome.failure() != null) {
@@ -194,7 +193,7 @@ public class DocsIngestionService {
         return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
     }
 
-    private LocalFileProcessingOutcome processLocalFile(Path file) {
+    private LocalFileProcessingOutcome processLocalFile(Path root, Path file) {
         long fileStartMillis = System.currentTimeMillis();
         Path fileNamePath = file.getFileName();
         if (fileNamePath == null) {
@@ -202,9 +201,28 @@ public class DocsIngestionService {
                     false, new LocalIngestionFailure(file.toString(), "filename", "Missing filename"));
         }
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
+        String url = mapLocalPathToUrl(file);
+        if (fileName.endsWith(".pdf")) {
+            // For recognized book PDFs, point URL to public /pdfs path
+            final Optional<String> publicPdfUrl = DocsSourceRegistry.mapBookLocalToPublic(file.toString());
+            url = publicPdfUrl.orElse(url);
+        }
+
+        final long fileSizeBytes;
+        final long lastModifiedMillis;
+        try {
+            fileSizeBytes = Files.size(file);
+            lastModifiedMillis = Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException attributeException) {
+            return new LocalFileProcessingOutcome(false, failure(file, "file-attributes", attributeException));
+        }
+
+        if (localStore.isFileIngestedAndUnchanged(url, fileSizeBytes, lastModifiedMillis)) {
+            INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
+            return new LocalFileProcessingOutcome(false, null);
+        }
         String title;
         String bodyText = null;
-        String url = mapLocalPathToUrl(file);
         String packageName;
 
         if (fileName.endsWith(".pdf")) {
@@ -212,9 +230,6 @@ public class DocsIngestionService {
                 String metadata = pdfExtractor.getPdfMetadata(file);
                 title = extractTitleFromMetadata(metadata, fileNamePath.toString());
                 packageName = "";
-                // For recognized book PDFs, point URL to public /pdfs path
-                final Optional<String> publicPdfUrl = DocsSourceRegistry.mapBookLocalToPublic(file.toString());
-                url = publicPdfUrl.orElse(url);
             } catch (IOException pdfExtractionException) {
                 log.error(
                         "Failed to extract PDF content (exception type: {})",
@@ -253,7 +268,8 @@ public class DocsIngestionService {
         }
 
         if (!documents.isEmpty()) {
-            return processDocuments(file, documents, fileStartMillis);
+            applyProvenanceMetadata(documents, deriveProvenance(root, file, url));
+            return processDocuments(file, url, fileSizeBytes, lastModifiedMillis, documents, fileStartMillis);
         } else {
             INDEXING_LOG.debug("[INDEXING] Skipping empty document");
             return new LocalFileProcessingOutcome(
@@ -261,8 +277,181 @@ public class DocsIngestionService {
         }
     }
 
+    private Provenance deriveProvenance(Path root, Path file, String url) {
+        Objects.requireNonNull(root, "root");
+        Objects.requireNonNull(file, "file");
+
+        Path baseDocsDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
+        String docSet = "";
+        if (root.startsWith(baseDocsDir)) {
+            docSet = baseDocsDir.relativize(root).toString();
+        }
+
+        String docPath = "";
+        if (file.startsWith(root)) {
+            docPath = root.relativize(file).toString();
+        }
+
+        String sourceName = deriveSourceName(docSet, url);
+        String sourceKind = deriveSourceKind(sourceName);
+        String docType = deriveDocType(docSet, url);
+        String docVersion = deriveDocVersion(docSet, url);
+
+        return new Provenance(
+                blankToNull(docSet),
+                blankToNull(docPath),
+                blankToNull(sourceName),
+                blankToNull(sourceKind),
+                blankToNull(docVersion),
+                blankToNull(docType));
+    }
+
+    private static void applyProvenanceMetadata(
+            List<org.springframework.ai.document.Document> documents, Provenance provenance) {
+        if (documents == null || documents.isEmpty() || provenance == null) {
+            return;
+        }
+        for (org.springframework.ai.document.Document doc : documents) {
+            if (doc == null) {
+                continue;
+            }
+            if (provenance.docSet() != null) {
+                doc.getMetadata().put("docSet", provenance.docSet());
+            }
+            if (provenance.docPath() != null) {
+                doc.getMetadata().put("docPath", provenance.docPath());
+            }
+            if (provenance.sourceName() != null) {
+                doc.getMetadata().put("sourceName", provenance.sourceName());
+            }
+            if (provenance.sourceKind() != null) {
+                doc.getMetadata().put("sourceKind", provenance.sourceKind());
+            }
+            if (provenance.docVersion() != null) {
+                doc.getMetadata().put("docVersion", provenance.docVersion());
+            }
+            if (provenance.docType() != null) {
+                doc.getMetadata().put("docType", provenance.docType());
+            }
+        }
+    }
+
+    private static String deriveSourceName(String docSet, String url) {
+        if (docSet != null) {
+            String normalized = docSet.replace('\\', '/');
+            if (normalized.startsWith("oracle/") || normalized.startsWith("java/")) {
+                return "oracle";
+            }
+            if (normalized.startsWith("ibm/")) {
+                return "ibm";
+            }
+            if (normalized.startsWith("jetbrains/")) {
+                return "jetbrains";
+            }
+            int slash = normalized.indexOf('/');
+            if (slash > 0) {
+                return normalized.substring(0, slash);
+            }
+            if (!normalized.isBlank()) {
+                return normalized;
+            }
+        }
+        if (url != null) {
+            String lower = AsciiTextNormalizer.toLowerAscii(url);
+            if (lower.contains("docs.oracle.com") || lower.contains("oracle.com")) {
+                return "oracle";
+            }
+            if (lower.contains("developer.ibm.com") || lower.contains("ibm.com")) {
+                return "ibm";
+            }
+            if (lower.contains("jetbrains.com")) {
+                return "jetbrains";
+            }
+        }
+        return "";
+    }
+
+    private static String deriveSourceKind(String sourceName) {
+        if (sourceName == null || sourceName.isBlank()) {
+            return "";
+        }
+        String lower = AsciiTextNormalizer.toLowerAscii(sourceName);
+        if ("oracle".equals(lower)) {
+            return "official";
+        }
+        if ("ibm".equals(lower) || "jetbrains".equals(lower)) {
+            return "vendor";
+        }
+        return "unknown";
+    }
+
+    private static String deriveDocType(String docSet, String url) {
+        String normalized = docSet == null ? "" : docSet.replace('\\', '/');
+        if (normalized.startsWith("java/")) {
+            return "api-docs";
+        }
+        if (normalized.startsWith("oracle/javase")) {
+            return "release-notes";
+        }
+        if (normalized.startsWith("ibm/articles") || normalized.startsWith("jetbrains/")) {
+            return "blog";
+        }
+        if (url != null) {
+            String lower = AsciiTextNormalizer.toLowerAscii(url);
+            if (lower.contains("docs.oracle.com/en/java/javase/")) {
+                return "api-docs";
+            }
+        }
+        return "";
+    }
+
+    private static String deriveDocVersion(String docSet, String url) {
+        String normalized = docSet == null ? "" : docSet.replace('\\', '/');
+        String fromDocSet = firstNumberToken(normalized);
+        if (!fromDocSet.isBlank()) {
+            return fromDocSet;
+        }
+        if (url != null) {
+            String fromUrl = firstNumberToken(AsciiTextNormalizer.toLowerAscii(url));
+            return fromUrl;
+        }
+        return "";
+    }
+
+    private static String firstNumberToken(String input) {
+        if (input == null || input.isBlank()) {
+            return "";
+        }
+        StringBuilder digits = new StringBuilder();
+        for (int i = 0; i < input.length(); i++) {
+            char ch = input.charAt(i);
+            if (ch >= '0' && ch <= '9') {
+                digits.append(ch);
+            } else if (!digits.isEmpty()) {
+                break;
+            }
+        }
+        return digits.toString();
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private record Provenance(
+            String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {}
+
     private LocalFileProcessingOutcome processDocuments(
-            Path file, List<org.springframework.ai.document.Document> documents, long fileStartMillis) {
+            Path file,
+            String url,
+            long fileSizeBytes,
+            long lastModifiedMillis,
+            List<org.springframework.ai.document.Document> documents,
+            long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
         try {
@@ -284,6 +473,7 @@ public class DocsIngestionService {
             // Don't mark when we fell back to cache in upload mode - allows future re-upload
             if (storageResult.usedPrimaryDestination()) {
                 markDocumentsIngested(documents);
+                markFileIngested(url, fileSizeBytes, lastModifiedMillis);
             }
 
             return new LocalFileProcessingOutcome(true, null);
@@ -318,6 +508,19 @@ public class DocsIngestionService {
                         "Failed to mark hash as ingested (exception type: {})",
                         markHashException.getClass().getSimpleName());
             }
+        }
+    }
+
+    private void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        try {
+            localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis);
+        } catch (IOException exception) {
+            log.warn(
+                    "Failed to mark file as ingested (exception type: {})",
+                    exception.getClass().getSimpleName());
         }
     }
 
@@ -552,14 +755,11 @@ public class DocsIngestionService {
     /**
      * Internal result of processing a single local file.
      *
-     * @param processed true if file was successfully processed
-     * @param failure failure details when processing failed, must be non-null if processed is false
+     * @param processed true if file was successfully processed and stored
+     * @param failure failure details when processing failed; null when skipped or processed successfully
      */
     private record LocalFileProcessingOutcome(boolean processed, LocalIngestionFailure failure) {
         LocalFileProcessingOutcome {
-            if (!processed && failure == null) {
-                throw new IllegalStateException("Failure details required when file processing fails");
-            }
             if (processed && failure != null) {
                 throw new IllegalStateException("Success outcome must not include failure details");
             }
