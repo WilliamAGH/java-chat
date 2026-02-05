@@ -75,7 +75,6 @@ RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index
 ENV PORT=8085
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
-ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
 ENV APP_KILL_ON_CONFLICT=false
 ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
 ENV DOCS_PARSED_DIR=/app/data/parsed

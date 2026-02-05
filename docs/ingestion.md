@@ -2,12 +2,16 @@
 
 Java Chat includes scripts and a CLI profile to mirror upstream documentation into `data/docs/` and ingest it into the vector store with content-hash deduplication.
 
+Command reference:
+
+- See `docs/pipeline-commands.md` for the supported scrape and ingestion commands, flags, and full vs incremental behavior.
+
 ## Pipeline overview
 
 1) **Fetch** documentation into `data/docs/` (HTML mirrors).
 2) **Process** docs into chunks + embeddings.
 3) **Deduplicate** chunks by SHA‑256 hash.
-4) **Upload** embeddings to Qdrant (or cache locally).
+4) **Upload** embeddings to Qdrant (upload mode) or **cache** embeddings locally (local-only mode).
 
 ## Fetch docs
 

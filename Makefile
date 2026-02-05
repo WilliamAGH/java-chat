@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all process-all full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-upload process-local process-doc-sets full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -112,8 +112,24 @@ citations: ## Try a citations lookup
 fetch-all: ## Fetch all documentation with deduplication
 	./scripts/fetch_all_docs.sh
 
+fetch-force: ## Fetch all documentation (full refresh; forces refetch)
+	./scripts/fetch_all_docs.sh --force
+
+fetch-quick: ## Fetch documentation including quick landing mirrors
+	./scripts/fetch_all_docs.sh --include-quick
+
 process-all: ## Process and upload all docs to Qdrant with deduplication
 	./scripts/process_all_to_qdrant.sh
+
+process-upload: ## Process docs and upload to Qdrant
+	./scripts/process_all_to_qdrant.sh --upload
+
+process-local: ## Process docs and cache embeddings locally (no Qdrant)
+	./scripts/process_all_to_qdrant.sh --local-only
+
+process-doc-sets: ## Process and upload selected doc sets (set DOCS_SETS=...)
+	@if [ -z "$$DOCS_SETS" ]; then echo "Set DOCS_SETS=comma,separated,docsets"; exit 1; fi
+	./scripts/process_all_to_qdrant.sh --upload --doc-sets="$$DOCS_SETS"
 
 full-pipeline: ## Complete pipeline: fetch docs, process, and upload to Qdrant
 	@echo "Starting full documentation pipeline..."

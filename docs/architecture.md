@@ -9,6 +9,7 @@ Java Chat is a Java-learning assistant focused on fast streaming answers and ver
 - **Streaming**: Server-Sent Events (SSE) with typed event payloads
 - **Retrieval**: Spring AI `VectorStore` (Qdrant) with local fallback search
 - **LLM streaming**: OpenAI Java SDK (`OpenAIStreamingService`) supporting GitHub Models and OpenAI
+- **Embeddings**: Strict provider selection with no runtime fallback (see [configuration](configuration.md#embeddings))
 
 ## Request flow (chat)
 

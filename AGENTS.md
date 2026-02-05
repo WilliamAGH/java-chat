@@ -14,10 +14,10 @@ alwaysApply: true
 ## Rule Summary [SUM]
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
-- [GT1a-j] Git, history safety, hooks/signing, lock files, and clean commits
+- [GT1a-l] Git, history safety, hooks/signing, lock files, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
 - [ID1a-d] Idiomatic Patterns & Defaults
-- [RC1a-e] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
+- [RC1a-f] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
 - [FS1a-k] File Creation & Clean Architecture (search first, strict types, single responsibility)
 - [TY1a-d] Type Safety (strict generics, no raw types, no unchecked casts)
 - [FV1a-h] Frontend Validation (Zod schemas, discriminated unions, never swallow errors)
@@ -51,6 +51,8 @@ alwaysApply: true
 - [GT1h] Never delete lock files automatically (including `.git/index.lock`). Stop and ask for instruction.
 - [GT1i] Treat existing staged/unstaged changes as intentional unless the user says otherwise; never “clean up” someone else’s work unprompted.
 - [GT1j] Git commands that write to the working tree, index, or history require elevated permissions; never run without escalation.
+- [GT1k] **Do Not Block On Baseline Diffs**: If `git status` already shows modified files when you start, assume those changes are intentional and continue the requested task without stopping to ask about them. Avoid touching unrelated files.
+- [GT1l] **Stop Only On Concurrent Drift**: Only stop and ask for direction if a file changes unexpectedly *during your work* in a way that conflicts with edits you are actively making (e.g., a file you are editing changes on disk between reads/writes). Otherwise, proceed and keep changes scoped.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -73,6 +75,10 @@ alwaysApply: true
 - [RC1c] **Fix Roots**: Investigate → understand → fix root causes. Do not add band-aids to silence errors.
 - [RC1d] **Dev Logging**: Dev-only logging is allowed to learn (must not change behavior, remove before shipping).
 - [RC1e] **Exceptions**: Use typed exception handling patterns; propagate meaningful errors, never swallow silently.
+- [RC1f] **Explicit Violations**: Any of the following is a violation that must be removed, not justified:
+  - Returning "best effort" results after a dependency failure (LLM, embeddings, vector store, database, filesystem).
+  - Catching and logging an exception while continuing as if the operation succeeded.
+  - Adding a secondary retrieval/indexing path that runs only when the primary path fails.
 
 ## [FS1] File Creation & Clean Architecture
 

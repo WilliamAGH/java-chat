@@ -41,12 +41,23 @@ Common variables:
 
 ## Embeddings
 
-Embeddings are configured with a fallback chain (see `EmbeddingFallbackConfig`):
+Embeddings are configured with explicit provider selection (see `EmbeddingConfig`).
+Runtime fallback and error swallowing are disallowed per [AGENTS.md](../AGENTS.md) ([RC1a], [RC1c], [RC1e]).
+Using fallback embeddings or suppressing provider failures is an explicit [AGENTS.md](../AGENTS.md) violation.
+If a provider is unreachable or returns an HTTP error, the failure is surfaced immediately
+and ingestion/retrieval stops so invalid vectors are never cached.
 
-1) Local embedding server (when enabled)
-2) Remote OpenAI-compatible embedding provider (optional)
-3) OpenAI embeddings (optional; requires `OPENAI_API_KEY`)
-4) Hash-based fallback (deterministic, not semantic)
+Selection order:
+
+1) Local embedding server when `APP_LOCAL_EMBEDDING_ENABLED=true`
+2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_SERVER_URL` and `REMOTE_EMBEDDING_API_KEY` are set
+3) OpenAI embeddings when `OPENAI_API_KEY` is set
+
+If none are configured, the application fails fast with an explicit error.
+
+Reprocessing note:
+
+- If you change embedding providers or suspect stale vectors, clear `data/embeddings-cache/` (or the configured cache dir) before re-ingesting so embeddings are recomputed with the new provider.
 
 Common variables:
 
@@ -54,7 +65,6 @@ Common variables:
 - `LOCAL_EMBEDDING_SERVER_URL` (default `http://127.0.0.1:8088`)
 - `APP_LOCAL_EMBEDDING_MODEL` (default `text-embedding-qwen3-embedding-8b`)
 - `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `4096`)
-- `APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED` (default `true`)
 - `REMOTE_EMBEDDING_SERVER_URL`, `REMOTE_EMBEDDING_API_KEY`, `REMOTE_EMBEDDING_MODEL_NAME`, `REMOTE_EMBEDDING_DIMENSIONS` (optional)
 
 ## Qdrant

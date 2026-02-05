@@ -12,7 +12,7 @@ Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 - Guided learning mode (`/learn`) with lesson-scoped chat (`/api/guided/*`)
 - Documentation ingestion pipeline (fetch → chunk → embed → dedupe → index)
 - Chunking uses JTokkit's CL100K_BASE tokenizer (GPT-3.5/4 style) for token counting
-- Embedding fallbacks: local embedding server → remote/OpenAI → hash fallback
+- Embeddings use strict provider selection and fail fast when the provider is unavailable (no runtime fallbacks)
 
 ## Quick start
 
@@ -54,7 +54,7 @@ Open `http://localhost:8085/`.
 make full-pipeline
 ```
 
-See `docs/ingestion.md`.
+Command reference: `docs/pipeline-commands.md` (scrape and ingestion targets, flags, and full vs incremental behavior).
 
 ## Documentation
 
