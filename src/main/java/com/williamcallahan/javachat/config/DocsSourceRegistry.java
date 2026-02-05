@@ -59,7 +59,7 @@ public final class DocsSourceRegistry {
     private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
-    private static final String DEFAULT_SPRING_AI_API_BASE = "https://docs.spring.io/spring-ai/reference/api/";
+    private static final String DEFAULT_SPRING_AI_API_BASE = "https://docs.spring.io/spring-ai/docs/2.0.x/api/";
 
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
     private static final String LOCAL_DOCS_JAVA24 = LOCAL_DOCS_ROOT + "java24/";
