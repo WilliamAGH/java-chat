@@ -87,7 +87,11 @@ fetch_docs() {
         --show-progress \
         --progress=bar:force \
         --timeout=30 \
+        --dns-timeout=30 \
+        --connect-timeout=30 \
+        --read-timeout=30 \
         --tries=3 \
+        --waitretry=1 \
         "$url" 2>&1 | tee -a "$LOG_FILE"
     
     local result=$?
@@ -107,7 +111,7 @@ fetch_docs() {
 # Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES
 DOC_SOURCES=(
     "${JAVA24_API_BASE:-https://docs.oracle.com/en/java/javase/24/docs/api/}|$DOCS_ROOT/java/java24-complete|Java 24 Complete API|5|9000"
-    "${JAVA25_API_BASE:-https://docs.oracle.com/en/java/javase/25/}|$DOCS_ROOT/java/java25-complete|Java 25 Documentation|4|8000"
+    "${JAVA25_API_BASE:-https://docs.oracle.com/en/java/javase/25/docs/api/}|$DOCS_ROOT/java/java25-complete|Java 25 Documentation|5|8000"
     "${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|$DOCS_ROOT/oracle/javase|Java 25 Release Notes Issues|3|1"
     "${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|$DOCS_ROOT/ibm/articles|IBM Java 25 Overview|1|1"
     "${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|$DOCS_ROOT/jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1"
