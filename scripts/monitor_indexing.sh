@@ -67,6 +67,7 @@ echo -e "${BOLD}${CYAN}═══════════════════
 echo ""
 
 # Main monitoring loop
+ESTIMATED_CORPUS_VECTORS=${ESTIMATED_CORPUS_VECTORS:-60000}
 PREV_VECTORS=0
 START_TIME=$(date +%s)
 LAST_UPDATE_TIME=$START_TIME
@@ -157,13 +158,11 @@ while true; do
     
     # Progress Estimation
     if [ "$VECTORS" -gt 0 ] && [ "$CURRENT_RATE" != "0" ]; then
-        # Estimate based on typical document count
-        ESTIMATED_TOTAL=60000
-        REMAINING=$((ESTIMATED_TOTAL - VECTORS))
+        REMAINING=$((ESTIMATED_CORPUS_VECTORS - VECTORS))
         if [ "$REMAINING" -gt 0 ]; then
             ETA=$(echo "scale=0; $REMAINING / $CURRENT_RATE / 60" | bc 2>/dev/null || echo "?")
             echo -e "${BOLD}${YELLOW}ESTIMATED TIME${NC}"
-            echo -e "├─ Progress: ${GREEN}$(echo "scale=1; $VECTORS * 100 / $ESTIMATED_TOTAL" | bc)%${NC}"
+            echo -e "├─ Progress: ${GREEN}$(echo "scale=1; $VECTORS * 100 / $ESTIMATED_CORPUS_VECTORS" | bc)%${NC}"
             echo -e "└─ ETA: ${CYAN}~$ETA minutes${NC}"
             echo ""
         fi

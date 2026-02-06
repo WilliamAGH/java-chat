@@ -87,9 +87,10 @@ TEST_TEXT="Java 25 introduces virtual threads and pattern matching improvements"
 echo -e "Test text: ${CYAN}\"$TEST_TEXT\"${NC}"
 
 # Call embedding API directly
+EMBED_REQUEST_BODY="$(jq -n --arg input "$TEST_TEXT" '{model:"text-embedding-qwen3-embedding-8b",input:[$input]}')"
 EMBED_RESPONSE=$(curl -s -X POST "$LOCAL_EMBEDDING_SERVER_URL/v1/embeddings" \
     -H "Content-Type: application/json" \
-    -d "{\"model\": \"text-embedding-qwen3-embedding-8b\", \"input\": \"$TEST_TEXT\"}" 2>/dev/null)
+    -d "$EMBED_REQUEST_BODY" 2>/dev/null)
 
 if [ $? -eq 0 ]; then
     EMBED_DIM=$(echo "$EMBED_RESPONSE" | jq '.data[0].embedding | length' 2>/dev/null || echo "0")
@@ -208,9 +209,10 @@ if [ "$FINAL_COUNT" -gt "$VECTOR_COUNT" ]; then
     echo -e "Query: ${CYAN}\"$TEST_QUERY\"${NC}"
     
     # Search directly in Qdrant
+    SEARCH_EMBED_BODY="$(jq -n --arg input "$TEST_QUERY" '{model:"text-embedding-qwen3-embedding-8b",input:[$input]}')"
     SEARCH_VECTOR=$(curl -s -X POST "$LOCAL_EMBEDDING_SERVER_URL/v1/embeddings" \
         -H "Content-Type: application/json" \
-        -d "{\"model\": \"text-embedding-qwen3-embedding-8b\", \"input\": \"$TEST_QUERY\"}" 2>/dev/null | \
+        -d "$SEARCH_EMBED_BODY" 2>/dev/null | \
         jq '.data[0].embedding' 2>/dev/null)
     
     if [ -n "$SEARCH_VECTOR" ]; then
