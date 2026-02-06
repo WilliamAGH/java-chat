@@ -57,7 +57,7 @@ If none are configured, the application fails fast with an explicit error.
 
 Reprocessing note:
 
-- If you change embedding providers or suspect stale vectors, clear `data/embeddings-cache/` (or the configured cache dir) before re-ingesting so embeddings are recomputed with the new provider.
+- If you change embedding providers or suspect stale vectors, remove existing Qdrant collections and clear local dedup markers (`data/index/`) before re-ingesting so vectors are rebuilt with the new provider.
 
 Common variables:
 

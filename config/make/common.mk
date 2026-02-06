@@ -86,19 +86,14 @@ endef
 # Sets APP_ARGS array with appropriate --spring.ai.* arguments
 # Usage: $(call build_app_args,PORT)
 define build_app_args
-APP_ARGS=(--server.port=$(1)); \
-if [ -n "$$GITHUB_TOKEN" ]; then \
-  APP_ARGS+=( \
-    --spring.ai.openai.api-key="$$GITHUB_TOKEN" \
-    --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-    --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-    --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
-  ); \
-elif [ -n "$$OPENAI_API_KEY" ]; then \
-  APP_ARGS+=( \
-    --spring.ai.openai.api-key="$$OPENAI_API_KEY" \
-  ); \
-fi
+	APP_ARGS=(--server.port=$(1)); \
+	if [ -n "$$GITHUB_TOKEN" ]; then \
+	  APP_ARGS+=( \
+	    --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
+	    --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
+	    --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
+	  ); \
+	fi
 endef
 
 # ============================================================================

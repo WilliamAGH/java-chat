@@ -12,7 +12,7 @@ Command reference:
 2. **Chunk** content using JTokkit's CL100K_BASE tokenizer (~900 tokens per chunk with 150-token overlap).
 3. **Deduplicate** chunks by SHA-256 hash — unchanged content is skipped on re-runs.
 4. **Embed** chunks with both dense vectors (semantic, from configured embedding provider) and sparse vectors (BM25 lexical tokens via Lucene `StandardAnalyzer`).
-5. **Upload** to Qdrant hybrid collections (upload mode) or **cache** embeddings locally (local-only mode).
+5. **Upsert** to Qdrant hybrid collections.
 
 ## Fetch docs
 
@@ -43,23 +43,13 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 - Routes each doc set to the appropriate Qdrant collection (`QdrantCollectionRouter`)
 - Writes both dense and sparse (BM25) vectors per chunk via gRPC (`HybridVectorService`)
 
-### Modes
-
-- Default: `--upload` (uploads to Qdrant)
-- Optional: `--local-only` (caches embeddings under `data/embeddings-cache/`)
-
-```bash
-make process-local                          # local-only via Make
-./scripts/process_all_to_qdrant.sh --upload # explicit upload via script
-```
-
 ### Doc set filtering (CLI)
 
 Limit ingestion to specific doc sets:
 
 ```bash
 DOCS_SETS=java25-complete make process-doc-sets
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete,spring-boot-complete
+./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete,spring-boot-complete
 ```
 
 See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for the full doc set ID table.

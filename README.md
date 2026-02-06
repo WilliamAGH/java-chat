@@ -53,12 +53,11 @@ Open `http://localhost:8085/`.
 ```bash
 make full-pipeline          # fetch all docs + ingest into Qdrant
 make process-all            # ingest only (incremental, upload to Qdrant)
-make process-local          # ingest only (cache embeddings locally, no Qdrant)
 ```
 
 Ingestion writes dense + BM25 sparse vectors to four hybrid Qdrant collections, queried via RRF fusion.
 
-Full command reference (scrape flags, ingestion modes, doc set filtering, HTTP API, full re-ingest):
+Full command reference (scrape flags, doc set filtering, HTTP API, full re-ingest):
 **[docs/pipeline-commands.md](docs/pipeline-commands.md)**
 
 ## Documentation

@@ -15,7 +15,6 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 | **Ingest** (chunk → embed → upload) | `make process-all` | Clear state, then `make process-all` ([details](#full-re-ingest)) |
 | **Both** | `make full-pipeline` | `make fetch-force`, then clear state, then `make process-all` |
 | **Ingest subset** | `DOCS_SETS=java25-complete make process-doc-sets` | — |
-| **Embed locally** (no Qdrant) | `make process-local` | — |
 
 ---
 
@@ -55,14 +54,12 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 
 ## Ingest (chunk, embed, deduplicate, upload)
 
-The ingestion phase processes local HTML/PDF mirrors into chunked, embedded vectors and writes them to Qdrant (or caches them locally).
+The ingestion phase processes local HTML/PDF mirrors into chunked, embedded vectors and writes them to Qdrant.
 
 ### Make targets
 
 ```bash
 make process-all        # Incremental ingestion, upload to Qdrant (default)
-make process-upload     # Same as process-all (explicit upload mode)
-make process-local      # Incremental ingestion, cache embeddings locally (no Qdrant required)
 make process-doc-sets   # Ingest selected doc sets only (requires DOCS_SETS=...)
 make full-pipeline      # Scrape + ingest in one step
 ```
@@ -70,13 +67,11 @@ make full-pipeline      # Scrape + ingest in one step
 ### Script flags
 
 ```bash
-./scripts/process_all_to_qdrant.sh [--upload | --local-only] [--doc-sets=SET1,SET2]
+./scripts/process_all_to_qdrant.sh [--doc-sets=SET1,SET2]
 ```
 
 | Flag | Effect |
 |---|---|
-| `--upload` | Upload embeddings to Qdrant (default) |
-| `--local-only` | Cache embeddings under `data/embeddings-cache/` without Qdrant |
 | `--doc-sets=...` | Comma-separated doc set IDs or paths to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
@@ -87,13 +82,13 @@ Limit ingestion to specific doc sets by ID or path:
 ```bash
 # Single doc set
 DOCS_SETS=java25-complete make process-doc-sets
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete
+./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete
 
 # Multiple doc sets
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete,spring-boot-complete
+./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete,spring-boot-complete
 
 # Path-style IDs
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java/java25-complete
+./scripts/process_all_to_qdrant.sh --doc-sets=java/java25-complete
 ```
 
 Available doc set IDs are defined in `DocumentationSetCatalog.java`. Common ones:
@@ -112,7 +107,6 @@ Available doc set IDs are defined in `DocumentationSetCatalog.java`. Common ones
 - Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
 - Unchanged files are skipped on re-runs — only new or modified content is embedded.
 - File-level fingerprints (`data/index/file_*.marker`) detect when a source file changes, triggering re-chunking and pruning stale vectors from Qdrant.
-- In `--local-only` mode, embeddings are cached to `data/embeddings-cache/` for deferred upload.
 
 ---
 
@@ -161,7 +155,7 @@ There is no single "force" flag for ingestion. A full re-ingest requires clearin
 2. Clear local deduplication state so all content is re-chunked and re-embedded:
 
 ```bash
-rm -rf data/index data/parsed data/embeddings-cache
+rm -rf data/index data/parsed
 ```
 
 3. Optionally, delete Qdrant collections to start clean (they are auto-created on next startup):
@@ -177,29 +171,6 @@ done
 
 ```bash
 make process-all
-```
-
----
-
-## Embeddings cache management (HTTP API)
-
-When the app is running, the embeddings cache can be managed via HTTP endpoints:
-
-```bash
-# View cache statistics
-curl -sS http://localhost:8085/api/embeddings-cache/stats
-
-# Upload cached embeddings to Qdrant (batch size configurable)
-curl -sS -X POST "http://localhost:8085/api/embeddings-cache/upload?batchSize=100"
-
-# Take a cache snapshot
-curl -sS -X POST http://localhost:8085/api/embeddings-cache/snapshot
-
-# Export cache to file
-curl -sS -X POST "http://localhost:8085/api/embeddings-cache/export?filename=cache-backup.gz"
-
-# Import cache from file
-curl -sS -X POST "http://localhost:8085/api/embeddings-cache/import?filename=cache-backup.gz"
 ```
 
 ---
@@ -231,14 +202,8 @@ To run the CLI directly:
 ```bash
 app_jar=$(ls -1 build/libs/*.jar | grep -v -- "-plain.jar" | head -1)
 
-# Upload mode
-EMBEDDINGS_UPLOAD_MODE=upload java -Dspring.profiles.active=cli -jar "$app_jar"
-
-# Local-only mode
-EMBEDDINGS_UPLOAD_MODE=local-only java -Dspring.profiles.active=cli -jar "$app_jar"
-
 # With doc set filtering
-DOCS_SETS=java25-complete EMBEDDINGS_UPLOAD_MODE=upload java -Dspring.profiles.active=cli -jar "$app_jar"
+DOCS_SETS=java25-complete java -Dspring.profiles.active=cli -jar "$app_jar"
 ```
 
 The docs root defaults to `data/docs` unless `DOCS_DIR` is set.
@@ -264,8 +229,6 @@ make fetch-all             # Incremental scrape
 make fetch-force           # Full scrape (force refetch)
 make fetch-quick           # Incremental scrape + quick landing mirrors
 make process-all           # Incremental ingest (upload to Qdrant)
-make process-upload        # Explicit upload mode
-make process-local         # Local-only embeddings (no Qdrant)
 make process-doc-sets      # Ingest selected doc sets (DOCS_SETS=...)
 make full-pipeline         # Scrape + ingest
 make compose-up            # Start local Qdrant via Docker Compose

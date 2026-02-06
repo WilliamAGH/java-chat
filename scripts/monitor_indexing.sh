@@ -125,7 +125,7 @@ while true; do
     WARNINGS=$(count_log_events "WARN")
     
     # Get last activity
-    LAST_EMBEDDING=$(get_last_log "LocalEmbeddingModel")
+    LAST_EMBEDDING=$(get_last_log "LocalEmbeddingClient")
     LAST_ERROR=$(get_last_log "ERROR")
     
     # Check services
