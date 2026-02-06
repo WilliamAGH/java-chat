@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -39,7 +40,7 @@ public class ExternalServiceHealth {
     private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
 
     private final WebClient webClient;
-    private final AppProperties appProperties;
+    private final List<String> qdrantCollections;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
 
     /** Qdrant gRPC default port. */
@@ -78,8 +79,13 @@ public class ExternalServiceHealth {
      * @param appProperties application configuration for Qdrant collection names
      */
     public ExternalServiceHealth(WebClient.Builder webClientBuilder, AppProperties appProperties) {
-        this.webClient = webClientBuilder.build();
-        this.appProperties = appProperties;
+        this.webClient =
+                Objects.requireNonNull(webClientBuilder, "webClientBuilder").build();
+        AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
+        AppProperties.QdrantCollections collections =
+                requiredAppProperties.getQdrant().getCollections();
+        this.qdrantCollections = List.of(
+                collections.getBooks(), collections.getDocs(), collections.getArticles(), collections.getPdfs());
     }
 
     /**
@@ -216,16 +222,15 @@ public class ExternalServiceHealth {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
 
-        List<String> collections = appProperties.getQdrant().getCollections().all();
-        if (collections.isEmpty()) {
+        if (qdrantCollections.isEmpty()) {
             status.markUnhealthy();
             log.warn("Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
             return;
         }
 
         String base = buildQdrantRestBaseUrl();
-        List<Mono<Void>> checks = new ArrayList<>(collections.size());
-        for (String collection : collections) {
+        List<Mono<Void>> checks = new ArrayList<>(qdrantCollections.size());
+        for (String collection : qdrantCollections) {
             if (collection == null || collection.isBlank()) {
                 continue;
             }

@@ -142,7 +142,10 @@ public class ChatController extends BaseController {
                 citations = retrievalService.toCitations(promptOutcome.documents());
                 citationWarning = null;
             } catch (Exception citationError) {
-                PIPELINE_LOG.warn("[{}] Citation conversion failed: {}", requestToken, citationError.getMessage());
+                PIPELINE_LOG.warn(
+                        "[{}] Citation conversion failed (exceptionType={})",
+                        requestToken,
+                        citationError.getClass().getSimpleName());
                 citations = List.of();
                 citationWarning = "Citation retrieval failed - sources unavailable for this response";
             }

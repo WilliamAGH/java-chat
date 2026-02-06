@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.domain.ingestion.IngestionErrorResponse;
-import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionResponse;
@@ -11,7 +10,6 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.io.IOException;
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -88,12 +86,8 @@ public class IngestionController extends BaseController {
             @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000") @Min(1) @Max(1000000) int maxFiles) {
         try {
-            DocsIngestionService.LocalIngestionOutcome outcome =
-                    docsIngestionService.ingestLocalDirectory(directory, maxFiles);
-            List<IngestionLocalFailure> failures = outcome.failures().stream()
-                    .map(failure -> new IngestionLocalFailure(failure.filePath(), failure.phase(), failure.details()))
-                    .toList();
-            return ResponseEntity.ok(IngestionLocalOutcome.success(outcome.processedCount(), directory, failures));
+            IngestionLocalOutcome outcome = docsIngestionService.ingestLocalDirectory(directory, maxFiles);
+            return ResponseEntity.ok(outcome);
         } catch (IllegalArgumentException illegalArgumentException) {
             return buildIngestionValidationError(illegalArgumentException);
         } catch (IOException ioException) {

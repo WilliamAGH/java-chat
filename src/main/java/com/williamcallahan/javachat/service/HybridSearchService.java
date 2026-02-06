@@ -26,7 +26,6 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Service;
 
 /**
@@ -36,6 +35,12 @@ import org.springframework.stereotype.Service;
  * (dense nearest-neighbor and sparse BM25-style lexical search) fused via reciprocal rank
  * fusion (RRF). Queries are fanned out to all configured collections in parallel and results
  * are deduplicated by point UUID before returning top-K.</p>
+ *
+ * <p>Verified API contract (Step 0): this adapter uses direct {@code io.qdrant:client} 1.16.2
+ * primitives rather than Spring AI VectorStore abstractions. Hybrid behavior depends on
+ * {@code QueryPoints.prefetch + QueryFactory.rrf(...)}, sparse query vectors are encoded with
+ * {@code VectorInputFactory.vectorInput(values, indices)}, and {@code using} names must match
+ * collection schema keys configured in {@code app.qdrant.*}.</p>
  */
 @Service
 public class HybridSearchService {
@@ -44,7 +49,7 @@ public class HybridSearchService {
     private static final String PAYLOAD_DOC_CONTENT = "doc_content";
 
     private final QdrantClient qdrantClient;
-    private final EmbeddingModel embeddingModel;
+    private final EmbeddingClient embeddingClient;
     private final LexicalSparseVectorEncoder sparseVectorEncoder;
     private final AppProperties appProperties;
 
@@ -52,17 +57,17 @@ public class HybridSearchService {
      * Wires gRPC client and embedding dependencies for hybrid search.
      *
      * @param qdrantClient Qdrant gRPC client
-     * @param embeddingModel embedding model for dense query vectors
+     * @param embeddingClient embedding client for dense query vectors
      * @param sparseVectorEncoder sparse encoder for lexical query vectors
      * @param appProperties application configuration
      */
     public HybridSearchService(
             QdrantClient qdrantClient,
-            EmbeddingModel embeddingModel,
+            EmbeddingClient embeddingClient,
             LexicalSparseVectorEncoder sparseVectorEncoder,
             AppProperties appProperties) {
         this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
-        this.embeddingModel = Objects.requireNonNull(embeddingModel, "embeddingModel");
+        this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.sparseVectorEncoder = Objects.requireNonNull(sparseVectorEncoder, "sparseVectorEncoder");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
     }
@@ -80,7 +85,7 @@ public class HybridSearchService {
             return List.of();
         }
 
-        float[] denseVector = embeddingModel.embed(query);
+        float[] denseVector = embeddingClient.embed(query);
         LexicalSparseVectorEncoder.SparseVector sparseVector = sparseVectorEncoder.encode(query);
 
         List<String> collectionNames = allCollectionNames();
@@ -111,16 +116,15 @@ public class HybridSearchService {
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                log.warn("[QDRANT] Search interrupted for collection {}", collection);
+                log.warn("[QDRANT] Search interrupted for a collection");
             } catch (ExecutionException executionException) {
-                log.warn(
-                        "[QDRANT] Search failed for collection {}: {}",
-                        collection,
-                        executionException.getCause() == null
-                                ? executionException.getMessage()
-                                : executionException.getCause().getMessage());
+                Throwable cause = executionException.getCause();
+                String exceptionType = cause == null
+                        ? executionException.getClass().getSimpleName()
+                        : cause.getClass().getSimpleName();
+                log.warn("[QDRANT] Search failed for a collection (exceptionType={})", exceptionType);
             } catch (TimeoutException timeoutException) {
-                log.warn("[QDRANT] Search timed out for collection {}", collection);
+                log.warn("[QDRANT] Search timed out for a collection");
             }
         }
 

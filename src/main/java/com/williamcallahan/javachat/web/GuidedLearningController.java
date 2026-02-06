@@ -226,7 +226,9 @@ public class GuidedLearningController extends BaseController {
             citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
             citationWarning = null;
         } catch (Exception citationError) {
-            log.warn("Citation conversion failed for guided lesson: {}", citationError.getMessage());
+            log.warn(
+                    "Citation conversion failed for guided lesson (exceptionType={})",
+                    citationError.getClass().getSimpleName());
             citations = List.of();
             citationWarning = "Citation retrieval failed - sources unavailable for this response";
         }
@@ -259,7 +261,7 @@ public class GuidedLearningController extends BaseController {
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();
-                    log.error("Guided streaming error: {} - {}", errorType, error.getMessage());
+                    log.error("Guided streaming error (exceptionType={})", errorType);
                     return sseSupport.sseError(
                             "Streaming error: " + errorType,
                             "The response stream encountered an error. Please try again.");

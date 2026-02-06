@@ -137,17 +137,19 @@ public class LexicalSparseVectorEncoder {
         }
 
         int k1 = 0;
-        switch (length & 3) {
-            case 3 -> k1 ^= (data[roundedEnd + 2] & 0xff) << 16;
-            case 2 -> k1 ^= (data[roundedEnd + 1] & 0xff) << 8;
-            case 1 -> {
-                k1 ^= (data[roundedEnd] & 0xff);
-                k1 *= c1;
-                k1 = Integer.rotateLeft(k1, 15);
-                k1 *= c2;
-                h1 ^= k1;
-            }
-            default -> {}
+        int remainder = length & 3;
+        if (remainder >= 3) {
+            k1 ^= (data[roundedEnd + 2] & 0xff) << 16;
+        }
+        if (remainder >= 2) {
+            k1 ^= (data[roundedEnd + 1] & 0xff) << 8;
+        }
+        if (remainder >= 1) {
+            k1 ^= (data[roundedEnd] & 0xff);
+            k1 *= c1;
+            k1 = Integer.rotateLeft(k1, 15);
+            k1 *= c2;
+            h1 ^= k1;
         }
 
         h1 ^= length;
@@ -173,6 +175,9 @@ public class LexicalSparseVectorEncoder {
             }
         }
 
+        /**
+         * Returns an empty sparse vector with no indices or values.
+         */
         public static SparseVector empty() {
             return new SparseVector(List.of(), List.of());
         }

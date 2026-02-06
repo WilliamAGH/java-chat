@@ -9,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.slf4j.Logger;
@@ -28,7 +31,8 @@ import org.springframework.stereotype.Component;
 public class PdfCitationEnhancer {
     private static final Logger logger = LoggerFactory.getLogger(PdfCitationEnhancer.class);
 
-    private final LocalStoreService localStore;
+    private final Function<String, String> safeNameResolver;
+    private final Supplier<Path> parsedDirSupplier;
 
     /** Cached page count for the Think Java PDF to avoid repeated I/O. */
     private volatile Integer cachedThinkJavaPdfPages = null;
@@ -48,7 +52,9 @@ public class PdfCitationEnhancer {
      * @param localStore service that provides access to parsed chunk storage
      */
     public PdfCitationEnhancer(LocalStoreService localStore) {
-        this.localStore = localStore;
+        LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
+        this.safeNameResolver = requiredLocalStore::toSafeName;
+        this.parsedDirSupplier = requiredLocalStore::getParsedDir;
     }
 
     /**
@@ -144,8 +150,8 @@ public class PdfCitationEnhancer {
      */
     int countChunksForUrl(String url) {
         try {
-            String safe = localStore.toSafeName(url);
-            Path dir = localStore.getParsedDir();
+            String safe = safeNameResolver.apply(url);
+            Path dir = parsedDirSupplier.get();
             if (dir == null) {
                 return 0;
             }

@@ -15,7 +15,10 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -46,9 +49,11 @@ public class AuditService {
             8086, 8087 // Docker compose mapping: gRPC -> REST
             );
 
-    private final LocalStoreService localStore;
+    private final Function<String, String> safeNameResolver;
+    private final Supplier<Path> parsedDirSupplier;
     private final ContentHasher hasher;
     private final RestTemplate restTemplate;
+    private final List<String> collectionNames;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -61,8 +66,6 @@ public class AuditService {
 
     @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String apiKey;
-
-    private final AppProperties appProperties;
 
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
@@ -77,10 +80,19 @@ public class AuditService {
             ContentHasher hasher,
             RestTemplateBuilder restTemplateBuilder,
             AppProperties appProperties) {
-        this.localStore = localStore;
-        this.hasher = hasher;
+        LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
+        AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
+        AppProperties.QdrantCollections configuredCollections =
+                requiredAppProperties.getQdrant().getCollections();
+        this.safeNameResolver = requiredLocalStore::toSafeName;
+        this.parsedDirSupplier = requiredLocalStore::getParsedDir;
+        this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.restTemplate = restTemplateBuilder.build();
-        this.appProperties = appProperties;
+        this.collectionNames = List.of(
+                configuredCollections.getBooks(),
+                configuredCollections.getDocs(),
+                configuredCollections.getArticles(),
+                configuredCollections.getPdfs());
     }
 
     /**
@@ -99,12 +111,12 @@ public class AuditService {
 
     private Set<String> getExpectedHashes(String url) throws IOException {
         // 1) Enumerate parsed chunks for this URL
-        String safeName = localStore.toSafeName(url);
+        String safeName = safeNameResolver.apply(url);
         if (safeName == null || safeName.isEmpty()) {
             throw new IllegalStateException("Cannot audit URL: invalid safe name mapping for " + url);
         }
         String safeBase = safeName + "_";
-        Path parsedRoot = localStore.getParsedDir();
+        Path parsedRoot = parsedDirSupplier.get();
         if (parsedRoot == null || !Files.exists(parsedRoot)) {
             throw new IllegalStateException("Parsed chunk directory not available: " + parsedRoot);
         }
@@ -183,10 +195,6 @@ public class AuditService {
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
-        AppProperties.QdrantCollections collections = appProperties.getQdrant().getCollections();
-        List<String> collectionNames = List.of(
-                collections.getBooks(), collections.getDocs(), collections.getArticles(), collections.getPdfs());
-
         for (String collectionName : collectionNames) {
             hashes.addAll(fetchQdrantHashesFromCollection(url, collectionName));
         }

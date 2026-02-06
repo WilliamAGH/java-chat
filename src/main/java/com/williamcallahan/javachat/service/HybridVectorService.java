@@ -25,7 +25,6 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Service;
 
 /**
@@ -33,6 +32,10 @@ import org.springframework.stereotype.Service;
  *
  * <p>This replaces the two-step pattern (dense upsert + sparse update) with a single
  * gRPC upsert containing named vectors for both the configured dense and sparse vector names.</p>
+ *
+ * <p>Verified API contract (Step 0): this adapter writes directly through {@code io.qdrant:client}
+ * 1.16.2 and relies on named vectors ({@code VectorsFactory.namedVectors}) where dense/sparse
+ * names must exactly match collection schema keys provisioned at startup.</p>
  */
 @Service
 public class HybridVectorService {
@@ -58,7 +61,7 @@ public class HybridVectorService {
             "pageEnd");
 
     private final QdrantClient qdrantClient;
-    private final EmbeddingModel embeddingModel;
+    private final EmbeddingClient embeddingClient;
     private final LexicalSparseVectorEncoder sparseVectorEncoder;
     private final AppProperties appProperties;
 
@@ -66,17 +69,17 @@ public class HybridVectorService {
      * Wires gRPC client and embedding dependencies for hybrid upserts.
      *
      * @param qdrantClient Qdrant gRPC client
-     * @param embeddingModel embedding model for dense vectors
+     * @param embeddingClient embedding client for dense vectors
      * @param sparseVectorEncoder sparse encoder for lexical vectors
      * @param appProperties application configuration
      */
     public HybridVectorService(
             QdrantClient qdrantClient,
-            EmbeddingModel embeddingModel,
+            EmbeddingClient embeddingClient,
             LexicalSparseVectorEncoder sparseVectorEncoder,
             AppProperties appProperties) {
         this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
-        this.embeddingModel = Objects.requireNonNull(embeddingModel, "embeddingModel");
+        this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.sparseVectorEncoder = Objects.requireNonNull(sparseVectorEncoder, "sparseVectorEncoder");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
     }
@@ -98,8 +101,13 @@ public class HybridVectorService {
         String denseVectorName = appProperties.getQdrant().getDenseVectorName();
         String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
 
-        List<String> texts = documents.stream().map(Document::getText).toList();
-        List<float[]> embeddings = embeddingModel.embed(texts);
+        List<String> texts = documents.stream()
+                .map(document -> {
+                    String text = document.getText();
+                    return text == null ? "" : text;
+                })
+                .toList();
+        List<float[]> embeddings = embeddingClient.embed(texts);
 
         List<PointStruct> points = new ArrayList<>(documents.size());
         for (int i = 0; i < documents.size(); i++) {
@@ -119,51 +127,7 @@ public class HybridVectorService {
                 },
                 "Qdrant hybrid upsert");
 
-        log.info("[QDRANT] Upserted {} hybrid points to {}", points.size(), collectionName);
-    }
-
-    /**
-     * Upserts documents using pre-computed dense embeddings (from cache).
-     *
-     * @param collectionKind target collection kind
-     * @param documents Spring AI documents
-     * @param precomputedEmbeddings pre-computed dense embedding vectors (one per document)
-     */
-    public void upsertWithEmbeddings(
-            QdrantCollectionKind collectionKind, List<Document> documents, List<float[]> precomputedEmbeddings) {
-        Objects.requireNonNull(collectionKind, "collectionKind");
-        Objects.requireNonNull(documents, "documents");
-        Objects.requireNonNull(precomputedEmbeddings, "precomputedEmbeddings");
-        if (documents.size() != precomputedEmbeddings.size()) {
-            throw new IllegalArgumentException("documents and precomputedEmbeddings must have the same size");
-        }
-        if (documents.isEmpty()) {
-            return;
-        }
-
-        String collectionName = resolveCollectionName(collectionKind);
-        String denseVectorName = appProperties.getQdrant().getDenseVectorName();
-        String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
-
-        List<PointStruct> points = new ArrayList<>(documents.size());
-        for (int i = 0; i < documents.size(); i++) {
-            Document doc = documents.get(i);
-            float[] denseVector = precomputedEmbeddings.get(i);
-            LexicalSparseVectorEncoder.SparseVector sparse = sparseVectorEncoder.encode(doc.getText());
-
-            PointStruct point =
-                    buildPoint(resolvePointId(doc), denseVector, sparse, denseVectorName, sparseVectorName, doc);
-            points.add(point);
-        }
-
-        RetrySupport.executeWithRetry(
-                () -> {
-                    awaitFuture(qdrantClient.upsertAsync(collectionName, points), UPSERT_TIMEOUT_SECONDS);
-                    return null;
-                },
-                "Qdrant hybrid upsert (cached)");
-
-        log.info("[QDRANT] Upserted {} hybrid points (cached) to {}", points.size(), collectionName);
+        log.info("[QDRANT] Upserted {} hybrid points", points.size());
     }
 
     /**
@@ -189,7 +153,7 @@ public class HybridVectorService {
                 },
                 "Qdrant delete by URL");
 
-        log.debug("[QDRANT] Deleted points with url={} from {}", url, collectionName);
+        log.debug("[QDRANT] Deleted points by URL filter");
     }
 
     /**
@@ -235,8 +199,8 @@ public class HybridVectorService {
 
     private Map<String, Value> buildPayload(Document doc) {
         var payload = new LinkedHashMap<String, Value>();
-        payload.put(
-                PAYLOAD_DOC_CONTENT, io.qdrant.client.ValueFactory.value(doc.getText() == null ? "" : doc.getText()));
+        String documentText = doc.getText();
+        payload.put(PAYLOAD_DOC_CONTENT, io.qdrant.client.ValueFactory.value(documentText == null ? "" : documentText));
 
         var metadata = doc.getMetadata();
         for (String key : SUPPORTED_METADATA_KEYS) {
@@ -279,8 +243,8 @@ public class HybridVectorService {
     }
 
     private static String resolvePointId(Document doc) {
-        String docId = doc.getId();
-        if (docId != null && !docId.isBlank()) {
+        String docId = Objects.requireNonNull(doc.getId(), "doc.id");
+        if (!docId.isBlank()) {
             return docId;
         }
         return UUID.randomUUID().toString();
@@ -295,8 +259,8 @@ public class HybridVectorService {
             throw new IllegalStateException("Qdrant operation interrupted", interrupted);
         } catch (ExecutionException executionException) {
             Throwable cause = executionException.getCause();
-            if (cause instanceof RuntimeException runtimeCause) {
-                throw runtimeCause;
+            if (cause == null) {
+                throw new IllegalStateException("Qdrant operation failed", executionException);
             }
             throw new IllegalStateException("Qdrant operation failed", cause);
         } catch (TimeoutException timeoutException) {

@@ -257,11 +257,12 @@ public class AppProperties {
          * while still allowing cross-collection retrieval.
          */
         public QdrantCollections getCollections() {
-            return collections;
+            return collections.copy();
         }
 
         public void setCollections(QdrantCollections collections) {
-            this.collections = requireConfiguredSection(collections, QDRANT_KEY + ".collections");
+            this.collections = requireConfiguredSection(collections, QDRANT_KEY + ".collections")
+                    .copy();
         }
 
         /**
@@ -358,6 +359,18 @@ public class AppProperties {
         private String articles = "java-articles";
         private String pdfs = "java-pdfs";
 
+        /**
+         * Creates collection-name defaults used when no explicit configuration is provided.
+         */
+        public QdrantCollections() {}
+
+        private QdrantCollections(String books, String docs, String articles, String pdfs) {
+            this.books = books;
+            this.docs = docs;
+            this.articles = articles;
+            this.pdfs = pdfs;
+        }
+
         public String getBooks() {
             return books;
         }
@@ -390,8 +403,15 @@ public class AppProperties {
             this.pdfs = pdfs;
         }
 
+        /**
+         * Returns all configured collection names in deterministic order.
+         */
         public List<String> all() {
             return List.of(books, docs, articles, pdfs);
+        }
+
+        QdrantCollections copy() {
+            return new QdrantCollections(books, docs, articles, pdfs);
         }
 
         QdrantCollections validateConfiguration() {
@@ -413,7 +433,6 @@ public class AppProperties {
     /** Embedding vector configuration. */
     public static class Embeddings {
         private int dimensions = 1536;
-        private String cacheDir = "./data/embeddings-cache";
 
         public int getDimensions() {
             return dimensions;
@@ -421,14 +440,6 @@ public class AppProperties {
 
         public void setDimensions(int dimensions) {
             this.dimensions = dimensions;
-        }
-
-        public String getCacheDir() {
-            return cacheDir;
-        }
-
-        public void setCacheDir(String cacheDir) {
-            this.cacheDir = cacheDir;
         }
 
         Embeddings validateConfiguration() {

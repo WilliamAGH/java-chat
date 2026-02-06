@@ -144,6 +144,9 @@ public class RetrievalService {
         return new RetrievalOutcome(truncatedDocs, outcome.notices());
     }
 
+    /**
+     * Retrieves documents while capping document count and per-document token budget.
+     */
     public List<Document> retrieveWithLimit(String query, int maxDocs, int maxTokensPerDoc) {
         return retrieveWithLimitOutcome(query, maxDocs, maxTokensPerDoc).documents();
     }

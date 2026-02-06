@@ -12,6 +12,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * Verifies file-level ingestion marker persistence and parsed-chunk cleanup behavior.
+ */
 class LocalStoreServiceFileMarkerTest {
 
     @Test
