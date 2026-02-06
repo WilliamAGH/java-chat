@@ -129,11 +129,15 @@ public class ChatController extends BaseController {
             try {
                 citations = retrievalService.toCitations(promptOutcome.documents());
                 citationWarning = null;
-            } catch (Exception citationError) {
+            } catch (RuntimeException citationFailure) {
+                if (!isRecoverableCitationConversionFailure(citationFailure)) {
+                    throw citationFailure;
+                }
                 PIPELINE_LOG.warn(
-                        "[{}] Citation conversion failed (exceptionType={})",
+                        "[{}] Citation conversion failed (exceptionType={}, exceptionMessage={})",
                         requestToken,
-                        citationError.getClass().getSimpleName());
+                        citationFailure.getClass().getSimpleName(),
+                        compactExceptionMessage(citationFailure));
                 citations = List.of();
                 citationWarning = "Citation retrieval failed - sources unavailable for this response";
             }
@@ -186,7 +190,12 @@ public class ChatController extends BaseController {
                         String errorDetail = buildUserFacingErrorMessage(error);
                         String diagnostics =
                                 error instanceof Exception exception ? describeException(exception) : error.toString();
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
+                        PIPELINE_LOG.error(
+                                "[{}] STREAMING ERROR (sessionId={}, exceptionType={})",
+                                requestToken,
+                                sessionId,
+                                error.getClass().getSimpleName(),
+                                error);
                         return sseSupport.sseError(errorDetail, diagnostics);
                     });
 
@@ -346,5 +355,22 @@ public class ChatController extends BaseController {
 
         // Default: include exception type for debugging
         return "Streaming error: " + error.getClass().getSimpleName();
+    }
+
+    private boolean isRecoverableCitationConversionFailure(RuntimeException citationFailure) {
+        return citationFailure instanceof IllegalStateException
+                || citationFailure instanceof IllegalArgumentException
+                || citationFailure instanceof IndexOutOfBoundsException;
+    }
+
+    private String compactExceptionMessage(RuntimeException runtimeFailure) {
+        if (runtimeFailure.getMessage() == null || runtimeFailure.getMessage().isBlank()) {
+            return "(no exception message)";
+        }
+        String exceptionMessage = runtimeFailure.getMessage().replace('\n', ' ');
+        if (exceptionMessage.length() <= 200) {
+            return exceptionMessage;
+        }
+        return exceptionMessage.substring(0, 200) + "...";
     }
 }

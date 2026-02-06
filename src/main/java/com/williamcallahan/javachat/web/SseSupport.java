@@ -5,14 +5,18 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 
 /**
@@ -31,7 +35,14 @@ public class SseSupport {
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
+    private static final Counter DROPPED_COALESCED_CHUNK_COUNTER =
+            Metrics.counter("javachat.sse.backpressure.dropped_chunks");
+    private static final Counter DROPPED_HEARTBEAT_COUNTER =
+            Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
+
     private final ObjectWriter jsonWriter;
+    private final AtomicLong droppedCoalescedChunkCount = new AtomicLong();
+    private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
     /**
      * Creates SSE support wired to the application's ObjectMapper.
@@ -63,8 +74,16 @@ public class SseSupport {
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
         return source.filter(chunk -> chunk != null && !chunk.isEmpty())
-                .doOnNext(chunkConsumer)
-                .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
+                .bufferTimeout(STREAM_CHUNK_COALESCE_MAX_ITEMS, Duration.ofMillis(STREAM_CHUNK_COALESCE_WINDOW_MS))
+                .filter(chunkBatch -> !chunkBatch.isEmpty())
+                .map(chunkBatch -> String.join("", chunkBatch))
+                .doOnNext(chunk -> chunkConsumer.accept(chunk))
+                // Keep buffering bounded and drop oldest coalesced chunks under sustained
+                // downstream pressure to avoid unbounded memory growth.
+                .onBackpressureBuffer(
+                        STREAM_BACKPRESSURE_BUFFER_CAPACITY,
+                        this::recordDroppedCoalescedChunk,
+                        BufferOverflowStrategy.DROP_OLDEST)
                 // Two subscribers consume this stream in controllers:
                 // 1) text event emission, 2) heartbeat termination signal.
                 // autoConnect(2) prevents a race where one subscriber could miss the first chunks.
@@ -135,10 +154,32 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> heartbeats(Flux<?> terminateOn) {
         return Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
+                .onBackpressureDrop(ignoredTick -> recordDroppedHeartbeat())
                 .takeUntilOther(terminateOn.ignoreElements())
                 .map(tick -> ServerSentEvent.<String>builder()
                         .comment(COMMENT_KEEPALIVE)
                         .build());
+    }
+
+    private void recordDroppedCoalescedChunk(String droppedChunk) {
+        DROPPED_COALESCED_CHUNK_COUNTER.increment();
+        long totalDroppedChunks = droppedCoalescedChunkCount.incrementAndGet();
+        if (totalDroppedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
+            log.warn(
+                    "Dropped {} coalesced SSE chunks due to downstream backpressure "
+                            + "(bufferCapacity={}, droppedChunkLength={})",
+                    totalDroppedChunks,
+                    STREAM_BACKPRESSURE_BUFFER_CAPACITY,
+                    droppedChunk.length());
+        }
+    }
+
+    private void recordDroppedHeartbeat() {
+        DROPPED_HEARTBEAT_COUNTER.increment();
+        long totalDroppedHeartbeats = droppedHeartbeatCount.incrementAndGet();
+        if (totalDroppedHeartbeats % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
+            log.warn("Dropped {} SSE heartbeats due to downstream backpressure", totalDroppedHeartbeats);
+        }
     }
 
     /**

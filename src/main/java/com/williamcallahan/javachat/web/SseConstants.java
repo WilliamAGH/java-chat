@@ -32,8 +32,17 @@ public final class SseConstants {
     /** Heartbeat interval in seconds to keep SSE connections alive through proxies. */
     public static final int HEARTBEAT_INTERVAL_SECONDS = 20;
 
-    /** Buffer capacity for backpressure handling in streaming responses. */
-    public static final int BACKPRESSURE_BUFFER_SIZE = 512;
+    /** Max number of raw model chunks to coalesce into one SSE text event. */
+    public static final int STREAM_CHUNK_COALESCE_MAX_ITEMS = 24;
+
+    /** Time window in milliseconds for coalescing raw model chunks. */
+    public static final int STREAM_CHUNK_COALESCE_WINDOW_MS = 35;
+
+    /** Maximum number of coalesced chunks buffered for downstream SSE consumers. */
+    public static final int STREAM_BACKPRESSURE_BUFFER_CAPACITY = 256;
+
+    /** Emits one warning log for every N dropped chunks/heartbeats under backpressure. */
+    public static final int STREAM_BACKPRESSURE_DROP_LOG_INTERVAL = 25;
 
     /** Temperature for chat responses (balances creativity with accuracy). */
     public static final double DEFAULT_TEMPERATURE = 0.7;

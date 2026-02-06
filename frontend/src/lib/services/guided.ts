@@ -12,12 +12,21 @@ import {
   LessonContentResponseSchema,
   CitationsArraySchema,
   type StreamStatus,
+  type StreamError,
   type Citation,
   type GuidedLesson,
   type LessonContentResponse
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
 import type { CitationFetchResult } from './chat'
+import {
+  buildStreamRecoverySucceededStatus,
+  buildStreamRetryStatus,
+  MAX_STREAM_RECOVERY_RETRIES,
+  shouldRetryStreamRequest,
+  toStreamError,
+  toStreamFailureException
+} from './streamRecovery'
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse }
 
@@ -25,7 +34,7 @@ export type { StreamStatus, GuidedLesson, LessonContentResponse }
 export interface GuidedStreamCallbacks {
   onChunk: (chunk: string) => void
   onStatus?: (status: StreamStatus) => void
-  onError?: (error: Error) => void
+  onError?: (error: StreamError) => void
   onCitations?: (citations: Citation[]) => void
   signal?: AbortSignal
 }
@@ -126,31 +135,54 @@ export async function streamGuidedChat(
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
   const { onChunk, onStatus, onError, onCitations, signal } = callbacks
-  let errorNotified = false
+  let attemptedRecoveryRetries = 0
+  let hasPendingRecoverySuccessNotice = false
 
-  try {
-    await streamSse(
-      '/api/guided/stream',
-      { sessionId, slug, latest: message },
-      {
-        onText: onChunk,
-        onStatus,
-        onCitations,
-        onError: (streamError) => {
-          errorNotified = true
-          onError?.(new Error(streamError.message))
-        }
-      },
-      'guided.ts',
-      { signal }
-    )
-  } catch (error) {
-    // Re-throw after invoking callback to maintain dual error propagation
-    if (error instanceof Error) {
-      if (!errorNotified) {
-        onError?.(error)
+  while (true) {
+    let hasStreamedAnyChunk = false
+    let streamErrorEvent: StreamError | null = null
+
+    try {
+      await streamSse(
+        '/api/guided/stream',
+        { sessionId, slug, latest: message },
+        {
+          onText: (chunk) => {
+            hasStreamedAnyChunk = true
+            if (hasPendingRecoverySuccessNotice) {
+              onStatus?.(buildStreamRecoverySucceededStatus(attemptedRecoveryRetries))
+              hasPendingRecoverySuccessNotice = false
+            }
+            onChunk(chunk)
+          },
+          onStatus,
+          onCitations,
+          onError: (streamError) => {
+            streamErrorEvent = streamError
+          }
+        },
+        'guided.ts',
+        { signal }
+      )
+      return
+    } catch (streamFailure) {
+      if (
+        shouldRetryStreamRequest(
+          streamFailure,
+          streamErrorEvent,
+          hasStreamedAnyChunk,
+          attemptedRecoveryRetries,
+          MAX_STREAM_RECOVERY_RETRIES
+        )
+      ) {
+        attemptedRecoveryRetries++
+        hasPendingRecoverySuccessNotice = true
+        onStatus?.(buildStreamRetryStatus(attemptedRecoveryRetries, MAX_STREAM_RECOVERY_RETRIES))
+        continue
       }
+      const streamError = toStreamError(streamFailure, streamErrorEvent)
+      onError?.(streamError)
+      throw toStreamFailureException(streamFailure, streamErrorEvent)
     }
-    throw error
   }
 }

@@ -225,10 +225,14 @@ public class GuidedLearningController extends BaseController {
         try {
             citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
             citationWarning = null;
-        } catch (Exception citationError) {
+        } catch (RuntimeException citationFailure) {
+            if (!isRecoverableCitationConversionFailure(citationFailure)) {
+                throw citationFailure;
+            }
             log.warn(
-                    "Citation conversion failed for guided lesson (exceptionType={})",
-                    citationError.getClass().getSimpleName());
+                    "Citation conversion failed for guided lesson (exceptionType={}, exceptionMessage={})",
+                    citationFailure.getClass().getSimpleName(),
+                    compactExceptionMessage(citationFailure));
             citations = List.of();
             citationWarning = "Citation retrieval failed - sources unavailable for this response";
         }
@@ -261,7 +265,12 @@ public class GuidedLearningController extends BaseController {
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     String errorType = error.getClass().getSimpleName();
-                    log.error("Guided streaming error (exceptionType={})", errorType);
+                    log.error(
+                            "Guided streaming error (sessionId={}, lessonSlug={}, exceptionType={})",
+                            sessionId,
+                            lessonSlug,
+                            errorType,
+                            error);
                     return sseSupport.sseError(
                             "Streaming error: " + errorType,
                             "The response stream encountered an error. Please try again.");
@@ -277,5 +286,22 @@ public class GuidedLearningController extends BaseController {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);
+    }
+
+    private boolean isRecoverableCitationConversionFailure(RuntimeException citationFailure) {
+        return citationFailure instanceof IllegalStateException
+                || citationFailure instanceof IllegalArgumentException
+                || citationFailure instanceof IndexOutOfBoundsException;
+    }
+
+    private String compactExceptionMessage(RuntimeException runtimeFailure) {
+        if (runtimeFailure.getMessage() == null || runtimeFailure.getMessage().isBlank()) {
+            return "(no exception message)";
+        }
+        String exceptionMessage = runtimeFailure.getMessage().replace('\n', ' ');
+        if (exceptionMessage.length() <= 200) {
+            return exceptionMessage;
+        }
+        return exceptionMessage.substring(0, 200) + "...";
     }
 }
