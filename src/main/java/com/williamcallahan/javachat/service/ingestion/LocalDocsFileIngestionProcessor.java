@@ -3,15 +3,10 @@ package com.williamcallahan.javachat.service.ingestion;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
-import com.williamcallahan.javachat.service.ContentHasher;
-import com.williamcallahan.javachat.service.FileOperationsService;
-import com.williamcallahan.javachat.service.HtmlContentExtractor;
-import com.williamcallahan.javachat.service.HybridVectorService;
+import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.LocalStoreService;
-import com.williamcallahan.javachat.service.PdfContentExtractor;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionKind;
-import com.williamcallahan.javachat.service.QdrantCollectionRouter;
 import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardDecision;
 import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver.IngestionProvenance;
 import java.io.IOException;
@@ -44,67 +39,32 @@ public class LocalDocsFileIngestionProcessor {
     private static final String FILE_URL_PREFIX = "file://";
     private static final String API_PATH_SEGMENT = "/api/";
 
-    private final HybridVectorService hybridVectorService;
-    private final ChunkProcessingService chunkProcessingService;
-    private final ContentHasher hasher;
-    private final LocalStoreService localStore;
-    private final FileOperationsService fileOperationsService;
-    private final HtmlContentExtractor htmlExtractor;
-    private final PdfContentExtractor pdfExtractor;
+    private final FileContentServices content;
+    private final IngestionStorageServices storage;
     private final ProgressTracker progressTracker;
-    private final QdrantCollectionRouter collectionRouter;
     private final IngestionProvenanceDeriver provenanceDeriver;
-    private final HtmlContentGuard contentGuard;
-    private final IngestionQuarantineService quarantineService;
     private final LocalIngestionFailureFactory failureFactory;
-    private final PdfTitleExtractor titleExtractor;
 
     /**
-     * Wires ingestion dependencies.
+     * Wires grouped ingestion dependencies.
      *
-     * @param hybridVectorService gRPC-based hybrid vector upsert service
-     * @param chunkProcessingService chunk processing pipeline
-     * @param hasher content hash helper for deterministic vector IDs
-     * @param localStore local snapshot and chunk storage
-     * @param fileOperationsService file IO helper
-     * @param htmlExtractor HTML content extractor
-     * @param pdfExtractor PDF content extractor
+     * @param content file content extraction and validation services
+     * @param storage chunking, hashing, vector storage, and local marker services
      * @param progressTracker ingestion progress tracker
-     * @param collectionRouter routes documents to the correct Qdrant collection
      * @param provenanceDeriver derives deterministic provenance tokens for routing and citations
-     * @param contentGuard validates extracted HTML prior to indexing
-     * @param quarantineService moves invalid content aside for inspection
      * @param failureFactory builds typed failures with diagnostics
      */
     public LocalDocsFileIngestionProcessor(
-            HybridVectorService hybridVectorService,
-            ChunkProcessingService chunkProcessingService,
-            ContentHasher hasher,
-            LocalStoreService localStore,
-            FileOperationsService fileOperationsService,
-            HtmlContentExtractor htmlExtractor,
-            PdfContentExtractor pdfExtractor,
+            FileContentServices content,
+            IngestionStorageServices storage,
             ProgressTracker progressTracker,
-            QdrantCollectionRouter collectionRouter,
             IngestionProvenanceDeriver provenanceDeriver,
-            HtmlContentGuard contentGuard,
-            IngestionQuarantineService quarantineService,
-            LocalIngestionFailureFactory failureFactory,
-            PdfTitleExtractor titleExtractor) {
-        this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
-        this.chunkProcessingService = Objects.requireNonNull(chunkProcessingService, "chunkProcessingService");
-        this.hasher = Objects.requireNonNull(hasher, "hasher");
-        this.localStore = Objects.requireNonNull(localStore, "localStore");
-        this.fileOperationsService = Objects.requireNonNull(fileOperationsService, "fileOperationsService");
-        this.htmlExtractor = Objects.requireNonNull(htmlExtractor, "htmlExtractor");
-        this.pdfExtractor = Objects.requireNonNull(pdfExtractor, "pdfExtractor");
+            LocalIngestionFailureFactory failureFactory) {
+        this.content = Objects.requireNonNull(content, "content");
+        this.storage = Objects.requireNonNull(storage, "storage");
         this.progressTracker = Objects.requireNonNull(progressTracker, "progressTracker");
-        this.collectionRouter = Objects.requireNonNull(collectionRouter, "collectionRouter");
         this.provenanceDeriver = Objects.requireNonNull(provenanceDeriver, "provenanceDeriver");
-        this.contentGuard = Objects.requireNonNull(contentGuard, "contentGuard");
-        this.quarantineService = Objects.requireNonNull(quarantineService, "quarantineService");
         this.failureFactory = Objects.requireNonNull(failureFactory, "failureFactory");
-        this.titleExtractor = Objects.requireNonNull(titleExtractor, "titleExtractor");
     }
 
     /**
@@ -139,8 +99,12 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         IngestionProvenance provenance = provenanceDeriver.derive(root, file, url);
+        var router = storage.router();
+        var localStore = storage.localStore();
         QdrantCollectionKind collectionKind =
-                collectionRouter.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
+                router.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
+        INDEXING_LOG.info("[INDEXING] Routed → {} (docSet={}, docType={})", collectionKind, provenance.docSet(),
+                provenance.docType());
 
         Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord = localStore.readFileIngestionRecord(url);
         if (priorIngestionRecord
@@ -166,11 +130,13 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         String title;
-        String bodyText = null;
+        String bodyText = "";
         String packageName;
 
         if (fileName.endsWith(".pdf")) {
             try {
+                var pdfExtractor = content.pdfExtractor();
+                var titleExtractor = content.titleExtractor();
                 String metadata = pdfExtractor.getPdfMetadata(file);
                 title = titleExtractor.extractTitle(metadata, fileNamePath.toString());
                 packageName = "";
@@ -183,7 +149,9 @@ public class LocalDocsFileIngestionProcessor {
             }
         } else {
             try {
-                String html = fileOperationsService.readTextFile(file);
+                var fileOps = content.fileOps();
+                var htmlExtractor = content.htmlExtractor();
+                String html = fileOps.readTextFile(file);
                 org.jsoup.nodes.Document doc = Jsoup.parse(html);
                 title = Optional.ofNullable(doc.title()).orElse("");
                 bodyText = url.contains(API_PATH_SEGMENT)
@@ -197,10 +165,12 @@ public class LocalDocsFileIngestionProcessor {
                 return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "html-read", htmlReadException));
             }
 
+            var contentGuard = content.contentGuard();
             GuardDecision guardDecision = contentGuard.evaluate(bodyText);
             if (!guardDecision.acceptable()) {
                 try {
-                    quarantineService.quarantine(file);
+                    var quarantine = content.quarantine();
+                    quarantine.quarantine(file);
                     INDEXING_LOG.warn("[INDEXING] Content guard rejected file and moved it to quarantine");
                     return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
                             file.toString(), "content-guard", "quarantined: " + guardDecision.rejectionReason()));
@@ -215,15 +185,16 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
+        var chunkProcessor = storage.chunks();
         try {
             if (fileName.endsWith(".pdf")) {
                 chunkingOutcome = requiresFullReindex
-                        ? chunkProcessingService.processPdfAndStoreWithPagesForce(file, url, title, packageName)
-                        : chunkProcessingService.processPdfAndStoreWithPages(file, url, title, packageName);
+                        ? chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName)
+                        : chunkProcessor.processPdfAndStoreWithPages(file, url, title, packageName);
             } else {
                 chunkingOutcome = requiresFullReindex
-                        ? chunkProcessingService.processAndStoreChunksForce(bodyText, url, title, packageName)
-                        : chunkProcessingService.processAndStoreChunks(bodyText, url, title, packageName);
+                        ? chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName)
+                        : chunkProcessor.processAndStoreChunks(bodyText, url, title, packageName);
             }
         } catch (IOException chunkingException) {
             log.error(
@@ -263,7 +234,9 @@ public class LocalDocsFileIngestionProcessor {
             String url,
             Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord)
             throws IOException {
-        hybridVectorService.deleteByUrl(collectionKind, url);
+        var hybridVector = storage.hybridVector();
+        LocalStoreService localStore = storage.localStore();
+        hybridVector.deleteByUrl(collectionKind, url);
         List<String> priorChunkHashes = resolveChunkHashesForPrune(url, priorIngestionRecord);
         if (!priorChunkHashes.isEmpty()) {
             localStore.deleteChunkIngestionMarkers(priorChunkHashes);
@@ -274,7 +247,6 @@ public class LocalDocsFileIngestionProcessor {
 
     private List<String> resolveChunkHashesForPrune(
             String url, Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) throws IOException {
-        Objects.requireNonNull(priorIngestionRecord, "priorIngestionRecord");
         if (priorIngestionRecord.isPresent()) {
             List<String> hashes = priorIngestionRecord.get().chunkHashes();
             if (hashes != null && !hashes.isEmpty()) {
@@ -288,11 +260,13 @@ public class LocalDocsFileIngestionProcessor {
         if (url == null || url.isBlank()) {
             return List.of();
         }
+        LocalStoreService localStore = storage.localStore();
         Path parsedDir = localStore.getParsedDir();
         if (parsedDir == null || !Files.isDirectory(parsedDir)) {
             return List.of();
         }
 
+        var hasher = storage.hasher();
         String safeName = localStore.toSafeName(url);
         String prefix = safeName + "_";
         Set<String> hashes = new LinkedHashSet<>();
@@ -344,7 +318,14 @@ public class LocalDocsFileIngestionProcessor {
             long fileStartMillis) {
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
-        storeDocumentsWithRetry(collectionKind, documents);
+        try {
+            storeDocumentsWithRetry(collectionKind, documents);
+        } catch (EmbeddingServiceUnavailableException embeddingException) {
+            log.error("Embedding service unavailable during upsert (exception type: {})",
+                    embeddingException.getClass().getSimpleName());
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(file, "embedding-unavailable", embeddingException));
+        }
 
         long totalDuration = System.currentTimeMillis() - fileStartMillis;
         INDEXING_LOG.info(
@@ -361,17 +342,20 @@ public class LocalDocsFileIngestionProcessor {
     }
 
     private void storeDocumentsWithRetry(QdrantCollectionKind collectionKind, List<Document> documents) {
+        var hybridVector = storage.hybridVector();
         long startTime = System.currentTimeMillis();
-        hybridVectorService.upsert(collectionKind, documents);
+        hybridVector.upsert(collectionKind, documents);
         long duration = System.currentTimeMillis() - startTime;
         INDEXING_LOG.info(
-                "[INDEXING] Added {} hybrid vectors to Qdrant in {}ms ({})",
+                "[INDEXING] Added {} hybrid vectors to {} in {}ms ({})",
                 documents.size(),
+                collectionKind,
                 duration,
                 progressTracker.formatPercent());
     }
 
     private void markDocumentsIngested(List<Document> documents) {
+        LocalStoreService localStore = storage.localStore();
         for (Document doc : documents) {
             Object hashMetadata = doc.getMetadata().get("hash");
             if (hashMetadata == null) {
@@ -389,6 +373,7 @@ public class LocalDocsFileIngestionProcessor {
         if (url == null || url.isBlank()) {
             return;
         }
+        LocalStoreService localStore = storage.localStore();
         try {
             localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis, chunkHashes);
         } catch (IOException exception) {
@@ -397,13 +382,9 @@ public class LocalDocsFileIngestionProcessor {
     }
 
     private static void applyProvenanceMetadata(List<Document> documents, IngestionProvenance provenance) {
-        if (documents == null || documents.isEmpty() || provenance == null) {
-            return;
-        }
+        Objects.requireNonNull(documents, "documents");
+        Objects.requireNonNull(provenance, "provenance");
         for (Document doc : documents) {
-            if (doc == null) {
-                continue;
-            }
             if (!provenance.docSet().isBlank()) {
                 doc.getMetadata().put("docSet", provenance.docSet());
             }
