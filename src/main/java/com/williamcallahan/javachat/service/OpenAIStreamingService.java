@@ -550,9 +550,9 @@ public class OpenAIStreamingService {
                 continue;
             }
             ResponseOutputMessage message = outputItem.asMessage();
-            for (ResponseOutputMessage.Content content : message.content()) {
-                if (content.isOutputText()) {
-                    ResponseOutputText outputText = content.asOutputText();
+            for (ResponseOutputMessage.Content messageContent : message.content()) {
+                if (messageContent.isOutputText()) {
+                    ResponseOutputText outputText = messageContent.asOutputText();
                     outputBuilder.append(outputText.text());
                 }
             }

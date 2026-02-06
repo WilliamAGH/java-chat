@@ -215,24 +215,24 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (response == null) {
             throw new EmbeddingServiceUnavailableException("Remote embedding response was null");
         }
-        List<com.openai.models.embeddings.Embedding> data = response.data();
-        if (data.isEmpty()) {
+        List<com.openai.models.embeddings.Embedding> embeddingEntries = response.data();
+        if (embeddingEntries.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding entries");
         }
 
         float[][] embeddingsByIndex = new float[expectedCount][];
 
-        for (int itemIndex = 0; itemIndex < data.size(); itemIndex++) {
-            com.openai.models.embeddings.Embedding item = data.get(itemIndex);
-            if (item == null) {
+        for (int itemIndex = 0; itemIndex < embeddingEntries.size(); itemIndex++) {
+            com.openai.models.embeddings.Embedding embeddingEntry = embeddingEntries.get(itemIndex);
+            if (embeddingEntry == null) {
                 throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response contained null entry at index " + itemIndex);
             }
-            int targetIndex = safeEmbeddingIndex(itemIndex, item, expectedCount);
+            int targetIndex = safeEmbeddingIndex(itemIndex, embeddingEntry, expectedCount);
             if (targetIndex < 0 || targetIndex >= expectedCount) {
                 continue;
             }
-            embeddingsByIndex[targetIndex] = toFloatVector(item.embedding());
+            embeddingsByIndex[targetIndex] = toFloatVector(embeddingEntry.embedding());
         }
 
         List<float[]> orderedEmbeddings = new ArrayList<>(expectedCount);

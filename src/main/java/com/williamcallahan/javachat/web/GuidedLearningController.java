@@ -144,8 +144,8 @@ public class GuidedLearningController extends BaseController {
         if (cached.isPresent()) {
             return new LessonContentResponse(cached.get(), true);
         }
-        String md = generateAndCacheLessonContent(slug);
-        return new LessonContentResponse(md, false);
+        String lessonMarkdownContent = generateAndCacheLessonContent(slug);
+        return new LessonContentResponse(lessonMarkdownContent, false);
     }
 
     /**
@@ -158,8 +158,8 @@ public class GuidedLearningController extends BaseController {
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
     public String contentHtml(@RequestParam("slug") String slug) {
         var cached = guidedService.getCachedLessonMarkdown(slug);
-        String md = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
-        return markdownService.processStructured(md).html();
+        String lessonMarkdownContent = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
+        return markdownService.processStructured(lessonMarkdownContent).html();
     }
 
     /**
@@ -176,9 +176,9 @@ public class GuidedLearningController extends BaseController {
             log.error("Content generation timed out or returned empty for lesson");
             throw new IllegalStateException("Content generation failed for lesson");
         }
-        String content = String.join("", chunks);
-        guidedService.putLessonCache(slug, content);
-        return content;
+        String lessonMarkdown = String.join("", chunks);
+        guidedService.putLessonCache(slug, lessonMarkdown);
+        return lessonMarkdown;
     }
 
     /**

@@ -352,9 +352,9 @@ public class HybridSearchService {
     }
 
     private static void putIfPresentString(Map<String, Value> payload, Document target, String key) {
-        String value = extractPayloadString(payload, key);
-        if (!value.isBlank()) {
-            target.getMetadata().put(key, value);
+        String stringFieldValue = extractPayloadString(payload, key);
+        if (!stringFieldValue.isBlank()) {
+            target.getMetadata().put(key, stringFieldValue);
         }
     }
 

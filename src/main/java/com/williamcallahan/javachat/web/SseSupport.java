@@ -95,13 +95,13 @@ public class SseSupport {
     /**
      * Serializes an object to JSON for SSE data payloads.
      *
-     * @param payload object to serialize
+     * @param objectToSerialize object to serialize
      * @return JSON string representation
      * @throws IllegalStateException if serialization fails
      */
-    public String jsonSerialize(Object payload) {
+    public String jsonSerialize(Object objectToSerialize) {
         try {
-            return jsonWriter.writeValueAsString(payload);
+            return jsonWriter.writeValueAsString(objectToSerialize);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize SSE data", e);
         }

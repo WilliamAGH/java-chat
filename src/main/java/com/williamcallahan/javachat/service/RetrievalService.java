@@ -37,7 +37,7 @@ public class RetrievalService {
     private static final String METADATA_HASH = "hash";
 
     private final HybridSearchService hybridSearchService;
-    private final AppProperties props;
+    private final AppProperties appProperties;
     private final RerankerService rerankerService;
     private final DocumentFactory documentFactory;
 
@@ -45,17 +45,17 @@ public class RetrievalService {
      * Creates a retrieval service backed by gRPC hybrid search with RRF fusion and a reranker.
      *
      * @param hybridSearchService gRPC-based hybrid search across all collections
-     * @param props application configuration
+     * @param appProperties application configuration
      * @param rerankerService reranker for result ordering
      * @param documentFactory document factory for metadata preservation
      */
     public RetrievalService(
             HybridSearchService hybridSearchService,
-            AppProperties props,
+            AppProperties appProperties,
             RerankerService rerankerService,
             DocumentFactory documentFactory) {
         this.hybridSearchService = hybridSearchService;
-        this.props = props;
+        this.appProperties = appProperties;
         this.rerankerService = rerankerService;
         this.documentFactory = documentFactory;
     }
@@ -108,7 +108,7 @@ public class RetrievalService {
         RetrievalConstraint retrievalConstraint = toRetrievalConstraint(versionFilter);
         String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
 
-        int baseTopK = Math.max(1, props.getRag().getSearchTopK());
+        int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
 
         HybridSearchService.SearchOutcome searchOutcome =
                 hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint);
@@ -119,12 +119,12 @@ public class RetrievalService {
                 : applyVersionFilterIfPresent(versionFilter, candidates);
         List<Document> uniqueByHash = dedupeByHashThenUrl(filtered);
 
-        List<Document> reranked =
-                rerankerService.rerank(query, uniqueByHash, props.getRag().getSearchReturnK());
+        List<Document> reranked = rerankerService.rerank(
+                query, uniqueByHash, appProperties.getRag().getSearchReturnK());
 
         if (!reranked.isEmpty()) {
-            Map<String, ?> metadata = reranked.get(0).getMetadata();
-            int metadataSize = metadata.size();
+            Map<String, ?> firstDocMetadata = reranked.get(0).getMetadata();
+            int metadataSize = firstDocMetadata.size();
             String docText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
             log.debug("First doc metadata size: {}", metadataSize);
@@ -141,13 +141,13 @@ public class RetrievalService {
      */
     public RetrievalOutcome retrieveWithLimitOutcome(String query, int maxDocs, int maxTokensPerDoc) {
         RetrievalOutcome outcome = retrieveOutcome(query);
-        List<Document> docs = outcome.documents();
-        if (docs.isEmpty()) {
+        List<Document> documents = outcome.documents();
+        if (documents.isEmpty()) {
             return outcome;
         }
-        List<Document> truncatedDocs = docs.stream()
+        List<Document> truncatedDocs = documents.stream()
                 .limit(Math.max(1, maxDocs))
-                .map(doc -> truncateDocumentToTokenLimit(doc, maxTokensPerDoc))
+                .map(document -> truncateDocumentToTokenLimit(document, maxTokensPerDoc))
                 .toList();
         return new RetrievalOutcome(truncatedDocs, outcome.notices());
     }
@@ -160,17 +160,17 @@ public class RetrievalService {
     }
 
     private List<Document> applyVersionFilterIfPresent(
-            Optional<VersionFilterPatterns> versionFilter, List<Document> docs) {
+            Optional<VersionFilterPatterns> versionFilter, List<Document> documents) {
         if (versionFilter.isEmpty()) {
-            return docs;
+            return documents;
         }
         VersionFilterPatterns filter = versionFilter.get();
-        List<Document> matched = docs.stream()
-                .filter(doc -> filter.matchesMetadata(
-                        stringMetadataValue(doc.getMetadata(), METADATA_URL),
-                        stringMetadataValue(doc.getMetadata(), METADATA_TITLE)))
+        List<Document> matched = documents.stream()
+                .filter(document -> filter.matchesMetadata(
+                        stringMetadataValue(document.getMetadata(), METADATA_URL),
+                        stringMetadataValue(document.getMetadata(), METADATA_TITLE)))
                 .toList();
-        return matched.isEmpty() ? docs : matched;
+        return matched.isEmpty() ? documents : matched;
     }
 
     private static RetrievalConstraint toRetrievalConstraint(Optional<VersionFilterPatterns> versionFilter) {
@@ -181,24 +181,24 @@ public class RetrievalService {
         return RetrievalConstraint.forDocVersion(versionNumber);
     }
 
-    private List<Document> dedupeByHashThenUrl(List<Document> docs) {
-        if (docs.isEmpty()) {
-            return docs;
+    private List<Document> dedupeByHashThenUrl(List<Document> documents) {
+        if (documents.isEmpty()) {
+            return documents;
         }
         Map<String, Document> byHash = new LinkedHashMap<>();
         List<Document> withoutHash = new ArrayList<>();
-        for (Document doc : docs) {
-            String hash = stringMetadataValue(doc.getMetadata(), METADATA_HASH);
+        for (Document document : documents) {
+            String hash = stringMetadataValue(document.getMetadata(), METADATA_HASH);
             if (!hash.isBlank()) {
-                byHash.putIfAbsent(hash, doc);
+                byHash.putIfAbsent(hash, document);
             } else {
-                withoutHash.add(doc);
+                withoutHash.add(document);
             }
         }
         Map<String, Document> byUrl = new LinkedHashMap<>();
         List<Document> unidentified = new ArrayList<>();
-        for (Document doc : withoutHash) {
-            String url = stringMetadataValue(doc.getMetadata(), METADATA_URL);
+        for (Document document : withoutHash) {
+            String url = stringMetadataValue(document.getMetadata(), METADATA_URL);
             if (!url.isBlank()) {
                 byUrl.putIfAbsent(url, doc);
             } else {
@@ -218,20 +218,20 @@ public class RetrievalService {
         if (metadata == null || metadata.isEmpty()) {
             return "";
         }
-        Object value = metadata.get(key);
-        return value == null ? "" : String.valueOf(value);
+        Object rawMetadataEntry = metadata.get(key);
+        return rawMetadataEntry == null ? "" : String.valueOf(rawMetadataEntry);
     }
 
-    private Document truncateDocumentToTokenLimit(Document doc, int maxTokens) {
-        String content = doc.getText();
-        if (content == null || content.isEmpty()) {
-            return doc;
+    private Document truncateDocumentToTokenLimit(Document sourceDocument, int maxTokens) {
+        String documentText = sourceDocument.getText();
+        if (documentText == null || documentText.isEmpty()) {
+            return sourceDocument;
         }
         int maxChars = Math.max(1, maxTokens) * ESTIMATED_CHARS_PER_TOKEN;
-        if (content.length() <= maxChars) {
-            return doc;
+        if (documentText.length() <= maxChars) {
+            return sourceDocument;
         }
-        String truncated = content.substring(0, maxChars);
+        String truncated = documentText.substring(0, maxChars);
         int lastPeriod = truncated.lastIndexOf('.');
         int lastNewline = truncated.lastIndexOf('\n');
         int breakPoint = Math.max(lastPeriod, lastNewline);
@@ -239,8 +239,8 @@ public class RetrievalService {
             truncated = truncated.substring(0, breakPoint + 1);
         }
         truncated += "\n[...content truncated for token limits...]";
-        Map<String, ?> truncationMetadata = Map.of("truncated", true, "originalLength", content.length());
-        return documentFactory.createWithPreservedMetadata(truncated, doc.getMetadata(), truncationMetadata);
+        Map<String, ?> truncationMetadata = Map.of("truncated", true, "originalLength", documentText.length());
+        return documentFactory.createWithPreservedMetadata(truncated, sourceDocument.getMetadata(), truncationMetadata);
     }
 
     /**
@@ -268,37 +268,37 @@ public class RetrievalService {
      * <p>Returns a {@link CitationOutcome} that includes both the successfully converted citations and
      * a count of conversion failures, ensuring callers are aware of any partial failures.</p>
      */
-    public CitationOutcome toCitations(List<Document> docs) {
-        if (docs == null || docs.isEmpty()) {
+    public CitationOutcome toCitations(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
             return new CitationOutcome(List.of(), 0);
         }
         List<Citation> citations = new ArrayList<>();
         int failedConversionCount = 0;
-        for (Document sourceDoc : docs) {
-            if (sourceDoc == null) {
+        for (Document sourceDocument : documents) {
+            if (sourceDocument == null) {
                 continue;
             }
             try {
-                Map<String, ?> metadata = sourceDoc.getMetadata();
-                String rawUrl = stringMetadataValue(metadata, METADATA_URL);
-                String title = stringMetadataValue(metadata, METADATA_TITLE);
-                String packageName = stringMetadataValue(metadata, METADATA_PACKAGE);
-                String url = refineCitationUrl(rawUrl, sourceDoc.getText(), packageName);
-                citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDoc.getText())));
+                Map<String, ?> sourceDocMetadata = sourceDocument.getMetadata();
+                String rawUrl = stringMetadataValue(sourceDocMetadata, METADATA_URL);
+                String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
+                String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
+                String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName);
+                citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDocument.getText())));
             } catch (RuntimeException citationConversionFailure) {
                 failedConversionCount++;
                 log.warn(
                         "Citation conversion failed (exceptionType={}, docUrl={}, docTitle={})",
                         citationConversionFailure.getClass().getSimpleName(),
-                        safeMetadataValueForLogging(sourceDoc.getMetadata(), METADATA_URL),
-                        safeMetadataValueForLogging(sourceDoc.getMetadata(), METADATA_TITLE));
+                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_URL),
+                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_TITLE));
             }
         }
         if (failedConversionCount > 0) {
             log.warn(
                     "Citation conversion completed with {} failure(s) out of {} documents",
                     failedConversionCount,
-                    docs.size());
+                    documents.size());
         }
         return new CitationOutcome(citations, failedConversionCount);
     }
