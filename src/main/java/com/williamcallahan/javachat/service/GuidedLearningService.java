@@ -102,14 +102,18 @@ public class GuidedLearningService {
      * Retrieves citations for a lesson using book-focused retrieval and best-effort PDF page anchoring.
      */
     public List<Citation> citationsForLesson(String slug) {
-        var lesson = tocProvider.findBySlug(slug).orElse(null);
-        if (lesson == null) return List.of();
-        String query = buildLessonQuery(lesson);
-        List<Document> docs = retrievalService.retrieve(query);
-        List<Document> filtered = filterToBook(docs);
-        if (filtered.isEmpty()) return List.of();
-        List<Citation> base = retrievalService.toCitations(filtered).citations();
-        return pdfCitationEnhancer.enhanceWithPageAnchors(filtered, base);
+        return tocProvider
+                .findBySlug(slug)
+                .map(lesson -> {
+                    String query = buildLessonQuery(lesson);
+                    List<Document> docs = retrievalService.retrieve(query);
+                    List<Document> filtered = filterToBook(docs);
+                    if (filtered.isEmpty()) return List.<Citation>of();
+                    List<Citation> baseCitations =
+                            retrievalService.toCitations(filtered).citations();
+                    return pdfCitationEnhancer.enhanceWithPageAnchors(filtered, baseCitations);
+                })
+                .orElse(List.of());
     }
 
     /**
@@ -117,32 +121,37 @@ public class GuidedLearningService {
      */
     public Enrichment enrichmentForLesson(String slug) {
         logger.debug("GuidedLearningService.enrichmentForLesson called");
-        var lesson = tocProvider.findBySlug(slug).orElse(null);
-        if (lesson == null) return emptyEnrichment();
-        String query = buildLessonQuery(lesson);
-        List<Document> docs = retrievalService.retrieve(query);
-        List<Document> filtered = filterToBook(docs);
-        List<String> snippets =
-                filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
-        Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
-        logger.debug(
-                "GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
-                enrichment.getHints().size(),
-                enrichment.getReminders().size(),
-                enrichment.getBackground().size());
-        return enrichment;
+        return tocProvider
+                .findBySlug(slug)
+                .map(lesson -> {
+                    String query = buildLessonQuery(lesson);
+                    List<Document> docs = retrievalService.retrieve(query);
+                    List<Document> filtered = filterToBook(docs);
+                    List<String> snippets =
+                            filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
+                    Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
+                    logger.debug(
+                            "GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
+                            enrichment.getHints().size(),
+                            enrichment.getReminders().size(),
+                            enrichment.getBackground().size());
+                    return enrichment;
+                })
+                .orElseGet(this::emptyEnrichment);
     }
 
     /**
      * Streams a guided answer grounded in the Think Java book with additional structured guidance.
      */
     public Flux<String> streamGuidedAnswer(List<Message> history, String slug, String userMessage) {
-        var lesson = tocProvider.findBySlug(slug).orElse(null);
-        String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
+        Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
+        String query = lessonOptional
+                .map(lesson -> buildLessonQuery(lesson) + "\n" + userMessage)
+                .orElse(userMessage);
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = buildLessonGuidance(lesson);
+        String guidance = buildLessonGuidance(lessonOptional.orElse(null));
         return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
     }
 
@@ -159,12 +168,14 @@ public class GuidedLearningService {
      */
     public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
             List<Message> history, String slug, String userMessage) {
-        var lesson = tocProvider.findBySlug(slug).orElse(null);
-        String query = lesson != null ? buildLessonQuery(lesson) + "\n" + userMessage : userMessage;
+        Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
+        String query = lessonOptional
+                .map(lesson -> buildLessonQuery(lesson) + "\n" + userMessage)
+                .orElse(userMessage);
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
 
-        String guidance = buildLessonGuidance(lesson);
+        String guidance = buildLessonGuidance(lessonOptional.orElse(null));
         StructuredPrompt structuredPrompt =
                 chatService.buildStructuredPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
         return new GuidedChatPromptOutcome(structuredPrompt, filtered);
@@ -250,9 +261,9 @@ To run this program, follow these steps:
             return Flux.just(hardcodedContent);
         }
 
-        var lesson = tocProvider.findBySlug(slug).orElse(null);
-        String title = lesson != null ? lesson.getTitle() : slug;
-        String query = lesson != null ? buildLessonQuery(lesson) : slug;
+        Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
+        String title = lessonOptional.map(GuidedLesson::getTitle).orElse(slug);
+        String query = lessonOptional.map(this::buildLessonQuery).orElse(slug);
 
         // Retrieve Think Java-only context
         List<Document> docs = retrievalService.retrieve(query);
