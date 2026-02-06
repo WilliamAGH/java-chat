@@ -65,7 +65,11 @@ public class SseSupport {
         return source.filter(chunk -> chunk != null && !chunk.isEmpty())
                 .doOnNext(chunkConsumer)
                 .onBackpressureBuffer(BACKPRESSURE_BUFFER_SIZE)
-                .share();
+                // Two subscribers consume this stream in controllers:
+                // 1) text event emission, 2) heartbeat termination signal.
+                // autoConnect(2) prevents a race where one subscriber could miss the first chunks.
+                .publish()
+                .autoConnect(2);
     }
 
     /**
