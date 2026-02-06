@@ -10,6 +10,7 @@ alwaysApply: true
 - [ORG1] Purpose: keep every critical rule within the first ~250 lines; move long examples/notes to Appendix.
 - [ORG2] Structure: Rule Summary first, then detailed sections keyed by short hashes (e.g., `[GT1a]`).
 - [ORG3] Usage: cite hashes when giving guidance or checking compliance; add new rules without renumbering older ones.
+- [ORG4] Directive language: rules use imperative/prohibitive phrasing ("do X", "no Y", "never Z"); no discretionary hedges ("prefer", "consider", "try to", "ideally", "when possible") that give agents interpretive latitude.
 
 ## Rule Summary [SUM]
 
@@ -27,6 +28,7 @@ alwaysApply: true
 - [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
 - [VR1a-c] Verification Loops (build/test/run)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
+- [ND1a-h] Naming Discipline (intent-revealing, banned generics, constant naming, type names)
 
 ## [ZA1] Epistemic Humility (Zero Assumptions)
 
@@ -204,6 +206,11 @@ alwaysApply: true
 
 ## [ND1] Naming Discipline
 
-- [ND1a] **Intent**: No generic identifiers; names must be domain-specific and intent-revealing.
-- [ND1b] **Banned**: `data`, `info`, `value`, `items`, `obj`, `result`, `temp`, `misc`, `foo`, `bar`.
-- [ND1c] **Legacy**: When legacy code uses generic names, rename in the same edit; never introduce new generic names.
+- [ND1a] **Intent-Revealing**: Every identifier (variable, parameter, method, class, constant) must be domain-specific and intent-revealing; a reader must understand purpose without context from surrounding code.
+- [ND1b] **Banned Single-Letter Variables**: `a`, `b`, `c`, `d`, `n`, `o`, `p`, `s`, `t`, `v`, `x`, `y`, `z` are prohibited as variable/parameter names. Exceptions: `i`, `j`, `k` in trivial indexed `for` loops; single-char lambda params only when the type is unambiguous in a one-expression pipeline (e.g., `list.stream().map(e -> e.name())`); `e` in `catch` blocks.
+- [ND1c] **Banned Generic Nouns**: These names (and close variants) are prohibited as variable, parameter, or field names: `data`, `info`, `value`, `val`, `item`, `items`, `obj`, `object`, `result`, `results`, `response`, `payload`, `content`, `stuff`, `thing`, `entry`, `element`, `record`, `temp`, `tmp`, `misc`, `foo`, `bar`, `baz`, `dummy`, `sample`. Use domain-specific names that describe what the variable holds (e.g., `embeddingVector` not `data`; `chatMessage` not `item`; `rankedDocuments` not `results`).
+- [ND1d] **Banned Abbreviations**: No abbreviated variable names: `val`, `res`, `req`, `resp`, `msg`, `str`, `num`, `cnt`, `idx`, `len`, `buf`, `ctx`, `cfg`, `mgr`, `impl`, `proc`, `ref`, `desc`, `doc`, `col`, `cb`. Use full words: `message`, `request`, `response`, `count`, `index`, `length`, `buffer`, `context`, `configuration`, `manager`, `description`, `document`, `column`, `callback`.
+- [ND1e] **Constants**: `UPPER_SNAKE_CASE` with domain-qualifying prefix; no bare generic constant names like `VALUE`, `DATA`, `DEFAULT`, `THRESHOLD`, `LIMIT`, `SIZE`, `TIMEOUT`, `COUNT`, `MAX`, `MIN` without a qualifying domain noun (e.g., `EMBEDDING_DIMENSION` not `SIZE`; `RERANKER_TIMEOUT_MS` not `TIMEOUT`; `MAX_RETRIEVAL_RESULTS` not `MAX`).
+- [ND1f] **Type Names**: No generic suffixes `*Data`, `*Info`, `*Object`, `*Item`, `*Wrapper`, `*Holder`, `*Container`, `*Manager` (unless the class genuinely manages a lifecycle); class and record names declare their domain role.
+- [ND1g] **Alias Consistency**: The same concept uses the same name across method signatures, variable assignments, log messages, and documentation; do not alias the same thing with different names in the same scope or call chain.
+- [ND1h] **Legacy Fix-on-Touch**: When editing code that uses banned or generic names, rename them in the same edit; never introduce new generic names into existing code.
