@@ -371,7 +371,10 @@
     display: none;
     position: absolute;
     top: var(--space-2);
-    left: calc(100% + var(--space-2));
+    left: 100%;
+    /* Keep a hover bridge between bubble edge and button hit area. */
+    padding-left: var(--space-2);
+    width: max-content;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--duration-fast) var(--ease-out);
@@ -384,7 +387,9 @@
     }
 
     .bubble:hover .bubble-actions,
-    .bubble:focus-within .bubble-actions {
+    .bubble:focus-within .bubble-actions,
+    .bubble-actions:hover,
+    .bubble-actions:focus-within {
       opacity: 1;
       pointer-events: auto;
     }
