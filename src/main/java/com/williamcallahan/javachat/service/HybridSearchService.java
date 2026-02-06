@@ -367,26 +367,26 @@ public class HybridSearchService {
         if (payload == null || payload.isEmpty() || key == null || key.isBlank()) {
             return "";
         }
-        Value value = payload.get(key);
-        if (value == null) {
+        Value payloadValue = payload.get(key);
+        if (payloadValue == null) {
             return "";
         }
-        if (value.getKindCase() == Value.KindCase.STRING_VALUE) {
-            return value.getStringValue();
+        if (payloadValue.getKindCase() == Value.KindCase.STRING_VALUE) {
+            return payloadValue.getStringValue();
         }
-        return fromValue(value).map(String::valueOf).orElse("");
+        return fromValue(payloadValue).map(String::valueOf).orElse("");
     }
 
     private static Optional<Integer> extractPayloadInteger(Map<String, Value> payload, String key) {
         if (payload == null || payload.isEmpty() || key == null || key.isBlank()) {
             return Optional.empty();
         }
-        Value value = payload.get(key);
-        if (value == null) {
+        Value payloadValue = payload.get(key);
+        if (payloadValue == null) {
             return Optional.empty();
         }
-        if (value.getKindCase() == Value.KindCase.INTEGER_VALUE) {
-            long integerValue = value.getIntegerValue();
+        if (payloadValue.getKindCase() == Value.KindCase.INTEGER_VALUE) {
+            long integerValue = payloadValue.getIntegerValue();
             if (integerValue > Integer.MAX_VALUE) {
                 return Optional.of(Integer.MAX_VALUE);
             }
@@ -395,22 +395,22 @@ public class HybridSearchService {
             }
             return Optional.of((int) integerValue);
         }
-        Optional<Object> maybePayloadValue = fromValue(value);
-        if (maybePayloadValue.isPresent() && maybePayloadValue.get() instanceof Number payloadNumber) {
-            return Optional.of(payloadNumber.intValue());
-        }
-        return Optional.empty();
+        Optional<Object> maybePayloadValue = fromValue(payloadValue);
+        return maybePayloadValue
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .map(Number::intValue);
     }
 
-    private static Optional<Object> fromValue(Value value) {
-        if (value == null) {
+    private static Optional<Object> fromValue(Value payloadValue) {
+        if (payloadValue == null) {
             return Optional.empty();
         }
-        return switch (value.getKindCase()) {
-            case STRING_VALUE -> Optional.of(value.getStringValue());
-            case INTEGER_VALUE -> Optional.of(value.getIntegerValue());
-            case DOUBLE_VALUE -> Optional.of(value.getDoubleValue());
-            case BOOL_VALUE -> Optional.of(value.getBoolValue());
+        return switch (payloadValue.getKindCase()) {
+            case STRING_VALUE -> Optional.of(payloadValue.getStringValue());
+            case INTEGER_VALUE -> Optional.of(payloadValue.getIntegerValue());
+            case DOUBLE_VALUE -> Optional.of(payloadValue.getDoubleValue());
+            case BOOL_VALUE -> Optional.of(payloadValue.getBoolValue());
             case NULL_VALUE -> Optional.empty();
             default -> Optional.empty();
         };
