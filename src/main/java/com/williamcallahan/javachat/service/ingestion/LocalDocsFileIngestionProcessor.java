@@ -103,7 +103,10 @@ public class LocalDocsFileIngestionProcessor {
         var localStore = storage.localStore();
         QdrantCollectionKind collectionKind =
                 router.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
-        INDEXING_LOG.info("[INDEXING] Routed → {} (docSet={}, docType={})", collectionKind, provenance.docSet(),
+        INDEXING_LOG.info(
+                "[INDEXING] Routed → {} (docSet={}, docType={})",
+                collectionKind,
+                provenance.docSet(),
                 provenance.docType());
 
         Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord = localStore.readFileIngestionRecord(url);
@@ -321,7 +324,8 @@ public class LocalDocsFileIngestionProcessor {
         try {
             storeDocumentsWithRetry(collectionKind, documents);
         } catch (EmbeddingServiceUnavailableException embeddingException) {
-            log.error("Embedding service unavailable during upsert (exception type: {})",
+            log.error(
+                    "Embedding service unavailable during upsert (exception type: {})",
                     embeddingException.getClass().getSimpleName());
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(file, "embedding-unavailable", embeddingException));

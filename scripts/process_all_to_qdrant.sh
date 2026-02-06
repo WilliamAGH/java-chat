@@ -28,23 +28,19 @@ for arg in "$@"; do
     esac
 done
 
-if [ -n "${RED:-}" ]; then
-    :
-else
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    NC='\033[0m'
-fi
+RED="${RED:-\033[0;31m}"
+GREEN="${GREEN:-\033[0;32m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+BLUE="${BLUE:-\033[0;34m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
 
 log() {
     echo "[$(date)] $1" >> "$LOG_FILE"
     echo -e "$1"
 }
 
-percent_complete() {
+corpus_indexed_summary() {
     local parsed_dir="$PROJECT_ROOT/data/parsed"
     local index_dir="$PROJECT_ROOT/data/index"
     local parsed_count=0
@@ -57,11 +53,7 @@ percent_complete() {
         indexed_count=$(find "$index_dir" -maxdepth 1 -type f ! -name "file_*.marker" 2>/dev/null | wc -l | tr -d ' ')
     fi
 
-    if [ "$parsed_count" -gt 0 ]; then
-        awk -v i="$indexed_count" -v p="$parsed_count" 'BEGIN { printf("%.1f%%", (i/p)*100) }'
-    else
-        echo "0.0%"
-    fi
+    echo "${indexed_count} indexed / ${parsed_count} parsed"
 }
 
 qdrant_rest_base_url() {
@@ -97,7 +89,7 @@ check_qdrant_connection() {
         return 1
     fi
 
-    log "${GREEN}Qdrant connection successful${NC} ($(percent_complete))"
+    log "${GREEN}Qdrant connection successful${NC}"
     return 0
 }
 
@@ -108,7 +100,7 @@ check_embedding_server() {
         local response
         response=$(curl -s -o /dev/null -w "%{http_code}" "$url")
         if [ "$response" = "200" ]; then
-            log "${GREEN}Local embedding server is healthy${NC} ($(percent_complete))"
+            log "${GREEN}Local embedding server is healthy${NC}"
             return 0
         fi
         log "${RED}Local embedding server not responding (HTTP $response)${NC}"
@@ -194,7 +186,7 @@ if ! ./gradlew buildForScripts --no-configuration-cache --quiet >> "$LOG_FILE" 2
     log "${RED}Build failed${NC}"
     exit 1
 fi
-log "${GREEN}Build succeeded${NC} ($(percent_complete))"
+log "${GREEN}Build succeeded${NC}"
 
 if [ -n "$DOCS_SETS_FILTER" ]; then
     export DOCS_SETS="$DOCS_SETS_FILTER"
@@ -219,7 +211,7 @@ last_files=0
 while true; do
     if grep -q "DOCUMENT PROCESSING COMPLETE" "$LOG_FILE" 2>/dev/null; then
         echo ""
-        log "${GREEN}Document processing completed${NC} ($(percent_complete))"
+        log "${GREEN}Document processing completed${NC} ($files_count files, ${elapsed}s)"
         break
     fi
 
@@ -234,10 +226,9 @@ while true; do
     files_count=$(grep -c "Completed processing" "$LOG_FILE" 2>/dev/null || true)
     files_count=$(echo "${files_count:-0}" | tr -dc '0-9')
     files_count=${files_count:-0}
-    percent=$(percent_complete)
 
     if [ "$files_count" -gt "$last_files" ]; then
-        echo -ne "\r${YELLOW}[$percent] Files: $files_count (${elapsed}s)${NC}     "
+        echo -ne "\r${YELLOW}Files: $files_count (${elapsed}s)${NC}     "
         last_files=$files_count
     fi
 
@@ -245,5 +236,5 @@ while true; do
 done
 
 echo ""
-log "${GREEN}Pipeline completed successfully${NC} ($(percent_complete))"
+log "${GREEN}Pipeline completed successfully${NC} ($(corpus_indexed_summary))"
 log "Log file: $LOG_FILE"
