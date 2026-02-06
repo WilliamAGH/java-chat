@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -30,14 +31,16 @@ class LocalStoreServiceFileMarkerTest {
         String url = "https://docs.example.com/reference/page.html";
         long size = 1234L;
         long mtime = 5678L;
+        String fingerprint = "abc123";
         List<String> hashes = List.of("a1", "b2", "c3");
 
-        localStore.markFileIngested(url, size, mtime, hashes);
+        localStore.markFileIngested(url, size, mtime, fingerprint, hashes);
 
         LocalStoreService.FileIngestionRecord record =
                 localStore.readFileIngestionRecord(url).orElseThrow();
         assertEquals(size, record.fileSizeBytes());
         assertEquals(mtime, record.lastModifiedMillis());
+        assertEquals(fingerprint, record.contentFingerprint());
         assertEquals(hashes, record.chunkHashes());
 
         assertTrue(localStore.isFileIngestedAndUnchanged(url, size, mtime));
@@ -68,5 +71,44 @@ class LocalStoreServiceFileMarkerTest {
 
         assertFalse(Files.exists(shouldDelete), "Expected parsed chunk for URL to be deleted");
         assertTrue(Files.exists(shouldRemain), "Expected unrelated parsed chunk to remain");
+    }
+
+    @Test
+    void throwsWhenFileMarkerIsMalformed(@TempDir Path tempDir) throws IOException {
+        Path snapshotDir = tempDir.resolve("snapshots");
+        Path parsedDir = tempDir.resolve("parsed");
+        Path indexDir = tempDir.resolve("index");
+
+        LocalStoreService localStore =
+                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
+        localStore.createStoreDirectories();
+
+        String url = "https://docs.example.com/broken.html";
+        Path marker = indexDir.resolve("file_" + localStore.toSafeName(url) + ".marker");
+        Files.writeString(marker, "size=not-a-number\n", StandardCharsets.UTF_8);
+
+        assertThrows(IllegalStateException.class, () -> localStore.readFileIngestionRecord(url));
+    }
+
+    @Test
+    void computesDeterministicFileFingerprint(@TempDir Path tempDir) throws IOException {
+        Path snapshotDir = tempDir.resolve("snapshots");
+        Path parsedDir = tempDir.resolve("parsed");
+        Path indexDir = tempDir.resolve("index");
+
+        LocalStoreService localStore =
+                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
+        localStore.createStoreDirectories();
+
+        Path first = tempDir.resolve("first.html");
+        Path second = tempDir.resolve("second.html");
+        Files.writeString(first, "<h1>same</h1>", StandardCharsets.UTF_8);
+        Files.writeString(second, "<h1>same</h1>", StandardCharsets.UTF_8);
+
+        String firstFingerprint = localStore.computeFileContentFingerprint(first);
+        String secondFingerprint = localStore.computeFileContentFingerprint(second);
+
+        assertEquals(firstFingerprint, secondFingerprint);
+        assertFalse(firstFingerprint.isBlank());
     }
 }

@@ -106,7 +106,7 @@ Available doc set IDs are defined in `DocumentationSetCatalog.java`. Common ones
 
 - Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
 - Unchanged files are skipped on re-runs — only new or modified content is embedded.
-- File-level fingerprints (`data/index/file_*.marker`) detect when a source file changes, triggering re-chunking and pruning stale vectors from Qdrant.
+- File-level fingerprints (`data/index/file_*.marker`) include size, mtime, and content SHA-256 to detect source changes, triggering re-chunking and pruning stale vectors from Qdrant.
 
 ---
 

@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -32,6 +33,7 @@ public class LocalStoreService {
     private static final String FILE_MARKER_PREFIX = "file_";
     private static final String FILE_MARKER_EXTENSION = ".marker";
     private static final String FILE_MARKER_HASH_PREFIX = "hash=";
+    private static final String FILE_MARKER_FINGERPRINT_PREFIX = "fingerprint=";
 
     private final String snapshotDirConfig;
     private final String parsedDirConfig;
@@ -151,7 +153,7 @@ public class LocalStoreService {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL is required for file ingestion marker");
         }
-        markFileIngested(url, fileSizeBytes, lastModifiedMillis, List.of());
+        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", List.of());
     }
 
     private Path fileMarkerPath(String url) {
@@ -172,12 +174,35 @@ public class LocalStoreService {
      */
     public void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes)
             throws IOException {
+        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", chunkHashes);
+    }
+
+    /**
+     * Records a file-level ingestion marker keyed by URL, including a content fingerprint and chunk hashes.
+     *
+     * Persisting a content fingerprint prevents false unchanged detection when size and last-modified metadata
+     * alone are insufficient to detect edits.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileSizeBytes file size in bytes
+     * @param lastModifiedMillis last modified timestamp in millis since epoch
+     * @param contentFingerprint SHA-256 fingerprint of file content
+     * @param chunkHashes chunk hashes for the file content (may be empty)
+     * @throws IOException if marker write fails
+     */
+    public void markFileIngested(
+            String url,
+            long fileSizeBytes,
+            long lastModifiedMillis,
+            String contentFingerprint,
+            List<String> chunkHashes)
+            throws IOException {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL is required for file ingestion marker");
         }
         Path markerPath = fileMarkerPath(url);
         ensureParentDirectoryExists(markerPath);
-        String payload = buildFileMarkerPayload(fileSizeBytes, lastModifiedMillis, chunkHashes);
+        String payload = buildFileMarkerPayload(fileSizeBytes, lastModifiedMillis, contentFingerprint, chunkHashes);
         Files.writeString(markerPath, payload, StandardCharsets.UTF_8);
     }
 
@@ -198,7 +223,7 @@ public class LocalStoreService {
         try {
             return Optional.of(readFileMarker(markerPath));
         } catch (IOException exception) {
-            return Optional.empty();
+            throw new IllegalStateException("Failed to read file ingestion marker for URL: " + url, exception);
         }
     }
 
@@ -286,6 +311,7 @@ public class LocalStoreService {
         String raw = Files.readString(markerPath, StandardCharsets.UTF_8);
         long size = -1;
         long mtime = -1;
+        String fingerprint = "";
         List<String> hashes = new ArrayList<>();
         for (String line : raw.split("\n")) {
             String trimmed = line == null ? "" : line.trim();
@@ -293,6 +319,9 @@ public class LocalStoreService {
                 size = parseLongSafely(trimmed.substring("size=".length()));
             } else if (trimmed.startsWith("mtime=")) {
                 mtime = parseLongSafely(trimmed.substring("mtime=".length()));
+            } else if (trimmed.startsWith(FILE_MARKER_FINGERPRINT_PREFIX)) {
+                fingerprint = trimmed.substring(FILE_MARKER_FINGERPRINT_PREFIX.length())
+                        .trim();
             } else if (trimmed.startsWith(FILE_MARKER_HASH_PREFIX)) {
                 String hash =
                         trimmed.substring(FILE_MARKER_HASH_PREFIX.length()).trim();
@@ -301,7 +330,10 @@ public class LocalStoreService {
                 }
             }
         }
-        return new FileIngestionRecord(size, mtime, List.copyOf(hashes));
+        if (size < 0 || mtime < 0) {
+            throw new IOException("Invalid file ingestion marker format: " + markerPath);
+        }
+        return new FileIngestionRecord(size, mtime, fingerprint, List.copyOf(hashes));
     }
 
     private long parseLongSafely(String value) throws IOException {
@@ -312,10 +344,14 @@ public class LocalStoreService {
         }
     }
 
-    private String buildFileMarkerPayload(long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes) {
+    private String buildFileMarkerPayload(
+            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
         StringBuilder payload = new StringBuilder();
         payload.append("size=").append(fileSizeBytes).append('\n');
         payload.append("mtime=").append(lastModifiedMillis).append('\n');
+        payload.append(FILE_MARKER_FINGERPRINT_PREFIX)
+                .append(contentFingerprint == null ? "" : contentFingerprint)
+                .append('\n');
         if (chunkHashes != null) {
             for (String hash : chunkHashes) {
                 if (hash == null || hash.isBlank()) {
@@ -332,12 +368,37 @@ public class LocalStoreService {
      *
      * @param fileSizeBytes file size in bytes at ingestion time
      * @param lastModifiedMillis file last modified timestamp in millis at ingestion time
+     * @param contentFingerprint SHA-256 file content fingerprint captured at ingestion time
      * @param chunkHashes chunk hashes ingested for the file
      */
-    public record FileIngestionRecord(long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes) {
+    public record FileIngestionRecord(
+            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
         public FileIngestionRecord {
+            contentFingerprint = contentFingerprint == null ? "" : contentFingerprint;
             chunkHashes = chunkHashes == null ? List.of() : List.copyOf(chunkHashes);
         }
+    }
+
+    /**
+     * Computes the SHA-256 fingerprint for a file's current content.
+     *
+     * @param filePath file path to fingerprint
+     * @return lowercase hex-encoded SHA-256 value
+     * @throws IOException if the file cannot be read
+     */
+    public String computeFileContentFingerprint(Path filePath) throws IOException {
+        MessageDigest messageDigest = newSha256Digest();
+        byte[] buffer = new byte[8192];
+        try (InputStream input = Files.newInputStream(filePath)) {
+            int read = input.read(buffer);
+            while (read >= 0) {
+                if (read > 0) {
+                    messageDigest.update(buffer, 0, read);
+                }
+                read = input.read(buffer);
+            }
+        }
+        return HexFormat.of().formatHex(messageDigest.digest());
     }
 
     private String safeName(String url) {
@@ -389,10 +450,14 @@ public class LocalStoreService {
     }
 
     private String shortSha256(String input) {
+        MessageDigest messageDigest = newSha256Digest();
+        byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
+        return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
+    }
+
+    private MessageDigest newSha256Digest() {
         try {
-            MessageDigest messageDigest = MessageDigest.getInstance(SHA_256_ALGORITHM);
-            byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
+            return MessageDigest.getInstance(SHA_256_ALGORITHM);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
         }

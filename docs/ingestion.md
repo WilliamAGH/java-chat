@@ -71,7 +71,7 @@ Deduplication is based on per-chunk SHA-256 markers stored locally:
 
 - `data/index/` contains one file per ingested chunk hash
 - `data/parsed/` contains chunk text snapshots for debugging
-- `data/index/file_*.marker` records file-level fingerprints and chunk hashes so re-runs can skip unchanged files and prune stale vectors when a source file changes
+- `data/index/file_*.marker` records file-level fingerprints (size, mtime, content SHA-256) and chunk hashes so re-runs can skip unchanged files and prune stale vectors when a source file changes
 
 See [local store directories](domains/local-store-directories.md) for details.
 

@@ -165,10 +165,21 @@ public class HybridVectorService {
      * @return true when one or more points exist
      */
     public boolean hasPointsForUrl(QdrantCollectionKind collectionKind, String url) {
+        return countPointsForUrl(collectionKind, url) > 0;
+    }
+
+    /**
+     * Returns the exact number of points that match a URL in the given collection.
+     *
+     * @param collectionKind target collection kind
+     * @param url URL payload value to match
+     * @return exact point count for the URL
+     */
+    public long countPointsForUrl(QdrantCollectionKind collectionKind, String url) {
         Objects.requireNonNull(collectionKind, "collectionKind");
         Objects.requireNonNull(url, "url");
         if (url.isBlank()) {
-            return false;
+            return 0;
         }
 
         String collectionName = resolveCollectionName(collectionKind);
@@ -177,7 +188,7 @@ public class HybridVectorService {
         Long count = RetrySupport.executeWithRetry(
                 () -> awaitFuture(qdrantClient.countAsync(collectionName, filter, true), COUNT_TIMEOUT_SECONDS),
                 "Qdrant count by URL");
-        return count != null && count > 0;
+        return count == null ? 0 : count;
     }
 
     /**
