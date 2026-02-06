@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.config.AppProperties;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,16 +27,21 @@ public class RerankerService {
     private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
+    private final Duration rerankerTimeout;
 
     /**
      * Creates a reranker backed by the streaming LLM client.
      *
      * @param openAIStreamingService streaming LLM client
      * @param objectMapper Jackson object mapper
+     * @param appProperties application configuration containing reranker timeout budget
      */
-    public RerankerService(OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper) {
+    public RerankerService(
+            OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper, AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
         this.mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+        this.rerankerTimeout =
+                Objects.requireNonNull(appProperties, "appProperties").getRag().getRerankerTimeout();
     }
 
     /**
@@ -84,12 +91,17 @@ public class RerankerService {
 
         String prompt = buildRerankPrompt(query, docs);
 
-        // Cap reranker latency aggressively; fall back on original order fast
-        return openAIStreamingService
-                .complete(prompt, 0.0)
-                .timeout(java.time.Duration.ofSeconds(4))
-                .doOnError(timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
-                .blockOptional();
+        try {
+            return openAIStreamingService
+                    .complete(prompt, 0.0)
+                    .timeout(rerankerTimeout)
+                    .doOnError(
+                            timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
+                    .blockOptional();
+        } catch (RuntimeException rerankFailure) {
+            throw new RerankingFailureException(
+                    "Reranking request failed within timeout " + rerankerTimeout, rerankFailure);
+        }
     }
 
     /**
