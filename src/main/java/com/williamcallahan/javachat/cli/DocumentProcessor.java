@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.cli;
 
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.DocsIngestionService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.io.IOException;
@@ -37,35 +38,6 @@ public class DocumentProcessor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentProcessor.class);
 
-    private static final String DOCSET_PDF_BOOKS_NAME = "PDF Books";
-    private static final String DOCSET_PDF_BOOKS_PATH = "books";
-    private static final String DOCSET_JAVA_24_COMPLETE_NAME = "Java 24 Complete API";
-    private static final String DOCSET_JAVA_24_COMPLETE_PATH = "java/java24-complete";
-    private static final String DOCSET_JAVA_25_COMPLETE_NAME = "Java 25 Documentation";
-    private static final String DOCSET_JAVA_25_COMPLETE_PATH = "java/java25-complete";
-    private static final String DOCSET_JAVA_25_RELEASE_NOTES_NAME = "Java 25 Release Notes Issues";
-    private static final String DOCSET_JAVA_25_RELEASE_NOTES_PATH = "oracle/javase";
-    private static final String DOCSET_IBM_JAVA_25_ARTICLE_NAME = "IBM Java 25 Overview";
-    private static final String DOCSET_IBM_JAVA_25_ARTICLE_PATH = "ibm/articles";
-    private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_NAME = "JetBrains Java 25 Blog";
-    private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_PATH = "jetbrains/idea/2025/09";
-    private static final String DOCSET_SPRING_BOOT_COMPLETE_NAME = "Spring Boot Complete";
-    private static final String DOCSET_SPRING_BOOT_COMPLETE_PATH = "spring-boot-complete";
-    private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME = "Spring Framework Complete";
-    private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH = "spring-framework-complete";
-    private static final String DOCSET_SPRING_AI_COMPLETE_NAME = "Spring AI Complete";
-    private static final String DOCSET_SPRING_AI_COMPLETE_PATH = "spring-ai-complete";
-    private static final String DOCSET_JAVA_24_QUICK_NAME = "Java 24 Quick";
-    private static final String DOCSET_JAVA_24_QUICK_PATH = "java24";
-    private static final String DOCSET_JAVA_25_QUICK_NAME = "Java 25 Quick";
-    private static final String DOCSET_JAVA_25_QUICK_PATH = "java25";
-    private static final String DOCSET_SPRING_BOOT_QUICK_NAME = "Spring Boot Quick";
-    private static final String DOCSET_SPRING_BOOT_QUICK_PATH = "spring-boot";
-    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_NAME = "Spring Framework Quick";
-    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_PATH = "spring-framework";
-    private static final String DOCSET_SPRING_AI_QUICK_NAME = "Spring AI Quick";
-    private static final String DOCSET_SPRING_AI_QUICK_PATH = "spring-ai";
-
     private static final String LOG_BANNER_LINE = "===============================================";
     private static final String LOG_SECTION_LINE = "-----------------------------------------------";
     private static final String LOG_BLANK_LINE = "";
@@ -77,13 +49,13 @@ public class DocumentProcessor {
             "Documents have been indexed in Qdrant with automatic deduplication.";
     private static final String LOG_HASH_DESCRIPTION =
             "Each document chunk is identified by a SHA-256 hash of its content.";
-    private static final String LOG_PROCESSING_SET = "Processing documentation set {} ({})";
+    private static final String LOG_PROCESSING_SET = "Processing documentation set";
     private static final String LOG_FILES_TO_PROCESS = "Files to process: {}";
     private static final String LOG_DUPLICATES_SKIPPED = "  Skipped {} duplicate files (already in Qdrant)";
     private static final String LOG_SKIP_PATH_ESCAPE = "Skipping documentation set (path escaped base directory)";
     private static final String LOG_SKIP_DIR_NOT_FOUND = "Skipping documentation set (directory not found)";
     private static final String LOG_SKIP_NO_ELIGIBLE = "Skipping documentation set (no eligible files)";
-    private static final String LOG_PROCESSING_FAILED = "Failed to process docSetId={} (exceptionType={})";
+    private static final String LOG_PROCESSING_FAILED = "Failed to process documentation set (exceptionType={})";
     private static final String LOG_STACK_TRACE = "Stack trace:";
     private static final String LOG_PROCESSED_STATS = "Processed {} files in {}s ({} files/sec) ({})";
     private static final String LOG_TOTAL_PROCESSED = "Total new documents processed: {}";
@@ -93,8 +65,8 @@ public class DocumentProcessor {
     private static final String LOG_NEXT_STEP_QDRANT = "1. Verify in Qdrant Dashboard";
     private static final String LOG_NEXT_STEP_RETRIEVAL = "2. Test retrieval";
     private static final String LOG_NEXT_STEP_CHAT = "3. Start chat: ./gradlew bootRun";
-    private static final String LOG_DOCSET_FILTER = "Doc set filter active: {}";
-    private static final String LOG_DOCSET_SELECTED = "Doc sets selected: {}";
+    private static final String LOG_DOCSET_FILTER = "Doc set filter active";
+    private static final String LOG_DOCSET_SELECTED = "Doc sets selected: {} set(s)";
 
     private static final String SKIP_REASON_INVALID_PATH = "invalid path";
     private static final String SKIP_REASON_DIR_MISSING = "directory not found";
@@ -112,28 +84,6 @@ public class DocumentProcessor {
             "Document processing completed with %d failed documentation set(s)";
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
             "Failed to enumerate files in %s - check directory permissions";
-
-    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = List.of(
-            new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
-            new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_RELEASE_NOTES_NAME, DOCSET_JAVA_25_RELEASE_NOTES_PATH),
-            new DocumentationSet(DOCSET_IBM_JAVA_25_ARTICLE_NAME, DOCSET_IBM_JAVA_25_ARTICLE_PATH),
-            new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
-            new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH));
-
-    private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
-            new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_QUICK_NAME, DOCSET_JAVA_25_QUICK_PATH),
-            new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
-            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
-            new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));
-
-    private static final List<DocumentationSet> ALL_DOCUMENTATION_SETS = Stream.concat(
-                    BASE_DOCUMENTATION_SETS.stream(), QUICK_DOCUMENTATION_SETS.stream())
-            .toList();
 
     private final DocsIngestionService ingestionService;
     private final ProgressTracker progressTracker;
@@ -221,15 +171,15 @@ public class DocumentProcessor {
 
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_SECTION_LINE);
-            LOGGER.info(LOG_PROCESSING_SET, docSet.docSetId(), docSet.displayName());
+            LOGGER.info(LOG_PROCESSING_SET);
             LOGGER.info(LOG_FILES_TO_PROCESS, fileCount);
         }
 
         final long startMillis = System.currentTimeMillis();
         try {
-            final DocsIngestionService.LocalIngestionOutcome outcome =
+            final IngestionLocalOutcome outcome =
                     ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
-            final int processed = outcome.processedCount();
+            final int processed = outcome.processed();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
 
@@ -247,10 +197,7 @@ public class DocumentProcessor {
 
         } catch (IOException ioException) {
             if (LOGGER.isErrorEnabled()) {
-                LOGGER.error(
-                        LOG_PROCESSING_FAILED,
-                        docSet.docSetId(),
-                        ioException.getClass().getSimpleName());
+                LOGGER.error(LOG_PROCESSING_FAILED, ioException.getClass().getSimpleName());
             }
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_STACK_TRACE, ioException);
@@ -294,16 +241,16 @@ public class DocumentProcessor {
         final String filter = config.docSetFilter();
         if (filter == null || filter.isBlank()) {
             if (config.includeQuickSets()) {
-                return ALL_DOCUMENTATION_SETS;
+                return DocumentationSetCatalog.allSets();
             }
-            return BASE_DOCUMENTATION_SETS;
+            return DocumentationSetCatalog.baseSets();
         }
         final Set<String> tokens = parseDocSetFilter(filter);
         if (tokens.isEmpty() || tokens.contains("all")) {
-            return ALL_DOCUMENTATION_SETS;
+            return DocumentationSetCatalog.allSets();
         }
         final List<DocumentationSet> selectedSets = new ArrayList<>();
-        for (DocumentationSet docSet : ALL_DOCUMENTATION_SETS) {
+        for (DocumentationSet docSet : DocumentationSetCatalog.allSets()) {
             if (docSet.matchesAny(tokens)) {
                 selectedSets.add(docSet);
             }
@@ -312,11 +259,11 @@ public class DocumentProcessor {
             throw new DocumentProcessingException(String.format(
                     Locale.ROOT,
                     "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
+                    formatDocSetSummary(DocumentationSetCatalog.allSets())));
         }
         if (LOGGER.isInfoEnabled()) {
-            LOGGER.info(LOG_DOCSET_FILTER, filter);
-            LOGGER.info(LOG_DOCSET_SELECTED, formatDocSetSummary(selectedSets));
+            LOGGER.info(LOG_DOCSET_FILTER);
+            LOGGER.info(LOG_DOCSET_SELECTED, selectedSets.size());
         }
         return selectedSets;
     }
@@ -474,30 +421,6 @@ public class DocumentProcessor {
         record Skipped(String setName, String reason) implements ProcessingOutcome {}
 
         record Failed(String setName) implements ProcessingOutcome {}
-    }
-
-    /**
-     * A documentation set to process, defined by display name and relative path.
-     */
-    private record DocumentationSet(String displayName, String relativePath) {
-        String docSetId() {
-            return normalizeToken(relativePath.replace('/', '-'));
-        }
-
-        boolean matchesAny(final Set<String> tokens) {
-            if (tokens == null || tokens.isEmpty()) {
-                return false;
-            }
-            final String normalizedName = normalizeToken(displayName);
-            final String normalizedPath = normalizeToken(relativePath);
-            final String normalizedId = docSetId();
-            for (String token : tokens) {
-                if (token.equals(normalizedId) || token.equals(normalizedName) || token.equals(normalizedPath)) {
-                    return true;
-                }
-            }
-            return false;
-        }
     }
 
     /**
