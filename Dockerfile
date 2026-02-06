@@ -95,6 +95,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
+  --enable-native-access=ALL-UNNAMED \
+  --sun-misc-unsafe-memory-access=allow \
   -Xms64m -Xmx192m \
   -XX:MaxMetaspaceSize=192m \
   -XX:ReservedCodeCacheSize=32m \
