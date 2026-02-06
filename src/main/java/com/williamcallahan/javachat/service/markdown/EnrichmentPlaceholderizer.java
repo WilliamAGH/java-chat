@@ -267,12 +267,36 @@ class EnrichmentPlaceholderizer {
                 }
             }
 
-            if (!fenceTracker.isInsideCode() && startsWith(markdown, scanIndex, MARKER_END)) {
-                return scanIndex;
+            if (!fenceTracker.isInsideCode() && markdown.charAt(scanIndex) == '}') {
+                int closeIndex = resolveCloseIndexFromBraceRun(markdown, scanIndex);
+                if (closeIndex >= 0) {
+                    return closeIndex;
+                }
             }
             scanIndex++;
         }
         return -1;
+    }
+
+    /**
+     * Resolves a close marker index from a run of closing braces.
+     *
+     * <p>For runs like {@code }}} this chooses the final {@code }} so a trailing content
+     * brace remains part of the enrichment body instead of leaking outside the card.</p>
+     *
+     * @param markdown source markdown text
+     * @param runStart index of a {@code }} candidate run start
+     * @return close marker start index, or -1 if no marker exists in the run
+     */
+    private int resolveCloseIndexFromBraceRun(String markdown, int runStart) {
+        int runLength = 0;
+        while (runStart + runLength < markdown.length() && markdown.charAt(runStart + runLength) == '}') {
+            runLength++;
+        }
+        if (runLength < MARKER_END.length()) {
+            return -1;
+        }
+        return runStart + (runLength - MARKER_END.length());
     }
 
     private MarkdownEnrichment createEnrichment(EnrichmentKind kind, String content, int absolutePosition) {

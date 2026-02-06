@@ -37,6 +37,122 @@ interface EnrichmentToken extends Tokens.Generic {
 
 /** Pattern matching code fence delimiters (3+ backticks or tildes at line start). */
 const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/
+const FENCE_MIN_LENGTH = 3
+const NEWLINE = '\n'
+
+type FenceMarker = { character: string; length: number }
+
+function scanFenceMarker(src: string, index: number): FenceMarker | null {
+  if (index < 0 || index >= src.length) {
+    return null
+  }
+  const markerChar = src[index]
+  if (markerChar !== '`' && markerChar !== '~') {
+    return null
+  }
+
+  let markerLength = 0
+  while (index + markerLength < src.length && src[index + markerLength] === markerChar) {
+    markerLength++
+  }
+
+  if (markerLength < FENCE_MIN_LENGTH) {
+    return null
+  }
+
+  return { character: markerChar, length: markerLength }
+}
+
+function isFenceLanguageCharacter(character: string): boolean {
+  if (character.length !== 1) {
+    return false
+  }
+  const charCode = character.charCodeAt(0)
+  const isLowerAlpha = charCode >= 97 && charCode <= 122
+  const isUpperAlpha = charCode >= 65 && charCode <= 90
+  const isDigit = charCode >= 48 && charCode <= 57
+  return isLowerAlpha || isUpperAlpha || isDigit || character === '-' || character === '_'
+}
+
+function isAttachedFenceStart(src: string, index: number): boolean {
+  if (index <= 0 || index >= src.length) {
+    return false
+  }
+  return !/\s/.test(src[index - 1])
+}
+
+function appendLineBreakIfNeeded(text: string): string {
+  if (text.length === 0 || text.endsWith(NEWLINE)) {
+    return text
+  }
+  return `${text}${NEWLINE}`
+}
+
+/**
+ * Repairs malformed fence placement commonly produced during streaming:
+ * - attached starts like "Example:```java"
+ * - attached closes like "```After"
+ * - missing closing fence at end-of-stream
+ */
+function normalizeMarkdownForStreaming(content: string): string {
+  if (!content) {
+    return ''
+  }
+
+  let normalized = ''
+  let inFence = false
+  let fenceChar = ''
+  let fenceLength = 0
+
+  for (let cursor = 0; cursor < content.length; ) {
+    const startOfLine = cursor === 0 || content[cursor - 1] === NEWLINE
+    const marker = scanFenceMarker(content, cursor)
+    const attachedFenceStart = isAttachedFenceStart(content, cursor)
+
+    if (marker) {
+      if (!inFence && (startOfLine || attachedFenceStart)) {
+        normalized = appendLineBreakIfNeeded(normalized)
+        inFence = true
+        fenceChar = marker.character
+        fenceLength = marker.length
+
+        normalized += content.slice(cursor, cursor + marker.length)
+        cursor += marker.length
+
+        while (cursor < content.length && isFenceLanguageCharacter(content[cursor])) {
+          normalized += content[cursor]
+          cursor++
+        }
+        if (cursor < content.length && content[cursor] !== NEWLINE) {
+          normalized += NEWLINE
+        }
+        continue
+      }
+
+      if (inFence && startOfLine && marker.character === fenceChar && marker.length >= fenceLength) {
+        normalized = appendLineBreakIfNeeded(normalized)
+        normalized += content.slice(cursor, cursor + marker.length)
+        cursor += marker.length
+        inFence = false
+        fenceChar = ''
+        fenceLength = 0
+        if (cursor < content.length && content[cursor] !== NEWLINE) {
+          normalized += NEWLINE
+        }
+        continue
+      }
+    }
+
+    normalized += content[cursor]
+    cursor++
+  }
+
+  if (inFence && fenceChar) {
+    normalized += `${NEWLINE}${fenceChar.repeat(Math.max(fenceLength, FENCE_MIN_LENGTH))}`
+  }
+
+  return normalized
+}
 
 /**
  * Checks whether code fences in content are balanced.
@@ -72,6 +188,21 @@ function hasBalancedCodeFences(content: string): boolean {
 const ENRICHMENT_CLOSE = '}}'
 
 /**
+ * Resolves the close marker position for a run of closing braces.
+ * For runs like "}}}", this picks the final "}}" so a trailing content "}" is preserved.
+ */
+function resolveCloseIndexFromBraceRun(src: string, runStart: number): number {
+  let runLength = 0
+  while (runStart + runLength < src.length && src[runStart + runLength] === '}') {
+    runLength++
+  }
+  if (runLength < ENRICHMENT_CLOSE.length) {
+    return -1
+  }
+  return runStart + (runLength - ENRICHMENT_CLOSE.length)
+}
+
+/**
  * Finds the closing }} for an enrichment marker, skipping }} inside code fences.
  * Scans character-by-character, tracking fence state at line boundaries.
  */
@@ -101,8 +232,11 @@ function findEnrichmentClose(src: string, startIndex: number): number {
     }
 
     // Check for closing marker only outside fences
-    if (!inFence && src.slice(cursor, cursor + ENRICHMENT_CLOSE.length) === ENRICHMENT_CLOSE) {
-      return cursor
+    if (!inFence && src[cursor] === '}') {
+      const closeIndex = resolveCloseIndexFromBraceRun(src, cursor)
+      if (closeIndex >= 0) {
+        return closeIndex
+      }
     }
   }
 
@@ -155,15 +289,16 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
       }
 
       const contentToRender = enrichmentToken.content
+      const normalizedContent = normalizeMarkdownForStreaming(contentToRender)
 
       // DIAGNOSTIC: Log enrichment content to identify malformed markdown
       if (import.meta.env.DEV) {
-        const hasFences = contentToRender.includes('```') || contentToRender.includes('~~~')
-        const isBalanced = hasBalancedCodeFences(contentToRender)
+        const hasFences = normalizedContent.includes('```') || normalizedContent.includes('~~~')
+        const isBalanced = hasBalancedCodeFences(normalizedContent)
         if (hasFences && !isBalanced) {
           console.warn('[markdown] Unbalanced code fences in enrichment:', {
             kind: enrichmentToken.kind,
-            content: contentToRender,
+            content: normalizedContent,
             raw: enrichmentToken.raw
           })
         }
@@ -171,7 +306,7 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
-      const innerHtml = marked.parse(contentToRender, {
+      const innerHtml = marked.parse(normalizedContent, {
         async: false,
         gfm: true,
         breaks: false // Preserve fence detection accuracy
@@ -212,20 +347,22 @@ export function parseMarkdown(content: string): string {
     return ''
   }
 
+  const normalizedContent = normalizeMarkdownForStreaming(content)
+
   // DIAGNOSTIC: Log content with unbalanced fences before parsing
   if (import.meta.env.DEV) {
-    const hasFences = content.includes('```') || content.includes('~~~')
-    if (hasFences && !hasBalancedCodeFences(content)) {
+    const hasFences = normalizedContent.includes('```') || normalizedContent.includes('~~~')
+    if (hasFences && !hasBalancedCodeFences(normalizedContent)) {
       console.warn('[markdown] Unbalanced code fences in input:', {
-        contentLength: content.length,
-        contentPreview: content.slice(0, 500),
-        contentEnd: content.slice(-200)
+        contentLength: normalizedContent.length,
+        contentPreview: normalizedContent.slice(0, 500),
+        contentEnd: normalizedContent.slice(-200)
       })
     }
   }
 
   try {
-    const rawHtml = marked.parse(content, { async: false }) as string
+    const rawHtml = marked.parse(normalizedContent, { async: false }) as string
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },

@@ -355,6 +355,17 @@ class MarkdownServiceTest {
     }
 
     @Test
+    @DisplayName("Enrichment closing marker preserves trailing content brace")
+    void testEnrichmentClosingMarkerPreservesTrailingBrace() {
+        String markdown = "{{example:try (var scope = open()) { doWork(); }}}";
+        String html = markdownService.processStructured(markdown).html();
+
+        assertTrue(html.contains("inline-enrichment example"), "Example card should render");
+        assertTrue(html.contains("doWork(); }"), "Trailing brace must remain inside enrichment content");
+        assertFalse(html.contains("<p>}</p>"), "Trailing brace must not leak as an orphan paragraph");
+    }
+
+    @Test
     @DisplayName("Indented code preserves bracketed citations")
     void testIndentedCodePreservesBracketedCitations() {
         String markdown = "    int total = 0; // [1]";
