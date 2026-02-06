@@ -29,7 +29,7 @@ class EmbeddingProviderFailureTest {
 
         try {
             LocalEmbeddingClient localClient =
-                    new LocalEmbeddingClient(baseUrl, "local-test-model", 12, new RestTemplateBuilder());
+                    new LocalEmbeddingClient(baseUrl, "local-test-model", 12, 8, new RestTemplateBuilder());
             EmbeddingServiceUnavailableException thrown =
                     assertThrows(EmbeddingServiceUnavailableException.class, () -> localClient.embed(List.of("hello")));
 

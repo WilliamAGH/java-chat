@@ -126,7 +126,7 @@ Ingestion writes to four Qdrant collections, each containing **dense vectors** (
 Each collection has two named vector spaces:
 
 - **`dense`** — 4096-dimensional embeddings from the configured embedding provider (default: Qwen3 8B)
-- **`bm25`** — sparse lexical vectors computed via Lucene `StandardAnalyzer` tokenization with IDF modifier
+- **`bm25`** — sparse lexical vectors computed via Lucene `StandardAnalyzer` tokenization and hashed term-frequency values, with Qdrant IDF modifier
 
 ### How retrieval works
 

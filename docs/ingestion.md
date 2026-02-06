@@ -11,7 +11,7 @@ Command reference:
 1. **Fetch** documentation into `data/docs/` (HTML mirrors via `wget`).
 2. **Chunk** content using JTokkit's CL100K_BASE tokenizer (~900 tokens per chunk with 150-token overlap).
 3. **Deduplicate** chunks by SHA-256 hash — unchanged content is skipped on re-runs.
-4. **Embed** chunks with both dense vectors (semantic, from configured embedding provider) and sparse vectors (BM25 lexical tokens via Lucene `StandardAnalyzer`).
+4. **Embed** chunks with both dense vectors (semantic, from configured embedding provider) and sparse vectors (Lucene `StandardAnalyzer` tokens encoded as hashed term-frequency vectors).
 5. **Upsert** to Qdrant hybrid collections.
 
 ## Fetch docs
@@ -59,9 +59,11 @@ See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for the full 
 Each ingested chunk is stored as a Qdrant point with two named vectors:
 
 - **`dense`** — semantic embedding from the configured provider (default 4096 dimensions via Qwen3 8B)
-- **`bm25`** — sparse lexical vector from Lucene `StandardAnalyzer` tokenization with IDF modifier
+- **`bm25`** — sparse lexical vector from Lucene `StandardAnalyzer` tokenization encoded as hashed term-frequency values with Qdrant IDF modifier
 
-This enables hybrid retrieval: dense search captures semantic similarity while sparse search captures exact keyword matches. Results are fused via Reciprocal Rank Fusion (RRF).
+This enables hybrid retrieval: dense search captures semantic similarity while sparse search captures exact keyword matches. Sparse vectors use local hashed TF values and Qdrant applies IDF at query time. Results are fused via Reciprocal Rank Fusion (RRF).
+
+If sparse encoding logic changes (tokenization or hashing), run a full re-ingest so stored sparse vectors stay compatible with query-time encoding.
 
 See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for collection layout and retrieval details.
 

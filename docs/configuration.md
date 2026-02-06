@@ -65,6 +65,7 @@ Common variables:
 - `LOCAL_EMBEDDING_SERVER_URL` (default `http://127.0.0.1:8088`)
 - `APP_LOCAL_EMBEDDING_MODEL` (default `text-embedding-qwen3-embedding-8b`)
 - `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `4096`)
+- `APP_LOCAL_EMBEDDING_BATCH_SIZE` (default `32`)
 - `REMOTE_EMBEDDING_SERVER_URL`, `REMOTE_EMBEDDING_API_KEY`, `REMOTE_EMBEDDING_MODEL_NAME`, `REMOTE_EMBEDDING_DIMENSIONS` (optional)
 
 ## Qdrant
@@ -89,6 +90,8 @@ See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the col
 - `QDRANT_DENSE_VECTOR_NAME` (default `dense`) — named vector for dense embeddings
 - `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
 - `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
+- `HYBRID_RRF_K` (default `60`) — reciprocal-rank-fusion k parameter used by Qdrant query fusion
+- `HYBRID_FAIL_ON_PARTIAL_SEARCH_ERROR` (default `true`) — fail retrieval when any collection query fails
 - `HYBRID_QUERY_TIMEOUT` (default `5s`) — timeout for hybrid search queries
 - `APP_QDRANT_ENSURE_PAYLOAD_INDEXES` (default `true`) — create payload indexes on startup
 

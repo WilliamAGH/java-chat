@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -55,6 +56,33 @@ class OpenAiCompatibleEmbeddingClientTest {
             assertEquals(1.0f, vectors.get(1)[1]);
 
             verify(embeddingService).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void throwsWhenEmbeddingDimensionDoesNotMatchConfiguration() {
+        OpenAIClient client = mock(OpenAIClient.class);
+        EmbeddingService embeddingService = mock(EmbeddingService.class);
+
+        when(client.embeddings()).thenReturn(embeddingService);
+
+        CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
+                .model("text-embedding-3-small")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(0L)
+                        .embedding(List.of(0.1f, 0.2f, 0.3f))
+                        .build()))
+                .build();
+
+        when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
+            assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
         }
     }
 }
