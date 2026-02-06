@@ -25,6 +25,7 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -227,14 +228,15 @@ public class OpenAIStreamingService {
         log.debug("Starting OpenAI stream with structured prompt");
 
         return Mono.<StreamingResult>defer(() -> {
-                    ProviderCandidate selectedProvider = selectProviderForStreaming();
-                    if (selectedProvider == null) {
+                    Optional<ProviderCandidate> selectedProvider = selectProviderForStreaming();
+                    if (selectedProvider.isEmpty()) {
                         String error = "LLM providers unavailable - active provider is rate limited or misconfigured";
                         log.error("[LLM] {}", error);
                         return Mono.<StreamingResult>error(new IllegalStateException(error));
                     }
 
-                    RateLimitService.ApiProvider activeProvider = selectedProvider.provider();
+                    RateLimitService.ApiProvider activeProvider =
+                            selectedProvider.get().provider();
                     boolean useGitHubModels = activeProvider == RateLimitService.ApiProvider.GITHUB_MODELS;
 
                     // Determine model and token limits
@@ -258,7 +260,7 @@ public class OpenAIStreamingService {
                     log.info("[LLM] Streaming started (structured, providerId={})", activeProvider.ordinal());
 
                     Flux<String> contentFlux =
-                            executeStreamingRequest(selectedProvider.client(), params, activeProvider);
+                            executeStreamingRequest(selectedProvider.get().client(), params, activeProvider);
                     return Mono.just(new StreamingResult(contentFlux, activeProvider));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
@@ -407,10 +409,9 @@ public class OpenAIStreamingService {
             builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
             log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
 
-            ReasoningEffort effort = resolveReasoningEffort(normalizedModelId);
-            if (effort != null) {
-                builder.reasoning(Reasoning.builder().effort(effort).build());
-            }
+            resolveReasoningEffort()
+                    .ifPresent(effort ->
+                            builder.reasoning(Reasoning.builder().effort(effort).build()));
         } else if (!reasoningModel && Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
@@ -495,11 +496,11 @@ public class OpenAIStreamingService {
         return modelId != null && modelId.startsWith(GPT_5_MODEL_PREFIX);
     }
 
-    private ReasoningEffort resolveReasoningEffort(String normalizedModelId) {
+    private Optional<ReasoningEffort> resolveReasoningEffort() {
         if (reasoningEffortSetting == null || reasoningEffortSetting.isBlank()) {
-            return null;
+            return Optional.empty();
         }
-        return ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+        return Optional.of(ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim())));
     }
 
     private String normalizeBaseUrl(String baseUrl) {
@@ -513,17 +514,17 @@ public class OpenAIStreamingService {
         return isAvailable && (clientPrimary != null || clientSecondary != null);
     }
 
-    private ProviderCandidate selectProviderForStreaming() {
+    private Optional<ProviderCandidate> selectProviderForStreaming() {
         List<ProviderCandidate> availableCandidates = selectAvailableProviderCandidates();
         if (availableCandidates.isEmpty()) {
             log.error("No LLM providers are currently available for streaming");
-            return null;
+            return Optional.empty();
         }
         ProviderCandidate selectedProvider = availableCandidates.get(0);
         log.debug(
                 "Selected provider for streaming (providerId={})",
                 selectedProvider.provider().ordinal());
-        return selectedProvider;
+        return Optional.of(selectedProvider);
     }
 
     private List<ProviderCandidate> selectAvailableProviderCandidates() {

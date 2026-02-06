@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Profile;
@@ -105,7 +106,9 @@ public class DocumentProcessor {
      * @param args command-line arguments
      */
     public static void main(final String[] args) {
-        SpringApplication.run(DocumentProcessor.class, args);
+        ConfigurableApplicationContext applicationContext = SpringApplication.run(DocumentProcessor.class, args);
+        int exitCode = SpringApplication.exit(applicationContext, () -> 0);
+        System.exit(exitCode);
     }
 
     /**
