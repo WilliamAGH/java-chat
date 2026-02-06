@@ -77,4 +77,38 @@ describe('streamGuidedChat recovery', () => {
     expect(firstOnErrorCall).toBeDefined()
     expect(firstOnErrorCall[0]).toEqual({ message: '429 rate limit exceeded' })
   })
+
+  it('does not retry when backend marks stream failure as non-retryable', async () => {
+    streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
+      callbacks.onStatus?.({
+        message: 'Primary and fallback streams both failed',
+        code: 'stream.provider.fatal-error',
+        retryable: false,
+        stage: 'stream'
+      })
+      throw new Error('Provider stream unavailable')
+    })
+
+    const onChunk = vi.fn()
+    const onStatus = vi.fn()
+    const onError = vi.fn()
+    const onCitations = vi.fn()
+
+    await expect(
+      streamGuidedChat('guided-session-3', 'intro', 'Teach me streams', {
+        onChunk,
+        onStatus,
+        onError,
+        onCitations
+      })
+    ).rejects.toThrow('Provider stream unavailable')
+
+    expect(streamSseMock).toHaveBeenCalledTimes(1)
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'stream.provider.fatal-error',
+        retryable: false
+      })
+    )
+  })
 })

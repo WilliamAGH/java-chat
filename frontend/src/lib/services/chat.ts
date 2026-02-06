@@ -5,7 +5,6 @@
  * @see {@link ../validation/schemas.ts} for type definitions
  */
 
-import { streamSse } from './sse'
 import {
   CitationsArraySchema,
   type StreamStatus,
@@ -14,14 +13,7 @@ import {
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
 import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from './csrf'
-import {
-  buildStreamRecoverySucceededStatus,
-  buildStreamRetryStatus,
-  MAX_STREAM_RECOVERY_RETRIES,
-  shouldRetryStreamRequest,
-  toStreamError,
-  toStreamFailureException
-} from './streamRecovery'
+import { streamWithRetry } from './streamRecovery'
 
 export type { StreamStatus, StreamError, Citation }
 
@@ -60,56 +52,18 @@ export async function streamChat(
   onChunk: (chunk: string) => void,
   options: StreamChatOptions = {}
 ): Promise<void> {
-  let attemptedRecoveryRetries = 0
-  let hasPendingRecoverySuccessNotice = false
-
-  while (true) {
-    let hasStreamedAnyChunk = false
-    let streamErrorEvent: StreamError | null = null
-
-    try {
-      await streamSse(
-        '/api/chat/stream',
-        { sessionId, latest: message },
-        {
-          onText: (chunk) => {
-            hasStreamedAnyChunk = true
-            if (hasPendingRecoverySuccessNotice) {
-              options.onStatus?.(buildStreamRecoverySucceededStatus(attemptedRecoveryRetries))
-              hasPendingRecoverySuccessNotice = false
-            }
-            onChunk(chunk)
-          },
-          onStatus: options.onStatus,
-          onError: (streamError) => {
-            streamErrorEvent = streamError
-          },
-          onCitations: options.onCitations
-        },
-        'chat.ts',
-        { signal: options.signal }
-      )
-      return
-    } catch (streamFailure) {
-      if (
-        shouldRetryStreamRequest(
-          streamFailure,
-          streamErrorEvent,
-          hasStreamedAnyChunk,
-          attemptedRecoveryRetries,
-          MAX_STREAM_RECOVERY_RETRIES
-        )
-      ) {
-        attemptedRecoveryRetries++
-        hasPendingRecoverySuccessNotice = true
-        options.onStatus?.(buildStreamRetryStatus(attemptedRecoveryRetries, MAX_STREAM_RECOVERY_RETRIES))
-        continue
-      }
-      const mappedStreamError = toStreamError(streamFailure, streamErrorEvent)
-      options.onError?.(mappedStreamError)
-      throw toStreamFailureException(streamFailure, streamErrorEvent)
-    }
-  }
+  return streamWithRetry(
+    '/api/chat/stream',
+    { sessionId, latest: message },
+    {
+      onChunk,
+      onStatus: options.onStatus,
+      onError: options.onError,
+      onCitations: options.onCitations,
+      signal: options.signal
+    },
+    'chat.ts'
+  )
 }
 
 /**

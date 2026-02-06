@@ -5,7 +5,6 @@
  * @see {@link ../validation/schemas.ts} for type definitions
  */
 
-import { streamSse } from './sse'
 import {
   GuidedTOCSchema,
   GuidedLessonSchema,
@@ -19,14 +18,7 @@ import {
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
 import type { CitationFetchResult } from './chat'
-import {
-  buildStreamRecoverySucceededStatus,
-  buildStreamRetryStatus,
-  MAX_STREAM_RECOVERY_RETRIES,
-  shouldRetryStreamRequest,
-  toStreamError,
-  toStreamFailureException
-} from './streamRecovery'
+import { streamWithRetry } from './streamRecovery'
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse }
 
@@ -134,55 +126,16 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks
 ): Promise<void> {
-  const { onChunk, onStatus, onError, onCitations, signal } = callbacks
-  let attemptedRecoveryRetries = 0
-  let hasPendingRecoverySuccessNotice = false
-
-  while (true) {
-    let hasStreamedAnyChunk = false
-    let streamErrorEvent: StreamError | null = null
-
-    try {
-      await streamSse(
-        '/api/guided/stream',
-        { sessionId, slug, latest: message },
-        {
-          onText: (chunk) => {
-            hasStreamedAnyChunk = true
-            if (hasPendingRecoverySuccessNotice) {
-              onStatus?.(buildStreamRecoverySucceededStatus(attemptedRecoveryRetries))
-              hasPendingRecoverySuccessNotice = false
-            }
-            onChunk(chunk)
-          },
-          onStatus,
-          onCitations,
-          onError: (streamError) => {
-            streamErrorEvent = streamError
-          }
-        },
-        'guided.ts',
-        { signal }
-      )
-      return
-    } catch (streamFailure) {
-      if (
-        shouldRetryStreamRequest(
-          streamFailure,
-          streamErrorEvent,
-          hasStreamedAnyChunk,
-          attemptedRecoveryRetries,
-          MAX_STREAM_RECOVERY_RETRIES
-        )
-      ) {
-        attemptedRecoveryRetries++
-        hasPendingRecoverySuccessNotice = true
-        onStatus?.(buildStreamRetryStatus(attemptedRecoveryRetries, MAX_STREAM_RECOVERY_RETRIES))
-        continue
-      }
-      const streamError = toStreamError(streamFailure, streamErrorEvent)
-      onError?.(streamError)
-      throw toStreamFailureException(streamFailure, streamErrorEvent)
-    }
-  }
+  return streamWithRetry(
+    '/api/guided/stream',
+    { sessionId, slug, latest: message },
+    {
+      onChunk: callbacks.onChunk,
+      onStatus: callbacks.onStatus,
+      onError: callbacks.onError,
+      onCitations: callbacks.onCitations,
+      signal: callbacks.signal
+    },
+    'guided.ts'
+  )
 }

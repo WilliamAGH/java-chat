@@ -69,4 +69,32 @@ describe('streamChat recovery', () => {
       message: 'OverflowException: malformed response frame'
     })
   })
+
+  it('honors backend non-retryable stream status metadata', async () => {
+    streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
+      callbacks.onStatus?.({
+        message: 'Provider returned fatal stream error',
+        code: 'stream.provider.fatal-error',
+        retryable: false,
+        stage: 'stream'
+      })
+      throw new Error('Unexpected provider failure')
+    })
+
+    const onChunk = vi.fn()
+    const onStatus = vi.fn()
+    const onError = vi.fn()
+
+    await expect(
+      streamChat('session-3', 'Explain virtual threads', onChunk, { onStatus, onError })
+    ).rejects.toThrow('Unexpected provider failure')
+
+    expect(streamSseMock).toHaveBeenCalledTimes(1)
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'stream.provider.fatal-error',
+        retryable: false
+      })
+    )
+  })
 })

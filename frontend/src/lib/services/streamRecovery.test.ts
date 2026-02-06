@@ -13,6 +13,7 @@ describe('streamRecovery', () => {
     const retryDecision = shouldRetryStreamRequest(
       new Error('OverflowException while decoding response'),
       null,
+      null,
       false,
       0,
       1
@@ -25,6 +26,7 @@ describe('streamRecovery', () => {
     const retryDecision = shouldRetryStreamRequest(
       new Error('OverflowException while decoding response'),
       null,
+      null,
       true,
       0,
       1
@@ -36,6 +38,7 @@ describe('streamRecovery', () => {
   it('refuses retry for non-recoverable quota errors', () => {
     const retryDecision = shouldRetryStreamRequest(
       new Error('HTTP 429 rate limit exceeded'),
+      null,
       null,
       false,
       0,
@@ -66,7 +69,24 @@ describe('streamRecovery', () => {
   })
 
   it('retries once for recoverable network failures before any chunk is rendered', () => {
-    const retryDecision = shouldRetryStreamRequest(new Error('TypeError: Failed to fetch'), null, false, 0, 1)
+    const retryDecision = shouldRetryStreamRequest(new Error('TypeError: Failed to fetch'), null, null, false, 0, 1)
+
+    expect(retryDecision).toBe(true)
+  })
+
+  it('respects backend retry metadata when stage is stream', () => {
+    const retryDecision = shouldRetryStreamRequest(
+      new Error('Some fatal backend error'),
+      null,
+      {
+        message: 'Provider fallback succeeded',
+        retryable: true,
+        stage: 'stream'
+      },
+      false,
+      0,
+      1
+    )
 
     expect(retryDecision).toBe(true)
   })

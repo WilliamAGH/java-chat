@@ -14,17 +14,23 @@ import { z } from 'zod/v4'
 // SSE Stream Event Schemas
 // =============================================================================
 
-/** Status message from SSE status events. */
-export const StreamStatusSchema = z.object({
+/** Shared field shape for SSE status and error event payloads. */
+const sseEventPayloadShape = {
   message: z.string(),
-  details: z.string().optional()
-})
+  details: z.string().nullish(),
+  code: z.string().nullish(),
+  retryable: z.boolean().nullish(),
+  provider: z.string().nullish(),
+  stage: z.string().nullish(),
+  attempt: z.number().int().positive().nullish(),
+  maxAttempts: z.number().int().positive().nullish()
+}
+
+/** Status message from SSE status events. */
+export const StreamStatusSchema = z.object(sseEventPayloadShape)
 
 /** Error response from SSE error events. */
-export const StreamErrorSchema = z.object({
-  message: z.string(),
-  details: z.string().optional()
-})
+export const StreamErrorSchema = z.object(sseEventPayloadShape)
 
 /** Text event payload wrapper. */
 export const TextEventPayloadSchema = z.object({
