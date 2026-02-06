@@ -53,6 +53,7 @@ Open `http://localhost:8085/`.
 ```bash
 make full-pipeline          # fetch all docs + ingest into Qdrant
 make process-all            # ingest only (incremental, upload to Qdrant)
+REPO_PATH=/absolute/path/to/repository make process-github-repo
 REPO_URL=https://github.com/owner/repository make process-github-repo
 SYNC_EXISTING=1 make process-github-repo
 ```

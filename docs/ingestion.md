@@ -108,8 +108,14 @@ REPO_PATH=/absolute/path/to/repository make process-github-repo
 # GitHub URL (auto clone/pull)
 REPO_URL=https://github.com/owner/repository make process-github-repo
 
+# Optional cache overrides for URL mode
+REPO_URL=https://github.com/owner/repository REPO_CACHE_DIR=/tmp/repo-cache make process-github-repo
+REPO_URL=https://github.com/owner/repository REPO_CACHE_PATH=/tmp/repos/openai/java-chat make process-github-repo
+
 # Batch sync all existing github-* collections
 SYNC_EXISTING=1 make process-github-repo
 ```
 
 GitHub ingestion stores canonical repository identity (`repoKey=owner/repository`) in payload metadata and applies strict changed-file pruning before reindexing.
+In local-path mode, canonical identity is resolved from the clone's `origin` remote in `.git/config`.
+See `docs/github-repository-ingestion.md` for full workflow, failure diagnostics, and retry behavior.
