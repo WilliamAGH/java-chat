@@ -2,8 +2,10 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -82,7 +84,55 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
                 OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
-            assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
+            EmbeddingServiceUnavailableException thrownException =
+                    assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
+            assertTrue(thrownException.getMessage().contains("dimension mismatch"));
+            verify(embeddingService, times(1)).create(any(), any(RequestOptions.class));
+        }
+    }
+
+    @Test
+    void retriesTransientResponseValidationFailuresAndRecovers() {
+        OpenAIClient client = mock(OpenAIClient.class);
+        EmbeddingService embeddingService = mock(EmbeddingService.class);
+
+        when(client.embeddings()).thenReturn(embeddingService);
+
+        CreateEmbeddingResponse malformedResponse = CreateEmbeddingResponse.builder()
+                .model("text-embedding-3-small")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(10L)
+                        .embedding(List.of(0.5f, 0.6f))
+                        .build()))
+                .build();
+
+        CreateEmbeddingResponse recoveredResponse = CreateEmbeddingResponse.builder()
+                .model("text-embedding-3-small")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(0L)
+                        .embedding(List.of(0.7f, 0.8f))
+                        .build()))
+                .build();
+
+        when(embeddingService.create(any(), any(RequestOptions.class)))
+                .thenReturn(malformedResponse, recoveredResponse);
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter =
+                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
+            List<float[]> vectors = clientAdapter.embed(List.of("single"));
+
+            assertEquals(1, vectors.size());
+            assertEquals(0.7f, vectors.get(0)[0]);
+            assertEquals(0.8f, vectors.get(0)[1]);
+            verify(embeddingService, times(2)).create(any(), any(RequestOptions.class));
         }
     }
 }

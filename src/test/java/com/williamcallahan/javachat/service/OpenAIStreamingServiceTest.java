@@ -12,7 +12,12 @@ import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
 
 /**
- * Verifies retry classification decisions for OpenAI streaming failures.
+ * Verifies primary-provider backoff classification for OpenAI streaming failures.
+ *
+ * <p>The {@code shouldBackoffPrimary} method determines whether a failure type
+ * should trigger temporary backoff of the primary provider, so that subsequent
+ * calls route to the secondary. These tests verify correct classification of
+ * transient vs. permanent failure types.</p>
  */
 class OpenAIStreamingServiceTest {
 
@@ -21,44 +26,44 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void isRetryablePrimaryFailureTreatsSdkIoAsRetryable() throws ReflectiveOperationException {
+    void shouldBackoffPrimaryTreatsSdkIoAsBackoffEligible() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
-        boolean retryable = invokeIsRetryablePrimaryFailure(service, new OpenAIIoException("io"));
-        assertTrue(retryable);
+        boolean backoffEligible = invokeShouldBackoffPrimary(service, new OpenAIIoException("io"));
+        assertTrue(backoffEligible);
     }
 
     @Test
-    void isRetryablePrimaryFailureTreats401AsRetryableForPrimaryFailover() throws ReflectiveOperationException {
+    void shouldBackoffPrimaryTreats401AsBackoffEligible() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
         UnauthorizedException unauthorized =
                 UnauthorizedException.builder().headers(headers).build();
-        boolean retryable = invokeIsRetryablePrimaryFailure(service, unauthorized);
-        assertTrue(retryable);
+        boolean backoffEligible = invokeShouldBackoffPrimary(service, unauthorized);
+        assertTrue(backoffEligible);
     }
 
     @Test
-    void isRetryablePrimaryFailureTreats429AsRetryable() throws ReflectiveOperationException {
+    void shouldBackoffPrimaryTreats429AsBackoffEligible() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
         Headers headers = Headers.builder().build();
         RateLimitException rateLimit =
                 RateLimitException.builder().headers(headers).build();
-        boolean retryable = invokeIsRetryablePrimaryFailure(service, rateLimit);
-        assertTrue(retryable);
+        boolean backoffEligible = invokeShouldBackoffPrimary(service, rateLimit);
+        assertTrue(backoffEligible);
     }
 
     @Test
-    void isRetryablePrimaryFailureDoesNotTreatGenericRuntimeAsRetryable() throws ReflectiveOperationException {
+    void shouldBackoffPrimaryDoesNotBackoffOnGenericRuntime() throws ReflectiveOperationException {
         OpenAIStreamingService service = createService();
-        boolean retryable = invokeIsRetryablePrimaryFailure(service, new IllegalArgumentException("no"));
-        assertFalse(retryable);
+        boolean backoffEligible = invokeShouldBackoffPrimary(service, new IllegalArgumentException("no"));
+        assertFalse(backoffEligible);
     }
 
-    private boolean invokeIsRetryablePrimaryFailure(OpenAIStreamingService service, Throwable throwable)
+    private boolean invokeShouldBackoffPrimary(OpenAIStreamingService service, Throwable throwable)
             throws ReflectiveOperationException {
-        Method method = OpenAIStreamingService.class.getDeclaredMethod("isRetryablePrimaryFailure", Throwable.class);
+        Method method = OpenAIStreamingService.class.getDeclaredMethod("shouldBackoffPrimary", Throwable.class);
         method.setAccessible(true);
-        Object result = method.invoke(service, throwable);
-        return (boolean) result;
+        Object methodResult = method.invoke(service, throwable);
+        return (boolean) methodResult;
     }
 }

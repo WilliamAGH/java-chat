@@ -4,6 +4,7 @@ import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.RequestOptions;
 import com.openai.core.Timeout;
+import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
@@ -11,6 +12,7 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,16 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
     private static final int MAX_ERROR_SNIPPET = 512;
+    private static final int MAX_EMBED_ATTEMPTS = 4;
+    private static final long INITIAL_RETRY_BACKOFF_MILLIS = 1_000L;
+    private static final long MAX_RETRY_BACKOFF_MILLIS = 8_000L;
+
+    private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_REQUEST_TIMEOUT = 408;
+    private static final int HTTP_CONFLICT = 409;
+    private static final int HTTP_TOO_EARLY = 425;
+    private static final int HTTP_TOO_MANY_REQUESTS = 429;
+    private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
 
     private final OpenAIClient client;
     private final String modelName;
@@ -68,26 +80,124 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
+        EmbeddingCreateParams params = EmbeddingCreateParams.builder()
+                .model(modelName)
+                .inputOfArrayOfStrings(texts)
+                .build();
+        RequestOptions requestOptions =
+                RequestOptions.builder().timeout(embeddingTimeout()).build();
+        long retryBackoffMillis = INITIAL_RETRY_BACKOFF_MILLIS;
+
+        for (int attemptNumber = 1; attemptNumber <= MAX_EMBED_ATTEMPTS; attemptNumber++) {
+            try {
+                CreateEmbeddingResponse response = client.embeddings().create(params, requestOptions);
+                return parseResponse(response, texts.size());
+            } catch (OpenAIServiceException exception) {
+                int statusCode = exception.statusCode();
+                String details = sanitizeMessage(exception.getMessage());
+                if (shouldRetryServiceError(statusCode, details) && attemptNumber < MAX_EMBED_ATTEMPTS) {
+                    log.warn(
+                            "[EMBEDDING] Remote provider transient HTTP {} on attempt {}/{}; retrying in {}ms",
+                            statusCode,
+                            attemptNumber,
+                            MAX_EMBED_ATTEMPTS,
+                            retryBackoffMillis);
+                    sleepBeforeRetry(retryBackoffMillis);
+                    retryBackoffMillis = Math.min(retryBackoffMillis * 2L, MAX_RETRY_BACKOFF_MILLIS);
+                    continue;
+                }
+                String failureMessage = details.isBlank()
+                        ? "Remote embedding provider returned HTTP " + statusCode + " after " + attemptNumber
+                                + " attempt(s)"
+                        : "Remote embedding provider returned HTTP " + statusCode + " after " + attemptNumber
+                                + " attempt(s): " + details;
+                throw new EmbeddingServiceUnavailableException(failureMessage, exception);
+            } catch (OpenAIRetryableException exception) {
+                String details = sanitizeMessage(exception.getMessage());
+                if (attemptNumber < MAX_EMBED_ATTEMPTS) {
+                    log.warn(
+                            "[EMBEDDING] Retryable OpenAI SDK failure on attempt {}/{}; retrying in {}ms ({})",
+                            attemptNumber,
+                            MAX_EMBED_ATTEMPTS,
+                            retryBackoffMillis,
+                            details.isBlank() ? "no details" : details);
+                    sleepBeforeRetry(retryBackoffMillis);
+                    retryBackoffMillis = Math.min(retryBackoffMillis * 2L, MAX_RETRY_BACKOFF_MILLIS);
+                    continue;
+                }
+                String failureMessage = details.isBlank()
+                        ? "Remote embedding request failed after " + attemptNumber + " attempt(s)"
+                        : "Remote embedding request failed after " + attemptNumber + " attempt(s): " + details;
+                throw new EmbeddingServiceUnavailableException(failureMessage, exception);
+            } catch (EmbeddingServiceUnavailableException exception) {
+                String details = sanitizeMessage(exception.getMessage());
+                if (shouldRetryResponseValidationError(details) && attemptNumber < MAX_EMBED_ATTEMPTS) {
+                    log.warn(
+                            "[EMBEDDING] Remote response validation failed on attempt {}/{}; retrying in {}ms ({})",
+                            attemptNumber,
+                            MAX_EMBED_ATTEMPTS,
+                            retryBackoffMillis,
+                            details.isBlank() ? "no details" : details);
+                    sleepBeforeRetry(retryBackoffMillis);
+                    retryBackoffMillis = Math.min(retryBackoffMillis * 2L, MAX_RETRY_BACKOFF_MILLIS);
+                    continue;
+                }
+                String failureMessage = details.isBlank()
+                        ? "Remote embedding response validation failed after " + attemptNumber + " attempt(s)"
+                        : "Remote embedding response validation failed after " + attemptNumber + " attempt(s): "
+                                + details;
+                throw new EmbeddingServiceUnavailableException(failureMessage, exception);
+            } catch (RuntimeException exception) {
+                String details = sanitizeMessage(exception.getMessage());
+                log.warn(
+                        "[EMBEDDING] Remote embedding call failed (exception type: {}, details: {})",
+                        exception.getClass().getSimpleName(),
+                        details.isBlank() ? "none" : details);
+                String failureMessage = details.isBlank()
+                        ? "Remote embedding call failed after " + attemptNumber + " attempt(s)"
+                        : "Remote embedding call failed after " + attemptNumber + " attempt(s): " + details;
+                throw new EmbeddingServiceUnavailableException(failureMessage, exception);
+            }
+        }
+        throw new EmbeddingServiceUnavailableException("Remote embedding call failed after retries");
+    }
+
+    private static boolean shouldRetryServiceError(int statusCode, String details) {
+        if (statusCode == HTTP_TOO_MANY_REQUESTS
+                || statusCode >= HTTP_INTERNAL_SERVER_ERROR
+                || statusCode == HTTP_REQUEST_TIMEOUT
+                || statusCode == HTTP_CONFLICT
+                || statusCode == HTTP_TOO_EARLY) {
+            return true;
+        }
+        // Some providers intermittently return HTTP 400 with null/empty payloads for transient gateway failures.
+        if (statusCode != HTTP_BAD_REQUEST) {
+            return false;
+        }
+        String normalizedDetails = details == null ? "" : details.trim().toLowerCase(Locale.ROOT);
+        return normalizedDetails.isBlank() || "null".equals(normalizedDetails) || "400: null".equals(normalizedDetails);
+    }
+
+    private static boolean shouldRetryResponseValidationError(String validationFailureMessage) {
+        String normalizedMessage = validationFailureMessage == null
+                ? ""
+                : validationFailureMessage.trim().toLowerCase(Locale.ROOT);
+        if (normalizedMessage.isBlank()) {
+            return true;
+        }
+        return normalizedMessage.contains("response was null")
+                || normalizedMessage.contains("missing embedding entries")
+                || normalizedMessage.contains("missing embedding for index")
+                || normalizedMessage.contains("contained null entry")
+                || normalizedMessage.contains("null embedding value at index");
+    }
+
+    private static void sleepBeforeRetry(long retryBackoffMillis) {
         try {
-            EmbeddingCreateParams params = EmbeddingCreateParams.builder()
-                    .model(modelName)
-                    .inputOfArrayOfStrings(texts)
-                    .build();
-            RequestOptions requestOptions =
-                    RequestOptions.builder().timeout(embeddingTimeout()).build();
-            CreateEmbeddingResponse response = client.embeddings().create(params, requestOptions);
-            return parseResponse(response, texts.size());
-        } catch (OpenAIServiceException exception) {
-            String details = sanitizeMessage(exception.getMessage());
-            String failureMessage = details.isBlank()
-                    ? "Remote embedding provider returned HTTP " + exception.statusCode()
-                    : "Remote embedding provider returned HTTP " + exception.statusCode() + ": " + details;
-            throw new EmbeddingServiceUnavailableException(failureMessage, exception);
-        } catch (RuntimeException exception) {
-            log.warn(
-                    "[EMBEDDING] Remote embedding call failed (exception type: {})",
-                    exception.getClass().getSimpleName());
-            throw new EmbeddingServiceUnavailableException("Remote embedding call failed", exception);
+            Thread.sleep(retryBackoffMillis);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Embedding retry interrupted", interruptedException);
         }
     }
 
