@@ -24,10 +24,20 @@ final class JavadocNestedTypeResolver {
             return url;
         }
 
-        String fileName = url.substring(url.lastIndexOf('/') + 1);
+        int lastSlashIndex = url.lastIndexOf('/');
+        if (lastSlashIndex < 0 || lastSlashIndex + 1 >= url.length()) {
+            return url;
+        }
+        String fileName = url.substring(lastSlashIndex + 1);
+        if (fileName.length() < ".html".length()) {
+            return url;
+        }
         String basePath = url.substring(0, url.length() - fileName.length());
         String outerTypeName =
                 fileName.endsWith(".html") ? fileName.substring(0, fileName.length() - ".html".length()) : fileName;
+        if (outerTypeName.isBlank()) {
+            return url;
+        }
 
         // Already a nested type page
         if (outerTypeName.contains(".")) {

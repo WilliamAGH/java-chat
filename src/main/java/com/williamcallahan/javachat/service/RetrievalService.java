@@ -256,14 +256,8 @@ public class RetrievalService {
             Map<String, ?> metadata = sourceDoc.getMetadata();
             String rawUrl = stringMetadataValue(metadata, METADATA_URL);
             String title = stringMetadataValue(metadata, METADATA_TITLE);
-            String url = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            url = com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(url, sourceDoc.getText());
             String pkg = stringMetadataValue(metadata, METADATA_PACKAGE);
-            url = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
-                    url, sourceDoc.getText(), pkg);
-            if (url.startsWith("http://") || url.startsWith("https://")) {
-                url = DocsSourceRegistry.canonicalizeHttpDocUrl(url);
-            }
+            String url = refineCitationUrl(rawUrl, sourceDoc.getText(), pkg, title);
             String snippet = Optional.ofNullable(sourceDoc.getText()).orElse("");
             citations.add(new Citation(
                     url,
@@ -274,5 +268,22 @@ public class RetrievalService {
                             : snippet));
         }
         return citations;
+    }
+
+    /**
+     * Refines a raw document URL through nested-type and member-anchor resolution, then canonicalizes.
+     *
+     * @throws IllegalStateException if Javadoc link resolution fails for any reason
+     */
+    private String refineCitationUrl(String rawUrl, String docText, String packageName, String citationTitle) {
+        String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
+        String nestedTypeRefinedUrl =
+                com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(normalizedUrl, docText);
+        String memberAnchorRefinedUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
+                nestedTypeRefinedUrl, docText, packageName);
+        if (memberAnchorRefinedUrl.startsWith("http://") || memberAnchorRefinedUrl.startsWith("https://")) {
+            return DocsSourceRegistry.canonicalizeHttpDocUrl(memberAnchorRefinedUrl);
+        }
+        return memberAnchorRefinedUrl;
     }
 }

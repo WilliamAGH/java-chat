@@ -30,8 +30,18 @@ final class JavadocMemberAnchorResolver {
             return url;
         }
 
-        String classFileName = url.substring(url.lastIndexOf('/') + 1);
+        int lastSlashIndex = url.lastIndexOf('/');
+        if (lastSlashIndex < 0 || lastSlashIndex + 1 >= url.length()) {
+            return url;
+        }
+        String classFileName = url.substring(lastSlashIndex + 1);
+        if (classFileName.length() < ".html".length()) {
+            return url;
+        }
         String className = classFileName.substring(0, classFileName.length() - ".html".length());
+        if (className.isBlank()) {
+            return url;
+        }
         String outerSimpleName = className.contains(".") ? className.substring(0, className.indexOf('.')) : className;
 
         String constructorAnchor = findConstructorAnchor(outerSimpleName, text, packageName, className);

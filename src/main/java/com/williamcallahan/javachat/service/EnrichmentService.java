@@ -54,23 +54,13 @@ public class EnrichmentService {
         prompt.append("\nMake each item concise but informative. Focus on learning value.\n");
         prompt.append("Use your knowledge of Java best practices and common pitfalls.\n");
 
-        String json;
-        try {
-            if (openAIStreamingService != null && openAIStreamingService.isAvailable()) {
-                json = openAIStreamingService.complete(prompt.toString(), 0.7).block();
-            } else {
-                logger.warn("OpenAIStreamingService unavailable; returning empty enrichment JSON");
-                json = "{}";
-            }
-            if (json == null || json.isEmpty()) {
-                logger.warn("Empty response from API, using fallback");
-                json = "{}";
-            }
-        } catch (RuntimeException exception) {
-            logger.warn(
-                    "Enrichment service failed (exception type: {})",
-                    exception.getClass().getSimpleName());
-            json = "{}"; // Return empty JSON for graceful degradation
+        if (openAIStreamingService == null || !openAIStreamingService.isAvailable()) {
+            throw new IllegalStateException("OpenAIStreamingService unavailable for enrichment");
+        }
+
+        String json = openAIStreamingService.complete(prompt.toString(), 0.7).block();
+        if (json == null || json.isBlank()) {
+            throw new IllegalStateException("LLM returned empty enrichment response");
         }
 
         String cleanedJson = cleanJson(json);
@@ -87,12 +77,11 @@ public class EnrichmentService {
             if (parsed.getHints() == null) parsed.setHints(List.of());
             if (parsed.getReminders() == null) parsed.setReminders(List.of());
             if (parsed.getBackground() == null) parsed.setBackground(List.of());
-            // Return sanitized enrichment with trimmed/filtered lists
             return parsed.sanitized();
-        } catch (JsonProcessingException exception) {
-            Enrichment fallback = Enrichment.empty();
-            fallback.setJdkVersion(jdkVersion);
-            return fallback;
+        } catch (JsonProcessingException jsonParseException) {
+            throw new IllegalStateException(
+                    "LLM enrichment response was not valid JSON: " + jsonParseException.getMessage(),
+                    jsonParseException);
         }
     }
 
