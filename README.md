@@ -53,12 +53,17 @@ Open `http://localhost:8085/`.
 ```bash
 make full-pipeline          # fetch all docs + ingest into Qdrant
 make process-all            # ingest only (incremental, upload to Qdrant)
+REPO_URL=https://github.com/owner/repository make process-github-repo
+SYNC_EXISTING=1 make process-github-repo
 ```
 
 Ingestion writes dense + BM25 sparse vectors to four hybrid Qdrant collections, queried via RRF fusion.
 
 Full command reference (scrape flags, doc set filtering, HTTP API, full re-ingest):
 **[docs/pipeline-commands.md](docs/pipeline-commands.md)**
+
+GitHub source repository ingestion details:
+**[docs/github-repository-ingestion.md](docs/github-repository-ingestion.md)**
 
 ## Documentation
 

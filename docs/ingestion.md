@@ -5,6 +5,7 @@ Java Chat includes scripts and a CLI profile to mirror upstream documentation in
 Command reference:
 
 - See [pipeline-commands.md](pipeline-commands.md) for all scrape and ingestion commands, flags, and full vs incremental behavior.
+- See [github-repository-ingestion.md](github-repository-ingestion.md) for GitHub source repository ingestion.
 
 ## Pipeline overview
 
@@ -95,3 +96,20 @@ curl -sS -X POST "http://localhost:8085/api/ingest?maxPages=100"
 scripts/monitor_progress.sh        # Simple log-based view
 scripts/monitor_indexing.sh        # Dashboard view (requires jq and bc)
 ```
+
+## GitHub repository ingestion
+
+GitHub source ingestion uses `scripts/process_github_repo.sh` and the `cli-github` Spring profile.
+
+```bash
+# Local clone path
+REPO_PATH=/absolute/path/to/repository make process-github-repo
+
+# GitHub URL (auto clone/pull)
+REPO_URL=https://github.com/owner/repository make process-github-repo
+
+# Batch sync all existing github-* collections
+SYNC_EXISTING=1 make process-github-repo
+```
+
+GitHub ingestion stores canonical repository identity (`repoKey=owner/repository`) in payload metadata and applies strict changed-file pruning before reindexing.

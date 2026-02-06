@@ -19,6 +19,8 @@ Java Chat is a Java-learning assistant focused on fast streaming answers and ver
 4) Prompt is built with retrieval context (`ChatService`)
 5) Response streams via SSE (`SseSupport`) and emits a final `citation` event
 
+For the full 5-stage retrieval pipeline (query enhancement, hybrid search, dedup, reranking, prompt assembly), see [retrieval-pipeline.md](retrieval-pipeline.md).
+
 ## Document ingestion (RAG indexing)
 
 The ingestion pipeline uses:

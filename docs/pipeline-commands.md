@@ -15,6 +15,7 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 | **Ingest** (chunk → embed → upload) | `make process-all` | Clear state, then `make process-all` ([details](#full-re-ingest)) |
 | **Both** | `make full-pipeline` | `make fetch-force`, then clear state, then `make process-all` |
 | **Ingest subset** | `DOCS_SETS=java25-complete make process-doc-sets` | — |
+| **Ingest GitHub repo** | `REPO_URL=https://github.com/owner/repo make process-github-repo` | — |
 
 ---
 
@@ -62,6 +63,7 @@ The ingestion phase processes local HTML/PDF mirrors into chunked, embedded vect
 make process-all        # Incremental ingestion, upload to Qdrant (default)
 make process-doc-sets   # Ingest selected doc sets only (requires DOCS_SETS=...)
 make full-pipeline      # Scrape + ingest in one step
+make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_EXISTING)
 ```
 
 ### Script flags
@@ -74,6 +76,31 @@ make full-pipeline      # Scrape + ingest in one step
 |---|---|
 | `--doc-sets=...` | Comma-separated doc set IDs or paths to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
+
+## GitHub repository ingestion
+
+Use the dedicated GitHub ingestion script via Make:
+
+```bash
+# Local clone path
+REPO_PATH=/absolute/path/to/repository make process-github-repo
+
+# GitHub URL (auto clone/pull cache)
+REPO_URL=https://github.com/owner/repository make process-github-repo
+
+# Batch sync existing github-* collections by remote HEAD
+SYNC_EXISTING=1 make process-github-repo
+```
+
+Advanced option:
+
+```bash
+REPO_URL=https://github.com/owner/repository REPO_CACHE_DIR=/tmp/repo-cache make process-github-repo
+REPO_URL=https://github.com/owner/repository REPO_CACHE_PATH=/tmp/repos/openai/java-chat make process-github-repo
+```
+
+GitHub ingestion details (canonical `repoKey`, collection naming, incremental changed-file behavior, and batch sync rules) are documented in [github-repository-ingestion.md](github-repository-ingestion.md).
+GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=none`) and does not bind a web server port.
 
 ### Doc set filtering
 
@@ -230,6 +257,7 @@ make fetch-force           # Full scrape (force refetch)
 make fetch-quick           # Incremental scrape + quick landing mirrors
 make process-all           # Incremental ingest (upload to Qdrant)
 make process-doc-sets      # Ingest selected doc sets (DOCS_SETS=...)
+make process-github-repo   # GitHub repo ingest/sync (REPO_PATH or REPO_URL or SYNC_EXISTING=1)
 make full-pipeline         # Scrape + ingest
 make compose-up            # Start local Qdrant via Docker Compose
 make compose-down          # Stop Qdrant

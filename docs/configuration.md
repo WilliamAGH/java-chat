@@ -7,6 +7,7 @@ For defaults, see `src/main/resources/application.properties`.
 ## Ports
 
 - `PORT` (default `8085`) is restricted to `8085–8090` (see `server.port` and the app’s port initializer).
+- CLI ingestion profiles (`cli`, `cli-github`) run in non-web mode and do not bind an HTTP port.
 
 ## LLM providers (streaming chat)
 
@@ -107,6 +108,19 @@ make compose-up
 - Local compose maps Qdrant to allowed ports: gRPC `8086`, REST `8087` (`docker-compose-qdrant.yml`).
 - Some scripts use REST for health checks; set `QDRANT_REST_PORT=8087` when using local compose.
 - On startup, `QdrantIndexInitializer` validates that all four collections have matching dense vector dimensions. A dimension mismatch (e.g., after changing embedding providers) causes startup failure — delete the collections and re-ingest.
+
+## GitHub repository ingestion
+
+GitHub source ingestion uses `scripts/process_github_repo.sh` and supports local-path mode, URL mode, and batch sync of existing `github-*` collections.
+
+Common variables:
+
+- `REPO_PATH` — local repository clone path for one-off ingestion
+- `REPO_URL` — GitHub URL for URL ingestion mode (`https://github.com/owner/repository`)
+- `REPO_CACHE_DIR` — local clone cache root for URL mode (default `data/repos/github`)
+- `REPO_CACHE_PATH` — exact local clone path for a specific URL ingestion run (single repo mode)
+- `SYNC_EXISTING` — set to `1` to batch-sync all existing `github-*` collections
+- `QDRANT_REFERENCE_COLLECTION` — source collection used for schema cloning when creating new GitHub collections (default `java-docs`)
 
 ## RAG tuning
 
