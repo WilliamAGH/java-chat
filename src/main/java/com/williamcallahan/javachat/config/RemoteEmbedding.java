@@ -9,7 +9,7 @@ public class RemoteEmbedding {
 
     private static final String EMPTY_TEXT = "";
     private static final String URL_DEF = EMPTY_TEXT;
-    private static final String MODEL_DEF = "text-embedding-3-small";
+    private static final String MODEL_DEF = "text-embedding-qwen3-embedding-8b";
     private static final String API_KEY_DEF = EMPTY_TEXT;
     private static final int DIM_DEF = 4_096;
     private static final int MIN_POSITIVE = 1;

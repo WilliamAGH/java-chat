@@ -220,10 +220,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding entries");
         }
 
-        List<float[]> embeddingsByIndex = new ArrayList<>(expectedCount);
-        for (int index = 0; index < expectedCount; index++) {
-            embeddingsByIndex.add(null);
-        }
+        float[][] embeddingsByIndex = new float[expectedCount][];
 
         for (int itemIndex = 0; itemIndex < data.size(); itemIndex++) {
             com.openai.models.embeddings.Embedding item = data.get(itemIndex);
@@ -235,18 +232,16 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             if (targetIndex < 0 || targetIndex >= expectedCount) {
                 continue;
             }
-            float[] vector = toFloatVector(item.embedding());
-            embeddingsByIndex.set(targetIndex, vector);
+            embeddingsByIndex[targetIndex] = toFloatVector(item.embedding());
         }
 
         List<float[]> orderedEmbeddings = new ArrayList<>(expectedCount);
         for (int index = 0; index < expectedCount; index++) {
-            float[] embedding = embeddingsByIndex.get(index);
-            if (embedding == null) {
+            if (embeddingsByIndex[index] == null) {
                 throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response missing embedding for index " + index);
             }
-            orderedEmbeddings.add(embedding);
+            orderedEmbeddings.add(embeddingsByIndex[index]);
         }
 
         return List.copyOf(orderedEmbeddings);
@@ -282,13 +277,36 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             throw new EmbeddingServiceUnavailableException("Remote embedding dimension mismatch: expected "
                     + dimensionsHint + " but received " + embeddingEntries.size());
         }
+
+        int nullValueCount = 0;
+        int firstNullIndex = -1;
+        for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
+            if (embeddingEntries.get(vectorIndex) == null) {
+                nullValueCount++;
+                if (firstNullIndex < 0) {
+                    firstNullIndex = vectorIndex;
+                }
+            }
+        }
+        if (nullValueCount > 0) {
+            if (nullValueCount == embeddingEntries.size()) {
+                throw new EmbeddingServiceUnavailableException("Remote embedding payload invalid: all "
+                        + embeddingEntries.size()
+                        + " dimensions are null. Likely causes: wrong endpoint (expected /v1/embeddings), "
+                        + "non-embedding model, or provider payload bug.");
+            }
+            throw new EmbeddingServiceUnavailableException("Remote embedding payload invalid: "
+                    + nullValueCount
+                    + " null values out of "
+                    + embeddingEntries.size()
+                    + " dimensions (first null index "
+                    + firstNullIndex
+                    + ").");
+        }
+
         float[] vector = new float[embeddingEntries.size()];
         for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
-            Float entry = embeddingEntries.get(vectorIndex);
-            if (entry == null) {
-                throw new EmbeddingServiceUnavailableException("Null embedding value at index " + vectorIndex);
-            }
-            vector[vectorIndex] = entry;
+            vector[vectorIndex] = embeddingEntries.get(vectorIndex);
         }
         return vector;
     }

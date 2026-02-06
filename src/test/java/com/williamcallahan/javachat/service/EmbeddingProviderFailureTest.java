@@ -47,7 +47,7 @@ class EmbeddingProviderFailureTest {
         String baseUrl = baseUrl(httpServer);
 
         try (OpenAiCompatibleEmbeddingClient remoteClient =
-                OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", "text-embedding-3-small", 8)) {
+                OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", "text-embedding-qwen3-embedding-8b", 8)) {
             EmbeddingServiceUnavailableException thrown = assertThrows(
                     EmbeddingServiceUnavailableException.class, () -> remoteClient.embed(List.of("hello")));
 

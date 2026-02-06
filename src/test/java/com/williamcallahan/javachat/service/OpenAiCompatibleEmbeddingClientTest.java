@@ -29,7 +29,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-3-small")
+                .model("text-embedding-qwen3-embedding-8b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -48,7 +48,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
+                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
             List<float[]> vectors = clientAdapter.embed(List.of("a", "b"));
 
             assertEquals(2, vectors.size());
@@ -69,7 +69,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-3-small")
+                .model("text-embedding-qwen3-embedding-8b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -83,7 +83,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
+                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
             EmbeddingServiceUnavailableException thrownException =
                     assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
             assertTrue(thrownException.getMessage().contains("dimension mismatch"));
@@ -99,7 +99,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse malformedResponse = CreateEmbeddingResponse.builder()
-                .model("text-embedding-3-small")
+                .model("text-embedding-qwen3-embedding-8b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -111,7 +111,7 @@ class OpenAiCompatibleEmbeddingClientTest {
                 .build();
 
         CreateEmbeddingResponse recoveredResponse = CreateEmbeddingResponse.builder()
-                .model("text-embedding-3-small")
+                .model("text-embedding-qwen3-embedding-8b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -126,7 +126,7 @@ class OpenAiCompatibleEmbeddingClientTest {
                 .thenReturn(malformedResponse, recoveredResponse);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-3-small", 2)) {
+                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
             List<float[]> vectors = clientAdapter.embed(List.of("single"));
 
             assertEquals(1, vectors.size());
