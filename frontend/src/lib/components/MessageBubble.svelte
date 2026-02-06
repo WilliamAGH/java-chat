@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ChatMessage } from '../services/chat'
+  import { isRecoverableCsrfErrorMessage } from '../services/csrf'
   import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
   import { createDebouncedHighlighter } from '../utils/highlight'
 
@@ -24,6 +25,12 @@
     message.role === 'assistant' && message.content
       ? parseMarkdown(message.content)
       : ''
+  )
+
+  let showCsrfRefreshButton = $derived(
+    message.role === 'assistant' &&
+      message.isError === true &&
+      isRecoverableCsrfErrorMessage(message.content)
   )
 
   // Apply Java language detection and highlight code blocks after render
@@ -61,6 +68,13 @@
   }
 
   let animationDelay = $derived(`${Math.min(index * 50, 200)}ms`)
+
+  function reloadCurrentPage(): void {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.location.reload()
+  }
 </script>
 
 <div
@@ -91,6 +105,11 @@
         {/if}
         <span class="cursor" class:visible={isStreaming}></span>
       </div>
+      {#if showCsrfRefreshButton}
+        <button type="button" class="csrf-refresh-btn" onclick={reloadCurrentPage}>
+          Refresh and retry
+        </button>
+      {/if}
     {/if}
 
     {#if message.role === 'assistant'}
@@ -320,6 +339,26 @@
   .cursor.visible {
     opacity: 1;
     animation: typing-cursor 0.8s ease-in-out infinite;
+  }
+
+  .csrf-refresh-btn {
+    margin-top: var(--space-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .csrf-refresh-btn:hover {
+    background: var(--color-bg-hover);
   }
 
   @keyframes typing-cursor {

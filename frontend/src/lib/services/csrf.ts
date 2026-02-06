@@ -7,8 +7,10 @@ const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 
 /** Header name expected by Spring Security's CsrfTokenRequestAttributeHandler. */
 const CSRF_HEADER_NAME = 'X-XSRF-TOKEN'
+const CSRF_REFRESH_ENDPOINT = '/api/security/csrf'
 
-const CSRF_EXPIRED_MESSAGE = 'CSRF token expired. Refresh the page and retry the request.'
+export const CSRF_EXPIRED_MESSAGE = 'CSRF token expired. Refresh the page and retry the request.'
+export const CSRF_INVALID_MESSAGE = 'CSRF token missing or invalid. Refresh the page and retry the request.'
 const CSRF_TOAST_MESSAGE = 'Session expired'
 const CSRF_TOAST_SUPPRESSION_MS = 12_000
 
@@ -83,6 +85,31 @@ export async function extractApiErrorMessage(
   return trimmedMessage ? trimmedMessage : null
 }
 
+export function isRecoverableCsrfErrorMessage(messageText: string): boolean {
+  const normalizedMessage = messageText.trim()
+  return (
+    normalizedMessage === CSRF_EXPIRED_MESSAGE ||
+    normalizedMessage === CSRF_INVALID_MESSAGE ||
+    normalizedMessage.includes(CSRF_EXPIRED_MESSAGE) ||
+    normalizedMessage.includes(CSRF_INVALID_MESSAGE)
+  )
+}
+
+function withCurrentCsrfHeader(init: RequestInit): RequestInit {
+  const requestHeaders = new Headers(init.headers ?? undefined)
+  requestHeaders.delete(CSRF_HEADER_NAME)
+
+  const currentTokenHeader = csrfHeader()[CSRF_HEADER_NAME]
+  if (currentTokenHeader) {
+    requestHeaders.set(CSRF_HEADER_NAME, currentTokenHeader)
+  }
+
+  return {
+    ...init,
+    headers: requestHeaders
+  }
+}
+
 export async function refreshCsrfToken(): Promise<boolean> {
   if (typeof window === 'undefined') {
     return false
@@ -94,7 +121,7 @@ export async function refreshCsrfToken(): Promise<boolean> {
 
   refreshPromise = (async () => {
     try {
-      const response = await fetch('/', { method: 'GET', cache: 'no-store' })
+      const response = await fetch(CSRF_REFRESH_ENDPOINT, { method: 'GET', cache: 'no-store' })
       return response.ok
     } catch (refreshError) {
       console.warn('[csrf] Failed to refresh CSRF token:', refreshError)
@@ -114,7 +141,7 @@ export async function fetchWithCsrfRetry(
   init: RequestInit,
   source: string
 ): Promise<Response> {
-  const response = await fetch(input, init)
+  const response = await fetch(input, withCurrentCsrfHeader(init))
   if (response.status !== 403) {
     return response
   }
@@ -124,7 +151,7 @@ export async function fetchWithCsrfRetry(
   }
 
   const apiError = await readApiErrorResponse(response.clone(), source)
-  if (!apiError || apiError.message !== CSRF_EXPIRED_MESSAGE) {
+  if (!apiError || !isRecoverableCsrfErrorMessage(apiError.message)) {
     return response
   }
 
@@ -134,7 +161,20 @@ export async function fetchWithCsrfRetry(
     return response
   }
 
-  return fetch(input, init)
+  if (init.signal?.aborted) {
+    return response
+  }
+
+  const retriedResponse = await fetch(input, withCurrentCsrfHeader(init))
+  if (retriedResponse.status !== 403) {
+    return retriedResponse
+  }
+
+  const retriedError = await readApiErrorResponse(retriedResponse.clone(), `${source}:retry`)
+  if (retriedError && isRecoverableCsrfErrorMessage(retriedError.message)) {
+    maybeToastExpired()
+  }
+  return retriedResponse
 }
 
 function maybeToastExpired(): void {
