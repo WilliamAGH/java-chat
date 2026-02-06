@@ -88,6 +88,32 @@ function appendLineBreakIfNeeded(text: string): string {
   return `${text}${NEWLINE}`
 }
 
+/** Result of consuming a fence marker and its trailing language tag or newline. */
+type ConsumedFence = { text: string; nextCursor: number }
+
+/** Consumes an opening fence marker plus any language tag, ensuring a trailing newline. */
+function consumeOpeningFence(content: string, cursor: number, marker: FenceMarker): ConsumedFence {
+  let text = content.slice(cursor, cursor + marker.length)
+  let pos = cursor + marker.length
+
+  while (pos < content.length && isFenceLanguageCharacter(content[pos])) {
+    text += content[pos]
+    pos++
+  }
+  if (pos < content.length && content[pos] !== NEWLINE) {
+    text += NEWLINE
+  }
+  return { text, nextCursor: pos }
+}
+
+/** Consumes a closing fence marker, ensuring a trailing newline. */
+function consumeClosingFence(content: string, cursor: number, marker: FenceMarker): ConsumedFence {
+  const text = content.slice(cursor, cursor + marker.length)
+  const pos = cursor + marker.length
+  const suffix = pos < content.length && content[pos] !== NEWLINE ? NEWLINE : ''
+  return { text: text + suffix, nextCursor: pos }
+}
+
 /**
  * Repairs malformed fence placement commonly produced during streaming:
  * - attached starts like "Example:```java"
@@ -107,40 +133,27 @@ function normalizeMarkdownForStreaming(content: string): string {
   for (let cursor = 0; cursor < content.length; ) {
     const startOfLine = cursor === 0 || content[cursor - 1] === NEWLINE
     const marker = scanFenceMarker(content, cursor)
-    const attachedFenceStart = isAttachedFenceStart(content, cursor)
 
-    if (marker) {
-      if (!inFence && (startOfLine || attachedFenceStart)) {
-        normalized = appendLineBreakIfNeeded(normalized)
-        inFence = true
-        fenceChar = marker.character
-        fenceLength = marker.length
+    if (marker && !inFence && (startOfLine || isAttachedFenceStart(content, cursor))) {
+      normalized = appendLineBreakIfNeeded(normalized)
+      const consumed = consumeOpeningFence(content, cursor, marker)
+      normalized += consumed.text
+      cursor = consumed.nextCursor
+      inFence = true
+      fenceChar = marker.character
+      fenceLength = marker.length
+      continue
+    }
 
-        normalized += content.slice(cursor, cursor + marker.length)
-        cursor += marker.length
-
-        while (cursor < content.length && isFenceLanguageCharacter(content[cursor])) {
-          normalized += content[cursor]
-          cursor++
-        }
-        if (cursor < content.length && content[cursor] !== NEWLINE) {
-          normalized += NEWLINE
-        }
-        continue
-      }
-
-      if (inFence && startOfLine && marker.character === fenceChar && marker.length >= fenceLength) {
-        normalized = appendLineBreakIfNeeded(normalized)
-        normalized += content.slice(cursor, cursor + marker.length)
-        cursor += marker.length
-        inFence = false
-        fenceChar = ''
-        fenceLength = 0
-        if (cursor < content.length && content[cursor] !== NEWLINE) {
-          normalized += NEWLINE
-        }
-        continue
-      }
+    if (marker && inFence && startOfLine && marker.character === fenceChar && marker.length >= fenceLength) {
+      normalized = appendLineBreakIfNeeded(normalized)
+      const consumed = consumeClosingFence(content, cursor, marker)
+      normalized += consumed.text
+      cursor = consumed.nextCursor
+      inFence = false
+      fenceChar = ''
+      fenceLength = 0
+      continue
     }
 
     normalized += content[cursor]
