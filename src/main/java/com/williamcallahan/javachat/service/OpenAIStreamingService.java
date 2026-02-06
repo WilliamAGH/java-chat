@@ -73,6 +73,14 @@ public class OpenAIStreamingService {
     private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK = "stream.provider.fallback";
     private static final String STREAM_STAGE_STREAM = "stream";
 
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
+    private static final int HTTP_REQUEST_TIMEOUT = 408;
+    private static final int HTTP_CONFLICT = 409;
+    private static final int HTTP_TOO_MANY_REQUESTS = 429;
+    private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
+
     /**
      * Result of streaming response containing the content flux and the provider that handled the request.
      * Surfacing the provider ensures transparency when multiple providers are configured.
@@ -499,7 +507,7 @@ public class OpenAIStreamingService {
             return;
         }
 
-        if (serviceException.statusCode() == 429) {
+        if (serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
             rateLimitManager.recordRateLimitFromOpenAiServiceException(provider, serviceException);
         }
     }
@@ -525,10 +533,9 @@ public class OpenAIStreamingService {
             builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
             log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
 
-            ReasoningEffort resolvedEffort = resolveReasoningEffort().orElse(null);
-            if (resolvedEffort != null) {
-                builder.reasoning(Reasoning.builder().effort(resolvedEffort).build());
-            }
+            resolveReasoningEffort()
+                    .ifPresent(effort ->
+                            builder.reasoning(Reasoning.builder().effort(effort).build()));
         } else if (!reasoningModel && Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
@@ -536,8 +543,8 @@ public class OpenAIStreamingService {
         return builder.build();
     }
 
-    private String extractTextDelta(ResponseStreamEvent event) {
-        return event.outputTextDelta().map(ResponseTextDeltaEvent::delta).orElse(null);
+    private Optional<String> extractTextDelta(ResponseStreamEvent event) {
+        return event.outputTextDelta().map(ResponseTextDeltaEvent::delta);
     }
 
     private String extractTextFromResponse(Response response) {
@@ -732,7 +739,9 @@ public class OpenAIStreamingService {
         }
         if (throwable instanceof OpenAIServiceException serviceException) {
             int statusCode = serviceException.statusCode();
-            return statusCode == 401 || statusCode == 403 || statusCode >= 500;
+            return statusCode == HTTP_UNAUTHORIZED
+                    || statusCode == HTTP_FORBIDDEN
+                    || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
         }
         String message = throwable.getMessage();
         return message != null && AsciiTextNormalizer.toLowerAscii(message).contains("sleep interrupted");
@@ -743,7 +752,8 @@ public class OpenAIStreamingService {
             return true;
         }
         if (throwable instanceof OpenAIServiceException serviceException) {
-            return serviceException.statusCode() == 404 || serviceException.statusCode() == 408;
+            return serviceException.statusCode() == HTTP_NOT_FOUND
+                    || serviceException.statusCode() == HTTP_REQUEST_TIMEOUT;
         }
         String exceptionMessage = throwable.getMessage();
         if (exceptionMessage == null) {
@@ -762,7 +772,10 @@ public class OpenAIStreamingService {
         }
         if (throwable instanceof OpenAIServiceException serviceException) {
             int statusCode = serviceException.statusCode();
-            return statusCode == 408 || statusCode == 409 || statusCode == 429 || statusCode >= 500;
+            return statusCode == HTTP_REQUEST_TIMEOUT
+                    || statusCode == HTTP_CONFLICT
+                    || statusCode == HTTP_TOO_MANY_REQUESTS
+                    || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
         }
         String exceptionType = throwable.getClass().getSimpleName();
         if ("SseException".equals(exceptionType) || "OverflowException".equals(exceptionType)) {
