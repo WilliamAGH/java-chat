@@ -1,12 +1,9 @@
 package com.williamcallahan.javachat.service;
 
-import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIServiceException;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -14,73 +11,45 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
- * Enhanced rate limit manager with persistent state and intelligent backoff.
- * Integrates with RateLimitState for persistence across restarts.
+ * Coordinates provider availability decisions from persisted and in-memory rate-limit state.
+ *
+ * <p>This service only accepts explicit header-derived timing signals for rate limiting.
+ * It intentionally rejects message parsing and implicit fallback behavior.</p>
  */
 @Component
 public class RateLimitService {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitService.class);
 
-    // --- Rate Limit Configuration Constants ---
-    // These values reflect documented API limits and operational experience.
-
-    /** OpenAI tier-1 rate limit: ~500 requests/day for standard accounts. */
+    /** OpenAI tier-1 daily request cap used for local protective throttling. */
     private static final int OPENAI_DAILY_LIMIT = 500;
 
-    /** GitHub Models preview limit: ~150 requests/day per token. */
+    /** GitHub Models preview daily cap used for local protective throttling. */
     private static final int GITHUB_MODELS_DAILY_LIMIT = 150;
 
-    /** OpenAI rate limits typically reset within minutes. */
+    /** OpenAI rate-limit persistence window key. */
     private static final String OPENAI_RATE_LIMIT_WINDOW = "1m";
 
-    /** GitHub Models enforces 24-hour rolling windows for daily limits. */
+    /** GitHub Models rate-limit persistence window key. */
     private static final String GITHUB_MODELS_RATE_LIMIT_WINDOW = "24h";
 
-    /** Maximum backoff multiplier to cap exponential growth (32 seconds max). */
+    /** Maximum exponential backoff multiplier used by in-memory circuit state. */
     private static final int MAX_BACKOFF_MULTIPLIER = 32;
 
-    /** GitHub Models default backoff when no Retry-After header is present. */
-    private static final Duration GITHUB_MODELS_DEFAULT_BACKOFF = Duration.ofHours(24);
-
-    /**
-     * Encapsulates rate limit information parsed from HTTP headers or error messages.
-     *
-     * <p><b>Interpretation:</b>
-     * <ul>
-     *   <li>{@code retryAfterSeconds > 0}: Explicit retry delay from Retry-After header</li>
-     *   <li>{@code resetTime != null}: Reset timestamp from X-RateLimit-Reset header</li>
-     *   <li>Both null/zero: No timing info available; caller should use default backoff</li>
-     * </ul>
-     *
-     * @param resetTime the timestamp when the rate limit resets (null if unavailable)
-     * @param retryAfterSeconds explicit retry delay in seconds (0 if unavailable)
-     */
-    private record RateLimitTiming(Instant resetTime, long retryAfterSeconds) {
-        /** Returns true if a reset timestamp is available for computing backoff. */
-        boolean hasResetTime() {
-            return resetTime != null;
-        }
-
-        /** Returns true if any timing information is available. */
-        boolean hasTimingInfo() {
-            return resetTime != null || retryAfterSeconds > 0;
-        }
-    }
-
     private final RateLimitState rateLimitState;
-    private final Map<String, ApiEndpointState> endpointStates = new ConcurrentHashMap<>();
+    private final Map<String, ProviderCircuitState> endpointStates = new ConcurrentHashMap<>();
     private final Environment env;
-    private final RateLimitHeaderParser headerParser;
+    private final RateLimitDecisionResolver decisionResolver;
 
     /**
-     * Describes supported LLM providers and their typical rate-limit characteristics.
+     * Describes supported providers and their persistence/rate-limit metadata.
      */
     public enum ApiProvider {
-        /** OpenAI has short rate limit windows (typically seconds to minutes). */
+        /** OpenAI provider. */
         OPENAI("openai", OPENAI_DAILY_LIMIT, OPENAI_RATE_LIMIT_WINDOW),
-        /** GitHub Models has strict daily limits with 24-hour reset windows. */
+        /** GitHub Models provider. */
         GITHUB_MODELS("github_models", GITHUB_MODELS_DAILY_LIMIT, GITHUB_MODELS_RATE_LIMIT_WINDOW),
+        /** Local model provider without network rate limits. */
         LOCAL("local", Integer.MAX_VALUE, null);
 
         private final String name;
@@ -94,14 +63,14 @@ public class RateLimitService {
         }
 
         /**
-         * Returns the provider identifier used for persistence keys and logging.
+         * Returns provider identifier used as persistence key.
          */
         public String getName() {
             return name;
         }
 
         /**
-         * Returns the typical rate-limit window description for the provider.
+         * Returns provider persistence rate-limit window descriptor.
          */
         public String getTypicalRateLimitWindow() {
             return typicalRateLimitWindow;
@@ -109,133 +78,39 @@ public class RateLimitService {
     }
 
     /**
-     * Tracks in-memory availability state and backoff timing for a single provider.
-     */
-    public static class ApiEndpointState {
-
-        private volatile boolean circuitOpen = false;
-        private volatile Instant nextRetryTime;
-
-        /**
-         * Tracks consecutive failures for future circuit breaker implementation.
-         * Currently incremented but not used for decision making.
-         */
-        private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
-
-        private volatile int backoffMultiplier = 1;
-        private final AtomicInteger requestsToday = new AtomicInteger(0);
-        private volatile Instant dayReset = Instant.now().plus(Duration.ofDays(1));
-
-        /**
-         * Reports whether the provider is eligible for requests based on the current circuit state.
-         */
-        public boolean isAvailable() {
-            if (circuitOpen && Instant.now().isBefore(nextRetryTime)) {
-                return false;
-            }
-            if (circuitOpen && Instant.now().isAfter(nextRetryTime)) {
-                circuitOpen = false;
-                backoffMultiplier = 1;
-            }
-            return true;
-        }
-
-        /**
-         * Records a successful request and clears any active backoff state.
-         */
-        public void recordSuccess() {
-            consecutiveFailures.set(0);
-            backoffMultiplier = 1;
-            circuitOpen = false;
-            requestsToday.incrementAndGet();
-        }
-
-        /**
-         * Records a rate limit and computes the next retry time using explicit retry headers or exponential backoff.
-         *
-         * @param retryAfterSeconds seconds until retry when known
-         */
-        public void recordRateLimit(long retryAfterSeconds) {
-            consecutiveFailures.incrementAndGet();
-            circuitOpen = true;
-
-            if (retryAfterSeconds > 0) {
-                nextRetryTime = Instant.now().plusSeconds(retryAfterSeconds);
-            } else {
-                // Exponential backoff for unknown retry times
-                backoffMultiplier = Math.min(backoffMultiplier * 2, MAX_BACKOFF_MULTIPLIER);
-                nextRetryTime = Instant.now().plusSeconds(backoffMultiplier);
-            }
-        }
-
-        /**
-         * Returns the number of requests counted for the current rolling day window.
-         */
-        public int getRequestsToday() {
-            if (Instant.now().isAfter(dayReset)) {
-                requestsToday.set(0);
-                dayReset = Instant.now().plus(Duration.ofDays(1));
-            }
-            return requestsToday.get();
-        }
-    }
-
-    /**
-     * Builds a manager that combines in-memory circuit state with persisted rate-limit state.
+     * Creates a rate-limit service backed by persistent state and strict header-based decisions.
      */
     public RateLimitService(RateLimitState rateLimitState, Environment env) {
-        this.rateLimitState = rateLimitState;
-        this.env = env;
-        this.headerParser = new RateLimitHeaderParser();
-        log.info("RateLimitService initialized with persistent state");
-    }
-
-    private boolean isProviderConfigured(ApiProvider provider) {
-        // Skip providers that are not configured to avoid noisy failures
-        return switch (provider) {
-            case OPENAI -> hasText(env.getProperty("OPENAI_API_KEY"));
-            case GITHUB_MODELS -> hasText(env.getProperty("GITHUB_TOKEN"));
-            case LOCAL -> true;
-        };
-    }
-
-    private ApiEndpointState getOrCreateEndpointState(ApiProvider provider) {
-        return endpointStates.computeIfAbsent(provider.getName(), providerKey -> new ApiEndpointState());
-    }
-
-    private boolean hasText(String valueText) {
-        return valueText != null && !valueText.trim().isEmpty();
+        this.rateLimitState = Objects.requireNonNull(rateLimitState, "rateLimitState");
+        this.env = Objects.requireNonNull(env, "env");
+        this.decisionResolver = new RateLimitDecisionResolver(new RateLimitHeaderParser());
+        log.info("RateLimitService initialized with strict header-based decisions");
     }
 
     /**
-     * Reports whether the provider can be used right now based on configuration, persisted rate limits, and in-memory backoff.
+     * Returns whether the provider is eligible for requests right now.
      */
     public boolean isProviderAvailable(ApiProvider provider) {
-        String providerName = sanitizeLogValue(provider.getName());
-        // First check if provider is actually configured
-        if (!isProviderConfigured(provider)) {
+        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
+        String providerName = providerName(requiredProvider);
+
+        if (!isProviderConfigured(requiredProvider)) {
             log.debug("[{}] Not configured; treating as unavailable", providerName);
             return false;
         }
 
-        // Then check persistent rate limit state
-        if (!rateLimitState.isAvailable(provider.getName())) {
-            Duration remaining = rateLimitState.getRemainingWaitTime(provider.getName());
-            if (!remaining.isZero()) {
-                log.debug("[{}] Rate limited (persistent state)", providerName);
-                return false;
-            }
+        if (!rateLimitState.isAvailable(providerName)) {
+            log.debug("[{}] Rate limited (persistent state)", providerName);
+            return false;
         }
 
-        // Then check in-memory circuit breaker state
-        ApiEndpointState state = getOrCreateEndpointState(provider);
-
+        ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
         if (!state.isAvailable()) {
             log.debug("[{}] In circuit breaker state", providerName);
             return false;
         }
 
-        if (state.getRequestsToday() >= provider.dailyLimit) {
+        if (state.requestsToday() >= requiredProvider.dailyLimit) {
             log.warn("[{}] Reached daily limit", providerName);
             return false;
         }
@@ -244,288 +119,92 @@ public class RateLimitService {
     }
 
     /**
-     * Records a successful provider request in both in-memory and persisted rate limit state.
+     * Records a successful provider request in both in-memory and persistent state.
      */
     public void recordSuccess(ApiProvider provider) {
-        String providerName = sanitizeLogValue(provider.getName());
-        // Update both in-memory and persistent state
-        ApiEndpointState state = getOrCreateEndpointState(provider);
+        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
+        String providerName = providerName(requiredProvider);
+
+        ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
         state.recordSuccess();
-        rateLimitState.recordSuccess(provider.getName());
+        rateLimitState.recordSuccess(providerName);
 
         log.debug("[{}] Request successful", providerName);
     }
 
     /**
-     * Records a rate limit for the provider using best-effort parsing of reset or retry information.
-     */
-    public void recordRateLimit(ApiProvider provider, String errorMessage) {
-        String providerName = sanitizeLogValue(provider.getName());
-        String safeErrorMessage = sanitizeLogValue(errorMessage);
-        // Reset time parsing from error messages not implemented; rely on window-based fallback
-        Instant resetTime = null;
-        long retryAfterSeconds = extractRetryAfter(errorMessage);
-
-        // For GitHub Models, use longer backoff as they have strict limits
-        if (provider == ApiProvider.GITHUB_MODELS) {
-            if (retryAfterSeconds == 0) {
-                resetTime = Instant.now().plus(GITHUB_MODELS_DEFAULT_BACKOFF);
-                log.info("[{}] Rate limited - applying {} backoff", providerName, GITHUB_MODELS_DEFAULT_BACKOFF);
-            }
-        }
-
-        // Update in-memory state
-        ApiEndpointState state = getOrCreateEndpointState(provider);
-        state.recordRateLimit(retryAfterSeconds);
-
-        // Update persistent state with proper window
-        rateLimitState.recordRateLimit(provider.getName(), resetTime, provider.getTypicalRateLimitWindow());
-
-        log.warn("[{}] Rate limited (errorMessage={})", providerName, safeErrorMessage);
-    }
-
-    /**
-     * Records a rate limit using headers from the OpenAI Java SDK exception.
+     * Records a rate limit from OpenAI SDK exceptions using only authoritative headers.
      *
-     * <p>The SDK exposes response headers via {@link OpenAIServiceException#headers()}, which is
-     * more reliable than parsing exception messages.
-     *
-     * <p><b>Resolution priority:</b>
-     * <ol>
-     *   <li>Retry-After header present → use explicit retry seconds</li>
-     *   <li>X-RateLimit-Reset header present → compute from reset timestamp</li>
-     *   <li>No usable headers → fall back to error message parsing heuristics</li>
-     * </ol>
-     *
-     * <p><b>Degradation behavior:</b> This method always applies some form of rate limiting.
-     * When headers are unavailable or unparseable, it degrades to error-message heuristics
-     * (logged at DEBUG level). If message parsing also fails, the provider's default backoff
-     * window is used. Monitor logs at WARN level for "Rate limited" entries.
-     *
-     * @param provider the provider that produced the rate limit (logs warning and returns if null)
-     * @param exception OpenAI SDK service exception carrying response headers (logs warning and returns if null)
+     * @throws RateLimitDecisionException when headers are missing/invalid or status is not 429
      */
     public void recordRateLimitFromOpenAiServiceException(ApiProvider provider, OpenAIServiceException exception) {
-        if (provider == null) {
-            log.warn("recordRateLimitFromOpenAiServiceException called with null provider; ignoring");
-            return;
-        }
-        String providerName = sanitizeLogValue(provider.getName());
-        if (exception == null) {
-            log.warn(
-                    "[{}] recordRateLimitFromOpenAiServiceException called with null exception; ignoring",
-                    providerName);
-            return;
-        }
-        RateLimitTiming timing = parseRateLimitFromHeaders(exception.headers());
-        if (timing.retryAfterSeconds > 0) {
-            log.debug("[{}] Using Retry-After header: {} seconds", providerName, timing.retryAfterSeconds);
-            applyRateLimit(provider, Instant.now().plusSeconds(timing.retryAfterSeconds), timing.retryAfterSeconds);
-            return;
+        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
+        OpenAIServiceException requiredException = Objects.requireNonNull(exception, "exception");
+
+        if (requiredException.statusCode() != 429) {
+            throw new RateLimitDecisionException(
+                    "OpenAI rate-limit recording requires HTTP 429, got " + requiredException.statusCode());
         }
 
-        if (timing.resetTime != null) {
-            log.debug("[{}] Using X-RateLimit-Reset header: {}", providerName, timing.resetTime);
-            applyRateLimit(provider, timing.resetTime, 0);
-            return;
-        }
-
-        // Fallback: no usable headers, use error-message-based heuristics.
-        log.debug("[{}] No rate limit headers found; falling back to error message parsing", providerName);
-        recordRateLimit(provider, exception.getMessage());
+        RateLimitDecision decision = decisionResolver.resolveFromOpenAiHeaders(requiredException.headers());
+        applyRateLimit(requiredProvider, decision);
     }
 
     /**
-     * Records a rate limit by parsing reset time from the exception.
+     * Records a rate limit from WebClient exceptions using Retry-After/X-RateLimit-Reset headers.
      *
-     * <p><b>Resolution priority:</b>
-     * <ol>
-     *   <li>WebClientResponseException with X-RateLimit-Reset header → use reset time</li>
-     *   <li>WebClientResponseException without reset header → parse error message</li>
-     *   <li>Other exception types → parse error message</li>
-     *   <li>Null error → apply provider's default backoff window</li>
-     * </ol>
-     *
-     * <p><b>Degradation behavior:</b> This method always applies some form of rate limiting.
-     * When header parsing fails, it falls back to error-message heuristics. When message
-     * parsing fails, it uses the provider's default backoff window. Monitor logs at WARN
-     * level for "Rate limited" entries to verify rate limits are being applied correctly.
-     *
-     * @param provider the rate-limited provider (logs warning and returns if null)
-     * @param error the exception that triggered the rate limit (uses default backoff if null)
+     * @throws RateLimitDecisionException when headers are missing/invalid or error type is unsupported
      */
     public void recordRateLimitFromException(ApiProvider provider, Throwable error) {
-        if (provider == null) {
-            log.warn("recordRateLimitFromException called with null provider; ignoring");
-            return;
-        }
-        String providerName = sanitizeLogValue(provider.getName());
-        if (error == null) {
-            log.warn(
-                    "[{}] recordRateLimitFromException called with null error; applying provider default backoff",
-                    providerName);
-            applyProviderDefaultBackoff(provider);
-            return;
-        }
-        if (error instanceof WebClientResponseException webError) {
-            RateLimitTiming timing = parseRateLimitHeaders(webError);
+        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
+        Throwable requiredError = Objects.requireNonNull(error, "error");
 
-            if (timing.hasResetTime()) {
-                applyRateLimit(provider, timing.resetTime(), 0);
-            } else {
-                log.debug("[{}] No reset header found; falling back to error message parsing", providerName);
-                recordRateLimit(provider, webError.getMessage());
-            }
-        } else {
-            log.debug("[{}] Non-WebClient exception; falling back to error message parsing", providerName);
-            recordRateLimit(provider, error.getMessage());
+        if (!(requiredError instanceof WebClientResponseException webClientError)) {
+            throw new RateLimitDecisionException(
+                    "Rate-limit recording requires WebClientResponseException with headers", requiredError);
         }
+
+        RateLimitDecision decision = decisionResolver.resolveFromWebClientException(webClientError);
+        applyRateLimit(requiredProvider, decision);
     }
 
     /**
-     * Applies the provider's default backoff when no specific timing information is available.
-     * Used as ultimate fallback when both header parsing and message parsing fail.
-     */
-    private void applyProviderDefaultBackoff(ApiProvider provider) {
-        String providerName = sanitizeLogValue(provider.getName());
-        ApiEndpointState state = getOrCreateEndpointState(provider);
-
-        // Use 0 retry seconds to trigger exponential backoff in ApiEndpointState
-        state.recordRateLimit(0);
-        rateLimitState.recordRateLimit(provider.getName(), null, provider.getTypicalRateLimitWindow());
-
-        log.warn(
-                "[{}] Rate limited (using provider default backoff: {})",
-                providerName,
-                provider.getTypicalRateLimitWindow());
-    }
-
-    /**
-     * Parse rate limit information from HTTP response headers.
-     */
-    private RateLimitTiming parseRateLimitHeaders(WebClientResponseException webError) {
-        Instant resetTime = headerParser.parseResetHeader(webError.getHeaders().getFirst("X-RateLimit-Reset"));
-        long retrySeconds =
-                headerParser.parseRetryAfterHeader(webError.getHeaders().getFirst("Retry-After"));
-
-        // If we have retry seconds but no reset time, compute reset time from retry
-        if (resetTime == null && retrySeconds > 0) {
-            resetTime = Instant.now().plusSeconds(retrySeconds);
-        }
-
-        return new RateLimitTiming(resetTime, retrySeconds);
-    }
-
-    /**
-     * Applies a rate limit using reset time and optional explicit retry-after seconds.
-     * Updates both persistent state and in-memory circuit breaker, then logs the event.
-     *
-     * @param provider the rate-limited provider
-     * @param resetTime the timestamp when the rate limit resets (may be null)
-     * @param retryAfterSecondsOverride explicit retry-after seconds (0 to compute from resetTime)
-     */
-    private void applyRateLimit(ApiProvider provider, Instant resetTime, long retryAfterSecondsOverride) {
-        String providerName = sanitizeLogValue(provider.getName());
-        ApiEndpointState state = getOrCreateEndpointState(provider);
-
-        long retryAfterSeconds = computeRetryAfterSeconds(resetTime, retryAfterSecondsOverride);
-
-        state.recordRateLimit(retryAfterSeconds);
-        rateLimitState.recordRateLimit(provider.getName(), resetTime, provider.getTypicalRateLimitWindow());
-
-        log.warn("[{}] Rate limited (resetTime={}, retryAfterSeconds={})", providerName, resetTime, retryAfterSeconds);
-    }
-
-    /**
-     * Computes retry-after seconds from explicit override or reset time.
-     * Priority: explicit override > computed from resetTime > zero (immediate retry eligible).
-     */
-    private long computeRetryAfterSeconds(Instant resetTime, long explicitOverride) {
-        if (explicitOverride > 0) {
-            return explicitOverride;
-        }
-        if (resetTime != null) {
-            return Math.max(0, Duration.between(Instant.now(), resetTime).getSeconds());
-        }
-        return 0;
-    }
-
-    /**
-     * Extracts retry-after seconds from error message text using heuristic parsing.
-     *
-     * <p>Parsing priority:
-     * <ol>
-     *   <li>"Please wait X seconds" pattern → extract X</li>
-     *   <li>"retry-after: X" or "retry-after X" pattern → extract X</li>
-     *   <li>No pattern found → return 0 (signals caller to use default backoff)</li>
-     * </ol>
-     *
-     * <p><b>Degradation behavior:</b> When a pattern is found but unparseable, logs a warning
-     * and returns 0 rather than throwing. This ensures rate limiting is always applied
-     * (via default backoff) even when message parsing fails.
-     *
-     * @param errorMessage the error message to parse (may be null)
-     * @return retry-after seconds, or 0 if no retry information found or parse failed
-     */
-    private long extractRetryAfter(String errorMessage) {
-        if (errorMessage == null) {
-            log.debug("extractRetryAfter: null message; using default backoff");
-            return 0;
-        }
-
-        if (errorMessage.contains("Please wait")) {
-            String[] parts = errorMessage.split("Please wait ");
-            if (parts.length <= 1) {
-                log.warn(
-                        "extractRetryAfter: found 'Please wait' but could not parse seconds from: {}",
-                        sanitizeLogValue(errorMessage));
-                return 0;
-            }
-            String secondsPart = parts[1].split(" seconds")[0].trim();
-            return headerParser.parseRetryAfterHeader(secondsPart);
-        }
-
-        if (errorMessage.contains("retry-after")) {
-            String[] parts = errorMessage.split("retry-after[: ]+");
-            if (parts.length <= 1) {
-                log.warn(
-                        "extractRetryAfter: found 'retry-after' but could not parse seconds from: {}",
-                        sanitizeLogValue(errorMessage));
-                return 0;
-            }
-            String secondsPart = parts[1].replaceAll("[^0-9]", "");
-            return headerParser.parseRetryAfterHeader(secondsPart);
-        }
-
-        return 0;
-    }
-
-    private RateLimitTiming parseRateLimitFromHeaders(Headers headers) {
-        if (headers == null || headers.isEmpty()) {
-            return new RateLimitTiming(null, 0);
-        }
-
-        long retryAfterSeconds = headerParser.parseRetryAfterSeconds(headers);
-        if (retryAfterSeconds > 0) {
-            return new RateLimitTiming(null, retryAfterSeconds);
-        }
-
-        Instant resetInstant = headerParser.parseResetInstant(headers);
-        return new RateLimitTiming(resetInstant, 0);
-    }
-
-    private static String sanitizeLogValue(String rawValue) {
-        if (rawValue == null) {
-            return "null";
-        }
-        return rawValue.replace("\r", "\\r").replace("\n", "\\n");
-    }
-
-    /**
-     * Clears all in-memory circuit and usage counters without modifying persisted state.
+     * Clears all in-memory circuit and request counters without changing persisted state.
      */
     public void reset() {
         endpointStates.clear();
         log.info("Rate limit manager reset (in-memory state only)");
+    }
+
+    private boolean isProviderConfigured(ApiProvider provider) {
+        return switch (provider) {
+            case OPENAI -> hasText(env.getProperty("OPENAI_API_KEY"));
+            case GITHUB_MODELS -> hasText(env.getProperty("GITHUB_TOKEN"));
+            case LOCAL -> true;
+        };
+    }
+
+    private ProviderCircuitState getOrCreateEndpointState(ApiProvider provider) {
+        String providerName = providerName(provider);
+        return endpointStates.computeIfAbsent(
+                providerName, ignoredKey -> new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER));
+    }
+
+    private void applyRateLimit(ApiProvider provider, RateLimitDecision decision) {
+        String providerName = providerName(provider);
+        ProviderCircuitState state = getOrCreateEndpointState(provider);
+
+        state.recordRateLimit(decision.retryAfterSeconds());
+        rateLimitState.recordRateLimit(providerName, decision.resetTime(), provider.getTypicalRateLimitWindow());
+
+        log.warn("[{}] Rate limited (retryAfterSeconds={})", providerName, decision.retryAfterSeconds());
+    }
+
+    private static String providerName(ApiProvider provider) {
+        return provider.getName();
+    }
+
+    private boolean hasText(String valueText) {
+        return valueText != null && !valueText.trim().isEmpty();
     }
 }

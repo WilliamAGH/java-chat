@@ -338,9 +338,6 @@ public class OpenAIStreamingService {
 
     private void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
         if (!(throwable instanceof OpenAIServiceException serviceException)) {
-            if (isRetryablePrimaryFailure(throwable)) {
-                rateLimitManager.recordRateLimit(provider, throwable.getMessage());
-            }
             return;
         }
 
