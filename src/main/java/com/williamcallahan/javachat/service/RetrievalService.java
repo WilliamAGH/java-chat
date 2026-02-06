@@ -28,6 +28,8 @@ public class RetrievalService {
 
     private static final int DEBUG_FIRST_DOC_PREVIEW_LENGTH = 200;
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
+    private static final int ESTIMATED_CHARS_PER_TOKEN = 4;
+    private static final double TRUNCATION_BREAK_THRESHOLD = 0.8;
 
     private static final String METADATA_URL = "url";
     private static final String METADATA_TITLE = "title";
@@ -125,8 +127,8 @@ public class RetrievalService {
             int metadataSize = metadata.size();
             String docText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
-            log.info("First doc metadata size: {}", metadataSize);
-            log.info("First doc content preview length: {}", previewLength);
+            log.debug("First doc metadata size: {}", metadataSize);
+            log.debug("First doc content preview length: {}", previewLength);
         }
         List<RetrievalNotice> retrievalNotices = searchOutcome.notices().stream()
                 .map(searchNotice -> new RetrievalNotice(searchNotice.summary(), searchNotice.details()))
@@ -225,7 +227,7 @@ public class RetrievalService {
         if (content == null || content.isEmpty()) {
             return doc;
         }
-        int maxChars = Math.max(1, maxTokens) * 4;
+        int maxChars = Math.max(1, maxTokens) * ESTIMATED_CHARS_PER_TOKEN;
         if (content.length() <= maxChars) {
             return doc;
         }
@@ -233,7 +235,7 @@ public class RetrievalService {
         int lastPeriod = truncated.lastIndexOf('.');
         int lastNewline = truncated.lastIndexOf('\n');
         int breakPoint = Math.max(lastPeriod, lastNewline);
-        if (breakPoint > maxChars * 0.8) {
+        if (breakPoint > maxChars * TRUNCATION_BREAK_THRESHOLD) {
             truncated = truncated.substring(0, breakPoint + 1);
         }
         truncated += "\n[...content truncated for token limits...]";
@@ -242,40 +244,70 @@ public class RetrievalService {
     }
 
     /**
-     * Builds citations from retrieved documents by normalizing source URLs and trimming snippets for UI display.
+     * Outcome of converting documents into citations, surfacing any partial conversion failures.
+     *
+     * <p>Callers must inspect {@code failedConversionCount} to detect partial failures rather than
+     * silently receiving an incomplete citation list. A zero count means all documents converted
+     * successfully.</p>
+     *
+     * @param citations successfully converted citations
+     * @param failedConversionCount number of documents that failed citation conversion
      */
-    public List<Citation> toCitations(List<Document> docs) {
+    public record CitationOutcome(List<Citation> citations, int failedConversionCount) {
+        public CitationOutcome {
+            citations = citations == null ? List.of() : List.copyOf(citations);
+            if (failedConversionCount < 0) {
+                throw new IllegalArgumentException("failedConversionCount cannot be negative");
+            }
+        }
+    }
+
+    /**
+     * Builds citations from retrieved documents by normalizing source URLs and trimming snippets for UI display.
+     *
+     * <p>Returns a {@link CitationOutcome} that includes both the successfully converted citations and
+     * a count of conversion failures, ensuring callers are aware of any partial failures.</p>
+     */
+    public CitationOutcome toCitations(List<Document> docs) {
         if (docs == null || docs.isEmpty()) {
-            return List.of();
+            return new CitationOutcome(List.of(), 0);
         }
         List<Citation> citations = new ArrayList<>();
+        int failedConversionCount = 0;
         for (Document sourceDoc : docs) {
             if (sourceDoc == null) {
                 continue;
             }
-            Map<String, ?> metadata = sourceDoc.getMetadata();
-            String rawUrl = stringMetadataValue(metadata, METADATA_URL);
-            String title = stringMetadataValue(metadata, METADATA_TITLE);
-            String pkg = stringMetadataValue(metadata, METADATA_PACKAGE);
-            String url = refineCitationUrl(rawUrl, sourceDoc.getText(), pkg, title);
-            String snippet = Optional.ofNullable(sourceDoc.getText()).orElse("");
-            citations.add(new Citation(
-                    url,
-                    title,
-                    "",
-                    snippet.length() > CITATION_SNIPPET_MAX_LENGTH
-                            ? snippet.substring(0, CITATION_SNIPPET_MAX_LENGTH) + "…"
-                            : snippet));
+            try {
+                Map<String, ?> metadata = sourceDoc.getMetadata();
+                String rawUrl = stringMetadataValue(metadata, METADATA_URL);
+                String title = stringMetadataValue(metadata, METADATA_TITLE);
+                String packageName = stringMetadataValue(metadata, METADATA_PACKAGE);
+                String url = refineCitationUrl(rawUrl, sourceDoc.getText(), packageName);
+                citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDoc.getText())));
+            } catch (RuntimeException citationConversionFailure) {
+                failedConversionCount++;
+                log.warn(
+                        "Citation conversion failed (exceptionType={}, docUrl={}, docTitle={})",
+                        citationConversionFailure.getClass().getSimpleName(),
+                        safeMetadataValueForLogging(sourceDoc.getMetadata(), METADATA_URL),
+                        safeMetadataValueForLogging(sourceDoc.getMetadata(), METADATA_TITLE));
+            }
         }
-        return citations;
+        if (failedConversionCount > 0) {
+            log.warn(
+                    "Citation conversion completed with {} failure(s) out of {} documents",
+                    failedConversionCount,
+                    docs.size());
+        }
+        return new CitationOutcome(citations, failedConversionCount);
     }
 
     /**
      * Refines a raw document URL through nested-type and member-anchor resolution, then canonicalizes.
      *
-     * @throws IllegalStateException if Javadoc link resolution fails for any reason
      */
-    private String refineCitationUrl(String rawUrl, String docText, String packageName, String citationTitle) {
+    private String refineCitationUrl(String rawUrl, String docText, String packageName) {
         String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
         String nestedTypeRefinedUrl =
                 com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(normalizedUrl, docText);
@@ -285,5 +317,28 @@ public class RetrievalService {
             return DocsSourceRegistry.canonicalizeHttpDocUrl(memberAnchorRefinedUrl);
         }
         return memberAnchorRefinedUrl;
+    }
+
+    private String trimmedCitationSnippet(String sourceText) {
+        String snippetText = Optional.ofNullable(sourceText).orElse("");
+        if (snippetText.length() <= CITATION_SNIPPET_MAX_LENGTH) {
+            return snippetText;
+        }
+        return snippetText.substring(0, CITATION_SNIPPET_MAX_LENGTH) + "…";
+    }
+
+    private String safeMetadataValueForLogging(Map<String, ?> metadata, String key) {
+        if (metadata == null || metadata.isEmpty()) {
+            return "";
+        }
+        Object metadataValue = metadata.get(key);
+        if (metadataValue == null) {
+            return "";
+        }
+        try {
+            return String.valueOf(metadataValue);
+        } catch (RuntimeException metadataFailure) {
+            return "[unprintable:" + metadataValue.getClass().getSimpleName() + "]";
+        }
     }
 }

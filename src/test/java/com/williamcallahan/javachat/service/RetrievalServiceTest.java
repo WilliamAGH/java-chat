@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -64,5 +65,42 @@ class RetrievalServiceTest {
         assertThrows(
                 HybridSearchPartialFailureException.class,
                 () -> retrievalService.retrieveOutcome("Java stream basics"));
+    }
+
+    @Test
+    void toCitationsReportsFailedConversionCountAndKeepsValidCitations() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        DocumentFactory documentFactory = mock(DocumentFactory.class);
+        AppProperties appProperties = new AppProperties();
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+
+        Document malformedDocument = Document.builder()
+                .id("malformed-doc")
+                .text("Malformed metadata")
+                .build();
+        malformedDocument.getMetadata().put("url", new BrokenUrlValue());
+        malformedDocument.getMetadata().put("title", "Broken citation");
+
+        Document validDocument =
+                Document.builder().id("valid-doc").text("Valid snippet").build();
+        validDocument.getMetadata().put("url", "https://docs.oracle.com/javase/8/docs/api/java/lang/String.html");
+        validDocument.getMetadata().put("title", "String");
+
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.toCitations(List.of(malformedDocument, validDocument));
+
+        assertEquals(1, citationOutcome.citations().size());
+        assertEquals(1, citationOutcome.failedConversionCount());
+        assertEquals("String", citationOutcome.citations().get(0).getTitle());
+        assertTrue(citationOutcome.citations().get(0).getUrl().contains("docs.oracle.com"));
+    }
+
+    private static final class BrokenUrlValue {
+        @Override
+        public String toString() {
+            throw new IllegalStateException("broken url value");
+        }
     }
 }

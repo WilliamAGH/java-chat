@@ -116,7 +116,7 @@ public class ChatService {
      */
     public List<Citation> citationsFor(String userQuery) {
         List<Document> docs = retrievalService.retrieve(userQuery);
-        return retrievalService.toCitations(docs);
+        return retrievalService.toCitations(docs).citations();
     }
 
     /**

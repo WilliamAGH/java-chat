@@ -108,7 +108,7 @@ public class GuidedLearningService {
         List<Document> docs = retrievalService.retrieve(query);
         List<Document> filtered = filterToBook(docs);
         if (filtered.isEmpty()) return List.of();
-        List<Citation> base = retrievalService.toCitations(filtered);
+        List<Citation> base = retrievalService.toCitations(filtered).citations();
         return pdfCitationEnhancer.enhanceWithPageAnchors(filtered, base);
     }
 
@@ -171,37 +171,27 @@ public class GuidedLearningService {
     }
 
     /**
-     * Builds UI-ready citations from Think Java context documents, with best-effort PDF page anchors.
+     * Builds UI-ready citations from Think Java context documents with PDF page anchors.
      *
-     * <p>This method is designed for guided chat streaming: citation generation must never break the
-     * response stream. If citation conversion or page anchor enrichment fails, it returns a best-effort
-     * result and logs diagnostics.</p>
+     * <p>Converts documents to citations and enhances them with page-anchor fragments.
+     * Propagates all failures to the caller; UI resilience decisions belong in the controller layer.</p>
      *
      * @param bookContextDocuments retrieved Think Java documents used to ground the response
-     * @return list of citations for display in the UI citation panel
+     * @return citations enhanced with PDF page anchors
      */
     public List<Citation> citationsForBookDocuments(List<Document> bookContextDocuments) {
         if (bookContextDocuments == null || bookContextDocuments.isEmpty()) {
             return List.of();
         }
-        List<Citation> baseCitations;
-        try {
-            baseCitations = retrievalService.toCitations(bookContextDocuments);
-        } catch (RuntimeException conversionFailure) {
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(bookContextDocuments);
+        if (citationOutcome.failedConversionCount() > 0) {
             logger.warn(
-                    "Unable to convert guided context documents into citations (exceptionType={})",
-                    conversionFailure.getClass().getSimpleName());
-            return List.of();
+                    "Guided citation conversion had {} failure(s) out of {} documents",
+                    citationOutcome.failedConversionCount(),
+                    bookContextDocuments.size());
         }
-
-        try {
-            return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
-        } catch (RuntimeException anchorFailure) {
-            logger.warn(
-                    "Unable to enhance guided citations with PDF page anchors (exceptionType={})",
-                    anchorFailure.getClass().getSimpleName());
-            return baseCitations;
-        }
+        List<Citation> baseCitations = citationOutcome.citations();
+        return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
     }
 
     /**
