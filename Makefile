@@ -25,7 +25,7 @@ lint: lint-ast ## Run static analysis (Java: SpotBugs + PMD + ast-grep, Frontend
 	cd frontend && npm run check
 
 lint-ast: ## Run ast-grep rules for Java naming and type safety
-	@command -v ast-grep >/dev/null 2>&1 || { echo "$(RED)Error: 'ast-grep' not found. Install: brew install ast-grep$(NC)" >&2; exit 1; }
+	@$(call require_cmd,ast-grep,brew install ast-grep)
 	@echo "$(CYAN)Running ast-grep rules...$(NC)"
 	@ast-grep scan -c config/sgconfig.yml src/main/java/
 
@@ -33,7 +33,7 @@ format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
 
 hooks: ## Install git hooks via prek
-	@command -v prek >/dev/null 2>&1 || { echo "Error: 'prek' not found. Install it first: https://prek.j178.dev/" >&2; exit 1; }
+	@$(call require_cmd,prek,https://prek.j178.dev/)
 	prek install --install-hooks -c config/prek.toml
 
 run: build ## Run the packaged jar (loads .env if present)
@@ -126,26 +126,11 @@ process-doc-sets: ## Process selected doc sets into Qdrant (set DOCS_SETS=...)
 	./scripts/process_all_to_qdrant.sh --doc-sets="$$DOCS_SETS"
 
 process-github-repo: ## Ingest GitHub repo by local path or URL, or sync existing collections
-	@if [ "$$SYNC_EXISTING" = "1" ]; then \
-		if [ -n "$$REPO_CACHE_DIR" ]; then \
-			./scripts/process_github_repo.sh --sync-existing --repo-cache-dir="$$REPO_CACHE_DIR"; \
-		else \
-			./scripts/process_github_repo.sh --sync-existing; \
-		fi; \
-	elif [ -n "$$REPO_URL" ]; then \
-		if [ -n "$$REPO_CACHE_PATH" ]; then \
-			./scripts/process_github_repo.sh --repo-url="$$REPO_URL" --repo-cache-path="$$REPO_CACHE_PATH"; \
-		elif [ -n "$$REPO_CACHE_DIR" ]; then \
-			./scripts/process_github_repo.sh --repo-url="$$REPO_URL" --repo-cache-dir="$$REPO_CACHE_DIR"; \
-		else \
-			./scripts/process_github_repo.sh --repo-url="$$REPO_URL"; \
-		fi; \
-	elif [ -n "$$REPO_PATH" ]; then \
-		./scripts/process_github_repo.sh --repo-path="$$REPO_PATH"; \
-	else \
+	@if [ -z "$$SYNC_EXISTING" ] && [ -z "$$REPO_URL" ] && [ -z "$$REPO_PATH" ]; then \
 		echo "Set REPO_PATH=/path/to/repo OR REPO_URL=https://github.com/owner/repo (optionally REPO_CACHE_PATH/REPO_CACHE_DIR) OR SYNC_EXISTING=1"; \
 		exit 1; \
 	fi
+	./scripts/process_github_repo.sh
 
 update-github-repos: ## Check all GitHub repo collections for updates and re-ingest changed ones
 	./scripts/update_all_github_repos.sh

@@ -3,70 +3,48 @@
 # Real-time Indexing Monitor
 # Shows actual progress of document indexing to Qdrant
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
-
-# Load environment
+# Load environment and shared libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
-fi
+# shellcheck source=lib/common_qdrant.sh
+source "$SCRIPT_DIR/lib/common_qdrant.sh"
+
+load_env_file
+apply_pipeline_defaults
 
 # Configuration (use REST API)
-QDRANT_PROTOCOL="https"
-QDRANT_BASE_URL=""
-if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
-    QDRANT_REST_PORT="${QDRANT_REST_PORT:-8087}"
-    QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
-else
-    QDRANT_PROTOCOL="http"
-    QDRANT_REST_PORT="${QDRANT_REST_PORT:-8087}"
-    QDRANT_BASE_URL="${QDRANT_PROTOCOL}://${QDRANT_HOST}:${QDRANT_REST_PORT}"
-fi
+QDRANT_BASE_URL="$(qdrant_rest_base_url)"
 QDRANT_URL="${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}"
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 REFRESH_INTERVAL=${1:-5}  # Default 5 seconds, or pass as argument
 
 # Function to get Qdrant stats
 get_qdrant_stats() {
-    local auth=()
-    if [ -n "${QDRANT_API_KEY:-}" ]; then
-        auth=( -H "api-key: $QDRANT_API_KEY" )
-    fi
-    local response
-    if response=$(curl -s "${auth[@]}" "$QDRANT_URL" 2>/dev/null); then
-        echo "$response" | jq -r '.result | "\(.points_count)|\(.vectors_count)|\(.indexed_vectors_count)"' 2>/dev/null || echo "0|0|0"
+    local qdrant_response
+    if qdrant_response=$(qdrant_curl -s "$QDRANT_URL" 2>/dev/null); then
+        echo "$qdrant_response" | jq -r '.result | "\(.points_count)|\(.vectors_count)|\(.indexed_vectors_count)"' 2>/dev/null || echo "0|0|0"
     else
         echo "0|0|0"
     fi
 }
 
 # Function to get embedding server status
-check_embedding_server() {
-    local url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
-    local response=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
-    if [ "$response" = "200" ]; then
-        echo "✓"
+check_embedding_server_status() {
+    local probe_url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$probe_url" 2>/dev/null)
+    if [ "$http_code" = "200" ]; then
+        echo "OK"
     else
-        echo "✗"
+        echo "UNAVAILABLE"
     fi
 }
 
 # Function to count log events
 count_log_events() {
     local pattern="$1"
-    grep -c "$pattern" "$LOG_FILE" 2>/dev/null || echo "0"
+    grep -c "$pattern" "$LOG_FILE" 2>/dev/null || true
 }
 
 # Function to get last log entry
@@ -84,7 +62,7 @@ get_last_log() {
 # Initialize
 clear
 echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}${CYAN}           📊 REAL-TIME INDEXING MONITOR 📊${NC}"
+echo -e "${BOLD}${CYAN}           REAL-TIME INDEXING MONITOR${NC}"
 echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -129,18 +107,18 @@ while true; do
     LAST_ERROR=$(get_last_log "ERROR")
     
     # Check services
-    EMBEDDING_STATUS=$(check_embedding_server)
+    EMBEDDING_STATUS=$(check_embedding_server_status)
     APP_RUNNING=$(pgrep -f "java.*java-chat" > /dev/null && echo "✓" || echo "✗")
     
     # Clear screen and display dashboard
     clear
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}${CYAN}           📊 REAL-TIME INDEXING MONITOR 📊${NC}"
+    echo -e "${BOLD}${CYAN}           REAL-TIME INDEXING MONITOR${NC}"
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
     
     # Qdrant Status
-    echo -e "${BOLD}${YELLOW}🗄️  QDRANT STATUS${NC}"
+    echo -e "${BOLD}${YELLOW}QDRANT STATUS${NC}"
     echo -e "├─ Collection: ${CYAN}$QDRANT_COLLECTION${NC}"
     echo -e "├─ Vectors: ${GREEN}${BOLD}$VECTORS${NC}"
     if [ "$VECTOR_DELTA" -gt 0 ]; then
@@ -153,13 +131,13 @@ while true; do
     echo ""
     
     # Services Status
-    echo -e "${BOLD}${YELLOW}🔧 SERVICES${NC}"
-    echo -e "├─ Java App: $([[ "$APP_RUNNING" == "✓" ]] && echo -e "${GREEN}✓ Running${NC}" || echo -e "${RED}✗ Stopped${NC}")"
-    echo -e "└─ Embedding Server: $([[ "$EMBEDDING_STATUS" == "✓" ]] && echo -e "${GREEN}✓ Healthy${NC}" || echo -e "${RED}✗ Unavailable${NC}")"
+    echo -e "${BOLD}${YELLOW}SERVICES${NC}"
+    echo -e "├─ Java App: $([[ "$APP_RUNNING" == "✓" ]] && echo -e "${GREEN}Running${NC}" || echo -e "${RED}Stopped${NC}")"
+    echo -e "└─ Embedding Server: $([[ "$EMBEDDING_STATUS" == "OK" ]] && echo -e "${GREEN}Healthy${NC}" || echo -e "${RED}Unavailable${NC}")"
     echo ""
     
     # Processing Stats
-    echo -e "${BOLD}${YELLOW}📈 PROCESSING STATS${NC}"
+    echo -e "${BOLD}${YELLOW}PROCESSING STATS${NC}"
     echo -e "├─ Documents Processed: ${CYAN}$DOCS_PROCESSED${NC}"
     echo -e "├─ Embedding API Calls: ${CYAN}$EMBEDDINGS_CALLED${NC}"
     echo -e "├─ Embeddings Generated: ${GREEN}$EMBEDDINGS_GENERATED${NC}"
@@ -168,7 +146,7 @@ while true; do
     echo ""
     
     # Last Activity
-    echo -e "${BOLD}${YELLOW}📝 LAST ACTIVITY${NC}"
+    echo -e "${BOLD}${YELLOW}LAST ACTIVITY${NC}"
     echo -e "├─ Embedding: ${BLUE}$LAST_EMBEDDING${NC}"
     if [ "$ERRORS" -gt 0 ]; then
         echo -e "└─ Error: ${RED}$LAST_ERROR${NC}"
@@ -184,7 +162,7 @@ while true; do
         REMAINING=$((ESTIMATED_TOTAL - VECTORS))
         if [ "$REMAINING" -gt 0 ]; then
             ETA=$(echo "scale=0; $REMAINING / $CURRENT_RATE / 60" | bc 2>/dev/null || echo "?")
-            echo -e "${BOLD}${YELLOW}⏱️  ESTIMATED TIME${NC}"
+            echo -e "${BOLD}${YELLOW}ESTIMATED TIME${NC}"
             echo -e "├─ Progress: ${GREEN}$(echo "scale=1; $VECTORS * 100 / $ESTIMATED_TOTAL" | bc)%${NC}"
             echo -e "└─ ETA: ${CYAN}~$ETA minutes${NC}"
             echo ""

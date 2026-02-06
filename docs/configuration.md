@@ -1,6 +1,6 @@
 # Configuration
 
-Java Chat is configured primarily via environment variables (loaded from `.env` by `Makefile` targets and most scripts).
+Java Chat is configured primarily via environment variables. Scripts load `.env` when present, but `.env` is optional when values are exported in the invoking shell.
 
 For defaults, see `src/main/resources/application.properties`.
 
@@ -54,6 +54,8 @@ Selection order:
 2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_SERVER_URL` and `REMOTE_EMBEDDING_API_KEY` are set
 3) OpenAI embeddings when `OPENAI_API_KEY` is set
 
+`GITHUB_TOKEN` / GitHub Models is never used for embeddings. GitHub Models does not expose an embeddings API in this project.
+
 If none are configured, the application fails fast with an explicit error.
 
 Reprocessing note:
@@ -68,6 +70,28 @@ Common variables:
 - `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `4096`)
 - `APP_LOCAL_EMBEDDING_BATCH_SIZE` (default `32`)
 - `REMOTE_EMBEDDING_SERVER_URL`, `REMOTE_EMBEDDING_API_KEY`, `REMOTE_EMBEDDING_MODEL_NAME`, `REMOTE_EMBEDDING_DIMENSIONS` (optional)
+  - `REMOTE_EMBEDDING_SERVER_URL` has no in-repo default and must be set via environment or `.env`.
+  - `REMOTE_EMBEDDING_SERVER_URL` accepts either `.../v1` or `.../v1/embeddings`; both normalize correctly.
+
+Environment precedence is universal across Make targets and ingestion scripts:
+1) CLI arguments (script flags / Make variables passed inline)
+2) Variables exported in the invoking shell/command
+3) `.env`
+4) Application/script defaults
+
+### Embedding preflight checks
+
+Ingestion scripts now run remote embedding probes before starting application indexing:
+
+1. Plain text probe
+2. Code-like multiline probe (for source ingestion realism)
+
+A probe fails when the endpoint returns malformed embedding payloads (for example HTTP `200` with null vector values).
+Plain-text probe failure stops ingestion immediately and prints the specific probe failure reason plus a response excerpt.
+Code-like probe failure stops ingestion by default (`EMBEDDING_CODE_PROBE_MODE=strict`).
+Set `EMBEDDING_CODE_PROBE_MODE=warn` only when you explicitly want to continue despite the risk.
+
+This catches provider issues earlier than full ingestion runs and prevents generic downstream failures.
 
 ## Qdrant
 

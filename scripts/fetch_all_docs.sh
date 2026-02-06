@@ -7,14 +7,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/shell_bootstrap.sh
+source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
+# shellcheck source=lib/env_loader.sh
+source "$SCRIPT_DIR/lib/env_loader.sh"
+
 # Centralized source URLs (single source of truth)
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
 if [ -f "$RES_PROPS" ]; then
-  # Export variables defined as KEY=VALUE in the properties file
-  set -a
-  # shellcheck source=/dev/null
-  . "$RES_PROPS"
-  set +a
+  preserve_process_env_then_source_file "$RES_PROPS"
 fi
 DOCS_ROOT="$SCRIPT_DIR/../data/docs"
 LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
@@ -49,13 +51,6 @@ for arg in "$@"; do
     esac
 done
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
 echo "=============================================="
 echo "Consolidated Documentation Fetcher"
 echo "=============================================="
@@ -65,12 +60,6 @@ echo ""
 
 # Initialize log
 echo "[$(date)] Starting consolidated documentation fetch" > "$LOG_FILE"
-
-# Function to log messages
-log() {
-    echo "[$(date)] $1" >> "$LOG_FILE"
-    echo -e "$1"
-}
 
 extract_meta_version() {
     local file_path="$1"

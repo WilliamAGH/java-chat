@@ -36,6 +36,13 @@ The ingestion pipeline stores this identity in payload metadata:
 
 All GitHub ingestion commands run in headless CLI mode (`spring.main.web-application-type=none`), so they do not bind an HTTP port and can run concurrently with the main app or other ingestion jobs. Each CLI invocation runs in its own short-lived JVM process and exits automatically after completion.
 
+Runtime configuration precedence for this pipeline:
+
+1. CLI flags / inline Make variables
+2. Exported shell environment variables
+3. `.env` values (when `.env` exists)
+4. Script defaults
+
 ### Ingest from a local clone
 
 ```bash
@@ -106,13 +113,25 @@ Then the file is chunked and upserted again.
 ## Failure diagnostics and retry behavior
 
 - GitHub ingestion fails fast when embedding or vector writes fail.
+- Preflight now validates remote embedding payload quality before ingestion starts:
+  - plain text probe
+  - code-like multiline probe
+  - probe failures include explicit endpoint/model context and payload anomaly details
+  - plain-text failures stop immediately
+  - code-like failures stop by default; set `EMBEDDING_CODE_PROBE_MODE=warn` to continue explicitly
+- When null/invalid vectors are detected, diagnostics now state likely causes explicitly:
+  - wrong endpoint (must resolve to `/v1/embeddings`)
+  - non-embedding model
+  - provider payload bug
 - Remote embedding calls use exponential backoff retries for transient HTTP errors (for example `429`, `5xx`, and provider-side `400: null` gateway responses).
 - Remote embedding response-shape failures that are typically transient (for example null/missing embedding entries) also retry with exponential backoff before failing terminally.
 - On terminal failure, `scripts/process_github_repo.sh` prints a failure summary extracted from `process_github_repo.log`, including:
+  - failure source classification (`AI Embedding API`, `Qdrant API`, `GitHub API`, or `Application/Unknown`),
+  - explicit rate-limit diagnosis (`No rate limit detected` or detected API + evidence),
   - the last root-cause headline (for example, file URL and failing embedding batch),
   - the final exception cause chain (`Caused by`),
   - recent retry/error trace lines,
-  - the final log tail.
+  - a compact tail of significant error lines.
 
 ## Collection and payload indexes
 

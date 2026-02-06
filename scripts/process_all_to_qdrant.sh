@@ -32,11 +32,6 @@ for arg in "$@"; do
     esac
 done
 
-log() {
-    echo "[$(date)] $1" >> "$LOG_FILE"
-    echo -e "$1"
-}
-
 corpus_indexed_summary() {
     local parsed_dir="$PROJECT_ROOT/data/parsed"
     local index_dir="$PROJECT_ROOT/data/index"
@@ -77,7 +72,7 @@ if ! check_embedding_server "log"; then
     exit 1
 fi
 
-setup_pid_and_cleanup
+setup_pid_and_cleanup "$PID_FILE"
 
 log "${YELLOW}Building application...${NC}"
 build_application "$LOG_FILE"

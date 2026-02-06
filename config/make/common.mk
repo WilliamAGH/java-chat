@@ -45,10 +45,16 @@ export JAR_PATH = $(call get_jar)
 # Common Shell Functions (for use in recipes)
 # ============================================================================
 
+# Require a CLI tool; exits with contextual error when missing.
+# Usage: @$(call require_cmd,ast-grep,brew install ast-grep)
+define require_cmd
+command -v $(1) >/dev/null 2>&1 || { echo "$(RED)Error: '$(1)' not found. Install with: $(2)$(NC)" >&2; exit 1; }
+endef
+
 # Load .env file if present
 # Usage: $(call load_env)
 define load_env
-if [ -f .env ]; then set -a; source .env; set +a; fi
+if [ -f .env ]; then source scripts/lib/env_loader.sh; preserve_process_env_then_source_file .env; fi
 endef
 
 # Validate API keys - exits with error if neither is set
@@ -91,7 +97,6 @@ define build_app_args
 	  APP_ARGS+=( \
 	    --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
 	    --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	    --spring.ai.openai.embedding.options.model="$${GITHUB_MODELS_EMBED_MODEL:-text-embedding-3-small}" \
 	  ); \
 	fi
 endef
