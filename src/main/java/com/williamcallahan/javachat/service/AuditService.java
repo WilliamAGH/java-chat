@@ -166,7 +166,7 @@ public class AuditService {
         // Detect duplicates in Qdrant by hash (should be 0 if id=hash going forward)
         Map<String, Integer> duplicateCounts = new HashMap<>();
         for (String hashValue : qdrantHashList) {
-            duplicateCounts.merge(hashValue, 1, Integer::sum);
+            duplicateCounts.merge(hashValue, 1, (a, b) -> a + b);
         }
         List<String> duplicateHashes = duplicateCounts.entrySet().stream()
                 .filter(countEntry -> countEntry.getValue() != null && countEntry.getValue() > 1)

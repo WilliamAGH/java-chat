@@ -96,8 +96,16 @@ public class HybridSearchService {
 
         List<CompletableFuture<List<ScoredPoint>>> futures = new ArrayList<>(collectionNames.size());
         for (String collection : collectionNames) {
-            QueryPoints queryRequest = buildHybridQueryRequest(
-                    collection, denseVector, sparseVector, denseVectorName, sparseVectorName, prefetchLimit, topK);
+            QueryPoints queryRequest = Objects.requireNonNull(
+                    buildHybridQueryRequest(
+                            collection,
+                            denseVector,
+                            sparseVector,
+                            denseVectorName,
+                            sparseVectorName,
+                            prefetchLimit,
+                            topK),
+                    "QueryPoints");
             CompletableFuture<List<ScoredPoint>> future = toCompletableFuture(qdrantClient.queryAsync(queryRequest));
             futures.add(future);
         }
@@ -150,7 +158,7 @@ public class HybridSearchService {
                 .setLimit(limit);
 
         PrefetchQuery densePrefetch = PrefetchQuery.newBuilder()
-                .setQuery(nearest(denseVector))
+                .setQuery(nearest(Objects.requireNonNull(denseVector, "denseVector")))
                 .setUsing(denseVectorName)
                 .setLimit(prefetchLimit)
                 .build();

@@ -43,6 +43,7 @@ public class HybridVectorService {
 
     private static final long UPSERT_TIMEOUT_SECONDS = 30;
     private static final long DELETE_TIMEOUT_SECONDS = 15;
+    private static final long COUNT_TIMEOUT_SECONDS = 15;
     private static final String PAYLOAD_DOC_CONTENT = "doc_content";
 
     private static final Set<String> SUPPORTED_METADATA_KEYS = Set.of(
@@ -157,6 +158,29 @@ public class HybridVectorService {
     }
 
     /**
+     * Returns true when at least one point exists for the URL in the given collection.
+     *
+     * @param collectionKind target collection kind
+     * @param url URL payload value to match
+     * @return true when one or more points exist
+     */
+    public boolean hasPointsForUrl(QdrantCollectionKind collectionKind, String url) {
+        Objects.requireNonNull(collectionKind, "collectionKind");
+        Objects.requireNonNull(url, "url");
+        if (url.isBlank()) {
+            return false;
+        }
+
+        String collectionName = resolveCollectionName(collectionKind);
+        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+
+        Long count = RetrySupport.executeWithRetry(
+                () -> awaitFuture(qdrantClient.countAsync(collectionName, filter, true), COUNT_TIMEOUT_SECONDS),
+                "Qdrant count by URL");
+        return count != null && count > 0;
+    }
+
+    /**
      * Returns the Qdrant collection name for the given kind.
      *
      * <p>Collection names are configured in {@code app.qdrant.collections.*}.</p>
@@ -181,11 +205,12 @@ public class HybridVectorService {
             Document doc) {
 
         Map<String, Vector> namedVectorMap = new LinkedHashMap<>(2);
-        namedVectorMap.put(denseVectorName, vector(denseVector));
+        namedVectorMap.put(denseVectorName, vector(Objects.requireNonNull(denseVector, "denseVector")));
         if (!sparse.indices().isEmpty()) {
             List<Integer> intIndices =
                     sparse.indices().stream().map(Long::intValue).toList();
-            namedVectorMap.put(sparseVectorName, vector(sparse.values(), intIndices));
+            namedVectorMap.put(
+                    sparseVectorName, vector(sparse.values(), Objects.requireNonNull(intIndices, "intIndices")));
         }
 
         Map<String, Value> payload = buildPayload(doc);

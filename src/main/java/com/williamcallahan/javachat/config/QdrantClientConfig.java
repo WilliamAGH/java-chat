@@ -4,6 +4,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,13 +74,13 @@ public class QdrantClientConfig {
                 KEEPALIVE_TIMEOUT_SECONDS,
                 IDLE_TIMEOUT_MINUTES);
 
-        ManagedChannel channel = channelBuilder.build();
+        ManagedChannel channel = Objects.requireNonNull(channelBuilder.build(), "ManagedChannel");
         QdrantGrpcClient.Builder grpcClientBuilder = QdrantGrpcClient.newBuilder(channel, true);
 
         if (apiKey != null && !apiKey.isBlank()) {
-            grpcClientBuilder.withApiKey(apiKey);
+            grpcClientBuilder.withApiKey(Objects.requireNonNull(apiKey, "apiKey"));
         }
 
-        return new QdrantClient(grpcClientBuilder.build());
+        return new QdrantClient(Objects.requireNonNull(grpcClientBuilder.build(), "QdrantGrpcClient"));
     }
 }

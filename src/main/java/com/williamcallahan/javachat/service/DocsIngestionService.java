@@ -28,7 +28,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DocsIngestionService {
-    private static final Logger log = LoggerFactory.getLogger(DocsIngestionService.class);
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String API_PATH_SEGMENT = "/api/";

@@ -10,8 +10,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +18,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class GuidedTOCProvider {
-    private static final Logger log = LoggerFactory.getLogger(GuidedTOCProvider.class);
     private final ObjectMapper mapper;
     private volatile List<GuidedLesson> cache = Collections.emptyList();
     private volatile boolean tocLoaded = false;

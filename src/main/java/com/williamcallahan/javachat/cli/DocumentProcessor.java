@@ -139,8 +139,8 @@ public class DocumentProcessor {
     private IngestionTotals accumulateOutcome(final IngestionTotals totals, final ProcessingOutcome outcome) {
         return switch (outcome) {
             case ProcessingOutcome.Success success -> totals.addSuccess(success.processed(), success.duplicates());
-            case ProcessingOutcome.Skipped ignored -> totals.addSkipped();
-            case ProcessingOutcome.Failed ignored -> totals.addFailed();
+            case ProcessingOutcome.Skipped _ -> totals.addSkipped();
+            case ProcessingOutcome.Failed _ -> totals.addFailed();
         };
     }
 

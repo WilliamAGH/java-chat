@@ -208,8 +208,8 @@ public class QdrantIndexInitializer {
 
         if (lastHttp != null) {
             throw new IllegalStateException(
-                    "Failed to create Qdrant collection '" + collection + "' (HTTP " + lastHttp.getRawStatusCode()
-                            + ")",
+                    "Failed to create Qdrant collection '" + collection + "' (HTTP "
+                            + lastHttp.getStatusCode().value() + ")",
                     lastHttp);
         }
         throw new IllegalStateException("Failed to create Qdrant collection '" + collection + "'", lastRuntime);
@@ -274,7 +274,7 @@ public class QdrantIndexInitializer {
         if (lastHttp != null) {
             throw new IllegalStateException(
                     "Failed to fetch Qdrant collection info for '" + collection + "' (HTTP "
-                            + lastHttp.getRawStatusCode() + ")",
+                            + lastHttp.getStatusCode().value() + ")",
                     lastHttp);
         }
         throw new IllegalStateException("Failed to fetch Qdrant collection info for '" + collection + "'", lastRuntime);
@@ -367,7 +367,7 @@ public class QdrantIndexInitializer {
                             + ", field="
                             + field
                             + ", HTTP "
-                            + lastHttp.getRawStatusCode()
+                            + lastHttp.getStatusCode().value()
                             + ")",
                     lastHttp);
         }
