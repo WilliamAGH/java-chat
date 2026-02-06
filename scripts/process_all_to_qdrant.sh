@@ -12,6 +12,9 @@ LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 PID_FILE="$PROJECT_ROOT/process_qdrant.pid"
 DOCS_SETS_FILTER=""
 
+# shellcheck source=lib/common_qdrant.sh
+source "$SCRIPT_DIR/lib/common_qdrant.sh"
+
 for arg in "$@"; do
     case $arg in
         --doc-sets=*)
@@ -28,13 +31,6 @@ for arg in "$@"; do
             ;;
     esac
 done
-
-RED="${RED:-\033[0;31m}"
-GREEN="${GREEN:-\033[0;32m}"
-YELLOW="${YELLOW:-\033[1;33m}"
-BLUE="${BLUE:-\033[0;34m}"
-CYAN="${CYAN:-\033[0;36m}"
-NC="${NC:-\033[0m}"
 
 log() {
     echo "[$(date)] $1" >> "$LOG_FILE"
@@ -57,73 +53,6 @@ corpus_indexed_summary() {
     echo "${indexed_count} indexed / ${parsed_count} parsed"
 }
 
-qdrant_rest_base_url() {
-    if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
-        if [ -n "${QDRANT_REST_PORT:-}" ]; then
-            echo "https://${QDRANT_HOST}:${QDRANT_REST_PORT}"
-        else
-            echo "https://${QDRANT_HOST}"
-        fi
-    else
-        echo "http://${QDRANT_HOST}:${QDRANT_REST_PORT:-8087}"
-    fi
-}
-
-check_qdrant_connection() {
-    log "${YELLOW}Checking Qdrant connection...${NC}"
-
-    local base_url
-    base_url=$(qdrant_rest_base_url)
-    local url="${base_url}/collections"
-
-    local curl_opts=(-s -o /dev/null -w "%{http_code}")
-    if [ -n "${QDRANT_API_KEY:-}" ]; then
-        curl_opts+=(-H "api-key: $QDRANT_API_KEY")
-    fi
-
-    local response
-    response=$(curl "${curl_opts[@]}" "$url" || echo "000")
-
-    if [ "$response" != "200" ]; then
-        log "${RED}Qdrant connection failed (HTTP $response)${NC}"
-        log "${YELLOW}URL: $url${NC}"
-        return 1
-    fi
-
-    log "${GREEN}Qdrant connection successful${NC}"
-    return 0
-}
-
-check_embedding_server() {
-    if [ "${APP_LOCAL_EMBEDDING_ENABLED:-false}" = "true" ]; then
-        log "${YELLOW}Checking local embedding server...${NC}"
-        local url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
-        local response
-        response=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" "$url" || echo "000")
-        if [ "$response" = "200" ]; then
-            log "${GREEN}Local embedding server is healthy${NC}"
-            return 0
-        fi
-        log "${RED}Local embedding server not responding (HTTP $response)${NC}"
-        return 1
-    fi
-
-    log "${BLUE}Using remote embedding provider${NC}"
-    return 0
-}
-
-cleanup() {
-    log ""
-    log "${YELLOW}Received interrupt signal. Shutting down...${NC}"
-    if [ -n "${APP_PID:-}" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill -TERM "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$PID_FILE"
-    exit 0
-}
-
-trap cleanup INT TERM
-
 echo "[$(date)] Starting document processing" > "$LOG_FILE"
 
 echo "=============================================="
@@ -134,116 +63,43 @@ echo "Project root: $PROJECT_ROOT"
 echo "Docs root: $DOCS_ROOT"
 echo ""
 
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    PRESET_APP_LOCAL_EMBEDDING_ENABLED="${APP_LOCAL_EMBEDDING_ENABLED:-}"
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
-    if [ -n "$PRESET_APP_LOCAL_EMBEDDING_ENABLED" ]; then
-        APP_LOCAL_EMBEDDING_ENABLED="$PRESET_APP_LOCAL_EMBEDDING_ENABLED"
-        export APP_LOCAL_EMBEDDING_ENABLED
-    fi
-    echo -e "${GREEN}Environment variables loaded${NC}"
-else
-    echo -e "${RED}.env file not found${NC}"
-    exit 1
-fi
-
-required_vars=("QDRANT_HOST" "QDRANT_PORT" "APP_LOCAL_EMBEDDING_ENABLED")
-missing_vars=()
-for var in "${required_vars[@]}"; do
-    if [ -z "${!var:-}" ]; then
-        missing_vars+=("$var")
-    fi
-done
-
-if [ ${#missing_vars[@]} -gt 0 ]; then
-    echo -e "${RED}Missing required environment variables:${NC}"
-    printf '%s\n' "${missing_vars[@]}"
-    exit 1
-fi
-
-echo -e "${GREEN}All required environment variables present${NC}"
+load_env_file
+validate_required_vars "QDRANT_HOST" "QDRANT_PORT" "APP_LOCAL_EMBEDDING_ENABLED"
 echo ""
 
-if ! check_qdrant_connection; then
+if ! check_qdrant_connection "log"; then
     log "${RED}Cannot proceed without Qdrant connectivity${NC}"
     exit 1
 fi
 
-if ! check_embedding_server; then
+if ! check_embedding_server "log"; then
     log "${RED}Embedding provider check failed${NC}"
     exit 1
 fi
 
-if [ -f "$PID_FILE" ]; then
-    existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
-    if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-        log "${YELLOW}Stopping previous document processor (PID: $existing_pid)...${NC}"
-        kill -TERM "$existing_pid" 2>/dev/null || true
-        sleep 2
-    fi
-    rm -f "$PID_FILE"
-fi
+setup_pid_and_cleanup
 
 log "${YELLOW}Building application...${NC}"
-cd "$PROJECT_ROOT"
-if ! ./gradlew buildForScripts --no-configuration-cache --quiet >> "$LOG_FILE" 2>&1; then
-    log "${RED}Build failed${NC}"
-    exit 1
-fi
-log "${GREEN}Build succeeded${NC}"
+build_application "$LOG_FILE"
 
 if [ -n "$DOCS_SETS_FILTER" ]; then
     export DOCS_SETS="$DOCS_SETS_FILTER"
 fi
 
-app_jar=$(ls -1 build/libs/*.jar 2>/dev/null | grep -v -- "-plain.jar" | head -1 || true)
-if [ -z "$app_jar" ]; then
-    log "${RED}Failed to locate runnable jar${NC}"
-    exit 1
-fi
+app_jar=$(locate_app_jar)
 
 log "${YELLOW}Starting document processor...${NC}"
 java -Dspring.profiles.active=cli \
      -DDOCS_DIR="$DOCS_ROOT" \
-     -jar "$app_jar" >> "$LOG_FILE" 2>&1 &
+     -jar "$app_jar" \
+     --spring.main.web-application-type=none \
+     --server.port=0 >> "$LOG_FILE" 2>&1 &
 APP_PID=$!
 echo "$APP_PID" > "$PID_FILE"
 
 log "${BLUE}Application started with PID: $APP_PID${NC}"
 
-start_time=$(date +%s)
-last_files=0
-files_count=0
-elapsed=0
-while true; do
-    if grep -q "DOCUMENT PROCESSING COMPLETE" "$LOG_FILE" 2>/dev/null; then
-        echo ""
-        log "${GREEN}Document processing completed${NC} ($files_count files, ${elapsed}s)"
-        break
-    fi
-
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
-        echo ""
-        log "${RED}Application terminated unexpectedly${NC}"
-        rm -f "$PID_FILE"
-        exit 1
-    fi
-
-    current_time=$(date +%s)
-    elapsed=$((current_time - start_time))
-    files_count=$(grep -c "Completed processing" "$LOG_FILE" 2>/dev/null || true)
-    files_count=$(echo "${files_count:-0}" | tr -dc '0-9')
-    files_count=${files_count:-0}
-
-    if [ "$files_count" -gt "$last_files" ]; then
-        echo -ne "\r${YELLOW}Files: $files_count (${elapsed}s)${NC}     "
-        last_files=$files_count
-    fi
-
-    sleep 2
-done
+monitor_java_process "$APP_PID" "$LOG_FILE" "$PID_FILE"
 
 echo ""
 rm -f "$PID_FILE"

@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
@@ -54,6 +56,23 @@ public class QdrantIndexInitializer {
 
     private static final String VECTOR_DISTANCE_COSINE = "Cosine";
     private static final String SPARSE_MODIFIER_IDF = "idf";
+    private static final List<PayloadIndexSpec> REQUIRED_PAYLOAD_INDEXES = List.of(
+            new PayloadIndexSpec("url", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("hash", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("chunkIndex", SCHEMA_TYPE_INTEGER),
+            new PayloadIndexSpec("docSet", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("docPath", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("sourceName", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("sourceKind", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("docVersion", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("docType", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("repoUrl", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("repoOwner", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("repoName", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("repoKey", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("repoBranch", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("commitHash", SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec("license", SCHEMA_TYPE_KEYWORD));
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -148,7 +167,7 @@ public class QdrantIndexInitializer {
             String url = base + path;
             try {
                 restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-                log.info("[QDRANT] Collection present");
+                log.info("[QDRANT] Collection present (collection={})", collection);
                 return true;
             } catch (HttpClientErrorException.NotFound notFound) {
                 return false;
@@ -197,7 +216,7 @@ public class QdrantIndexInitializer {
                 if (status < 200 || status >= 300) {
                     throw new IllegalStateException("Qdrant create collection returned HTTP " + status);
                 }
-                log.info("[QDRANT] Created hybrid collection");
+                log.info("[QDRANT] Created hybrid collection (collection={})", collection);
                 return;
             } catch (RestClientResponseException httpError) {
                 lastHttp = httpError;
@@ -322,21 +341,76 @@ public class QdrantIndexInitializer {
     }
 
     private void ensurePayloadIndexes(List<String> collections) {
+        HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
-            ensurePayloadIndex(collection, "url", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "hash", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "chunkIndex", SCHEMA_TYPE_INTEGER);
-            ensurePayloadIndex(collection, "docSet", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "docPath", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "sourceName", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "sourceKind", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "docVersion", SCHEMA_TYPE_KEYWORD);
-            ensurePayloadIndex(collection, "docType", SCHEMA_TYPE_KEYWORD);
+            Map<String, String> existingPayloadIndexTypes = readExistingPayloadIndexTypes(collection, headers);
+            int createdIndexCount = 0;
+            int alreadyPresentIndexCount = 0;
+            for (PayloadIndexSpec payloadIndexSpec : REQUIRED_PAYLOAD_INDEXES) {
+                String existingType = existingPayloadIndexTypes.get(payloadIndexSpec.fieldName());
+                if (existingType == null || existingType.isBlank()) {
+                    ensurePayloadIndex(
+                            collection, payloadIndexSpec.fieldName(), payloadIndexSpec.schemaType(), headers);
+                    createdIndexCount++;
+                    continue;
+                }
+                if (!existingType.equals(payloadIndexSpec.schemaType())) {
+                    throw new IllegalStateException("Qdrant payload index type mismatch (collection="
+                            + collection
+                            + ", field="
+                            + payloadIndexSpec.fieldName()
+                            + ", expected="
+                            + payloadIndexSpec.schemaType()
+                            + ", actual="
+                            + existingType
+                            + ")");
+                }
+                alreadyPresentIndexCount++;
+            }
+            log.info(
+                    "[QDRANT] Payload index ensure complete (collection={}, created={}, alreadyPresent={})",
+                    collection,
+                    createdIndexCount,
+                    alreadyPresentIndexCount);
         }
     }
 
-    private void ensurePayloadIndex(String collection, String field, String schemaType) {
-        HttpHeaders headers = jsonHeaders();
+    private Map<String, String> readExistingPayloadIndexTypes(String collection, HttpHeaders headers) {
+        JsonNode collectionInfo = fetchCollectionInfo(collection, headers);
+        JsonNode payloadSchemaNode = collectionInfo.path("result").path("payload_schema");
+        if (payloadSchemaNode.isMissingNode() || payloadSchemaNode.isNull() || !payloadSchemaNode.isObject()) {
+            return Map.of();
+        }
+
+        LinkedHashMap<String, String> payloadIndexTypes = new LinkedHashMap<>();
+        payloadSchemaNode.fields().forEachRemaining(fieldEntry -> {
+            String payloadDataType = extractPayloadDataType(fieldEntry.getValue());
+            if (!payloadDataType.isBlank()) {
+                payloadIndexTypes.put(fieldEntry.getKey(), payloadDataType);
+            }
+        });
+        return Map.copyOf(payloadIndexTypes);
+    }
+
+    private String extractPayloadDataType(JsonNode payloadFieldSchema) {
+        JsonNode dataTypeNode = payloadFieldSchema.path("data_type");
+        if (dataTypeNode.isTextual()) {
+            return dataTypeNode.asText().trim().toLowerCase(Locale.ROOT);
+        }
+        if (dataTypeNode.isArray() && !dataTypeNode.isEmpty()) {
+            JsonNode firstDataTypeNode = dataTypeNode.get(0);
+            if (firstDataTypeNode != null && firstDataTypeNode.isTextual()) {
+                return firstDataTypeNode.asText().trim().toLowerCase(Locale.ROOT);
+            }
+        }
+        JsonNode fallbackTypeNode = payloadFieldSchema.path("type");
+        if (fallbackTypeNode.isTextual()) {
+            return fallbackTypeNode.asText().trim().toLowerCase(Locale.ROOT);
+        }
+        return "";
+    }
+
+    private void ensurePayloadIndex(String collection, String field, String schemaType, HttpHeaders headers) {
         PayloadIndexRequest body = new PayloadIndexRequest(field, Map.of("type", schemaType));
         String path = "/collections/" + collection + "/index";
 
@@ -351,7 +425,7 @@ public class QdrantIndexInitializer {
                     throw new IllegalStateException("Qdrant payload index ensure returned HTTP "
                             + response.getStatusCode().value());
                 }
-                log.info("[QDRANT] Ensured payload index");
+                log.info("[QDRANT] Ensured payload index (collection={}, field={})", collection, field);
                 return;
             } catch (RestClientResponseException httpError) {
                 lastHttp = httpError;
@@ -403,6 +477,8 @@ public class QdrantIndexInitializer {
     private record PayloadIndexRequest(
             @JsonProperty("field_name") String fieldName,
             @JsonProperty("field_schema") Map<String, String> fieldSchema) {}
+
+    private record PayloadIndexSpec(String fieldName, String schemaType) {}
 
     /**
      * Small helper to build a JSON object without exposing maps across the initializer.
