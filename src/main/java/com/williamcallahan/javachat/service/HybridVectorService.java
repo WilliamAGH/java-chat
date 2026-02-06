@@ -8,15 +8,22 @@ import static io.qdrant.client.VectorsFactory.namedVectors;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.RetrySupport;
 import io.qdrant.client.QdrantClient;
+import io.qdrant.client.WithPayloadSelectorFactory;
+import io.qdrant.client.WithVectorsSelectorFactory;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.JsonWithInt.Value;
 import io.qdrant.client.grpc.Points.PointStruct;
+import io.qdrant.client.grpc.Points.RetrievedPoint;
+import io.qdrant.client.grpc.Points.ScrollPoints;
+import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.Vector;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -44,22 +51,33 @@ public class HybridVectorService {
     private static final long UPSERT_TIMEOUT_SECONDS = 30;
     private static final long DELETE_TIMEOUT_SECONDS = 15;
     private static final long COUNT_TIMEOUT_SECONDS = 15;
-    private static final String PAYLOAD_DOC_CONTENT = "doc_content";
+    private static final long SCROLL_TIMEOUT_SECONDS = 30;
+    private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
+    private static final int SCROLL_PAGE_LIMIT = 256;
+    private static final int EMBEDDING_REQUEST_BATCH_SIZE = 1;
+    private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
+    private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
 
-    private static final Set<String> SUPPORTED_METADATA_KEYS = Set.of(
-            "url",
-            "title",
-            "chunkIndex",
-            "package",
-            "hash",
-            "docSet",
-            "docPath",
-            "sourceName",
-            "sourceKind",
-            "docVersion",
-            "docType",
-            "pageStart",
-            "pageEnd");
+    /**
+     * Bundles the dense and sparse vector data for a single document point.
+     *
+     * @param denseVector dense embedding from the embedding model
+     * @param sparseVector sparse BM25-style vector from lexical encoder
+     * @param denseVectorName Qdrant named vector key for dense embeddings
+     * @param sparseVectorName Qdrant named vector key for sparse tokens
+     */
+    record HybridVectorData(
+            float[] denseVector,
+            LexicalSparseVectorEncoder.SparseVector sparseVector,
+            String denseVectorName,
+            String sparseVectorName) {
+        HybridVectorData {
+            Objects.requireNonNull(denseVector, "denseVector");
+            Objects.requireNonNull(sparseVector, "sparseVector");
+            Objects.requireNonNull(denseVectorName, "denseVectorName");
+            Objects.requireNonNull(sparseVectorName, "sparseVectorName");
+        }
+    }
 
     private final QdrantClient qdrantClient;
     private final EmbeddingClient embeddingClient;
@@ -92,43 +110,27 @@ public class HybridVectorService {
      * @param documents Spring AI documents with metadata and text
      */
     public void upsert(QdrantCollectionKind collectionKind, List<Document> documents) {
-        Objects.requireNonNull(collectionKind, "collectionKind");
-        Objects.requireNonNull(documents, "documents");
-        if (documents.isEmpty()) {
-            return;
+        Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
+        String collectionName =
+                Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
+        doUpsert(collectionName, documents);
+    }
+
+    /**
+     * Upserts documents to a collection identified by name rather than enum kind.
+     *
+     * <p>Used for dynamically created collections (e.g., GitHub repository collections)
+     * that are not part of the fixed {@link QdrantCollectionKind} enum.</p>
+     *
+     * @param collectionName target Qdrant collection name
+     * @param documents Spring AI documents with metadata and text
+     */
+    public void upsertToCollection(String collectionName, List<Document> documents) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
         }
-
-        String collectionName = resolveCollectionName(collectionKind);
-        String denseVectorName = appProperties.getQdrant().getDenseVectorName();
-        String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
-
-        List<String> texts = documents.stream()
-                .map(document -> {
-                    String text = document.getText();
-                    return text == null ? "" : text;
-                })
-                .toList();
-        List<float[]> embeddings = embeddingClient.embed(texts);
-
-        List<PointStruct> points = new ArrayList<>(documents.size());
-        for (int i = 0; i < documents.size(); i++) {
-            Document doc = documents.get(i);
-            String pointId = resolvePointId(doc);
-            float[] denseVector = embeddings.get(i);
-            LexicalSparseVectorEncoder.SparseVector sparse = sparseVectorEncoder.encode(doc.getText());
-
-            PointStruct point = buildPoint(pointId, denseVector, sparse, denseVectorName, sparseVectorName, doc);
-            points.add(point);
-        }
-
-        RetrySupport.executeWithRetry(
-                () -> {
-                    awaitFuture(qdrantClient.upsertAsync(collectionName, points), UPSERT_TIMEOUT_SECONDS);
-                    return null;
-                },
-                "Qdrant hybrid upsert");
-
-        log.info("[QDRANT] Upserted {} hybrid points", points.size());
+        doUpsert(collectionName, documents);
     }
 
     /**
@@ -138,23 +140,22 @@ public class HybridVectorService {
      * @param url URL to match for deletion
      */
     public void deleteByUrl(QdrantCollectionKind collectionKind, String url) {
-        Objects.requireNonNull(collectionKind, "collectionKind");
-        Objects.requireNonNull(url, "url");
-        if (url.isBlank()) {
-            return;
+        Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
+        doDeleteByUrl(resolveCollectionName(collectionKind), url);
+    }
+
+    /**
+     * Deletes points matching a URL filter from a collection identified by name.
+     *
+     * @param collectionName target Qdrant collection name
+     * @param url URL to match for deletion
+     */
+    public void deleteByUrl(String collectionName, String url) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
         }
-
-        String collectionName = resolveCollectionName(collectionKind);
-        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
-
-        RetrySupport.executeWithRetry(
-                () -> {
-                    awaitFuture(qdrantClient.deleteAsync(collectionName, filter), DELETE_TIMEOUT_SECONDS);
-                    return null;
-                },
-                "Qdrant delete by URL");
-
-        log.debug("[QDRANT] Deleted points by URL filter");
+        doDeleteByUrl(collectionName, url);
     }
 
     /**
@@ -176,19 +177,107 @@ public class HybridVectorService {
      * @return exact point count for the URL
      */
     public long countPointsForUrl(QdrantCollectionKind collectionKind, String url) {
-        Objects.requireNonNull(collectionKind, "collectionKind");
-        Objects.requireNonNull(url, "url");
-        if (url.isBlank()) {
-            return 0;
+        Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
+        return doCountPointsForUrl(resolveCollectionName(collectionKind), url);
+    }
+
+    /**
+     * Returns the exact number of points that match a URL in a collection identified by name.
+     *
+     * @param collectionName target Qdrant collection name
+     * @param url URL payload value to match
+     * @return exact point count for the URL
+     */
+    public long countPointsForUrl(String collectionName, String url) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
+        }
+        return doCountPointsForUrl(collectionName, url);
+    }
+
+    /**
+     * Scrolls all unique URL payload values from points in a collection.
+     *
+     * <p>Uses selective payload retrieval ({@code url} field only) and disables vector
+     * transfer to minimize network overhead. Paginates through the entire collection
+     * using {@code ScrollPoints} with offset-based cursoring.</p>
+     *
+     * @param collectionName target Qdrant collection name
+     * @return all unique URL values found across points in the collection
+     */
+    public Set<String> scrollAllUrlsInCollection(String collectionName) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
         }
 
-        String collectionName = resolveCollectionName(collectionKind);
-        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+        Set<String> collectedUrls = new LinkedHashSet<>();
+        ScrollPoints.Builder scrollRequestBuilder = ScrollPoints.newBuilder()
+                .setCollectionName(collectionName)
+                .setWithPayload(WithPayloadSelectorFactory.include(List.of("url")))
+                .setWithVectors(WithVectorsSelectorFactory.enable(false))
+                .setLimit(SCROLL_PAGE_LIMIT);
 
-        Long count = RetrySupport.executeWithRetry(
-                () -> awaitFuture(qdrantClient.countAsync(collectionName, filter, true), COUNT_TIMEOUT_SECONDS),
-                "Qdrant count by URL");
-        return count == null ? 0 : count;
+        while (true) {
+            ScrollPoints scrollRequest = scrollRequestBuilder.build();
+            ScrollResponse scrollResponse = RetrySupport.executeWithRetry(
+                    () -> awaitFuture(qdrantClient.scrollAsync(scrollRequest), SCROLL_TIMEOUT_SECONDS),
+                    "Qdrant scroll URLs");
+
+            for (RetrievedPoint retrievedPoint : scrollResponse.getResultList()) {
+                Value urlPayloadValue = retrievedPoint.getPayloadMap().get("url");
+                if (urlPayloadValue != null && urlPayloadValue.hasStringValue()) {
+                    String urlString = urlPayloadValue.getStringValue();
+                    if (!urlString.isBlank()) {
+                        collectedUrls.add(urlString);
+                    }
+                }
+            }
+
+            if (!scrollResponse.hasNextPageOffset()) {
+                break;
+            }
+            scrollRequestBuilder.setOffset(scrollResponse.getNextPageOffset());
+        }
+
+        log.debug("[QDRANT] Scrolled {} unique URLs from collection '{}'", collectedUrls.size(), collectionName);
+        return collectedUrls;
+    }
+
+    /**
+     * Updates payload fields on all points matching a filter without re-embedding.
+     *
+     * <p>Uses Qdrant's {@code setPayloadAsync} which performs a partial merge — only the
+     * specified fields are modified; existing payload fields and vectors are untouched.</p>
+     *
+     * @param collectionName target Qdrant collection name
+     * @param metadataFieldUpdates map of payload field names to new values
+     * @param pointFilter filter selecting which points to update
+     */
+    public void updatePayloadByFilter(
+            String collectionName, Map<String, Value> metadataFieldUpdates, Filter pointFilter) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        Objects.requireNonNull(metadataFieldUpdates, "metadataFieldUpdates");
+        Objects.requireNonNull(pointFilter, "pointFilter");
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
+        }
+        if (metadataFieldUpdates.isEmpty()) {
+            return;
+        }
+
+        RetrySupport.executeWithRetry(
+                () -> awaitFuture(
+                        qdrantClient.setPayloadAsync(
+                                collectionName, metadataFieldUpdates, pointFilter, true, null, null),
+                        SET_PAYLOAD_TIMEOUT_SECONDS),
+                "Qdrant set payload by filter");
+
+        log.debug(
+                "[QDRANT] Updated {} payload field(s) on points matching filter in '{}'",
+                metadataFieldUpdates.size(),
+                collectionName);
     }
 
     /**
@@ -207,75 +296,207 @@ public class HybridVectorService {
         };
     }
 
-    private PointStruct buildPoint(
-            String pointId,
-            float[] denseVector,
-            LexicalSparseVectorEncoder.SparseVector sparse,
-            String denseVectorName,
-            String sparseVectorName,
-            Document doc) {
-
-        Map<String, Vector> namedVectorMap = new LinkedHashMap<>(2);
-        namedVectorMap.put(denseVectorName, vector(Objects.requireNonNull(denseVector, "denseVector")));
-        if (!sparse.indices().isEmpty()) {
-            List<Integer> intIndices =
-                    sparse.indices().stream().map(Long::intValue).toList();
-            namedVectorMap.put(
-                    sparseVectorName, vector(sparse.values(), Objects.requireNonNull(intIndices, "intIndices")));
+    private void doUpsert(String collectionName, List<Document> documents) {
+        Objects.requireNonNull(documents, "documents");
+        if (documents.isEmpty()) {
+            return;
         }
 
-        Map<String, Value> payload = buildPayload(doc);
+        String denseVectorName = appProperties.getQdrant().getDenseVectorName();
+        String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
+
+        List<float[]> embeddings = embedDocumentsInBatches(documents);
+
+        List<PointStruct> points = new ArrayList<>(documents.size());
+        for (int i = 0; i < documents.size(); i++) {
+            Document document = documents.get(i);
+            String pointId = resolvePointId(document);
+            HybridVectorData vectorData = new HybridVectorData(
+                    embeddings.get(i),
+                    sparseVectorEncoder.encode(document.getText()),
+                    denseVectorName,
+                    sparseVectorName);
+
+            PointStruct point = buildPoint(pointId, vectorData, document);
+            points.add(point);
+        }
+
+        RetrySupport.executeWithRetry(
+                () -> awaitFuture(qdrantClient.upsertAsync(collectionName, points), UPSERT_TIMEOUT_SECONDS),
+                "Qdrant hybrid upsert");
+
+        log.info("[QDRANT] Upserted {} hybrid points", points.size());
+    }
+
+    private List<float[]> embedDocumentsInBatches(List<Document> documents) {
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+
+        List<float[]> allEmbeddings = new ArrayList<>(documents.size());
+        for (int batchStartIndex = 0;
+                batchStartIndex < documents.size();
+                batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
+            int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
+            List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
+            List<float[]> batchEmbeddings = embedSingleBatch(documentBatch, batchStartIndex, batchEndIndex);
+            allEmbeddings.addAll(batchEmbeddings);
+        }
+        return List.copyOf(allEmbeddings);
+    }
+
+    /**
+     * Embeds a single batch of documents with contextual error wrapping.
+     *
+     * <p>Re-wraps embedding failures with batch range and URL context so upstream
+     * callers can identify which documents caused the failure.</p>
+     */
+    private List<float[]> embedSingleBatch(List<Document> documentBatch, int batchStartIndex, int batchEndIndex) {
+        List<String> textBatch = documentBatch.stream()
+                .map(document -> {
+                    String text = document.getText();
+                    return text == null ? "" : text;
+                })
+                .toList();
+
+        List<float[]> batchEmbeddings;
+        try {
+            batchEmbeddings = embeddingClient.embed(textBatch);
+        } catch (EmbeddingServiceUnavailableException embeddingFailure) {
+            String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
+            String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);
+            throw new EmbeddingServiceUnavailableException(
+                    "Embedding failed for batch ["
+                            + batchStartIndex
+                            + ".."
+                            + (batchEndIndex - 1)
+                            + "] (firstUrl="
+                            + firstBatchUrl
+                            + ", lastUrl="
+                            + lastBatchUrl
+                            + ")",
+                    embeddingFailure);
+        }
+
+        if (batchEmbeddings.size() != textBatch.size()) {
+            throw new EmbeddingServiceUnavailableException("Embedding response count mismatch: expected "
+                    + textBatch.size()
+                    + " but received "
+                    + batchEmbeddings.size()
+                    + " for batch ["
+                    + batchStartIndex
+                    + ".."
+                    + (batchEndIndex - 1)
+                    + "]");
+        }
+        return batchEmbeddings;
+    }
+
+    private static String extractDocumentUrl(Document document, int fallbackIndex) {
+        if (document == null) {
+            return "unknown-url@" + fallbackIndex;
+        }
+        Object urlMetadata = document.getMetadata().get("url");
+        if (urlMetadata instanceof String documentUrl && !documentUrl.isBlank()) {
+            return documentUrl;
+        }
+        return "unknown-url@" + fallbackIndex;
+    }
+
+    private void doDeleteByUrl(String collectionName, String url) {
+        Objects.requireNonNull(url, "url");
+        if (url.isBlank()) {
+            return;
+        }
+
+        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+
+        RetrySupport.executeWithRetry(
+                () -> awaitFuture(qdrantClient.deleteAsync(collectionName, filter), DELETE_TIMEOUT_SECONDS),
+                "Qdrant delete by URL");
+
+        log.debug("[QDRANT] Deleted points by URL filter");
+    }
+
+    private long doCountPointsForUrl(String collectionName, String url) {
+        Objects.requireNonNull(url, "url");
+        if (url.isBlank()) {
+            return 0;
+        }
+
+        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+
+        Long count = RetrySupport.executeWithRetry(
+                () -> awaitFuture(qdrantClient.countAsync(collectionName, filter, true), COUNT_TIMEOUT_SECONDS),
+                "Qdrant count by URL");
+        return count == null ? 0 : count;
+    }
+
+    private PointStruct buildPoint(String pointId, HybridVectorData vectorData, Document document) {
+        Map<String, Vector> namedVectorMap = new LinkedHashMap<>();
+        namedVectorMap.put(vectorData.denseVectorName(), vector(vectorData.denseVector()));
+        if (!vectorData.sparseVector().indices().isEmpty()) {
+            namedVectorMap.put(
+                    vectorData.sparseVectorName(),
+                    vector(
+                            vectorData.sparseVector().values(),
+                            vectorData.sparseVector().integerIndices()));
+        }
+
+        Map<String, Value> pointPayload = buildPayload(document);
 
         return PointStruct.newBuilder()
                 .setId(id(UUID.fromString(pointId)))
                 .setVectors(namedVectors(namedVectorMap))
-                .putAllPayload(payload)
+                .putAllPayload(pointPayload)
                 .build();
     }
 
-    private Map<String, Value> buildPayload(Document doc) {
-        var payload = new LinkedHashMap<String, Value>();
-        String documentText = doc.getText();
-        payload.put(PAYLOAD_DOC_CONTENT, io.qdrant.client.ValueFactory.value(documentText == null ? "" : documentText));
+    private Map<String, Value> buildPayload(Document document) {
+        LinkedHashMap<String, Value> pointPayload = new LinkedHashMap<>();
+        String documentText = document.getText();
+        pointPayload.put(
+                QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
+                io.qdrant.client.ValueFactory.value(documentText == null ? "" : documentText));
 
-        var metadata = doc.getMetadata();
-        for (String key : SUPPORTED_METADATA_KEYS) {
-            Object raw = metadata.get(key);
-            Value value = toValue(raw);
-            if (value != null) {
-                payload.put(key, value);
-            }
+        Map<String, ?> metadata = document.getMetadata();
+        for (String fieldName : QdrantPayloadFieldSchema.ALL_METADATA_FIELDS) {
+            toValue(metadata.get(fieldName))
+                    .ifPresent(qdrantFieldValue -> pointPayload.put(fieldName, qdrantFieldValue));
         }
 
-        return payload;
+        return pointPayload;
     }
 
-    private static Value toValue(Object obj) {
+    private static Optional<Value> toValue(Object obj) {
         if (obj == null) {
-            return null;
+            return Optional.empty();
         }
         if (obj instanceof String s) {
-            return s.isBlank() ? null : io.qdrant.client.ValueFactory.value(s);
+            if (s.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.of(io.qdrant.client.ValueFactory.value(s));
         }
         if (obj instanceof Integer i) {
-            return io.qdrant.client.ValueFactory.value(i.longValue());
+            return Optional.of(io.qdrant.client.ValueFactory.value(i.longValue()));
         }
         if (obj instanceof Long l) {
-            return io.qdrant.client.ValueFactory.value(l);
+            return Optional.of(io.qdrant.client.ValueFactory.value(l));
         }
         if (obj instanceof Double d) {
-            return io.qdrant.client.ValueFactory.value(d);
+            return Optional.of(io.qdrant.client.ValueFactory.value(d));
         }
         if (obj instanceof Float f) {
-            return io.qdrant.client.ValueFactory.value(f.doubleValue());
+            return Optional.of(io.qdrant.client.ValueFactory.value(f.doubleValue()));
         }
         if (obj instanceof Boolean b) {
-            return io.qdrant.client.ValueFactory.value(b);
+            return Optional.of(io.qdrant.client.ValueFactory.value(b));
         }
         if (obj instanceof Number n) {
-            return io.qdrant.client.ValueFactory.value(n.doubleValue());
+            return Optional.of(io.qdrant.client.ValueFactory.value(n.doubleValue()));
         }
-        return io.qdrant.client.ValueFactory.value(String.valueOf(obj));
+        return Optional.of(io.qdrant.client.ValueFactory.value(String.valueOf(obj)));
     }
 
     private static String resolvePointId(Document doc) {

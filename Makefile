@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo update-github-repos full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -124,6 +124,31 @@ process-all: ## Process all docs into Qdrant with deduplication
 process-doc-sets: ## Process selected doc sets into Qdrant (set DOCS_SETS=...)
 	@if [ -z "$$DOCS_SETS" ]; then echo "Set DOCS_SETS=comma,separated,docsets"; exit 1; fi
 	./scripts/process_all_to_qdrant.sh --doc-sets="$$DOCS_SETS"
+
+process-github-repo: ## Ingest GitHub repo by local path or URL, or sync existing collections
+	@if [ "$$SYNC_EXISTING" = "1" ]; then \
+		if [ -n "$$REPO_CACHE_DIR" ]; then \
+			./scripts/process_github_repo.sh --sync-existing --repo-cache-dir="$$REPO_CACHE_DIR"; \
+		else \
+			./scripts/process_github_repo.sh --sync-existing; \
+		fi; \
+	elif [ -n "$$REPO_URL" ]; then \
+		if [ -n "$$REPO_CACHE_PATH" ]; then \
+			./scripts/process_github_repo.sh --repo-url="$$REPO_URL" --repo-cache-path="$$REPO_CACHE_PATH"; \
+		elif [ -n "$$REPO_CACHE_DIR" ]; then \
+			./scripts/process_github_repo.sh --repo-url="$$REPO_URL" --repo-cache-dir="$$REPO_CACHE_DIR"; \
+		else \
+			./scripts/process_github_repo.sh --repo-url="$$REPO_URL"; \
+		fi; \
+	elif [ -n "$$REPO_PATH" ]; then \
+		./scripts/process_github_repo.sh --repo-path="$$REPO_PATH"; \
+	else \
+		echo "Set REPO_PATH=/path/to/repo OR REPO_URL=https://github.com/owner/repo (optionally REPO_CACHE_PATH/REPO_CACHE_DIR) OR SYNC_EXISTING=1"; \
+		exit 1; \
+	fi
+
+update-github-repos: ## Check all GitHub repo collections for updates and re-ingest changed ones
+	./scripts/update_all_github_repos.sh
 
 full-pipeline: ## Complete pipeline: fetch docs, then process into Qdrant
 	@echo "Starting full documentation pipeline..."

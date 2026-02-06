@@ -10,15 +10,12 @@ import com.williamcallahan.javachat.service.QdrantCollectionKind;
 import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardDecision;
 import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver.IngestionProvenance;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import org.jsoup.Jsoup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +41,7 @@ public class LocalDocsFileIngestionProcessor {
     private final ProgressTracker progressTracker;
     private final IngestionProvenanceDeriver provenanceDeriver;
     private final LocalIngestionFailureFactory failureFactory;
+    private final IngestedFilePruneService ingestedFilePruneService;
 
     /**
      * Wires grouped ingestion dependencies.
@@ -53,18 +51,21 @@ public class LocalDocsFileIngestionProcessor {
      * @param progressTracker ingestion progress tracker
      * @param provenanceDeriver derives deterministic provenance tokens for routing and citations
      * @param failureFactory builds typed failures with diagnostics
+     * @param ingestedFilePruneService shared stale-file prune service
      */
     public LocalDocsFileIngestionProcessor(
             FileContentServices content,
             IngestionStorageServices storage,
             ProgressTracker progressTracker,
             IngestionProvenanceDeriver provenanceDeriver,
-            LocalIngestionFailureFactory failureFactory) {
+            LocalIngestionFailureFactory failureFactory,
+            IngestedFilePruneService ingestedFilePruneService) {
         this.content = Objects.requireNonNull(content, "content");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.progressTracker = Objects.requireNonNull(progressTracker, "progressTracker");
         this.provenanceDeriver = Objects.requireNonNull(provenanceDeriver, "provenanceDeriver");
         this.failureFactory = Objects.requireNonNull(failureFactory, "failureFactory");
+        this.ingestedFilePruneService = Objects.requireNonNull(ingestedFilePruneService, "ingestedFilePruneService");
     }
 
     /**
@@ -296,77 +297,9 @@ public class LocalDocsFileIngestionProcessor {
             String url,
             Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord)
             throws IOException {
-        var hybridVector = storage.hybridVector();
-        LocalStoreService localStore = storage.localStore();
-        hybridVector.deleteByUrl(collectionKind, url);
-        List<String> priorChunkHashes = resolveChunkHashesForPrune(url, priorIngestionRecord);
-        if (!priorChunkHashes.isEmpty()) {
-            localStore.deleteChunkIngestionMarkers(priorChunkHashes);
-        }
-        localStore.deleteParsedChunksForUrl(url);
-        localStore.deleteFileIngestionRecord(url);
-    }
-
-    private List<String> resolveChunkHashesForPrune(
-            String url, Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord) throws IOException {
-        if (priorIngestionRecord.isPresent()) {
-            List<String> hashes = priorIngestionRecord.get().chunkHashes();
-            if (hashes != null && !hashes.isEmpty()) {
-                return hashes;
-            }
-        }
-        return reconstructChunkHashesFromParsedChunks(url);
-    }
-
-    private List<String> reconstructChunkHashesFromParsedChunks(String url) throws IOException {
-        if (url == null || url.isBlank()) {
-            return List.of();
-        }
-        LocalStoreService localStore = storage.localStore();
-        Path parsedDir = localStore.getParsedDir();
-        if (parsedDir == null || !Files.isDirectory(parsedDir)) {
-            return List.of();
-        }
-
-        var hasher = storage.hasher();
-        String safeName = localStore.toSafeName(url);
-        String prefix = safeName + "_";
-        Set<String> hashes = new LinkedHashSet<>();
-
-        try (var stream = Files.newDirectoryStream(parsedDir, path -> {
-            Path fileNamePath = path.getFileName();
-            if (fileNamePath == null) {
-                return false;
-            }
-            String fileName = fileNamePath.toString();
-            return fileName.startsWith(prefix) && fileName.endsWith(".txt");
-        })) {
-            for (Path chunkPath : stream) {
-                Path fileNamePath = chunkPath.getFileName();
-                if (fileNamePath == null) {
-                    continue;
-                }
-                String fileName = fileNamePath.toString();
-                String remainder = fileName.substring(prefix.length());
-                int underscore = remainder.indexOf('_');
-                if (underscore <= 0) {
-                    continue;
-                }
-                String indexToken = remainder.substring(0, underscore);
-                int chunkIndex;
-                try {
-                    chunkIndex = Integer.parseInt(indexToken);
-                } catch (NumberFormatException nfe) {
-                    continue;
-                }
-                String chunkText = Files.readString(chunkPath, StandardCharsets.UTF_8);
-                String hash = hasher.generateChunkHash(url, chunkIndex, chunkText == null ? "" : chunkText);
-                if (!hash.isBlank()) {
-                    hashes.add(hash);
-                }
-            }
-        }
-        return List.copyOf(hashes);
+        String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
+        LocalStoreService.FileIngestionRecord previousFileRecord = priorIngestionRecord.orElse(null);
+        ingestedFilePruneService.pruneCollectionFileStrict(collectionName, url, previousFileRecord);
     }
 
     private LocalDocsFileOutcome processDocuments(

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,8 +18,10 @@ import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -27,13 +30,21 @@ import org.mockito.ArgumentCaptor;
  */
 class HybridSearchServiceTest {
 
+    private QdrantClient qdrantClient;
+    private EmbeddingClient embeddingClient;
+    private LexicalSparseVectorEncoder sparseEncoder;
+    private AppProperties appProperties;
+
+    @BeforeEach
+    void setUp() {
+        qdrantClient = mock(QdrantClient.class);
+        embeddingClient = mock(EmbeddingClient.class);
+        sparseEncoder = mock(LexicalSparseVectorEncoder.class);
+        appProperties = new AppProperties();
+    }
+
     @Test
     void appliesServerFilterToQueryAndPrefetchWithConfiguredRrfK() {
-        QdrantClient qdrantClient = org.mockito.Mockito.mock(QdrantClient.class);
-        EmbeddingClient embeddingClient = org.mockito.Mockito.mock(EmbeddingClient.class);
-        LexicalSparseVectorEncoder sparseEncoder = org.mockito.Mockito.mock(LexicalSparseVectorEncoder.class);
-        QdrantRetrievalConstraintBuilder constraintBuilder = new QdrantRetrievalConstraintBuilder();
-        AppProperties appProperties = new AppProperties();
         appProperties.getQdrant().setRrfK(77);
 
         when(embeddingClient.embed("Java 25 streams")).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
@@ -42,8 +53,7 @@ class HybridSearchServiceTest {
         when(qdrantClient.queryAsync(any(QueryPoints.class)))
                 .thenReturn(Futures.immediateFuture(List.of(scoredPoint())));
 
-        HybridSearchService hybridSearchService =
-                new HybridSearchService(qdrantClient, embeddingClient, sparseEncoder, constraintBuilder, appProperties);
+        HybridSearchService hybridSearchService = buildSearchService();
 
         RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersion("25");
         hybridSearchService.searchOutcome("Java 25 streams", 5, retrievalConstraint);
@@ -63,28 +73,10 @@ class HybridSearchServiceTest {
 
     @Test
     void throwsWhenAnyCollectionFailsInStrictMode() {
-        QdrantClient qdrantClient = org.mockito.Mockito.mock(QdrantClient.class);
-        EmbeddingClient embeddingClient = org.mockito.Mockito.mock(EmbeddingClient.class);
-        LexicalSparseVectorEncoder sparseEncoder = org.mockito.Mockito.mock(LexicalSparseVectorEncoder.class);
-        QdrantRetrievalConstraintBuilder constraintBuilder = new QdrantRetrievalConstraintBuilder();
-        AppProperties appProperties = new AppProperties();
         appProperties.getQdrant().setFailOnPartialSearchError(true);
+        stubPartialFailureQueryResponses("collections health");
 
-        when(embeddingClient.embed("collections health")).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
-        when(sparseEncoder.encode("collections health"))
-                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
-
-        AtomicInteger invocationCounter = new AtomicInteger();
-        when(qdrantClient.queryAsync(any(QueryPoints.class))).thenAnswer(unusedInvocation -> {
-            int invocationIndex = invocationCounter.getAndIncrement();
-            if (invocationIndex == 0) {
-                return Futures.immediateFailedFuture(new RuntimeException("collection unavailable"));
-            }
-            return Futures.immediateFuture(List.of(scoredPoint()));
-        });
-
-        HybridSearchService hybridSearchService =
-                new HybridSearchService(qdrantClient, embeddingClient, sparseEncoder, constraintBuilder, appProperties);
+        HybridSearchService hybridSearchService = buildSearchService();
 
         assertThrows(
                 HybridSearchPartialFailureException.class,
@@ -93,15 +85,30 @@ class HybridSearchServiceTest {
 
     @Test
     void returnsNoticesWhenCollectionFailsInNonStrictMode() {
-        QdrantClient qdrantClient = org.mockito.Mockito.mock(QdrantClient.class);
-        EmbeddingClient embeddingClient = org.mockito.Mockito.mock(EmbeddingClient.class);
-        LexicalSparseVectorEncoder sparseEncoder = org.mockito.Mockito.mock(LexicalSparseVectorEncoder.class);
-        QdrantRetrievalConstraintBuilder constraintBuilder = new QdrantRetrievalConstraintBuilder();
-        AppProperties appProperties = new AppProperties();
         appProperties.getQdrant().setFailOnPartialSearchError(false);
+        stubPartialFailureQueryResponses("collections health");
 
-        when(embeddingClient.embed("collections health")).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
-        when(sparseEncoder.encode("collections health"))
+        HybridSearchService hybridSearchService = buildSearchService();
+
+        HybridSearchService.SearchOutcome searchOutcome =
+                hybridSearchService.searchOutcome("collections health", 5, RetrievalConstraint.none());
+
+        assertFalse(searchOutcome.notices().isEmpty());
+    }
+
+    private HybridSearchService buildSearchService() {
+        return new HybridSearchService(
+                qdrantClient,
+                embeddingClient,
+                sparseEncoder,
+                new QdrantRetrievalConstraintBuilder(),
+                appProperties,
+                Optional.empty());
+    }
+
+    private void stubPartialFailureQueryResponses(String queryText) {
+        when(embeddingClient.embed(queryText)).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
+        when(sparseEncoder.encode(queryText))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
 
         AtomicInteger invocationCounter = new AtomicInteger();
@@ -112,14 +119,6 @@ class HybridSearchServiceTest {
             }
             return Futures.immediateFuture(List.of(scoredPoint()));
         });
-
-        HybridSearchService hybridSearchService =
-                new HybridSearchService(qdrantClient, embeddingClient, sparseEncoder, constraintBuilder, appProperties);
-
-        HybridSearchService.SearchOutcome searchOutcome =
-                hybridSearchService.searchOutcome("collections health", 5, RetrievalConstraint.none());
-
-        assertFalse(searchOutcome.notices().isEmpty());
     }
 
     private static ScoredPoint scoredPoint() {

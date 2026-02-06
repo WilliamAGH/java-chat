@@ -185,5 +185,14 @@ public class LexicalSparseVectorEncoder {
         public static SparseVector empty() {
             return new SparseVector(List.of(), List.of());
         }
+
+        /**
+         * Returns indices narrowed to {@code int} for Qdrant gRPC APIs that require 32-bit indices.
+         *
+         * <p>Feature-hashed token indices fit within unsigned 32-bit range, so narrowing is safe.</p>
+         */
+        public List<Integer> integerIndices() {
+            return indices.stream().map(Long::intValue).toList();
+        }
     }
 }
