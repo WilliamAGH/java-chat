@@ -133,9 +133,10 @@ final class RateLimitHeaderParser {
      * @throws IllegalArgumentException when a provided header is unparseable
      */
     Optional<Instant> parseResetInstant(Headers headers) {
-        Optional<String> resetSecondsHeader = firstHeaderValue(headers, "X-RateLimit-Reset");
-        if (resetSecondsHeader.isPresent()) {
-            return Optional.of(parseInstantSecondsFromEpoch(resetSecondsHeader.orElse("")));
+        Optional<Instant> epochResetInstant =
+                firstHeaderValue(headers, "X-RateLimit-Reset").map(this::parseInstantSecondsFromEpoch);
+        if (epochResetInstant.isPresent()) {
+            return epochResetInstant;
         }
 
         long candidateSeconds = minPositive(

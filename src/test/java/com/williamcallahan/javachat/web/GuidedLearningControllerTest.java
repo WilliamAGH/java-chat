@@ -14,6 +14,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,9 @@ class GuidedLearningControllerTest {
 
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
+
+    @MockitoBean
+    RetrievalService retrievalService;
 
     @MockitoBean
     SseSupport sseSupport;

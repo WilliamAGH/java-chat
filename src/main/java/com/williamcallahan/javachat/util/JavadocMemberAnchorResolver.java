@@ -103,9 +103,7 @@ final class JavadocMemberAnchorResolver {
             if (canonicalBuilder.length() > 0) {
                 canonicalBuilder.append(',');
             }
-            String canonicalTypeSignature =
-                    canonicalType.orElseThrow(() -> new IllegalStateException("Canonical type unexpectedly absent"));
-            canonicalBuilder.append(canonicalTypeSignature);
+            canonicalBuilder.append(canonicalType.get());
         }
         return Optional.of(canonicalBuilder.toString());
     }

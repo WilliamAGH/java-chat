@@ -1,9 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.openai.core.http.Headers;
-import java.time.Instant;
 import java.util.Objects;
-import java.util.Optional;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 /**
@@ -41,7 +39,8 @@ final class RateLimitDecisionResolver {
                 return RateLimitDecision.fromRetryAfterSeconds(retryAfterSeconds);
             }
 
-            return headerParser.parseResetInstant(headers)
+            return headerParser
+                    .parseResetInstant(headers)
                     .map(RateLimitDecision::fromResetTime)
                     .orElseThrow(() -> new RateLimitDecisionException(
                             "OpenAI rate-limit headers did not include Retry-After or reset timing"));
@@ -65,7 +64,8 @@ final class RateLimitDecisionResolver {
                 return RateLimitDecision.fromRetryAfterSeconds(retryAfterSeconds);
             }
 
-            return headerParser.parseResetHeader(webClientError.getHeaders().getFirst(RESET_HEADER))
+            return headerParser
+                    .parseResetHeader(webClientError.getHeaders().getFirst(RESET_HEADER))
                     .map(RateLimitDecision::fromResetTime)
                     .orElseThrow(() -> new RateLimitDecisionException(
                             "WebClient rate-limit headers did not include Retry-After or X-RateLimit-Reset"));
