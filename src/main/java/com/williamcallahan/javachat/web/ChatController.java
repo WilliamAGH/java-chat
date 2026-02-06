@@ -4,7 +4,6 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
-import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
@@ -23,14 +22,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 
 /**
@@ -41,17 +37,15 @@ import reactor.core.publisher.Flux;
 @PermitAll
 @PreAuthorize("permitAll()")
 public class ChatController extends BaseController {
-    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
+    private static final String SESSION_ID_REQUIRED = "Session ID is required";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SseSupport sseSupport;
-    private final RestTemplate restTemplate;
-    private final AppProperties appProperties;
 
     /**
      * Creates the chat controller wired to chat, retrieval, and streaming services.
@@ -61,9 +55,7 @@ public class ChatController extends BaseController {
      * @param openAIStreamingService streaming LLM client
      * @param retrievalService retrieval service for diagnostics
      * @param sseSupport shared SSE serialization and event support
-     * @param restTemplateBuilder builder for creating the RestTemplate
      * @param exceptionBuilder shared exception response builder
-     * @param appProperties centralized application configuration
      */
     public ChatController(
             ChatService chatService,
@@ -71,17 +63,13 @@ public class ChatController extends BaseController {
             OpenAIStreamingService openAIStreamingService,
             RetrievalService retrievalService,
             SseSupport sseSupport,
-            RestTemplateBuilder restTemplateBuilder,
-            ExceptionResponseBuilder exceptionBuilder,
-            AppProperties appProperties) {
+            ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.sseSupport = sseSupport;
-        this.restTemplate = restTemplateBuilder.build();
-        this.appProperties = appProperties;
     }
 
     /**
@@ -122,8 +110,6 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
         chatMemory.addUser(sessionId, userQuery);
-        StringBuilder fullResponse = new StringBuilder();
-        AtomicInteger chunkCount = new AtomicInteger(0);
 
         // Build structured prompt for intelligent truncation
         // Pass model hint to optimize RAG for token-constrained models
@@ -132,6 +118,8 @@ public class ChatController extends BaseController {
 
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
+            StringBuilder fullResponse = new StringBuilder();
+            AtomicInteger chunkCount = new AtomicInteger(0);
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
             // Emit citations inline at stream end - compute before streaming starts
@@ -250,7 +238,7 @@ public class ChatController extends BaseController {
     @GetMapping(value = "/export/last", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> exportLast(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest().body("Session ID is required");
+            return ResponseEntity.badRequest().body(SESSION_ID_REQUIRED);
         }
         var turns = chatMemory.getTurns(sessionId);
         for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
@@ -271,7 +259,7 @@ public class ChatController extends BaseController {
     @GetMapping(value = "/export/session", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> exportSession(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest().body("Session ID is required");
+            return ResponseEntity.badRequest().body(SESSION_ID_REQUIRED);
         }
         var turns = chatMemory.getTurns(sessionId);
         if (turns.isEmpty()) {
@@ -317,36 +305,13 @@ public class ChatController extends BaseController {
     public ResponseEntity<SessionValidationResponse> validateSession(
             @RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest()
-                    .body(new SessionValidationResponse("", 0, false, "Session ID is required"));
+            return ResponseEntity.badRequest().body(new SessionValidationResponse("", 0, false, SESSION_ID_REQUIRED));
         }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
         boolean exists = turnCount > 0;
         return ResponseEntity.ok(new SessionValidationResponse(
                 sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
-    }
-
-    /**
-     * Reports whether the configured local embedding server is reachable when the feature is enabled.
-     */
-    @GetMapping("/health/embeddings")
-    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-        String serverUrl = appProperties.getLocalEmbedding().getServerUrl();
-        if (!appProperties.getLocalEmbedding().isEnabled()) {
-            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(serverUrl));
-        }
-
-        try {
-            // Simple health check - try to get models list
-            String healthUrl = serverUrl + "/v1/models";
-            restTemplate.getForEntity(healthUrl, String.class);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(serverUrl));
-        } catch (RestClientException httpError) {
-            log.debug("Embedding server health check failed", httpError);
-            String details = describeException(httpError);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(serverUrl, "UNREACHABLE: " + details));
-        }
     }
 
     /**

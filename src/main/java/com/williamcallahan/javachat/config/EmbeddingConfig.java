@@ -28,9 +28,7 @@ public class EmbeddingConfig {
     /**
      * Creates a local embedding model when local embeddings are enabled.
      *
-     * @param localUrl local embedding server URL
-     * @param localModel local embedding model name
-     * @param dimensions embedding dimensions for local model
+     * @param appProperties application configuration
      * @param restTemplateBuilder RestTemplate builder
      * @return local embedding model
      */
@@ -38,13 +36,16 @@ public class EmbeddingConfig {
     @Primary
     @ConditionalOnMissingBean(EmbeddingClient.class)
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "true", matchIfMissing = false)
-    public EmbeddingClient localEmbeddingClient(
-            @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}") String localUrl,
-            @Value("${app.local-embedding.model:text-embedding-qwen3-embedding-8b}") String localModel,
-            @Value("${app.local-embedding.dimensions:4096}") int dimensions,
-            RestTemplateBuilder restTemplateBuilder) {
+    public EmbeddingClient localEmbeddingClient(AppProperties appProperties, RestTemplateBuilder restTemplateBuilder) {
+        LocalEmbedding localEmbedding =
+                Objects.requireNonNull(appProperties, "appProperties").getLocalEmbedding();
         log.info("[EMBEDDING] Using local embedding provider");
-        return new LocalEmbeddingClient(localUrl, localModel, dimensions, restTemplateBuilder);
+        return new LocalEmbeddingClient(
+                localEmbedding.getServerUrl(),
+                localEmbedding.getModel(),
+                localEmbedding.getDimensions(),
+                localEmbedding.getBatchSize(),
+                restTemplateBuilder);
     }
 
     /**

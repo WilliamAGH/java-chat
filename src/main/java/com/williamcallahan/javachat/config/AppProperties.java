@@ -240,6 +240,8 @@ public class AppProperties {
         private String sparseVectorName = "bm25";
         private boolean ensureCollections = true;
         private int prefetchLimit = 20;
+        private int rrfK = 60;
+        private boolean failOnPartialSearchError = true;
         private Duration queryTimeout = Duration.ofSeconds(5);
 
         public boolean isEnsurePayloadIndexes() {
@@ -328,6 +330,28 @@ public class AppProperties {
             this.prefetchLimit = prefetchLimit;
         }
 
+        /**
+         * Returns the reciprocal-rank-fusion k value used for hybrid result fusion.
+         */
+        public int getRrfK() {
+            return rrfK;
+        }
+
+        public void setRrfK(int rrfK) {
+            this.rrfK = rrfK;
+        }
+
+        /**
+         * Returns whether retrieval should fail when any collection query fails.
+         */
+        public boolean isFailOnPartialSearchError() {
+            return failOnPartialSearchError;
+        }
+
+        public void setFailOnPartialSearchError(boolean failOnPartialSearchError) {
+            this.failOnPartialSearchError = failOnPartialSearchError;
+        }
+
         Qdrant validateConfiguration() {
             if (collections == null) {
                 throw new IllegalArgumentException("app.qdrant.collections must not be null");
@@ -342,6 +366,9 @@ public class AppProperties {
             }
             if (prefetchLimit <= 0) {
                 throw new IllegalArgumentException("app.qdrant.prefetch-limit must be positive, got: " + prefetchLimit);
+            }
+            if (rrfK <= 0) {
+                throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
             }
             if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
                 throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");

@@ -6,6 +6,7 @@ import static io.qdrant.client.VectorInputFactory.vectorInput;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import io.qdrant.client.QdrantClient;
+import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.JsonWithInt.Value;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -47,10 +49,12 @@ public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
     private static final String PAYLOAD_DOC_CONTENT = "doc_content";
+    private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
 
     private final QdrantClient qdrantClient;
     private final EmbeddingClient embeddingClient;
     private final LexicalSparseVectorEncoder sparseVectorEncoder;
+    private final QdrantRetrievalConstraintBuilder qdrantRetrievalConstraintBuilder;
     private final AppProperties appProperties;
 
     /**
@@ -59,17 +63,49 @@ public class HybridSearchService {
      * @param qdrantClient Qdrant gRPC client
      * @param embeddingClient embedding client for dense query vectors
      * @param sparseVectorEncoder sparse encoder for lexical query vectors
+     * @param qdrantRetrievalConstraintBuilder builder for Qdrant payload filters
      * @param appProperties application configuration
      */
     public HybridSearchService(
             QdrantClient qdrantClient,
             EmbeddingClient embeddingClient,
             LexicalSparseVectorEncoder sparseVectorEncoder,
+            QdrantRetrievalConstraintBuilder qdrantRetrievalConstraintBuilder,
             AppProperties appProperties) {
         this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
         this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.sparseVectorEncoder = Objects.requireNonNull(sparseVectorEncoder, "sparseVectorEncoder");
+        this.qdrantRetrievalConstraintBuilder =
+                Objects.requireNonNull(qdrantRetrievalConstraintBuilder, "qdrantRetrievalConstraintBuilder");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
+    }
+
+    /**
+     * Captures one retrieval notice generated during non-strict hybrid fan-out.
+     *
+     * @param summary concise summary for UI status events
+     * @param details detailed retrieval context for diagnostics
+     */
+    public record HybridSearchNotice(String summary, String details) {
+        public HybridSearchNotice {
+            if (summary == null || summary.isBlank()) {
+                throw new IllegalArgumentException("summary cannot be null or blank");
+            }
+            details = details == null ? "" : details;
+        }
+    }
+
+    /**
+     * Captures hybrid search results and optional non-fatal notices.
+     *
+     * @param documents retrieved documents
+     * @param notices retrieval notices for non-strict partial failures
+     */
+    public record SearchOutcome(List<Document> documents, List<HybridSearchNotice> notices) {
+        public SearchOutcome {
+            documents = documents == null ? List.of() : List.copyOf(documents);
+            notices = notices == null ? List.of() : List.copyOf(notices);
+        }
     }
 
     /**
@@ -80,19 +116,35 @@ public class HybridSearchService {
      * @return documents sorted by fused score (highest first)
      */
     public List<Document> search(String query, int topK) {
+        return searchOutcome(query, topK, RetrievalConstraint.none()).documents();
+    }
+
+    /**
+     * Performs hybrid search across all configured collections and returns retrieval notices.
+     *
+     * @param query search query text
+     * @param topK maximum number of results to return
+     * @param retrievalConstraint retrieval metadata constraint for server-side filtering
+     * @return search outcome containing documents and optional non-fatal notices
+     */
+    public SearchOutcome searchOutcome(String query, int topK, RetrievalConstraint retrievalConstraint) {
         Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
         if (query.isBlank() || topK <= 0) {
-            return List.of();
+            return new SearchOutcome(List.of(), List.of());
         }
 
         float[] denseVector = embeddingClient.embed(query);
         LexicalSparseVectorEncoder.SparseVector sparseVector = sparseVectorEncoder.encode(query);
+        Optional<Filter> retrievalFilter = qdrantRetrievalConstraintBuilder.buildFilter(retrievalConstraint);
 
         List<String> collectionNames = allCollectionNames();
         String denseVectorName = appProperties.getQdrant().getDenseVectorName();
         String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
         int prefetchLimit = appProperties.getQdrant().getPrefetchLimit();
+        int rrfK = appProperties.getQdrant().getRrfK();
         Duration timeout = appProperties.getQdrant().getQueryTimeout();
+        boolean failOnPartialSearchError = appProperties.getQdrant().isFailOnPartialSearchError();
 
         List<CompletableFuture<List<ScoredPoint>>> futures = new ArrayList<>(collectionNames.size());
         for (String collection : collectionNames) {
@@ -104,43 +156,55 @@ public class HybridSearchService {
                             denseVectorName,
                             sparseVectorName,
                             prefetchLimit,
-                            topK),
+                            topK,
+                            retrievalFilter,
+                            rrfK),
                     "QueryPoints");
             CompletableFuture<List<ScoredPoint>> future = toCompletableFuture(qdrantClient.queryAsync(queryRequest));
             futures.add(future);
         }
 
         Map<String, ScoredResult> deduplicated = new LinkedHashMap<>();
+        List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures = new ArrayList<>();
         for (int i = 0; i < futures.size(); i++) {
             String collection = collectionNames.get(i);
             try {
                 List<ScoredPoint> points = futures.get(i).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-                for (ScoredPoint point : points) {
-                    String pointId = extractPointId(point);
-                    ScoredResult existing = deduplicated.get(pointId);
-                    if (existing == null || point.getScore() > existing.score()) {
-                        deduplicated.put(pointId, new ScoredResult(pointId, point.getScore(), point, collection));
-                    }
-                }
-            } catch (InterruptedException interrupted) {
+                mergePoints(points, collection, deduplicated);
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-                log.warn("[QDRANT] Search interrupted for a collection");
+                log.warn("[QDRANT] Search interrupted for collection={}", collection);
+                collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        collection, "Interrupted", "Hybrid query was interrupted"));
             } catch (ExecutionException executionException) {
                 Throwable cause = executionException.getCause();
                 String exceptionType = cause == null
                         ? executionException.getClass().getSimpleName()
                         : cause.getClass().getSimpleName();
-                log.warn("[QDRANT] Search failed for a collection (exceptionType={})", exceptionType);
-            } catch (TimeoutException timeoutException) {
-                log.warn("[QDRANT] Search timed out for a collection");
+                String failureDetails = cause == null ? executionException.getMessage() : cause.getMessage();
+                log.warn("[QDRANT] Search failed for collection={} (exceptionType={})", collection, exceptionType);
+                collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        collection, exceptionType, sanitizeFailureDetails(failureDetails)));
+            } catch (TimeoutException _) {
+                log.warn("[QDRANT] Search timed out for collection={}", collection);
+                collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        collection, "Timeout", "Hybrid query exceeded timeout " + timeout.toMillis() + "ms"));
             }
         }
 
-        return deduplicated.values().stream()
+        if (!collectionFailures.isEmpty() && failOnPartialSearchError) {
+            throw new HybridSearchPartialFailureException(
+                    "Hybrid retrieval failed for " + collectionFailures.size() + " collection(s)", collectionFailures);
+        }
+
+        List<Document> topDocuments = deduplicated.values().stream()
                 .sorted(Comparator.comparingDouble(ScoredResult::score).reversed())
                 .limit(topK)
                 .map(this::toDocument)
                 .toList();
+        List<HybridSearchNotice> retrievalNotices =
+                collectionFailures.stream().map(HybridSearchService::toNotice).toList();
+        return new SearchOutcome(topDocuments, retrievalNotices);
     }
 
     private QueryPoints buildHybridQueryRequest(
@@ -150,33 +214,47 @@ public class HybridSearchService {
             String denseVectorName,
             String sparseVectorName,
             int prefetchLimit,
-            int limit) {
+            int limit,
+            Optional<Filter> retrievalFilter,
+            int rrfK) {
 
         QueryPoints.Builder builder = QueryPoints.newBuilder()
                 .setCollectionName(collection)
                 .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
                 .setLimit(limit);
+        retrievalFilter.ifPresent(builder::setFilter);
 
-        PrefetchQuery densePrefetch = PrefetchQuery.newBuilder()
+        PrefetchQuery.Builder densePrefetchBuilder = PrefetchQuery.newBuilder()
                 .setQuery(nearest(Objects.requireNonNull(denseVector, "denseVector")))
                 .setUsing(denseVectorName)
-                .setLimit(prefetchLimit)
-                .build();
-        builder.addPrefetch(densePrefetch);
+                .setLimit(prefetchLimit);
+        retrievalFilter.ifPresent(densePrefetchBuilder::setFilter);
+        builder.addPrefetch(densePrefetchBuilder.build());
 
         if (!sparseVector.indices().isEmpty()) {
             List<Integer> intIndices =
                     sparseVector.indices().stream().map(Long::intValue).toList();
-            PrefetchQuery sparsePrefetch = PrefetchQuery.newBuilder()
+            PrefetchQuery.Builder sparsePrefetchBuilder = PrefetchQuery.newBuilder()
                     .setQuery(nearest(vectorInput(sparseVector.values(), intIndices)))
                     .setUsing(sparseVectorName)
-                    .setLimit(prefetchLimit)
-                    .build();
-            builder.addPrefetch(sparsePrefetch);
+                    .setLimit(prefetchLimit);
+            retrievalFilter.ifPresent(sparsePrefetchBuilder::setFilter);
+            builder.addPrefetch(sparsePrefetchBuilder.build());
         }
 
-        builder.setQuery(rrf(Rrf.newBuilder().build()));
+        builder.setQuery(rrf(Rrf.newBuilder().setK(rrfK).build()));
         return builder.build();
+    }
+
+    private static void mergePoints(
+            List<ScoredPoint> points, String collection, Map<String, ScoredResult> deduplicated) {
+        for (ScoredPoint point : points) {
+            String pointId = extractPointId(point);
+            ScoredResult existing = deduplicated.get(pointId);
+            if (existing == null || point.getScore() > existing.score()) {
+                deduplicated.put(pointId, new ScoredResult(pointId, point.getScore(), point, collection));
+            }
+        }
     }
 
     private List<String> allCollectionNames() {
@@ -310,6 +388,25 @@ public class HybridSearchService {
                 },
                 com.google.common.util.concurrent.MoreExecutors.directExecutor());
         return completable;
+    }
+
+    private static HybridSearchNotice toNotice(
+            HybridSearchPartialFailureException.CollectionSearchFailure collectionSearchFailure) {
+        String summary = "Partial retrieval failure in collection " + collectionSearchFailure.collectionName();
+        String details = collectionSearchFailure.failureType() + ": " + collectionSearchFailure.failureDetails();
+        return new HybridSearchNotice(summary, details);
+    }
+
+    private static String sanitizeFailureDetails(String failureDetails) {
+        if (failureDetails == null || failureDetails.isBlank()) {
+            return "";
+        }
+        String flattenedFailure =
+                failureDetails.replace('\n', ' ').replace('\r', ' ').trim();
+        if (flattenedFailure.length() <= MAX_FAILURE_DETAIL_LENGTH) {
+            return flattenedFailure;
+        }
+        return flattenedFailure.substring(0, MAX_FAILURE_DETAIL_LENGTH) + "...";
     }
 
     private record ScoredResult(String id, double score, ScoredPoint point, String collection) {}

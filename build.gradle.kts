@@ -71,6 +71,8 @@ dependencies {
 
     // Token counting
     implementation(libs.jtokkit)
+    implementation(libs.lucene.core)
+    implementation(libs.lucene.analysis.common)
 
     // Markdown processing
     implementation(libs.bundles.flexmark.all)

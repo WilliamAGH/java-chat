@@ -168,6 +168,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (embeddingEntries == null || embeddingEntries.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding values");
         }
+        if (embeddingEntries.size() != dimensionsHint) {
+            throw new EmbeddingServiceUnavailableException("Remote embedding dimension mismatch: expected "
+                    + dimensionsHint + " but received " + embeddingEntries.size());
+        }
         float[] vector = new float[embeddingEntries.size()];
         for (int vectorIndex = 0; vectorIndex < embeddingEntries.size(); vectorIndex++) {
             Float entry = embeddingEntries.get(vectorIndex);

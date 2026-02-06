@@ -10,7 +10,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -28,7 +27,6 @@ public class RetrievalService {
     private static final Logger log = LoggerFactory.getLogger(RetrievalService.class);
 
     private static final int DEBUG_FIRST_DOC_PREVIEW_LENGTH = 200;
-    private static final int DIAGNOSTIC_PREVIEW_LENGTH = 500;
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
 
     private static final String METADATA_URL = "url";
@@ -105,13 +103,18 @@ public class RetrievalService {
             return new RetrievalOutcome(List.of(), List.of());
         }
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
+        RetrievalConstraint retrievalConstraint = toRetrievalConstraint(versionFilter);
         String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
 
         int baseTopK = Math.max(1, props.getRag().getSearchTopK());
 
-        List<Document> candidates = hybridSearchService.search(boostedQuery, baseTopK);
+        HybridSearchService.SearchOutcome searchOutcome =
+                hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint);
+        List<Document> candidates = searchOutcome.documents();
 
-        List<Document> filtered = applyVersionFilterIfPresent(versionFilter, candidates);
+        List<Document> filtered = retrievalConstraint.hasServerSideConstraint()
+                ? candidates
+                : applyVersionFilterIfPresent(versionFilter, candidates);
         List<Document> uniqueByHash = dedupeByHashThenUrl(filtered);
 
         List<Document> reranked =
@@ -125,7 +128,10 @@ public class RetrievalService {
             log.info("First doc metadata size: {}", metadataSize);
             log.info("First doc content preview length: {}", previewLength);
         }
-        return new RetrievalOutcome(reranked, List.of());
+        List<RetrievalNotice> retrievalNotices = searchOutcome.notices().stream()
+                .map(searchNotice -> new RetrievalNotice(searchNotice.summary(), searchNotice.details()))
+                .toList();
+        return new RetrievalOutcome(reranked, retrievalNotices);
     }
 
     /**
@@ -140,7 +146,7 @@ public class RetrievalService {
         List<Document> truncatedDocs = docs.stream()
                 .limit(Math.max(1, maxDocs))
                 .map(doc -> truncateDocumentToTokenLimit(doc, maxTokensPerDoc))
-                .collect(Collectors.toList());
+                .toList();
         return new RetrievalOutcome(truncatedDocs, outcome.notices());
     }
 
@@ -161,8 +167,16 @@ public class RetrievalService {
                 .filter(doc -> filter.matchesMetadata(
                         stringMetadataValue(doc.getMetadata(), METADATA_URL),
                         stringMetadataValue(doc.getMetadata(), METADATA_TITLE)))
-                .collect(Collectors.toList());
+                .toList();
         return matched.isEmpty() ? docs : matched;
+    }
+
+    private static RetrievalConstraint toRetrievalConstraint(Optional<VersionFilterPatterns> versionFilter) {
+        if (versionFilter.isEmpty()) {
+            return RetrievalConstraint.none();
+        }
+        String versionNumber = versionFilter.get().versionNumber();
+        return RetrievalConstraint.forDocVersion(versionNumber);
     }
 
     private List<Document> dedupeByHashThenUrl(List<Document> docs) {

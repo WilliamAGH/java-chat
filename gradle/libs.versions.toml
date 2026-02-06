@@ -16,6 +16,7 @@ jsoup = "1.22.1"
 flexmark = "0.64.8"
 pdfbox = "3.0.6"
 jtokkit = "1.1.0"
+lucene = "9.12.1"
 
 # Performance
 fastutil = "8.5.18"
@@ -73,6 +74,8 @@ fastutil = { module = "it.unimi.dsi:fastutil", version.ref = "fastutil" }
 
 # Token counting
 jtokkit = { module = "com.knuddels:jtokkit", version.ref = "jtokkit" }
+lucene-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene" }
+lucene-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene" }
 
 # Markdown processing
 flexmark = { module = "com.vladsch.flexmark:flexmark", version.ref = "flexmark" }

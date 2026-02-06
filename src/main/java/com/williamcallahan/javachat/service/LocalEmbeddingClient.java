@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -24,6 +25,7 @@ public class LocalEmbeddingClient implements EmbeddingClient {
     private final String baseUrl;
     private final String modelName;
     private final int dimensions;
+    private final int batchSize;
     private final RestTemplate restTemplate;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
@@ -36,13 +38,18 @@ public class LocalEmbeddingClient implements EmbeddingClient {
      * @param baseUrl local embedding base URL
      * @param modelName embedding model name
      * @param dimensions embedding vector dimensions
+     * @param batchSize embedding request batch size
      * @param restTemplateBuilder RestTemplate builder
      */
     public LocalEmbeddingClient(
-            String baseUrl, String modelName, int dimensions, RestTemplateBuilder restTemplateBuilder) {
+            String baseUrl, String modelName, int dimensions, int batchSize, RestTemplateBuilder restTemplateBuilder) {
         this.baseUrl = baseUrl;
         this.modelName = modelName;
         this.dimensions = dimensions;
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException("batchSize must be positive");
+        }
+        this.batchSize = batchSize;
         this.restTemplate = restTemplateBuilder
                 .connectTimeout(java.time.Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
                 .readTimeout(java.time.Duration.ofSeconds(READ_TIMEOUT_SECONDS))
@@ -71,66 +78,120 @@ public class LocalEmbeddingClient implements EmbeddingClient {
     private List<float[]> callEmbeddingApi(List<String> texts) {
         log.debug("[EMBEDDING] Generating embeddings for request payload");
         List<float[]> embeddings = new ArrayList<>(texts.size());
-        for (String text : texts) {
-            float[] vector = fetchEmbeddingFromApi(text);
-            if (vector.length == 0) {
-                throw new EmbeddingServiceUnavailableException("Local embedding response was empty");
+        for (int startIndex = 0; startIndex < texts.size(); startIndex += batchSize) {
+            int endIndex = Math.min(startIndex + batchSize, texts.size());
+            List<String> batchInputTexts = List.copyOf(texts.subList(startIndex, endIndex));
+            List<float[]> batchEmbeddings = fetchEmbeddingsFromApi(batchInputTexts);
+            if (batchEmbeddings.size() != batchInputTexts.size()) {
+                throw new EmbeddingServiceUnavailableException(
+                        "Local embedding response size mismatch for batch starting at index " + startIndex);
             }
-            embeddings.add(vector);
+            embeddings.addAll(batchEmbeddings);
         }
         log.info("Generated {} embeddings successfully", embeddings.size());
         return List.copyOf(embeddings);
     }
 
     /**
-     * Fetches a single embedding from the API.
+     * Fetches embeddings for one batch from the API.
      *
-     * @param text input text to embed
-     * @return embedding vector
+     * @param batchInputTexts input texts for one batch
+     * @return embedding vectors matching batch input order
      * @throws EmbeddingServiceUnavailableException when the provider returns invalid data
      */
-    private float[] fetchEmbeddingFromApi(String text) {
+    private List<float[]> fetchEmbeddingsFromApi(List<String> batchInputTexts) {
+        Objects.requireNonNull(batchInputTexts, "batchInputTexts");
+        if (batchInputTexts.isEmpty()) {
+            return List.of();
+        }
         String url = baseUrl + EMBEDDINGS_PATH;
 
-        EmbeddingRequestPayload requestBody = new EmbeddingRequestPayload(modelName, text);
+        EmbeddingBatchRequestPayload requestBody = new EmbeddingBatchRequestPayload(modelName, batchInputTexts);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<EmbeddingRequestPayload> entity = new HttpEntity<>(requestBody, headers);
+        HttpEntity<EmbeddingBatchRequestPayload> entity = new HttpEntity<>(requestBody, headers);
 
-        log.debug("[EMBEDDING] Calling embedding API");
+        log.debug("[EMBEDDING] Calling embedding API batch with {} texts", batchInputTexts.size());
 
         EmbeddingResponsePayload response = restTemplate.postForObject(url, entity, EmbeddingResponsePayload.class);
 
-        return parseEmbeddingResponse(response);
+        return parseEmbeddingResponse(response, batchInputTexts.size());
     }
 
     /**
      * Parse the embedding vector from the API response.
      */
-    private float[] parseEmbeddingResponse(EmbeddingResponsePayload response) {
+    private List<float[]> parseEmbeddingResponse(EmbeddingResponsePayload response, int expectedCount) {
         if (response == null || response.data() == null) {
             throw new IllegalStateException("Local embedding response was null");
         }
 
-        List<EmbeddingData> dataList = response.data();
-        if (dataList.isEmpty()) {
+        List<EmbeddingVectorData> embeddingEntries = response.data();
+        if (embeddingEntries.isEmpty()) {
             throw new IllegalStateException("Local embedding response missing embedding entries");
         }
 
-        EmbeddingData first = dataList.get(0);
-        if (first == null || first.embedding() == null || first.embedding().isEmpty()) {
-            throw new IllegalStateException("Local embedding response missing embedding payload");
+        List<float[]> embeddingsByIndex = new ArrayList<>(expectedCount);
+        for (int slotIndex = 0; slotIndex < expectedCount; slotIndex++) {
+            embeddingsByIndex.add(null);
         }
 
-        List<Double> embeddingList = first.embedding();
-        float[] vector = new float[embeddingList.size()];
-        for (int i = 0; i < embeddingList.size(); i++) {
-            vector[i] = embeddingList.get(i).floatValue();
+        for (int entryIndex = 0; entryIndex < embeddingEntries.size(); entryIndex++) {
+            EmbeddingVectorData embeddingEntry = embeddingEntries.get(entryIndex);
+            if (embeddingEntry == null) {
+                throw new IllegalStateException("Local embedding response contained null entry at index " + entryIndex);
+            }
+            int targetIndex = resolveTargetIndex(entryIndex, embeddingEntry.index(), expectedCount);
+            if (embeddingsByIndex.get(targetIndex) != null) {
+                throw new IllegalStateException("Local embedding response contained duplicate index " + targetIndex);
+            }
+            float[] embeddingVector = toEmbeddingVector(embeddingEntry.embedding(), targetIndex);
+            embeddingsByIndex.set(targetIndex, embeddingVector);
         }
 
-        log.debug("Retrieved embedding vector of dimension: {}", vector.length);
-        return vector;
+        List<float[]> orderedEmbeddings = new ArrayList<>(expectedCount);
+        for (int expectedIndex = 0; expectedIndex < expectedCount; expectedIndex++) {
+            float[] embeddingVector = embeddingsByIndex.get(expectedIndex);
+            if (embeddingVector == null) {
+                throw new IllegalStateException(
+                        "Local embedding response missing embedding for index " + expectedIndex);
+            }
+            orderedEmbeddings.add(embeddingVector);
+        }
+        return List.copyOf(orderedEmbeddings);
+    }
+
+    private int resolveTargetIndex(int fallbackIndex, Integer declaredIndex, int expectedCount) {
+        int targetIndex = declaredIndex == null ? fallbackIndex : declaredIndex;
+        if (targetIndex < 0 || targetIndex >= expectedCount) {
+            throw new IllegalStateException("Local embedding response index out of bounds: " + targetIndex
+                    + " (expectedCount=" + expectedCount + ")");
+        }
+        return targetIndex;
+    }
+
+    private float[] toEmbeddingVector(List<Double> embeddingValues, int embeddingIndex) {
+        if (embeddingValues == null || embeddingValues.isEmpty()) {
+            throw new IllegalStateException(
+                    "Local embedding response missing embedding payload for index " + embeddingIndex);
+        }
+        if (embeddingValues.size() != dimensions) {
+            throw new EmbeddingServiceUnavailableException("Local embedding dimension mismatch at index "
+                    + embeddingIndex + ": expected " + dimensions + " but received " + embeddingValues.size());
+        }
+
+        float[] embeddingVector = new float[embeddingValues.size()];
+        for (int valueIndex = 0; valueIndex < embeddingValues.size(); valueIndex++) {
+            Double embeddingValue = embeddingValues.get(valueIndex);
+            if (embeddingValue == null) {
+                throw new IllegalStateException("Local embedding value was null at index " + valueIndex);
+            }
+            embeddingVector[valueIndex] = embeddingValue.floatValue();
+        }
+
+        log.debug("Retrieved embedding vector of dimension: {}", embeddingVector.length);
+        return embeddingVector;
     }
 
     /**
@@ -146,9 +207,11 @@ public class LocalEmbeddingClient implements EmbeddingClient {
     private static String formatHttpFailure(org.springframework.web.client.RestClientResponseException exception) {
         String payload = sanitizeMessage(exception.getResponseBodyAsString());
         if (!payload.isBlank()) {
-            return "Local embedding server returned HTTP " + exception.getRawStatusCode() + ": " + payload;
+            return "Local embedding server returned HTTP "
+                    + exception.getStatusCode().value() + ": " + payload;
         }
-        return "Local embedding server returned HTTP " + exception.getRawStatusCode();
+        return "Local embedding server returned HTTP "
+                + exception.getStatusCode().value();
     }
 
     private static String sanitizeMessage(String message) {
@@ -162,9 +225,9 @@ public class LocalEmbeddingClient implements EmbeddingClient {
         return sanitized;
     }
 
-    private record EmbeddingRequestPayload(String model, String input) {}
+    private record EmbeddingBatchRequestPayload(String model, List<String> input) {}
 
-    private record EmbeddingResponsePayload(List<EmbeddingData> data) {}
+    private record EmbeddingResponsePayload(List<EmbeddingVectorData> data) {}
 
-    private record EmbeddingData(List<Double> embedding) {}
+    private record EmbeddingVectorData(Integer index, List<Double> embedding) {}
 }

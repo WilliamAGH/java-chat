@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -9,6 +10,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.springframework.stereotype.Service;
 
 /**
@@ -23,6 +27,7 @@ public class LexicalSparseVectorEncoder {
 
     private static final int MIN_TOKEN_LENGTH = 2;
     private static final int MAX_UNIQUE_TOKENS = 256;
+    private static final String TOKEN_STREAM_FIELD = "retrieval_text";
 
     /**
      * Encodes the provided text into a sparse vector representation.
@@ -37,16 +42,7 @@ public class LexicalSparseVectorEncoder {
         }
 
         Map<Long, Integer> countsByIndex = new HashMap<>();
-        StringBuilder token = new StringBuilder();
-        for (int i = 0; i < normalized.length(); i++) {
-            char ch = normalized.charAt(i);
-            if (Character.isLetterOrDigit(ch)) {
-                token.append(ch);
-                continue;
-            }
-            flushToken(token, countsByIndex);
-        }
-        flushToken(token, countsByIndex);
+        accumulateTokenCounts(normalized, countsByIndex);
 
         if (countsByIndex.isEmpty()) {
             return SparseVector.empty();
@@ -80,17 +76,25 @@ public class LexicalSparseVectorEncoder {
         return new SparseVector(indices, values);
     }
 
-    private void flushToken(StringBuilder token, Map<Long, Integer> countsByIndex) {
-        if (token.isEmpty()) {
-            return;
+    private void accumulateTokenCounts(String normalizedText, Map<Long, Integer> countsByIndex) {
+        Objects.requireNonNull(normalizedText, "normalizedText");
+        Objects.requireNonNull(countsByIndex, "countsByIndex");
+        try (StandardAnalyzer standardAnalyzer = new StandardAnalyzer();
+                TokenStream tokenStream = standardAnalyzer.tokenStream(TOKEN_STREAM_FIELD, normalizedText)) {
+            CharTermAttribute termAttribute = tokenStream.addAttribute(CharTermAttribute.class);
+            tokenStream.reset();
+            while (tokenStream.incrementToken()) {
+                String lexicalToken = termAttribute.toString();
+                if (lexicalToken.length() < MIN_TOKEN_LENGTH) {
+                    continue;
+                }
+                long tokenIndex = unsigned32ToLong(murmurHash32(lexicalToken));
+                countsByIndex.merge(tokenIndex, 1, Integer::sum);
+            }
+            tokenStream.end();
+        } catch (IOException ioException) {
+            throw new IllegalStateException("Failed to tokenize text for sparse vector encoding", ioException);
         }
-        String rawToken = token.toString();
-        token.setLength(0);
-        if (rawToken.length() < MIN_TOKEN_LENGTH) {
-            return;
-        }
-        long index = unsigned32ToLong(murmur3_32(rawToken));
-        countsByIndex.merge(index, 1, Integer::sum);
     }
 
     private static String normalize(String text) {
@@ -110,7 +114,7 @@ public class LexicalSparseVectorEncoder {
      *
      * <p>This is intentionally self-contained to avoid introducing additional hashing dependencies.</p>
      */
-    private static int murmur3_32(String token) {
+    private static int murmurHash32(String token) {
         Objects.requireNonNull(token, "token");
         byte[] data = token.getBytes(StandardCharsets.UTF_8);
 
