@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 DOCS_ROOT="$PROJECT_ROOT/data/docs"
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
+PID_FILE="$PROJECT_ROOT/process_qdrant.pid"
 DOCS_SETS_FILTER=""
 
 for arg in "$@"; do
@@ -98,7 +99,7 @@ check_embedding_server() {
         log "${YELLOW}Checking local embedding server...${NC}"
         local url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
         local response
-        response=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+        response=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" "$url" || echo "000")
         if [ "$response" = "200" ]; then
             log "${GREEN}Local embedding server is healthy${NC}"
             return 0
@@ -117,6 +118,7 @@ cleanup() {
     if [ -n "${APP_PID:-}" ] && kill -0 "$APP_PID" 2>/dev/null; then
         kill -TERM "$APP_PID" 2>/dev/null || true
     fi
+    rm -f "$PID_FILE"
     exit 0
 }
 
@@ -174,10 +176,14 @@ if ! check_embedding_server; then
     exit 1
 fi
 
-if pgrep -f "java.*java-chat" > /dev/null; then
-    log "${YELLOW}Stopping existing java-chat process...${NC}"
-    pkill -f "java.*java-chat" || true
-    sleep 2
+if [ -f "$PID_FILE" ]; then
+    existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+        log "${YELLOW}Stopping previous document processor (PID: $existing_pid)...${NC}"
+        kill -TERM "$existing_pid" 2>/dev/null || true
+        sleep 2
+    fi
+    rm -f "$PID_FILE"
 fi
 
 log "${YELLOW}Building application...${NC}"
@@ -203,11 +209,14 @@ java -Dspring.profiles.active=cli \
      -DDOCS_DIR="$DOCS_ROOT" \
      -jar "$app_jar" >> "$LOG_FILE" 2>&1 &
 APP_PID=$!
+echo "$APP_PID" > "$PID_FILE"
 
 log "${BLUE}Application started with PID: $APP_PID${NC}"
 
 start_time=$(date +%s)
 last_files=0
+files_count=0
+elapsed=0
 while true; do
     if grep -q "DOCUMENT PROCESSING COMPLETE" "$LOG_FILE" 2>/dev/null; then
         echo ""
@@ -218,6 +227,7 @@ while true; do
     if ! kill -0 "$APP_PID" 2>/dev/null; then
         echo ""
         log "${RED}Application terminated unexpectedly${NC}"
+        rm -f "$PID_FILE"
         exit 1
     fi
 
@@ -236,5 +246,6 @@ while true; do
 done
 
 echo ""
+rm -f "$PID_FILE"
 log "${GREEN}Pipeline completed successfully${NC} ($(corpus_indexed_summary))"
 log "Log file: $LOG_FILE"
