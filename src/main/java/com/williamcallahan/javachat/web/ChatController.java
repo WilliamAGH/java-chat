@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
@@ -123,26 +124,12 @@ public class ChatController extends BaseController {
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
             // Emit citations inline at stream end - compute before streaming starts
-            // Citation conversion errors are surfaced to UI via status event, not silently swallowed
-            List<Citation> citations;
-            String citationWarning;
-            try {
-                citations = retrievalService.toCitations(promptOutcome.documents());
-                citationWarning = null;
-            } catch (RuntimeException citationFailure) {
-                if (!isRecoverableCitationConversionFailure(citationFailure)) {
-                    throw citationFailure;
-                }
-                PIPELINE_LOG.warn(
-                        "[{}] Citation conversion failed (exceptionType={}, exceptionMessage={})",
-                        requestToken,
-                        citationFailure.getClass().getSimpleName(),
-                        compactExceptionMessage(citationFailure));
-                citations = List.of();
-                citationWarning = "Citation retrieval failed - sources unavailable for this response";
-            }
-            final List<Citation> finalCitations = citations;
-            final String finalCitationWarning = citationWarning;
+            // Citation conversion failures are surfaced to UI via status event
+            RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(promptOutcome.documents());
+            final List<Citation> finalCitations = citationOutcome.citations();
+            final String finalCitationWarning = citationOutcome.failedConversionCount() > 0
+                    ? "Some citations could not be loaded (" + citationOutcome.failedConversionCount() + " failed)"
+                    : null;
 
             // Stream with provider transparency - surfaces which LLM is responding
             return openAIStreamingService
@@ -164,10 +151,11 @@ public class ChatController extends BaseController {
                         // Combine retrieval notices with citation warning if present
                         Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                                 .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-                        if (finalCitationWarning != null) {
-                            statusEvents = statusEvents.concatWith(Flux.just(
-                                    sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded")));
-                        }
+                        statusEvents =
+                                statusEvents.concatWith(sseSupport.citationWarningStatusFlux(finalCitationWarning));
+
+                        Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                sseSupport.streamingNoticeEvents(streamingResult.notices());
 
                         // Wrap chunks in JSON to preserve whitespace
                         Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
@@ -178,7 +166,7 @@ public class ChatController extends BaseController {
                         return Flux.concat(
                                 Flux.just(providerEvent),
                                 statusEvents,
-                                Flux.merge(dataEvents, heartbeats),
+                                Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
                                 citationEvent);
                     })
                     .doOnComplete(() -> {
@@ -186,7 +174,6 @@ public class ChatController extends BaseController {
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                     })
                     .onErrorResume(error -> {
-                        // Log and send error event to client - errors must be communicated, not silently dropped
                         String errorDetail = buildUserFacingErrorMessage(error);
                         String diagnostics =
                                 error instanceof Exception exception ? describeException(exception) : error.toString();
@@ -196,7 +183,8 @@ public class ChatController extends BaseController {
                                 sessionId,
                                 error.getClass().getSimpleName(),
                                 error);
-                        return sseSupport.sseError(errorDetail, diagnostics);
+                        boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                        return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
                     });
 
         } else {
@@ -216,7 +204,8 @@ public class ChatController extends BaseController {
         RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
                 query, ModelConfiguration.RAG_LIMIT_CONSTRAINED, ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations = retrievalService.toCitations(outcome.documents());
+        List<Citation> citations =
+                retrievalService.toCitations(outcome.documents()).citations();
         if (outcome.notices().isEmpty()) {
             return RetrievalDiagnosticsResponse.success(citations);
         }
@@ -256,7 +245,7 @@ public class ChatController extends BaseController {
                 return ResponseEntity.ok(turn.getText());
             }
         }
-        return ResponseEntity.status(404).body("No assistant message found in session: " + sessionId);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("No assistant message found in session: " + sessionId);
     }
 
     /**
@@ -272,7 +261,7 @@ public class ChatController extends BaseController {
         }
         var turns = chatMemory.getTurns(sessionId);
         if (turns.isEmpty()) {
-            return ResponseEntity.status(404).body("No history found for session: " + sessionId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("No history found for session: " + sessionId);
         }
         StringBuilder formatted = new StringBuilder();
         for (var turn : turns) {
@@ -355,22 +344,5 @@ public class ChatController extends BaseController {
 
         // Default: include exception type for debugging
         return "Streaming error: " + error.getClass().getSimpleName();
-    }
-
-    private boolean isRecoverableCitationConversionFailure(RuntimeException citationFailure) {
-        return citationFailure instanceof IllegalStateException
-                || citationFailure instanceof IllegalArgumentException
-                || citationFailure instanceof IndexOutOfBoundsException;
-    }
-
-    private String compactExceptionMessage(RuntimeException runtimeFailure) {
-        if (runtimeFailure.getMessage() == null || runtimeFailure.getMessage().isBlank()) {
-            return "(no exception message)";
-        }
-        String exceptionMessage = runtimeFailure.getMessage().replace('\n', ' ');
-        if (exceptionMessage.length() <= 200) {
-            return exceptionMessage;
-        }
-        return exceptionMessage.substring(0, 200) + "...";
     }
 }

@@ -26,6 +26,24 @@ public final class SseConstants {
     /** SSE event type for provider metadata (which LLM provider is responding). */
     public static final String EVENT_PROVIDER = "provider";
 
+    /** Stable status code emitted when backend switches providers before first streamed token. */
+    public static final String STATUS_CODE_STREAM_PROVIDER_FALLBACK = "stream.provider.fallback";
+
+    /** Stable status/error code emitted for recoverable stream-provider failures. */
+    public static final String STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR = "stream.provider.retryable-error";
+
+    /** Stable status/error code emitted for non-recoverable stream-provider failures. */
+    public static final String STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR = "stream.provider.fatal-error";
+
+    /** Stable status code emitted when citations partially fail but response streaming continues. */
+    public static final String STATUS_CODE_CITATION_PARTIAL_FAILURE = "citation.partial-failure";
+
+    /** Processing stage label for stream-provider diagnostics. */
+    public static final String STATUS_STAGE_STREAM = "stream";
+
+    /** Processing stage label for citation diagnostics. */
+    public static final String STATUS_STAGE_CITATION = "citation";
+
     /** SSE comment content for keepalive heartbeats. */
     public static final String COMMENT_KEEPALIVE = "keepalive";
 

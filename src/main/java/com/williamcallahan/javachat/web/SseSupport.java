@@ -5,6 +5,7 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
@@ -114,11 +115,20 @@ public class SseSupport {
      * @return Flux emitting a single error event
      */
     public Flux<ServerSentEvent<String>> sseError(String message, String details) {
+        return sseError(SseEventPayload.builder(message).details(details).build());
+    }
+
+    /**
+     * Creates a Flux containing a single SSE error event with typed diagnostic metadata.
+     * Uses a localized fallback when error serialization itself fails, since this is the
+     * terminal error path with nowhere further to propagate.
+     */
+    public Flux<ServerSentEvent<String>> sseError(SseEventPayload payload) {
         String json;
         try {
-            json = jsonWriter.writeValueAsString(new ErrorPayload(message, details));
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE error payload", e);
+            json = jsonWriter.writeValueAsString(payload);
+        } catch (JsonProcessingException serializationFailure) {
+            log.error("Failed to serialize SSE error payload", serializationFailure);
             json = ERROR_FALLBACK_JSON;
         }
         return Flux.just(
@@ -134,13 +144,15 @@ public class SseSupport {
      * @return Flux emitting a single status event
      */
     public Flux<ServerSentEvent<String>> sseStatus(String message, String details) {
-        String json;
-        try {
-            json = jsonWriter.writeValueAsString(new StatusPayload(message, details));
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize SSE status payload", e);
-            json = ERROR_FALLBACK_JSON;
-        }
+        return sseStatus(SseEventPayload.builder(message).details(details).build());
+    }
+
+    /**
+     * Creates a Flux containing a single SSE status event with typed diagnostic metadata.
+     * Serialization failures propagate as exceptions — callers handle via onErrorResume.
+     */
+    public Flux<ServerSentEvent<String>> sseStatus(SseEventPayload payload) {
+        String json = jsonSerialize(payload);
         return Flux.just(
                 ServerSentEvent.<String>builder().event(EVENT_STATUS).data(json).build());
     }
@@ -204,9 +216,16 @@ public class SseSupport {
      * @return ServerSentEvent with status payload
      */
     public ServerSentEvent<String> statusEvent(String summary, String details) {
+        return statusEvent(SseEventPayload.builder(summary).details(details).build());
+    }
+
+    /**
+     * Creates a status event with typed diagnostic metadata.
+     */
+    public ServerSentEvent<String> statusEvent(SseEventPayload payload) {
         return ServerSentEvent.<String>builder()
                 .event(EVENT_STATUS)
-                .data(jsonSerialize(new StatusPayload(summary, details)))
+                .data(jsonSerialize(payload))
                 .build();
     }
 
@@ -237,14 +256,141 @@ public class SseSupport {
                 .build();
     }
 
+    /**
+     * Maps runtime streaming notices from the LLM provider into SSE status events.
+     *
+     * @param notices flux of streaming notices from the provider
+     * @return flux of ServerSentEvents with structured status payloads
+     */
+    public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<OpenAIStreamingService.StreamingNotice> notices) {
+        return notices.map(notice -> statusEvent(SseEventPayload.builder(notice.message())
+                .details(notice.details())
+                .code(notice.code())
+                .retryable(notice.retryable())
+                .provider(notice.provider())
+                .stage(notice.stage())
+                .attempt(notice.attempt())
+                .maxAttempts(notice.maxAttempts())
+                .build()));
+    }
+
+    /**
+     * Creates a citation-partial-failure status event flux if a warning message is present.
+     *
+     * @param citationWarning user-facing warning message, or null if no warning
+     * @return flux with a single status event, or empty if no warning
+     */
+    public Flux<ServerSentEvent<String>> citationWarningStatusFlux(String citationWarning) {
+        if (citationWarning == null) {
+            return Flux.empty();
+        }
+        return Flux.just(statusEvent(SseEventPayload.builder(citationWarning)
+                .details("Citations could not be loaded")
+                .code(STATUS_CODE_CITATION_PARTIAL_FAILURE)
+                .retryable(false)
+                .stage(STATUS_STAGE_CITATION)
+                .build()));
+    }
+
+    /**
+     * Creates a single-event error flux for SSE stream error resume handlers.
+     *
+     * @param userFacingMessage user-facing error description
+     * @param diagnosticDetails diagnostic details for debugging
+     * @param retryable whether the client should retry
+     * @return flux emitting a single error SSE event
+     */
+    public Flux<ServerSentEvent<String>> streamErrorEvent(
+            String userFacingMessage, String diagnosticDetails, boolean retryable) {
+        String statusCode =
+                retryable ? STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR : STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR;
+        return sseError(SseEventPayload.builder(userFacingMessage)
+                .details(diagnosticDetails)
+                .code(statusCode)
+                .retryable(retryable)
+                .stage(STATUS_STAGE_STREAM)
+                .build());
+    }
+
     /** Payload record for text chunks - preserves whitespace in JSON. */
     public record ChunkPayload(String text) {}
 
-    /** Payload record for status messages. */
-    public record StatusPayload(String message, String details) {}
+    /**
+     * Payload record for status and error SSE events.
+     * Event-type distinction is handled by the SSE event type string, not by the payload record.
+     * Use {@link #builder(String)} to construct — avoids 8-param positional calls with null padding.
+     */
+    public record SseEventPayload(
+            String message,
+            String details,
+            String code,
+            Boolean retryable,
+            String provider,
+            String stage,
+            Integer attempt,
+            Integer maxAttempts) {
 
-    /** Payload record for error messages. */
-    public record ErrorPayload(String message, String details) {}
+        /** Creates a builder with the required message field. */
+        public static Builder builder(String message) {
+            return new Builder(message);
+        }
+
+        /** Fluent builder that lets callers set only the fields they need. */
+        public static final class Builder {
+            private final String message;
+            private String details;
+            private String code;
+            private Boolean retryable;
+            private String provider;
+            private String stage;
+            private Integer attempt;
+            private Integer maxAttempts;
+
+            private Builder(String message) {
+                this.message = message;
+            }
+
+            public Builder details(String details) {
+                this.details = details;
+                return this;
+            }
+
+            public Builder code(String code) {
+                this.code = code;
+                return this;
+            }
+
+            public Builder retryable(Boolean retryable) {
+                this.retryable = retryable;
+                return this;
+            }
+
+            public Builder provider(String provider) {
+                this.provider = provider;
+                return this;
+            }
+
+            public Builder stage(String stage) {
+                this.stage = stage;
+                return this;
+            }
+
+            public Builder attempt(Integer attempt) {
+                this.attempt = attempt;
+                return this;
+            }
+
+            public Builder maxAttempts(Integer maxAttempts) {
+                this.maxAttempts = maxAttempts;
+                return this;
+            }
+
+            /** Builds the immutable payload record. */
+            public SseEventPayload build() {
+                return new SseEventPayload(message, details, code, retryable, provider, stage, attempt, maxAttempts);
+            }
+        }
+    }
 
     /** Payload record for provider metadata. */
     public record ProviderPayload(String provider) {}

@@ -10,6 +10,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
@@ -37,6 +38,7 @@ public class GuidedLearningController extends BaseController {
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
 
     private final GuidedLearningService guidedService;
+    private final RetrievalService retrievalService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final MarkdownService markdownService;
@@ -47,6 +49,7 @@ public class GuidedLearningController extends BaseController {
      */
     public GuidedLearningController(
             GuidedLearningService guidedService,
+            RetrievalService retrievalService,
             ChatMemoryService chatMemory,
             OpenAIStreamingService openAIStreamingService,
             ExceptionResponseBuilder exceptionBuilder,
@@ -54,6 +57,7 @@ public class GuidedLearningController extends BaseController {
             SseSupport sseSupport) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
+        this.retrievalService = retrievalService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
@@ -219,24 +223,22 @@ public class GuidedLearningController extends BaseController {
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-        // Compute citations before streaming starts - errors surfaced to UI, not silently swallowed
-        List<Citation> citations;
+        // Compute citations before streaming starts - page-anchor failures surfaced to UI via status event
+        List<Citation> computedCitations;
         String citationWarning;
         try {
-            citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+            computedCitations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
             citationWarning = null;
-        } catch (RuntimeException citationFailure) {
-            if (!isRecoverableCitationConversionFailure(citationFailure)) {
-                throw citationFailure;
-            }
+        } catch (RuntimeException citationEnhancementFailure) {
             log.warn(
-                    "Citation conversion failed for guided lesson (exceptionType={}, exceptionMessage={})",
-                    citationFailure.getClass().getSimpleName(),
-                    compactExceptionMessage(citationFailure));
-            citations = List.of();
-            citationWarning = "Citation retrieval failed - sources unavailable for this response";
+                    "PDF page-anchor enhancement failed; returning base citations (exceptionType={})",
+                    citationEnhancementFailure.getClass().getSimpleName());
+            computedCitations = retrievalService
+                    .toCitations(promptOutcome.bookContextDocuments())
+                    .citations();
+            citationWarning = "Page anchors unavailable for some citations";
         }
-        final List<Citation> finalCitations = citations;
+        final List<Citation> finalCitations = computedCitations;
         final String finalCitationWarning = citationWarning;
 
         // Stream with provider transparency - surfaces which LLM is responding
@@ -254,26 +256,30 @@ public class GuidedLearningController extends BaseController {
                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
                     Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(finalCitations));
 
-                    // Include citation warning in stream if citations failed
-                    Flux<ServerSentEvent<String>> statusEvents = finalCitationWarning != null
-                            ? Flux.just(sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded"))
-                            : Flux.empty();
+                    Flux<ServerSentEvent<String>> statusEvents =
+                            sseSupport.citationWarningStatusFlux(finalCitationWarning);
+                    Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                            sseSupport.streamingNoticeEvents(streamingResult.notices());
 
                     return Flux.concat(
-                            Flux.just(providerEvent), statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent);
+                            Flux.just(providerEvent),
+                            statusEvents,
+                            Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                            citationEvent);
                 })
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
-                    String errorType = error.getClass().getSimpleName();
                     log.error(
                             "Guided streaming error (sessionId={}, lessonSlug={}, exceptionType={})",
                             sessionId,
                             lessonSlug,
-                            errorType,
+                            error.getClass().getSimpleName(),
                             error);
-                    return sseSupport.sseError(
-                            "Streaming error: " + errorType,
-                            "The response stream encountered an error. Please try again.");
+                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                    return sseSupport.streamErrorEvent(
+                            "Streaming error: " + error.getClass().getSimpleName(),
+                            "The response stream encountered an error. Please try again.",
+                            retryable);
                 });
     }
 
@@ -286,22 +292,5 @@ public class GuidedLearningController extends BaseController {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);
-    }
-
-    private boolean isRecoverableCitationConversionFailure(RuntimeException citationFailure) {
-        return citationFailure instanceof IllegalStateException
-                || citationFailure instanceof IllegalArgumentException
-                || citationFailure instanceof IndexOutOfBoundsException;
-    }
-
-    private String compactExceptionMessage(RuntimeException runtimeFailure) {
-        if (runtimeFailure.getMessage() == null || runtimeFailure.getMessage().isBlank()) {
-            return "(no exception message)";
-        }
-        String exceptionMessage = runtimeFailure.getMessage().replace('\n', ' ');
-        if (exceptionMessage.length() <= 200) {
-            return exceptionMessage;
-        }
-        return exceptionMessage.substring(0, 200) + "...";
     }
 }

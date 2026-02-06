@@ -10,6 +10,7 @@ import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
+import reactor.core.Exceptions;
 
 /**
  * Verifies primary-provider backoff classification for OpenAI streaming failures.
@@ -57,6 +58,27 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService service = createService();
         boolean backoffEligible = invokeShouldBackoffPrimary(service, new IllegalArgumentException("no"));
         assertFalse(backoffEligible);
+    }
+
+    @Test
+    void recoverableStreamingFailureTreatsOverflowAsRetryable() {
+        OpenAIStreamingService service = createService();
+        boolean retryable = service.isRecoverableStreamingFailure(new RuntimeException("OverflowException in stream"));
+        assertTrue(retryable);
+    }
+
+    @Test
+    void recoverableStreamingFailureTreatsReactorOverflowTypeAsRetryable() {
+        OpenAIStreamingService service = createService();
+        boolean retryable = service.isRecoverableStreamingFailure(Exceptions.failWithOverflow());
+        assertTrue(retryable);
+    }
+
+    @Test
+    void recoverableStreamingFailureTreatsValidationErrorsAsNonRetryable() {
+        OpenAIStreamingService service = createService();
+        boolean retryable = service.isRecoverableStreamingFailure(new IllegalArgumentException("bad request payload"));
+        assertFalse(retryable);
     }
 
     private boolean invokeShouldBackoffPrimary(OpenAIStreamingService service, Throwable throwable)
