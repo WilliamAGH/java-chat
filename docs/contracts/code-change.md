@@ -6,12 +6,12 @@ description: "Evergreen contract for change decisions (new file vs edit), reposi
 
 # Code Change Policy Contract
 
-See `AGENTS.md` ([FS1a-k], [MO1a-g], [AR1a-f], [ND1a-c], [CC1a-d]).
+See `AGENTS.md` ([FS1a-k], [FS1l], [AR1a-f], [ND1a-c], [CC1a-d], [AB1a-d], [RC1a-f], [CS1a-h]).
 
 ## Non-negotiables (applies to every change)
 
-- **SRP/DDD only**: each new type/method has one reason to change ([MO1d], [CC1a]).
-- **New feature → new file**; do not grow monoliths ([MO1b], [FS1b]).
+- **SRP/DDD only**: each new type/method has one reason to change ([CC1a]).
+- **New feature → new file**; do not grow monoliths ([FS1b]).
 - **No edits to >500 LOC files**; first split/retrofit ([FS1f]).
 - **Domain is framework-free**; dependencies point inward ([CC1d]).
 - **No DTOs in domain**; domain records/interfaces are the API response types.
@@ -23,17 +23,17 @@ Use this as a hard rule, not a suggestion.
 
 | Situation | MUST do | MUST NOT do |
 | --------- | ------- | ----------- |
-| New user-facing behavior (new endpoint, new domain capability) | Add a new, narrowly scoped type in the correct layer/package ([MO1b], [AR1a]) | “Just add a method” to an unrelated class ([MO1a], [MO1d]) |
+| New user-facing behavior (new endpoint, new domain capability) | Add a new, narrowly scoped type in the correct layer/package ([FS1b], [AR1a]) | “Just add a method” to an unrelated class ([CC1a], [AB1c]) |
 | Bug fix (existing behavior wrong) | Edit the smallest correct owner; add/adjust tests to lock behavior ([RC1c]) | Create a parallel/shadow implementation ([RC1a]) |
-| Logic change in stable code | Extract/replace via composition; keep stable code stable ([MO1g]) | Add flags, shims, or “compat” paths to hide uncertainty ([RC1b]) |
-| Touching a large/overloaded file | Extract at least one seam (new type + typed contract) ([FS1f], [MO1b]) | Grow the file further ([MO1a]) |
+| Logic change in stable code | Extract/replace via composition; keep stable code stable ([AB1c], [CC1a]) | Add flags, shims, or “compat” paths to hide uncertainty ([RC1b]) |
+| Touching a large/overloaded file | Extract at least one seam (new type + typed contract) ([FS1f], [FS1b]) | Grow the file further ([FS1f]) |
 | Reuse needed across features | Add a domain value object / explicit port / explicit service with intent-revealing name ([AB1b]) | Add `*Utils/*Helper/*Common/*Base*` grab bags ([FS1e]) |
 
 ### When adding a method is allowed
 
 Adding to an existing type is allowed only when all are true:
 
-- It is the **same responsibility** as the type’s existing purpose ([MO1d]).
+- It is the **same responsibility** as the type’s existing purpose ([CC1a]).
 - The method’s inputs belong together (avoid data clumps/long parameter lists; extract a parameter record when needed) ([CS1b], [CS1c]).
 - The method does not pull in a new dependency direction (dependencies still point inward) ([CC1d]).
 
