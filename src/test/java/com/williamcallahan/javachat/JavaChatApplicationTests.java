@@ -1,9 +1,9 @@
 package com.williamcallahan.javachat;
 
+import com.williamcallahan.javachat.service.EmbeddingClient;
 import io.qdrant.client.QdrantClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -24,7 +24,7 @@ class JavaChatApplicationTests {
     ChatModel chatModel;
 
     @MockitoBean
-    EmbeddingModel embeddingModel;
+    EmbeddingClient embeddingClient;
 
     @MockitoBean
     QdrantClient qdrantClient;

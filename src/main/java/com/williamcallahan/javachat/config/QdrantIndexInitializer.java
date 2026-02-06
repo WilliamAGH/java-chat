@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.williamcallahan.javachat.service.EmbeddingClient;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,7 +12,6 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -70,16 +70,24 @@ public class QdrantIndexInitializer {
 
     private final AppProperties appProperties;
     private final RestTemplate restTemplate;
-    private final EmbeddingModel embeddingModel;
+    private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Creates the initializer with strict startup validation of Qdrant collections and indexes.
+     *
+     * @param appProperties application configuration for collection and vector names
+     * @param restTemplateBuilder Spring-managed builder for REST calls to Qdrant
+     * @param embeddingClient embedding client used to resolve expected vector dimensions
+     * @param objectMapper JSON mapper used to build Qdrant request payloads
+     */
     public QdrantIndexInitializer(
             AppProperties appProperties,
             RestTemplateBuilder restTemplateBuilder,
-            EmbeddingModel embeddingModel,
+            EmbeddingClient embeddingClient,
             ObjectMapper objectMapper) {
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
-        this.embeddingModel = Objects.requireNonNull(embeddingModel, "embeddingModel");
+        this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.restTemplate = restTemplateBuilder
                 .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
@@ -91,6 +99,9 @@ public class QdrantIndexInitializer {
                 .build();
     }
 
+    /**
+     * Ensures configured collections exist and required payload indexes are present at startup.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void ensureCollectionsAndIndexes() {
         AppProperties.Qdrant qdrant = appProperties.getQdrant();
@@ -118,7 +129,7 @@ public class QdrantIndexInitializer {
 
     private void ensureHybridCollectionsExist(
             List<String> collections, String denseVectorName, String sparseVectorName) {
-        int dimensions = embeddingModel.dimensions();
+        int dimensions = embeddingClient.dimensions();
         HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
             if (collection == null || collection.isBlank()) {
@@ -137,14 +148,13 @@ public class QdrantIndexInitializer {
             String url = base + path;
             try {
                 restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-                log.info("[QDRANT] Collection present: {}", collection);
+                log.info("[QDRANT] Collection present");
                 return true;
             } catch (HttpClientErrorException.NotFound notFound) {
                 return false;
             } catch (RuntimeException exception) {
                 log.debug(
-                        "[QDRANT] Collection existence check failed (collection={}, exceptionType={})",
-                        collection,
+                        "[QDRANT] Collection existence check failed (exceptionType={})",
                         exception.getClass().getSimpleName());
             }
         }
@@ -187,7 +197,7 @@ public class QdrantIndexInitializer {
                 if (status < 200 || status >= 300) {
                     throw new IllegalStateException("Qdrant create collection returned HTTP " + status);
                 }
-                log.info("[QDRANT] Created hybrid collection: {}", collection);
+                log.info("[QDRANT] Created hybrid collection");
                 return;
             } catch (RestClientResponseException httpError) {
                 lastHttp = httpError;
@@ -206,7 +216,7 @@ public class QdrantIndexInitializer {
     }
 
     private void validateCollections(List<String> collections, String denseVectorName, String sparseVectorName) {
-        int expectedDimensions = embeddingModel.dimensions();
+        int expectedDimensions = embeddingClient.dimensions();
         if (expectedDimensions <= 0) {
             throw new IllegalStateException("Embedding model dimensions must be positive");
         }
@@ -341,11 +351,7 @@ public class QdrantIndexInitializer {
                     throw new IllegalStateException("Qdrant payload index ensure returned HTTP "
                             + response.getStatusCode().value());
                 }
-                log.info(
-                        "[QDRANT] Ensured payload index (collection={}, field={}, schema={})",
-                        collection,
-                        field,
-                        schemaType);
+                log.info("[QDRANT] Ensured payload index");
                 return;
             } catch (RestClientResponseException httpError) {
                 lastHttp = httpError;
@@ -402,11 +408,9 @@ public class QdrantIndexInitializer {
      * Small helper to build a JSON object without exposing maps across the initializer.
      */
     private static final class ObjectNodeBuilder {
-        private final ObjectMapper mapper;
         private final ObjectNode root;
 
         private ObjectNodeBuilder(ObjectMapper mapper) {
-            this.mapper = mapper;
             this.root = mapper.createObjectNode();
         }
 

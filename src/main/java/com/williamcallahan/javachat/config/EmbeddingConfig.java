@@ -1,12 +1,12 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
-import com.williamcallahan.javachat.service.LocalEmbeddingModel;
-import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingModel;
+import com.williamcallahan.javachat.service.LocalEmbeddingClient;
+import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -36,15 +36,15 @@ public class EmbeddingConfig {
      */
     @Bean
     @Primary
-    @ConditionalOnMissingBean(EmbeddingModel.class)
+    @ConditionalOnMissingBean(EmbeddingClient.class)
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "true", matchIfMissing = false)
-    public EmbeddingModel localEmbeddingModel(
+    public EmbeddingClient localEmbeddingClient(
             @Value("${app.local-embedding.server-url:http://127.0.0.1:8088}") String localUrl,
             @Value("${app.local-embedding.model:text-embedding-qwen3-embedding-8b}") String localModel,
             @Value("${app.local-embedding.dimensions:4096}") int dimensions,
             RestTemplateBuilder restTemplateBuilder) {
         log.info("[EMBEDDING] Using local embedding provider");
-        return new LocalEmbeddingModel(localUrl, localModel, dimensions, restTemplateBuilder);
+        return new LocalEmbeddingClient(localUrl, localModel, dimensions, restTemplateBuilder);
     }
 
     /**
@@ -63,9 +63,9 @@ public class EmbeddingConfig {
      */
     @Bean
     @Primary
-    @ConditionalOnMissingBean(EmbeddingModel.class)
+    @ConditionalOnMissingBean(EmbeddingClient.class)
     @ConditionalOnProperty(name = "app.local-embedding.enabled", havingValue = "false", matchIfMissing = true)
-    public EmbeddingModel remoteEmbeddingModel(
+    public EmbeddingClient remoteEmbeddingClient(
             AppProperties appProperties,
             @Value("${app.remote-embedding.server-url:}") String remoteUrl,
             @Value("${app.remote-embedding.api-key:}") String remoteApiKey,
@@ -80,13 +80,14 @@ public class EmbeddingConfig {
             log.info(
                     "[EMBEDDING] Using remote OpenAI-compatible provider (urlId={})",
                     Integer.toHexString(Objects.hashCode(remoteUrl)));
-            return OpenAiCompatibleEmbeddingModel.create(
+            return OpenAiCompatibleEmbeddingClient.create(
                     remoteUrl, remoteApiKey, remoteModel, remoteDims > 0 ? remoteDims : embeddingDimensions);
         }
 
         if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
             log.info("[EMBEDDING] Using OpenAI embeddings provider");
-            return OpenAiCompatibleEmbeddingModel.create(openaiBaseUrl, openaiApiKey, openaiModel, embeddingDimensions);
+            return OpenAiCompatibleEmbeddingClient.create(
+                    openaiBaseUrl, openaiApiKey, openaiModel, embeddingDimensions);
         }
 
         throw new EmbeddingServiceUnavailableException(

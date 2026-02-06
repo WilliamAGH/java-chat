@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.web;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.williamcallahan.javachat.TestConfiguration;
+import com.williamcallahan.javachat.service.EmbeddingClient;
 import io.qdrant.client.QdrantClient;
 import java.time.Duration;
 import java.util.List;
@@ -10,7 +11,6 @@ import java.util.Objects;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,7 +31,7 @@ class ChatSseIntegrationTest {
     WebTestClient webTestClient;
 
     @MockitoBean
-    EmbeddingModel embeddingModel;
+    EmbeddingClient embeddingClient;
 
     @MockitoBean
     QdrantClient qdrantClient;

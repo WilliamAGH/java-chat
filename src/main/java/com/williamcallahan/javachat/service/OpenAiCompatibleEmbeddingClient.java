@@ -14,19 +14,15 @@ import java.util.List;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
 
 /**
- * OpenAI-compatible embedding model that fails fast on provider errors.
+ * OpenAI-compatible embedding client that fails fast on provider errors.
  *
  * <p>Uses the OpenAI Java SDK to call `/embeddings` against the configured base URL and
  * propagates HTTP failures so invalid embeddings are never cached.</p>
  */
-public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, AutoCloseable {
-    private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
+public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class);
 
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
@@ -37,59 +33,50 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
     private final int dimensionsHint;
 
     /**
-     * Creates an OpenAI-compatible embedding model backed by a remote REST API endpoint.
+     * Creates an OpenAI-compatible embedding client backed by a remote REST API endpoint.
      *
      * @param baseUrl base URL for the embedding API
      * @param apiKey API key for the embedding provider
      * @param modelName model identifier for embeddings
      * @param dimensionsHint expected embedding dimensions (used as a hint)
-     * @return embedding model configured for the remote endpoint
+     * @return embedding client configured for the remote endpoint
      */
-    public static OpenAiCompatibleEmbeddingModel create(
+    public static OpenAiCompatibleEmbeddingClient create(
             String baseUrl, String apiKey, String modelName, int dimensionsHint) {
         validateDimensions(dimensionsHint);
         OpenAIClient client = OpenAIOkHttpClient.builder()
                 .apiKey(requireConfiguredApiKey(apiKey))
                 .baseUrl(normalizeSdkBaseUrl(baseUrl))
                 .build();
-        return new OpenAiCompatibleEmbeddingModel(client, requireConfiguredModel(modelName), dimensionsHint);
+        return new OpenAiCompatibleEmbeddingClient(client, requireConfiguredModel(modelName), dimensionsHint);
     }
 
-    static OpenAiCompatibleEmbeddingModel create(OpenAIClient client, String modelName, int dimensionsHint) {
+    static OpenAiCompatibleEmbeddingClient create(OpenAIClient client, String modelName, int dimensionsHint) {
         validateDimensions(dimensionsHint);
-        return new OpenAiCompatibleEmbeddingModel(
+        return new OpenAiCompatibleEmbeddingClient(
                 Objects.requireNonNull(client, "client"), requireConfiguredModel(modelName), dimensionsHint);
     }
 
-    private OpenAiCompatibleEmbeddingModel(OpenAIClient client, String modelName, int dimensionsHint) {
+    OpenAiCompatibleEmbeddingClient(OpenAIClient client, String modelName, int dimensionsHint) {
         this.client = client;
         this.modelName = modelName;
         this.dimensionsHint = dimensionsHint;
     }
 
-    /**
-     * Calls the OpenAI-compatible embeddings endpoint for all inputs in the request.
-     *
-     * @param request embedding request payload
-     * @return embedding response
-     * @throws EmbeddingServiceUnavailableException when the provider returns an HTTP error
-     */
     @Override
-    public EmbeddingResponse call(EmbeddingRequest request) {
-        List<String> instructions = request.getInstructions();
-        if (instructions.isEmpty()) {
-            return new EmbeddingResponse(List.of());
+    public List<float[]> embed(List<String> texts) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
         }
         try {
             EmbeddingCreateParams params = EmbeddingCreateParams.builder()
                     .model(modelName)
-                    .inputOfArrayOfStrings(instructions)
+                    .inputOfArrayOfStrings(texts)
                     .build();
             RequestOptions requestOptions =
                     RequestOptions.builder().timeout(embeddingTimeout()).build();
             CreateEmbeddingResponse response = client.embeddings().create(params, requestOptions);
-            List<Embedding> embeddings = parseResponse(response, instructions.size());
-            return new EmbeddingResponse(embeddings);
+            return parseResponse(response, texts.size());
         } catch (OpenAIServiceException exception) {
             String details = sanitizeMessage(exception.getMessage());
             String failureMessage = details.isBlank()
@@ -114,7 +101,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
                 .build();
     }
 
-    private List<Embedding> parseResponse(CreateEmbeddingResponse response, int expectedCount) {
+    private List<float[]> parseResponse(CreateEmbeddingResponse response, int expectedCount) {
         if (response == null) {
             throw new EmbeddingServiceUnavailableException("Remote embedding response was null");
         }
@@ -123,7 +110,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
             throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding entries");
         }
 
-        List<Embedding> embeddingsByIndex = new ArrayList<>(expectedCount);
+        List<float[]> embeddingsByIndex = new ArrayList<>(expectedCount);
         for (int index = 0; index < expectedCount; index++) {
             embeddingsByIndex.add(null);
         }
@@ -139,12 +126,12 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
                 continue;
             }
             float[] vector = toFloatVector(item.embedding());
-            embeddingsByIndex.set(targetIndex, new Embedding(vector, targetIndex));
+            embeddingsByIndex.set(targetIndex, vector);
         }
 
-        List<Embedding> orderedEmbeddings = new ArrayList<>(expectedCount);
+        List<float[]> orderedEmbeddings = new ArrayList<>(expectedCount);
         for (int index = 0; index < expectedCount; index++) {
-            Embedding embedding = embeddingsByIndex.get(index);
+            float[] embedding = embeddingsByIndex.get(index);
             if (embedding == null) {
                 throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response missing embedding for index " + index);
@@ -152,7 +139,7 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
             orderedEmbeddings.add(embedding);
         }
 
-        return orderedEmbeddings;
+        return List.copyOf(orderedEmbeddings);
     }
 
     private int safeEmbeddingIndex(int fallbackIndex, com.openai.models.embeddings.Embedding item, int expectedCount) {
@@ -175,23 +162,6 @@ public final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel, Aut
     @Override
     public int dimensions() {
         return dimensionsHint;
-    }
-
-    /**
-     * Embeds a single document by delegating to the remote embeddings endpoint.
-     *
-     * @param document document to embed
-     * @return embedding vector
-     * @throws EmbeddingServiceUnavailableException when the provider returns invalid data
-     */
-    @Override
-    public float[] embed(org.springframework.ai.document.Document document) {
-        EmbeddingRequest embeddingRequest = new EmbeddingRequest(List.of(document.getText()), null);
-        EmbeddingResponse embeddingResponse = call(embeddingRequest);
-        if (embeddingResponse.getResults().isEmpty()) {
-            throw new EmbeddingServiceUnavailableException("Remote embedding response was empty");
-        }
-        return embeddingResponse.getResults().get(0).getOutput();
     }
 
     private float[] toFloatVector(List<Float> embeddingEntries) {

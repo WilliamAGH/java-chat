@@ -4,10 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -16,14 +12,14 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * Embedding model that calls a local embedding provider without fallbacks.
+ * Embedding client that calls a local embedding provider without fallbacks.
  *
  * <p>This implementation fails fast when the provider is unreachable or returns invalid
  * responses so ingestion and retrieval never cache synthetic vectors.</p>
  */
-public class LocalEmbeddingModel implements EmbeddingModel {
+public class LocalEmbeddingClient implements EmbeddingClient {
 
-    private static final Logger log = LoggerFactory.getLogger(LocalEmbeddingModel.class);
+    private static final Logger log = LoggerFactory.getLogger(LocalEmbeddingClient.class);
 
     private final String baseUrl;
     private final String modelName;
@@ -35,14 +31,14 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     private static final int MAX_ERROR_SNIPPET = 512;
 
     /**
-     * Creates a local embedding model backed by the configured service endpoint.
+     * Creates a local embedding client backed by the configured service endpoint.
      *
      * @param baseUrl local embedding base URL
      * @param modelName embedding model name
      * @param dimensions embedding vector dimensions
      * @param restTemplateBuilder RestTemplate builder
      */
-    public LocalEmbeddingModel(
+    public LocalEmbeddingClient(
             String baseUrl, String modelName, int dimensions, RestTemplateBuilder restTemplateBuilder) {
         this.baseUrl = baseUrl;
         this.modelName = modelName;
@@ -53,21 +49,13 @@ public class LocalEmbeddingModel implements EmbeddingModel {
                 .build();
     }
 
-    /**
-     * Generates embeddings for the provided request and propagates provider failures.
-     *
-     * @param request embedding request payload
-     * @return embedding response
-     * @throws EmbeddingServiceUnavailableException when the provider is unreachable or returns invalid data
-     */
     @Override
-    public EmbeddingResponse call(EmbeddingRequest request) {
-        if (request == null || request.getInstructions().isEmpty()) {
-            return new EmbeddingResponse(List.of());
+    public List<float[]> embed(List<String> texts) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
         }
-
         try {
-            return callEmbeddingApi(request);
+            return callEmbeddingApi(texts);
         } catch (org.springframework.web.client.RestClientResponseException apiException) {
             String details = formatHttpFailure(apiException);
             throw new EmbeddingServiceUnavailableException(details, apiException);
@@ -80,24 +68,18 @@ public class LocalEmbeddingModel implements EmbeddingModel {
         }
     }
 
-    /**
-     * Call the embedding API for all texts in the request.
-     */
-    private EmbeddingResponse callEmbeddingApi(EmbeddingRequest request) {
+    private List<float[]> callEmbeddingApi(List<String> texts) {
         log.debug("[EMBEDDING] Generating embeddings for request payload");
-
-        List<Embedding> embeddings = new ArrayList<>();
-
-        for (String text : request.getInstructions()) {
+        List<float[]> embeddings = new ArrayList<>(texts.size());
+        for (String text : texts) {
             float[] vector = fetchEmbeddingFromApi(text);
             if (vector.length == 0) {
                 throw new EmbeddingServiceUnavailableException("Local embedding response was empty");
             }
-            embeddings.add(new Embedding(vector, embeddings.size()));
+            embeddings.add(vector);
         }
-
         log.info("Generated {} embeddings successfully", embeddings.size());
-        return new EmbeddingResponse(embeddings);
+        return List.copyOf(embeddings);
     }
 
     /**
@@ -159,23 +141,6 @@ public class LocalEmbeddingModel implements EmbeddingModel {
     @Override
     public int dimensions() {
         return dimensions;
-    }
-
-    /**
-     * Embeds a single document with strict failure propagation.
-     *
-     * @param document document to embed
-     * @return embedding vector
-     * @throws EmbeddingServiceUnavailableException when the provider is unreachable or returns invalid data
-     */
-    @Override
-    public float[] embed(org.springframework.ai.document.Document document) {
-        EmbeddingRequest request = new EmbeddingRequest(List.of(document.getText()), null);
-        EmbeddingResponse response = call(request);
-        if (!response.getResults().isEmpty()) {
-            return response.getResults().get(0).getOutput();
-        }
-        throw new EmbeddingServiceUnavailableException("Local embedding response was empty");
     }
 
     private static String formatHttpFailure(org.springframework.web.client.RestClientResponseException exception) {

@@ -14,23 +14,24 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 
+/**
+ * Verifies that embedding client implementations surface upstream HTTP failures with status context.
+ */
 class EmbeddingProviderFailureTest {
 
     @Test
-    void localEmbeddingSurfacesHttpErrors() throws Exception {
+    void localEmbeddingSurfacesHttpErrors() throws IOException {
         ExecutorService serverExecutor = Executors.newSingleThreadExecutor();
         HttpServer httpServer = startServer(serverExecutor, new LocalFailureRoutes());
         String baseUrl = baseUrl(httpServer);
 
         try {
-            LocalEmbeddingModel localModel =
-                    new LocalEmbeddingModel(baseUrl, "local-test-model", 12, new RestTemplateBuilder());
-            EmbeddingServiceUnavailableException thrown = assertThrows(
-                    EmbeddingServiceUnavailableException.class,
-                    () -> localModel.call(new EmbeddingRequest(List.of("hello"), null)));
+            LocalEmbeddingClient localClient =
+                    new LocalEmbeddingClient(baseUrl, "local-test-model", 12, new RestTemplateBuilder());
+            EmbeddingServiceUnavailableException thrown =
+                    assertThrows(EmbeddingServiceUnavailableException.class, () -> localClient.embed(List.of("hello")));
 
             assertTrue(thrown.getMessage().contains("HTTP 500"));
         } finally {
@@ -40,16 +41,15 @@ class EmbeddingProviderFailureTest {
     }
 
     @Test
-    void remoteEmbeddingHttpErrorsSurfaceStatusCodes() throws Exception {
+    void remoteEmbeddingHttpErrorsSurfaceStatusCodes() throws IOException {
         ExecutorService serverExecutor = Executors.newSingleThreadExecutor();
         HttpServer httpServer = startServer(serverExecutor, new RemoteFailureRoutes());
         String baseUrl = baseUrl(httpServer);
 
-        try (OpenAiCompatibleEmbeddingModel remoteModel =
-                OpenAiCompatibleEmbeddingModel.create(baseUrl, "test-key", "text-embedding-3-small", 8)) {
+        try (OpenAiCompatibleEmbeddingClient remoteClient =
+                OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", "text-embedding-3-small", 8)) {
             EmbeddingServiceUnavailableException thrown = assertThrows(
-                    EmbeddingServiceUnavailableException.class,
-                    () -> remoteModel.call(new EmbeddingRequest(List.of("hello"), null)));
+                    EmbeddingServiceUnavailableException.class, () -> remoteClient.embed(List.of("hello")));
 
             assertTrue(thrown.getMessage().contains("HTTP 401"));
             assertNotNull(thrown.getCause());
@@ -74,10 +74,19 @@ class EmbeddingProviderFailureTest {
         return "http://" + address.getHostString() + ":" + address.getPort();
     }
 
+    /**
+     * Registers deterministic HTTP routes for a test server.
+     */
     private interface RouteRegistrar {
+        /**
+         * Registers all required endpoints for the current test scenario.
+         */
         void register(HttpServer server);
     }
 
+    /**
+     * Route set that accepts model discovery but fails embedding requests with HTTP 500.
+     */
     private static final class LocalFailureRoutes implements RouteRegistrar {
         @Override
         public void register(HttpServer server) {
@@ -86,6 +95,9 @@ class EmbeddingProviderFailureTest {
         }
     }
 
+    /**
+     * Route set that rejects embedding requests with HTTP 401.
+     */
     private static final class RemoteFailureRoutes implements RouteRegistrar {
         @Override
         public void register(HttpServer server) {
