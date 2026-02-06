@@ -69,18 +69,30 @@ Common variables:
 
 ## Qdrant
 
-The app uses Qdrant via Spring AI’s Qdrant vector store starter.
+The app uses Qdrant directly via the gRPC client with four hybrid collections (dense + sparse vectors).
+See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the collection layout and retrieval flow.
 
-Common variables:
+### Connection variables
 
-- `QDRANT_HOST` (default `localhost`)
-- `QDRANT_PORT` (gRPC; local compose maps to `8086`)
-- `QDRANT_REST_PORT` (REST; local compose maps to `8087`, mainly for scripts)
-- `QDRANT_API_KEY` (required for cloud; empty for local)
+- `QDRANT_HOST` (default `localhost`) — hostname only, no `http://` prefix
+- `QDRANT_PORT` (gRPC; default `6334`, local compose maps to `8086`)
+- `QDRANT_REST_PORT` (REST; local compose maps to `8087`, used by scripts for health checks)
+- `QDRANT_API_KEY` (required for Qdrant Cloud; empty for local)
 - `QDRANT_SSL` (`true` for cloud, `false` for local)
-- `QDRANT_COLLECTION` (default `java-chat`)
 
-Local Qdrant:
+### Hybrid collection variables
+
+- `QDRANT_COLLECTION_BOOKS` (default `java-chat-books`)
+- `QDRANT_COLLECTION_DOCS` (default `java-docs`)
+- `QDRANT_COLLECTION_ARTICLES` (default `java-articles`)
+- `QDRANT_COLLECTION_PDFS` (default `java-pdfs`)
+- `QDRANT_DENSE_VECTOR_NAME` (default `dense`) — named vector for dense embeddings
+- `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
+- `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
+- `HYBRID_QUERY_TIMEOUT` (default `5s`) — timeout for hybrid search queries
+- `APP_QDRANT_ENSURE_PAYLOAD_INDEXES` (default `true`) — create payload indexes on startup
+
+### Local Qdrant
 
 ```bash
 make compose-up
@@ -91,6 +103,7 @@ make compose-up
 - `QDRANT_HOST` must be a hostname only (no `http://` or `https://` prefix).
 - Local compose maps Qdrant to allowed ports: gRPC `8086`, REST `8087` (`docker-compose-qdrant.yml`).
 - Some scripts use REST for health checks; set `QDRANT_REST_PORT=8087` when using local compose.
+- On startup, `QdrantIndexInitializer` validates that all four collections have matching dense vector dimensions. A dimension mismatch (e.g., after changing embedding providers) causes startup failure — delete the collections and re-ingest.
 
 ## RAG tuning
 

@@ -1,17 +1,18 @@
 # Documentation ingestion (RAG indexing)
 
-Java Chat includes scripts and a CLI profile to mirror upstream documentation into `data/docs/` and ingest it into the vector store with content-hash deduplication.
+Java Chat includes scripts and a CLI profile to mirror upstream documentation into `data/docs/` and ingest it into Qdrant hybrid collections with content-hash deduplication.
 
 Command reference:
 
-- See `docs/pipeline-commands.md` for the supported scrape and ingestion commands, flags, and full vs incremental behavior.
+- See [pipeline-commands.md](pipeline-commands.md) for all scrape and ingestion commands, flags, and full vs incremental behavior.
 
 ## Pipeline overview
 
-1) **Fetch** documentation into `data/docs/` (HTML mirrors).
-2) **Process** docs into chunks + embeddings.
-3) **Deduplicate** chunks by SHA‑256 hash.
-4) **Upload** embeddings to Qdrant (upload mode) or **cache** embeddings locally (local-only mode).
+1. **Fetch** documentation into `data/docs/` (HTML mirrors via `wget`).
+2. **Chunk** content using JTokkit's CL100K_BASE tokenizer (~900 tokens per chunk with 150-token overlap).
+3. **Deduplicate** chunks by SHA-256 hash — unchanged content is skipped on re-runs.
+4. **Embed** chunks with both dense vectors (semantic, from configured embedding provider) and sparse vectors (BM25 lexical tokens via Lucene `StandardAnalyzer`).
+5. **Upload** to Qdrant hybrid collections (upload mode) or **cache** embeddings locally (local-only mode).
 
 ## Fetch docs
 
@@ -25,15 +26,9 @@ This runs `scripts/fetch_all_docs.sh` (requires `wget`). Source URLs live in:
 
 - `src/main/resources/docs-sources.properties`
 
-Optional flags:
-
-```bash
-./scripts/fetch_all_docs.sh --include-quick
-```
+See [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors) for flags (`--force`, `--include-quick`, `--no-clean`).
 
 ## Process + upload to Qdrant
-
-Run the processor:
 
 ```bash
 make process-all
@@ -42,8 +37,11 @@ make process-all
 This runs `scripts/process_all_to_qdrant.sh`, which:
 
 - Loads `.env`
+- Validates Qdrant connectivity and embedding server availability
 - Builds the app JAR (`./gradlew buildForScripts`)
-- Runs the `cli` Spring profile (`com.williamcallahan.javachat.cli.DocumentProcessor`)
+- Runs the `cli` Spring profile (`DocumentProcessor`)
+- Routes each doc set to the appropriate Qdrant collection (`QdrantCollectionRouter`)
+- Writes both dense and sparse (BM25) vectors per chunk via gRPC (`HybridVectorService`)
 
 ### Modes
 
@@ -51,46 +49,57 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 - Optional: `--local-only` (caches embeddings under `data/embeddings-cache/`)
 
 ```bash
-./scripts/process_all_to_qdrant.sh --local-only
-./scripts/process_all_to_qdrant.sh --upload
+make process-local                          # local-only via Make
+./scripts/process_all_to_qdrant.sh --upload # explicit upload via script
 ```
 
 ### Doc set filtering (CLI)
 
-Limit ingestion to specific doc sets by id or path:
+Limit ingestion to specific doc sets:
 
 ```bash
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete
-./scripts/process_all_to_qdrant.sh --upload --doc-sets=java/java25-complete,spring-boot-complete
+DOCS_SETS=java25-complete make process-doc-sets
+./scripts/process_all_to_qdrant.sh --upload --doc-sets=java25-complete,spring-boot-complete
 ```
+
+See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for the full doc set ID table.
+
+## Hybrid vector storage
+
+Each ingested chunk is stored as a Qdrant point with two named vectors:
+
+- **`dense`** — semantic embedding from the configured provider (default 4096 dimensions via Qwen3 8B)
+- **`bm25`** — sparse lexical vector from Lucene `StandardAnalyzer` tokenization with IDF modifier
+
+This enables hybrid retrieval: dense search captures semantic similarity while sparse search captures exact keyword matches. Results are fused via Reciprocal Rank Fusion (RRF).
+
+See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for collection layout and retrieval details.
 
 ## Deduplication markers
 
-Deduplication is based on per-chunk SHA‑256 markers stored locally:
+Deduplication is based on per-chunk SHA-256 markers stored locally:
 
 - `data/index/` contains one file per ingested chunk hash
-- `data/parsed/` contains chunk text snapshots used for local fallback search and debugging
+- `data/parsed/` contains chunk text snapshots for debugging
 - `data/index/file_*.marker` records file-level fingerprints and chunk hashes so re-runs can skip unchanged files and prune stale vectors when a source file changes
 
 See [local store directories](domains/local-store-directories.md) for details.
 
 ## Ingest via HTTP API
 
-Ingest a local docs directory (must be under `data/docs/`):
+With the app running:
 
 ```bash
+# Ingest a local docs directory
 curl -sS -X POST "http://localhost:8085/api/ingest/local?dir=data/docs&maxFiles=50000"
-```
 
-Run a small remote crawl (dev/debug):
-
-```bash
+# Small remote crawl (dev/debug)
 curl -sS -X POST "http://localhost:8085/api/ingest?maxPages=100"
 ```
 
 ## Monitoring
 
-There are helper scripts in `scripts/`:
-
-- `scripts/monitor_progress.sh` (simple log-based view)
-- `scripts/monitor_indexing.sh` (dashboard view; requires `jq` and `bc`)
+```bash
+scripts/monitor_progress.sh        # Simple log-based view
+scripts/monitor_indexing.sh        # Dashboard view (requires jq and bc)
+```

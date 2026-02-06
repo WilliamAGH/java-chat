@@ -54,13 +54,18 @@ make health
 
 ## Documentation ingestion (optional)
 
-To mirror upstream docs into `data/docs/` and index them into Qdrant:
+To mirror upstream docs into `data/docs/` and index them into Qdrant hybrid collections:
 
 ```bash
 make full-pipeline
 ```
 
-See [ingestion.md](ingestion.md) for details and troubleshooting.
+This fetches all documentation sources and ingests them with dense + sparse (BM25) vectors across four Qdrant collections.
+
+For incremental vs full runs, doc set filtering, and all available flags:
+
+- [Pipeline commands](pipeline-commands.md) — complete command reference
+- [Ingestion](ingestion.md) — pipeline internals and deduplication
 
 ## Common commands
 
