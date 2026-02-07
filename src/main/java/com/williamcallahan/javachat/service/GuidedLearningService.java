@@ -6,6 +6,10 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.support.PdfCitationEnhancer;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -41,36 +44,6 @@ public class GuidedLearningService {
 
     /** Maximum retrieved book snippets to include in enrichment requests. */
     private static final int MAX_ENRICHMENT_SNIPPETS = 6;
-
-    /**
-     * Pre-authored introduction lesson content, used instead of LLM generation because
-     * the model consistently mis-formats the code block for this specific lesson.
-     */
-    private static final String INTRODUCTION_LESSON_CONTENT = """
-Java is a versatile, high-level programming language that is widely used for building applications across different platforms. Understanding Java begins with grasping what a program is and how it operates. A program is essentially a set of instructions written in a specific programming language to perform a task. In Java, these instructions are encapsulated in source code files, which must be compiled into bytecode before they can be executed by the Java Virtual Machine (JVM).
-
-Here are some key points about Java programs:
-*   **Source Code**: Java programs are written in plain text files with a `.java` extension.
-*   **Compilation**: The Java Compiler (javac) translates source code into bytecode, stored in `.class` files.
-*   **Execution**: The Java Virtual Machine (JVM) executes the bytecode, allowing the program to run on any machine with a JVM installed.
-
-Here's a simple example of a "Hello, World!" program in Java:
-
-```java
-// HelloWorld.java
-public class HelloWorld {
-    public static void main(String[] args) {
-        // Print a greeting to the console
-        System.out.println("Hello, World!"); // Output: Hello, World!
-    }
-}
-```
-
-To run this program, follow these steps:
-1.  Write the code in a file named `HelloWorld.java`.
-2.  Open a terminal and compile the program using `javac HelloWorld.java`.
-3.  Execute the compiled bytecode with `java HelloWorld`.
-""";
 
     /** Metadata key for the document source URL in Qdrant payload. */
     private static final String METADATA_KEY_URL = "url";
@@ -169,7 +142,7 @@ To run this program, follow these steps:
                     List<String> snippets = bookDocuments.stream()
                             .map(Document::getText)
                             .limit(MAX_ENRICHMENT_SNIPPETS)
-                            .collect(Collectors.toList());
+                            .toList();
                     Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
                     logger.debug(
                             "GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
@@ -179,21 +152,6 @@ To run this program, follow these steps:
                     return enrichment;
                 })
                 .orElseGet(this::emptyEnrichment);
-    }
-
-    /**
-     * Streams a guided answer grounded in the Think Java book with additional structured guidance.
-     */
-    public Flux<String> streamGuidedAnswer(List<Message> history, String slug, String userMessage) {
-        Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
-        String query = lessonOptional
-                .map(lesson -> buildLessonQuery(lesson) + "\n" + userMessage)
-                .orElse(userMessage);
-        List<Document> retrievedDocuments = retrievalService.retrieve(query);
-        List<Document> bookDocuments = filterToBook(retrievedDocuments);
-
-        String guidance = lessonOptional.map(this::buildLessonGuidance).orElseGet(this::buildDefaultGuidance);
-        return chatService.streamAnswerWithContext(history, userMessage, bookDocuments, guidance);
     }
 
     /**
@@ -348,13 +306,25 @@ To run this program, follow these steps:
     }
 
     /**
-     * Returns pre-authored lesson markdown for slugs where LLM generation is unreliable.
+     * Loads curated lesson markdown from the classpath for slugs where LLM generation is unreliable.
+     *
+     * <p>Curated lessons are stored as {@code .md} files under {@value #CURATED_LESSONS_RESOURCE_DIR}
+     * on the classpath. Returns {@link Optional#empty()} when no resource exists for the given slug.</p>
+     *
+     * @param slug lesson slug used to resolve the resource filename
+     * @return curated markdown content, or empty when no curated resource exists
+     * @throws UncheckedIOException when the resource exists but cannot be read
      */
     private Optional<String> loadCuratedLessonMarkdown(String slug) {
-        if ("introduction-to-java".equals(slug)) {
-            return Optional.of(INTRODUCTION_LESSON_CONTENT);
+        String resourcePath = CURATED_LESSONS_RESOURCE_DIR + slug + ".md";
+        try (InputStream lessonStream = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
+            if (lessonStream == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new String(lessonStream.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException readFailure) {
+            throw new UncheckedIOException("Failed to read curated lesson resource: " + resourcePath, readFailure);
         }
-        return Optional.empty();
     }
 
     private List<Document> filterToBook(List<Document> retrievedDocuments) {
@@ -405,6 +375,9 @@ To run this program, follow these steps:
 
     /**
      * Combines a lesson context description with the Think Java guidance template and system prompts.
+     *
+     * <p>This template includes a placeholder for the current lesson context, which is
+     * filled in at runtime to keep responses focused on the active topic.</p>
      *
      * @param lessonContext human-readable lesson context to embed in the template
      * @return complete guidance string for the LLM

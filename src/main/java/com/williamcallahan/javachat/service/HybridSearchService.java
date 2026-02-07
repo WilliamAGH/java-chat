@@ -50,6 +50,8 @@ public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
     private static final String PAYLOAD_DOC_CONTENT = QdrantPayloadFieldSchema.DOC_CONTENT_FIELD;
+    private static final String METADATA_KEY_SCORE = "score";
+    private static final String METADATA_KEY_COLLECTION = "collection";
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
 
     /**
@@ -348,8 +350,8 @@ public class HybridSearchService {
 
         // Keep metadata explicit and typed; do not attempt to round-trip arbitrary payloads.
         applyKnownMetadata(point.getPayloadMap(), document);
-        document.getMetadata().put("score", result.score());
-        document.getMetadata().put("collection", result.collection());
+        document.getMetadata().put(METADATA_KEY_SCORE, result.score());
+        document.getMetadata().put(METADATA_KEY_COLLECTION, result.collection());
 
         return document;
     }
@@ -375,7 +377,7 @@ public class HybridSearchService {
 
     private static void putIfPresentInteger(Map<String, Value> payload, Document target, String key) {
         extractPayloadInteger(payload, key)
-                .ifPresent(value -> target.getMetadata().put(key, value));
+                .ifPresent(integerFieldValue -> target.getMetadata().put(key, integerFieldValue));
     }
 
     private static String extractPayloadString(Map<String, Value> payload, String key) {
@@ -445,8 +447,8 @@ public class HybridSearchService {
                 listenableFuture,
                 new com.google.common.util.concurrent.FutureCallback<>() {
                     @Override
-                    public void onSuccess(T result) {
-                        completable.complete(result);
+                    public void onSuccess(T completedValue) {
+                        completable.complete(completedValue);
                     }
 
                     @Override

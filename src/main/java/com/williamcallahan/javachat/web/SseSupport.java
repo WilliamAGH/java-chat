@@ -263,8 +263,8 @@ public class SseSupport {
      * @return flux of ServerSentEvents with structured status payloads
      */
     public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<OpenAIStreamingService.StreamingNotice> notices) {
-        return notices.map(notice -> statusEvent(SseEventPayload.builder(notice.message())
-                .details(notice.details())
+        return notices.map(notice -> statusEvent(SseEventPayload.builder(notice.summary())
+                .details(notice.diagnosticContext())
                 .code(notice.code())
                 .retryable(notice.retryable())
                 .provider(notice.provider())

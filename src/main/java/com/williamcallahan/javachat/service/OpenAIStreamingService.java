@@ -86,12 +86,12 @@ public class OpenAIStreamingService {
      * Result of streaming response containing the content flux and the provider that handled the request.
      * Surfacing the provider ensures transparency when multiple providers are configured.
      *
-     * @param content the streaming response flux
+     * @param textChunks the streaming response flux
      * @param provider the initially selected LLM provider for this request
      * @param notices runtime streaming notices (for example, pre-first-token provider failover)
      */
     public record StreamingResult(
-            Flux<String> content, RateLimitService.ApiProvider provider, Flux<StreamingNotice> notices) {
+            Flux<String> textChunks, RateLimitService.ApiProvider provider, Flux<StreamingNotice> notices) {
         /** Returns a user-friendly display name for the provider. */
         public String providerDisplayName() {
             return provider.getName();
@@ -101,8 +101,8 @@ public class OpenAIStreamingService {
     /**
      * Structured runtime notice emitted during streaming.
      *
-     * @param message short user-facing summary
-     * @param details detailed context for UI status indicators
+     * @param summary short user-facing summary
+     * @param diagnosticContext detailed context for UI status indicators
      * @param code stable machine-readable status code
      * @param retryable whether this notice represents a retryable condition
      * @param provider provider label associated with this notice
@@ -111,8 +111,8 @@ public class OpenAIStreamingService {
      * @param maxAttempts max configured attempts for this request
      */
     public record StreamingNotice(
-            String message,
-            String details,
+            String summary,
+            String diagnosticContext,
             String code,
             boolean retryable,
             String provider,
@@ -120,8 +120,8 @@ public class OpenAIStreamingService {
             int attempt,
             int maxAttempts) {
         public StreamingNotice {
-            if (message == null || message.isBlank()) {
-                throw new IllegalArgumentException("message cannot be null or blank");
+            if (summary == null || summary.isBlank()) {
+                throw new IllegalArgumentException("summary cannot be null or blank");
             }
             if (code == null || code.isBlank()) {
                 throw new IllegalArgumentException("code cannot be null or blank");
@@ -135,7 +135,7 @@ public class OpenAIStreamingService {
             if (maxAttempts <= 0 || attempt > maxAttempts) {
                 throw new IllegalArgumentException("attempt must be <= maxAttempts");
             }
-            details = details == null ? "" : details;
+            diagnosticContext = diagnosticContext == null ? "" : diagnosticContext;
             provider = provider == null ? "" : provider;
         }
     }

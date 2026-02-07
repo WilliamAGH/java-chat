@@ -62,9 +62,6 @@ public final class SseConstants {
     /** Emits one warning log for every N dropped chunks/heartbeats under backpressure. */
     public static final int STREAM_BACKPRESSURE_DROP_LOG_INTERVAL = 25;
 
-    /** Temperature for chat responses (balances creativity with accuracy). */
-    public static final double DEFAULT_TEMPERATURE = 0.7;
-
     private SseConstants() {
         // Non-instantiable utility class
     }

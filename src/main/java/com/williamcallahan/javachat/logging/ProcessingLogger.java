@@ -118,7 +118,7 @@ public class ProcessingLogger {
     /**
      * Log LLM interaction
      */
-    @Around("execution(* com.williamcallahan.javachat.service.ChatService.streamAnswer(..))")
+    @Around("execution(* com.williamcallahan.javachat.service.ChatService.streamAnswerWithContext(..))")
     public Object logLLMInteraction(ProceedingJoinPoint joinPoint) throws Throwable {
         int requestToken = Objects.hashCode(REQUEST_ID.get());
         long startTime = System.currentTimeMillis();
@@ -137,7 +137,7 @@ public class ProcessingLogger {
      * Logs LLM interaction failures without masking the underlying exception.
      */
     @AfterThrowing(
-            pointcut = "execution(* com.williamcallahan.javachat.service.ChatService.streamAnswer(..))",
+            pointcut = "execution(* com.williamcallahan.javachat.service.ChatService.streamAnswerWithContext(..))",
             throwing = "exception")
     public void logLlmInteractionFailure(Throwable exception) {
         int requestToken = Objects.hashCode(REQUEST_ID.get());

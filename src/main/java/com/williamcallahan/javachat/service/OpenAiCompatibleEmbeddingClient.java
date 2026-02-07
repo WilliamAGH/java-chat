@@ -90,8 +90,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
 
         for (int attemptNumber = 1; attemptNumber <= MAX_EMBED_ATTEMPTS; attemptNumber++) {
             try {
-                CreateEmbeddingResponse response = client.embeddings().create(params, requestOptions);
-                return parseResponse(response, texts.size());
+                CreateEmbeddingResponse embeddingResponse = client.embeddings().create(params, requestOptions);
+                return parseResponse(embeddingResponse, texts.size());
             } catch (OpenAIServiceException exception) {
                 int statusCode = exception.statusCode();
                 String details = sanitizeMessage(exception.getMessage());
@@ -247,8 +247,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return List.copyOf(orderedEmbeddings);
     }
 
-    private int safeEmbeddingIndex(int fallbackIndex, com.openai.models.embeddings.Embedding item, int expectedCount) {
-        long responseIndex = item._index().asNumber().map(Number::longValue).orElse((long) fallbackIndex);
+    private int safeEmbeddingIndex(
+            int fallbackIndex, com.openai.models.embeddings.Embedding embedding, int expectedCount) {
+        long responseIndex =
+                embedding._index().asNumber().map(Number::longValue).orElse((long) fallbackIndex);
         if (responseIndex < 0L || responseIndex > (long) Integer.MAX_VALUE) {
             log.debug("[EMBEDDING] Ignoring out-of-range embedding index={}", responseIndex);
             return -1;

@@ -147,7 +147,7 @@ public class ChatController extends BaseController {
                                 sseSupport.providerEvent(streamingResult.providerDisplayName());
 
                         // Stream with structure-aware truncation - preserves semantic boundaries
-                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.content(), chunk -> {
+                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
                             fullResponse.append(chunk);
                             chunkCount.incrementAndGet();
                         });

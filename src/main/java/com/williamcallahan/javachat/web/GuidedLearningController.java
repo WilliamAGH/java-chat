@@ -132,15 +132,10 @@ public class GuidedLearningController extends BaseController {
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamLesson(@RequestParam("slug") String slug) {
         // If cached, emit immediately as a single-frame stream with proper SSE formatting
-        var cached = guidedService.getCachedLessonMarkdown(slug);
-        if (cached.isPresent()) {
-            String payload = cached.get().replace("\r", "");
-            // Return raw content and let Spring handle SSE formatting automatically
-            return Flux.just(payload);
-        }
-
-        // Stream raw content and let Spring handle SSE formatting automatically
-        return guidedService.streamLessonContent(slug);
+        return guidedService
+                .getCachedLessonMarkdown(slug)
+                .map(cachedMarkdown -> Flux.just(cachedMarkdown.replace("\r", "")))
+                .orElseGet(() -> guidedService.streamLessonContent(slug));
     }
 
     /**
@@ -152,12 +147,10 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping(value = "/content", produces = MediaType.APPLICATION_JSON_VALUE)
     public LessonContentResponse content(@RequestParam("slug") String slug) {
-        var cached = guidedService.getCachedLessonMarkdown(slug);
-        if (cached.isPresent()) {
-            return new LessonContentResponse(cached.get(), true);
-        }
-        String lessonMarkdownContent = generateAndCacheLessonContent(slug);
-        return new LessonContentResponse(lessonMarkdownContent, false);
+        return guidedService
+                .getCachedLessonMarkdown(slug)
+                .map(cachedMarkdown -> new LessonContentResponse(cachedMarkdown, true))
+                .orElseGet(() -> new LessonContentResponse(generateAndCacheLessonContent(slug), false));
     }
 
     /**
@@ -263,7 +256,7 @@ public class GuidedLearningController extends BaseController {
                             sseSupport.providerEvent(streamingResult.providerDisplayName());
 
                     Flux<String> dataStream =
-                            sseSupport.prepareDataStream(streamingResult.content(), fullResponse::append);
+                            sseSupport.prepareDataStream(streamingResult.textChunks(), fullResponse::append);
 
                     Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);

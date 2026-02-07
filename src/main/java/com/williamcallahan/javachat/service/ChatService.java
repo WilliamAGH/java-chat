@@ -73,7 +73,7 @@ public class ChatService {
 
         return openAIStreamingService
                 .streamResponse(structuredPrompt, temperature)
-                .flatMapMany(result -> result.content())
+                .flatMapMany(streamingResult -> streamingResult.textChunks())
                 .onErrorResume(exception -> {
                     logger.error("Streaming failed", exception);
                     return Flux.error(exception);
