@@ -15,6 +15,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class HtmlContentExtractor {
 
+    private static final int MIN_INLINE_TEXT_LENGTH = 20;
+    private static final String CODE_FENCE_MARKER = "```";
+    private static final int CODE_FENCE_LENGTH = CODE_FENCE_MARKER.length();
+    private static final int MAX_CONSECUTIVE_NEWLINES = 2;
+
     // Common noise patterns to filter out
     private static final Set<String> NOISE_PATTERNS = Set.of(
             "JavaScript is disabled",
@@ -151,7 +156,7 @@ public class HtmlContentExtractor {
             }
             case "table" -> appendTableContent(child, sb);
             default -> {
-                if (!isNavigationElement(child) && text.length() > 20) {
+                if (!isNavigationElement(child) && text.length() > MIN_INLINE_TEXT_LENGTH) {
                     sb.append(" ").append(text);
                 }
             }
@@ -276,8 +281,8 @@ public class HtmlContentExtractor {
         int index = 0;
         while (index < text.length()) {
             if (isCodeFenceAt(text, index)) {
-                normalized.append("```");
-                index += 3;
+                normalized.append(CODE_FENCE_MARKER);
+                index += CODE_FENCE_LENGTH;
                 inFence = !inFence;
                 newlineRun = 0;
             } else if (inFence) {
@@ -292,7 +297,7 @@ public class HtmlContentExtractor {
     }
 
     private static boolean isCodeFenceAt(String text, int index) {
-        return index + 2 < text.length()
+        return index + (CODE_FENCE_LENGTH - 1) < text.length()
                 && text.charAt(index) == '`'
                 && text.charAt(index + 1) == '`'
                 && text.charAt(index + 2) == '`';
@@ -301,7 +306,7 @@ public class HtmlContentExtractor {
     private static int appendCollapsedWhitespace(char character, StringBuilder normalized, int newlineRun) {
         if (character == '\n') {
             int updatedRun = newlineRun + 1;
-            if (updatedRun <= 2) {
+            if (updatedRun <= MAX_CONSECUTIVE_NEWLINES) {
                 normalized.append(character);
             }
             return updatedRun;
