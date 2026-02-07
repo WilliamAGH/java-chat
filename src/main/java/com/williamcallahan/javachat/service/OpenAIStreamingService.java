@@ -326,7 +326,7 @@ public class OpenAIStreamingService {
     private OpenAIClient createClient(String apiKey, String baseUrl) {
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
-                .baseUrl(normalizeBaseUrl(baseUrl))
+                .baseUrl(OpenAiSdkUrlNormalizer.normalize(baseUrl))
                 // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
                 // Retries cause InterruptedException when Reactor cancels a sleeping retry.
                 .maxRetries(0)
@@ -343,10 +343,6 @@ public class OpenAIStreamingService {
         } catch (RuntimeException closeException) {
             log.warn("Failed to close OpenAI client (clientName={})", clientName, closeException);
         }
-    }
-
-    private String normalizeBaseUrl(String baseUrl) {
-        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
     }
 
     private Optional<String> extractTextDelta(ResponseStreamEvent event) {
