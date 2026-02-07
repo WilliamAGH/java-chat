@@ -22,7 +22,7 @@ Common variables:
 
 - `GITHUB_TOKEN` (GitHub Models auth)
 - `GITHUB_MODELS_BASE_URL` (default `https://models.github.ai/inference/v1`)
-- `GITHUB_MODELS_CHAT_MODEL` (default `gpt-5`)
+- `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
 - `OPENAI_MODEL` (default `gpt-5.2`)
@@ -33,6 +33,7 @@ Common variables:
 ### Provider notes
 
 - GitHub Models uses `https://models.github.ai/inference` (the OpenAI SDK requires `/v1`, so the default is `.../inference/v1`).
+- GitHub Models model IDs should be provider-qualified (for example `openai/gpt-5`, `xai/grok-3-mini`).
 - OpenAI uses `https://api.openai.com` (the OpenAI SDK requires `/v1`; the app normalizes URLs when needed).
 - Avoid `azure.com`-style endpoints unless you are explicitly running an Azure OpenAI-compatible gateway; this project does not configure Azure by default.
 

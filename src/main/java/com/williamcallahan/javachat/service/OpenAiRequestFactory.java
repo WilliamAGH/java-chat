@@ -28,6 +28,10 @@ public class OpenAiRequestFactory {
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
 
+    private static final String GITHUB_MODEL_PROVIDER_PREFIX = "openai/";
+    private static final String DEFAULT_OPENAI_MODEL = "gpt-5.2";
+    private static final String DEFAULT_GITHUB_MODELS_MODEL = "openai/gpt-5";
+
     /** Safe token budget for GPT-5.2 input (8K limit). */
     private static final int MAX_TOKENS_GPT5_INPUT = 7000;
 
@@ -58,8 +62,8 @@ public class OpenAiRequestFactory {
     public OpenAiRequestFactory(
             Chunker chunker,
             PromptTruncator promptTruncator,
-            @Value("${OPENAI_MODEL:gpt-5.2}") String openaiModel,
-            @Value("${GITHUB_MODELS_CHAT_MODEL:gpt-5}") String githubModelsChatModel,
+            @Value("${OPENAI_MODEL:" + DEFAULT_OPENAI_MODEL + "}") String openaiModel,
+            @Value("${GITHUB_MODELS_CHAT_MODEL:" + DEFAULT_GITHUB_MODELS_MODEL + "}") String githubModelsChatModel,
             @Value("${OPENAI_REASONING_EFFORT:}") String reasoningEffortSetting) {
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
@@ -127,7 +131,9 @@ public class OpenAiRequestFactory {
         String openaiModelId = normalizedModelId(false);
         String githubModelId = normalizedModelId(true);
         boolean gpt5Family = isGpt5Family(openaiModelId) || isGpt5Family(githubModelId);
-        boolean reasoningModel = gpt5Family || openaiModelId.startsWith("o") || githubModelId.startsWith("o");
+        boolean reasoningModel = gpt5Family
+                || canonicalModelName(openaiModelId).startsWith("o")
+                || canonicalModelName(githubModelId).startsWith("o");
 
         int tokenLimit = reasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
         String truncatedPrompt = chunker.keepLastTokens(prompt, tokenLimit);
@@ -142,7 +148,8 @@ public class OpenAiRequestFactory {
 
     private ResponseCreateParams buildResponseParams(String prompt, double temperature, String normalizedModelId) {
         boolean gpt5Family = isGpt5Family(normalizedModelId);
-        boolean reasoningModel = gpt5Family || normalizedModelId.startsWith("o");
+        boolean reasoningModel =
+                gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
 
         ResponseCreateParams.Builder builder =
                 ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
@@ -162,20 +169,32 @@ public class OpenAiRequestFactory {
     }
 
     private String normalizedModelId(boolean useGitHubModels) {
-        String rawModelId;
-        String defaultModel;
-        if (useGitHubModels) {
-            rawModelId = githubModelsChatModel == null ? "" : githubModelsChatModel.trim();
-            defaultModel = "gpt-5";
-        } else {
-            rawModelId = openaiModel == null ? "" : openaiModel.trim();
-            defaultModel = "gpt-5.2";
+        String configuredModel = useGitHubModels ? githubModelsChatModel : openaiModel;
+        String normalizedConfiguredModel =
+                configuredModel == null ? "" : AsciiTextNormalizer.toLowerAscii(configuredModel.trim());
+        if (normalizedConfiguredModel.isEmpty()) {
+            return useGitHubModels ? DEFAULT_GITHUB_MODELS_MODEL : DEFAULT_OPENAI_MODEL;
         }
-        return rawModelId.isEmpty() ? defaultModel : AsciiTextNormalizer.toLowerAscii(rawModelId);
+        if (!useGitHubModels || normalizedConfiguredModel.contains("/")) {
+            return normalizedConfiguredModel;
+        }
+        return GITHUB_MODEL_PROVIDER_PREFIX + normalizedConfiguredModel;
     }
 
     private boolean isGpt5Family(String modelId) {
-        return modelId != null && modelId.startsWith(GPT_5_MODEL_PREFIX);
+        return canonicalModelName(modelId).startsWith(GPT_5_MODEL_PREFIX);
+    }
+
+    private String canonicalModelName(String modelId) {
+        if (modelId == null || modelId.isBlank()) {
+            return "";
+        }
+        String normalizedModelId = AsciiTextNormalizer.toLowerAscii(modelId.trim());
+        int providerSeparatorIndex = normalizedModelId.lastIndexOf('/');
+        if (providerSeparatorIndex < 0 || providerSeparatorIndex + 1 >= normalizedModelId.length()) {
+            return normalizedModelId;
+        }
+        return normalizedModelId.substring(providerSeparatorIndex + 1);
     }
 
     private Optional<ReasoningEffort> resolveReasoningEffort() {
