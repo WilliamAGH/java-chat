@@ -140,19 +140,13 @@ while :; do
   COPIED=$((COPIED + COUNT))
   ELAPSED=$(( $(date +%s) - START_TS ))
   RATE=0
-  if [[ "$ELAPSED" -gt 0 ]]; then RATE=$(python3 - <<PY 2>/dev/null || echo 0
-import sys
-c=int(sys.argv[1]); e=int(sys.argv[2])
-print(int(c/e)) if e>0 else print(0)
-PY
- "$COPIED" "$ELAPSED"); fi
-  PCT=0
-  if [[ "$SRC_POINTS" -gt 0 ]]; then PCT=$(python3 - <<PY 2>/dev/null || echo 0
-import sys
-c=int(sys.argv[1]); t=int(sys.argv[2])
-print(f"{(c/t)*100:.2f}") if t>0 else print("0.00")
-PY
- "$COPIED" "$SRC_POINTS"); fi
+  if [[ "$ELAPSED" -gt 0 ]]; then
+    RATE=$((COPIED / ELAPSED))
+  fi
+  PCT="0.00"
+  if [[ "$SRC_POINTS" -gt 0 ]]; then
+    PCT=$(awk "BEGIN {printf \"%.2f\", ($COPIED/$SRC_POINTS)*100}")
+  fi
   echo "→ Copied batch ${COUNT}; total ${COPIED}/${SRC_POINTS} (${PCT}%), ~${RATE} pts/sec"
 
   # Next offset

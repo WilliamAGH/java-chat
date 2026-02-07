@@ -41,11 +41,12 @@ short_sha256() {
         printf '%s' "$raw_value" | shasum -a 256 | awk '{print substr($1,1,8)}'
         return
     fi
-    python3 - "$raw_value" <<'PY'
-import hashlib
-import sys
-print(hashlib.sha256(sys.argv[1].encode("utf-8")).hexdigest()[:8])
-PY
+    if command -v openssl >/dev/null 2>&1; then
+        printf '%s' "$raw_value" | openssl dgst -sha256 -r | awk '{print substr($1,1,8)}'
+        return
+    fi
+    echo "ERROR: no SHA-256 tool available (need sha256sum, shasum, or openssl)" >&2
+    return 1
 }
 
 sanitize_collection_segment() {

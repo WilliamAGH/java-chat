@@ -178,8 +178,105 @@ quarantine_versioned_reference_subdirs() {
     shopt -u nullglob
 }
 
-# Function to fetch documentation with wget (incremental via timestamping)
-fetch_docs() {
+# Validates a wget fetch result: checks exit code, counts HTML files, and
+# enforces the minimum-files threshold.  Returns 0 on success, 1 on failure.
+#
+# Arguments:
+#   $1 - wget exit code
+#   $2 - target directory (for HTML count)
+#   $3 - human-readable name
+#   $4 - minimum required HTML files (0 = no minimum)
+#   $5 - "true" to allow partial mirrors without failing
+validate_fetch_result() {
+    local wget_exit_code="$1"
+    local target_dir="$2"
+    local name="$3"
+    local min_files="$4"
+    local allow_partial="${5:-false}"
+
+    local fetched_html_count
+    fetched_html_count="$(count_html_files "$target_dir")"
+
+    # wget returns 8 for HTTP errors (e.g., a few 404s) even when the mirror is usable.
+    # Prefer our post-fetch validation over raw exit status.
+    if [ "$wget_exit_code" -ne 0 ] && [ "$wget_exit_code" -ne 8 ]; then
+        log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
+        return 1
+    fi
+
+    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
+    if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
+        if [ "$allow_partial" = "true" ]; then
+            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
+        else
+            log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Fetches Oracle Javadoc using an explicit seed list derived from the Javadoc
+# search indices.  This avoids incomplete recursive crawls that miss pages.
+#
+# Arguments:
+#   $1 - base URL (e.g., https://docs.oracle.com/en/java/javase/24/docs/api/)
+#   $2 - target directory
+#   $3 - human-readable name
+#   $4 - --cut-dirs value
+#   $5 - minimum required HTML files
+#   $6 - "true" to allow partial mirrors
+fetch_oracle_javadoc_seed() {
+    local url="$1"
+    local target_dir="$2"
+    local name="$3"
+    local cut_dirs="$4"
+    local min_files="$5"
+    local allow_partial="${6:-false}"
+
+    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    log "${BLUE}ℹ Oracle Javadoc detected; generating explicit URL seed list...${NC}"
+    python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
+    local seed_url_count
+    seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
+    log "${BLUE}ℹ Oracle Javadoc seed URLs: $seed_url_count${NC}"
+
+    local wget_seed_args=(
+        --timestamping
+        --no-host-directories
+        --cut-dirs="$cut_dirs"
+        --input-file="$seed_file"
+        --directory-prefix="$target_dir"
+        --show-progress
+        --progress=bar:force
+        --timeout=120
+        --dns-timeout=30
+        --connect-timeout=30
+        --read-timeout=120
+        --tries=5
+        --waitretry=1
+        --retry-connrefused
+        --user-agent="java-chat-doc-fetcher/1.0"
+    )
+
+    wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+    local wget_exit_code=$?
+    cd - > /dev/null
+
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$allow_partial"
+}
+
+# Fetches documentation using wget --mirror for generic (non-Oracle) sites.
+#
+# Arguments:
+#   $1 - URL to mirror
+#   $2 - target directory
+#   $3 - human-readable name
+#   $4 - --cut-dirs value
+#   $5 - minimum required HTML files
+#   $6 - reject regex (optional)
+#   $7 - "true" to allow partial mirrors (optional)
+fetch_docs_mirror() {
     local url="$1"
     local target_dir="$2"
     local name="$3"
@@ -187,91 +284,6 @@ fetch_docs() {
     local min_files="$5"
     local reject_regex="${6:-}"
     local allow_partial="${7:-false}"
-
-    # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
-    reject_regex="${reject_regex//__OR__/|}"
-
-    local existing_count
-    existing_count="$(count_html_files "$target_dir")"
-    if [ "$existing_count" -gt 0 ]; then
-        log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
-    fi
-    if [ "$allow_partial" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
-        quarantine_incomplete_dir "$target_dir" "$name" "$existing_count" "$min_files"
-    fi
-
-    # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
-    if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
-        quarantine_path "$target_dir/api/current" "$name legacy api/current"
-    fi
-    if [[ "$name" == *"Spring Framework Reference"* ]]; then
-        quarantine_versioned_reference_subdirs "$target_dir" "$name" ""
-    fi
-    if [[ "$name" == *"Spring AI Reference"* ]]; then
-        quarantine_versioned_reference_subdirs "$target_dir" "$name" "^2\\."
-    fi
-
-    log "${YELLOW}Fetching $name...${NC}"
-    mkdir -p "$target_dir"
-    cd "$target_dir"
-
-    # Oracle Javadoc: use an explicit seed list derived from the Javadoc search indices.
-    # This avoids incomplete recursive crawls. To avoid 10k+ URL checks every run, only do this when
-    # the local mirror is incomplete or when --force is set.
-    if [[ "$url" == *"docs.oracle.com/en/java/javase/"*"/docs/api/" ]]; then
-        if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
-            log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
-            return 0
-        fi
-
-        local seed_file="$target_dir/.oracle-javadoc-seed.txt"
-        log "${BLUE}ℹ Oracle Javadoc detected; generating explicit URL seed list...${NC}"
-        python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
-        local seed_url_count
-        seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
-        log "${BLUE}ℹ Oracle Javadoc seed URLs: $seed_url_count${NC}"
-
-        local wget_seed_args=(
-            --timestamping
-            --no-host-directories
-            --cut-dirs="$cut_dirs"
-            --input-file="$seed_file"
-            --directory-prefix="$target_dir"
-            --show-progress
-            --progress=bar:force
-            --timeout=120
-            --dns-timeout=30
-            --connect-timeout=30
-            --read-timeout=120
-            --tries=5
-            --waitretry=1
-            --retry-connrefused
-            --user-agent="java-chat-doc-fetcher/1.0"
-        )
-
-        wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
-        local seed_result=$?
-        cd - > /dev/null
-
-        local seed_count
-        seed_count="$(count_html_files "$target_dir")"
-
-        # wget returns 8 for HTTP errors (e.g., a few 404s) even when the mirror is usable.
-        # Prefer our post-fetch validation over raw exit status.
-        if [ $seed_result -ne 0 ] && [ $seed_result -ne 8 ]; then
-            log "${RED}✗ Failed to fetch $name (exit code: $seed_result)${NC}"
-            return 1
-        fi
-
-        log "${GREEN}✓ $name fetched successfully: $seed_count HTML files${NC}"
-        if [ "$min_files" -gt 0 ] && [ "$seed_count" -lt "$min_files" ] && [ "$allow_partial" != "true" ]; then
-            log "${RED}✗ $name mirror is still incomplete after fetch: $seed_count HTML files (expected $min_files+)${NC}"
-            return 1
-        elif [ "$min_files" -gt 0 ] && [ "$seed_count" -lt "$min_files" ] && [ "$allow_partial" = "true" ]; then
-            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $seed_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
-        fi
-        return 0
-    fi
 
     local wget_args=(
         --mirror \
@@ -301,28 +313,71 @@ fetch_docs() {
     fi
 
     wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
-
-    local result=$?
+    local wget_exit_code=$?
     cd - > /dev/null
-    
-    local count
-    count="$(count_html_files "$target_dir")"
 
-    # wget returns 8 for HTTP errors (e.g., a few 404s) even when the mirror is usable.
-    # Prefer our post-fetch validation over raw exit status.
-    if [ $result -ne 0 ] && [ $result -ne 8 ]; then
-        log "${RED}✗ Failed to fetch $name (exit code: $result)${NC}"
-        return 1
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$allow_partial"
+}
+
+# Dispatches documentation fetching: performs pre-fetch housekeeping (existing
+# mirror check, quarantine, legacy cleanup), then delegates to the appropriate
+# strategy — seed-list for Oracle Javadoc, wget --mirror for everything else.
+#
+# Arguments (pipe-delimited config row):
+#   $1 - URL
+#   $2 - target directory
+#   $3 - human-readable name
+#   $4 - --cut-dirs value
+#   $5 - minimum required HTML files
+#   $6 - reject regex (optional)
+#   $7 - "true" to allow partial mirrors (optional)
+fetch_docs() {
+    local url="$1"
+    local target_dir="$2"
+    local name="$3"
+    local cut_dirs="$4"
+    local min_files="$5"
+    local reject_regex="${6:-}"
+    local allow_partial="${7:-false}"
+
+    # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
+    reject_regex="${reject_regex//__OR__/|}"
+
+    # ── Pre-fetch: check existing mirror and quarantine if incomplete ──
+    local existing_count
+    existing_count="$(count_html_files "$target_dir")"
+    if [ "$existing_count" -gt 0 ]; then
+        log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
+    fi
+    if [ "$allow_partial" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
+        quarantine_incomplete_dir "$target_dir" "$name" "$existing_count" "$min_files"
     fi
 
-    log "${GREEN}✓ $name fetched successfully: $count HTML files${NC}"
-    if [ "$min_files" -gt 0 ] && [ "$count" -lt "$min_files" ] && [ "$allow_partial" != "true" ]; then
-        log "${RED}✗ $name mirror is still incomplete after fetch: $count HTML files (expected $min_files+)${NC}"
-        return 1
-    elif [ "$min_files" -gt 0 ] && [ "$count" -lt "$min_files" ] && [ "$allow_partial" = "true" ]; then
-        log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
+    # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
+    if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
+        quarantine_path "$target_dir/api/current" "$name legacy api/current"
     fi
-    return 0
+    if [[ "$name" == *"Spring Framework Reference"* ]]; then
+        quarantine_versioned_reference_subdirs "$target_dir" "$name" ""
+    fi
+    if [[ "$name" == *"Spring AI Reference"* ]]; then
+        quarantine_versioned_reference_subdirs "$target_dir" "$name" "^2\\."
+    fi
+
+    log "${YELLOW}Fetching $name...${NC}"
+    mkdir -p "$target_dir"
+    cd "$target_dir"
+
+    # ── Dispatch to strategy ──
+    if [[ "$url" == *"docs.oracle.com/en/java/javase/"*"/docs/api/" ]]; then
+        if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
+            log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
+            return 0
+        fi
+        fetch_oracle_javadoc_seed "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$allow_partial"
+    else
+        fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$allow_partial"
+    fi
 }
 
 # Documentation sources configuration
@@ -428,12 +483,12 @@ cat > "$METADATA_FILE" << EOF
     "total_files": $TOTAL_FILES
   },
   "versions": {
-    "java24_javadoc": "$(echo "$JAVA24_JAVADOC_VERSION")",
-    "java25_javadoc": "$(echo "$JAVA25_JAVADOC_VERSION")",
-    "spring_boot_reference": "$(echo "$SPRING_BOOT_REFERENCE_VERSION")",
-    "spring_framework_reference": "$(echo "$SPRING_FRAMEWORK_REFERENCE_VERSION")",
-    "spring_ai_reference_stable": "$(echo "$SPRING_AI_REFERENCE_STABLE_VERSION")",
-    "spring_ai_reference_2": "$(echo "$SPRING_AI_REFERENCE_2_VERSION")"
+    "java24_javadoc": "$JAVA24_JAVADOC_VERSION",
+    "java25_javadoc": "$JAVA25_JAVADOC_VERSION",
+    "spring_boot_reference": "$SPRING_BOOT_REFERENCE_VERSION",
+    "spring_framework_reference": "$SPRING_FRAMEWORK_REFERENCE_VERSION",
+    "spring_ai_reference_stable": "$SPRING_AI_REFERENCE_STABLE_VERSION",
+    "spring_ai_reference_2": "$SPRING_AI_REFERENCE_2_VERSION"
   },
   "directories": {
     "java24_complete": "$(find "$DOCS_ROOT/java/java24-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
