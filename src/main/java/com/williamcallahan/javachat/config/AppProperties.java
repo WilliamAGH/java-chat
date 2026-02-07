@@ -524,8 +524,7 @@ public class AppProperties {
     /** Guided learning configuration for Think Java book integration. */
     public static class GuidedLearning {
         /** Classpath resource path to the Think Java 2nd Edition PDF used for guided lessons. */
-        private static final String DEFAULT_THINK_JAVA_PDF_CLASSPATH =
-                "/pdfs/Think Java - 2nd Edition Book.pdf";
+        private static final String DEFAULT_THINK_JAVA_PDF_CLASSPATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
 
         private String thinkJavaPdfPath = DEFAULT_THINK_JAVA_PDF_CLASSPATH;
 

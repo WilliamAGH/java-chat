@@ -34,7 +34,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    private static final String API_PATH_SEGMENT = "/api/";
+    private static final String API_PATH_SEGMENT = "${app.ingestion.api-path-segment:/api/}";
 
     private final FileContentServices content;
     private final IngestionStorageServices storage;
@@ -121,16 +121,16 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         boolean unchangedByFingerprint = priorIngestionRecord
-                .map(record -> record.fileSizeBytes() == fileSizeBytes
-                        && record.lastModifiedMillis() == lastModifiedMillis
-                        && fileContentFingerprint.equals(record.contentFingerprint()))
+                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == fileSizeBytes
+                        && ingestionRecord.lastModifiedMillis() == lastModifiedMillis
+                        && fileContentFingerprint.equals(ingestionRecord.contentFingerprint()))
                 .orElse(false);
 
         if (unchangedByFingerprint) {
             try {
                 long storedPointCount = storage.hybridVector().countPointsForUrl(collectionKind, url);
                 int expectedChunkCount = priorIngestionRecord
-                        .map(record -> record.chunkHashes().size())
+                        .map(ingestionRecord -> ingestionRecord.chunkHashes().size())
                         .orElse(0);
                 boolean sufficientPointCoverage = expectedChunkCount <= 0 || storedPointCount >= expectedChunkCount;
                 if (storedPointCount > 0 && sufficientPointCoverage) {
@@ -325,12 +325,13 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         long totalDuration = System.currentTimeMillis() - fileStartMillis;
+        String formattedPercent = progressTracker.formatPercent();
         INDEXING_LOG.info(
                 "[INDEXING] Completed processing {}/{} chunks to Qdrant in {}ms (end-to-end) ({})",
                 documents.size(),
                 documents.size(),
                 totalDuration,
-                progressTracker.formatPercent());
+                formattedPercent);
 
         markDocumentsIngested(documents);
         markFileIngested(url, fileSizeBytes, lastModifiedMillis, fileContentFingerprint, allChunkHashes);
@@ -353,12 +354,13 @@ public class LocalDocsFileIngestionProcessor {
         long startTime = System.currentTimeMillis();
         hybridVector.upsert(collectionKind, documents);
         long duration = System.currentTimeMillis() - startTime;
+        String formattedPercent = progressTracker.formatPercent();
         INDEXING_LOG.info(
                 "[INDEXING] Added {} hybrid vectors to {} in {}ms ({})",
                 documents.size(),
                 collectionKind,
                 duration,
-                progressTracker.formatPercent());
+                formattedPercent);
     }
 
     private void markDocumentsIngested(List<Document> documents) {

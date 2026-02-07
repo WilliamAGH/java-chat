@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
 public class DocsIngestionService {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
-    private static final String API_PATH_SEGMENT = "/api/";
+    private static final String API_PATH_SEGMENT = "${app.docs.api-path-segment:/api/}";
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(30);
 
     private final String rootUrl;

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
@@ -38,9 +39,11 @@ public class GuidedLearningService {
     private final ChatService chatService;
     private final SystemPromptConfig systemPromptConfig;
     private final PdfCitationEnhancer pdfCitationEnhancer;
+    private final AppProperties appProperties;
 
-    // Public server path of the Think Java book (as mapped by DocsSourceRegistry)
-    private static final String THINK_JAVA_PDF_PATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
+    // Configurable path of the Think Java book (as mapped by DocsSourceRegistry)
+    // Default: "/pdfs/Think Java - 2nd Edition Book.pdf"
+    // Can be overridden via app.guided-learning.think-java-pdf-path property
 
     /** Maximum retrieved book snippets to include in enrichment requests. */
     private static final int MAX_ENRICHMENT_SNIPPETS = 6;
@@ -86,6 +89,7 @@ public class GuidedLearningService {
             ChatService chatService,
             SystemPromptConfig systemPromptConfig,
             PdfCitationEnhancer pdfCitationEnhancer,
+            AppProperties appProperties,
             @Value("${app.docs.jdk-version}") String jdkVersion) {
         this.tocProvider = tocProvider;
         this.retrievalService = retrievalService;
@@ -93,6 +97,7 @@ public class GuidedLearningService {
         this.chatService = chatService;
         this.systemPromptConfig = systemPromptConfig;
         this.pdfCitationEnhancer = pdfCitationEnhancer;
+        this.appProperties = appProperties;
         this.jdkVersion = jdkVersion;
     }
 
@@ -331,7 +336,7 @@ public class GuidedLearningService {
         List<Document> bookDocuments = new ArrayList<>();
         for (Document document : retrievedDocuments) {
             String sourceUrl = String.valueOf(document.getMetadata().getOrDefault(METADATA_KEY_URL, ""));
-            if (sourceUrl.contains(THINK_JAVA_PDF_PATH)) {
+            if (sourceUrl.contains(appProperties.getGuidedLearning().getThinkJavaPdfPath())) {
                 bookDocuments.add(document);
             }
         }
