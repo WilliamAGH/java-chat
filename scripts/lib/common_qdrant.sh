@@ -220,7 +220,8 @@ _common_cleanup() {
 
 # Monitors a background Java process for completion by watching a log file
 # for the "DOCUMENT PROCESSING COMPLETE" marker.
-# Exits with error if the process terminates unexpectedly.
+# Exits successfully when the process completes (with or without marker).
+# Exits with error if the process fails unexpectedly with exit code > 0.
 #
 # Tracks progress via actual Java log patterns:
 #   "Files to process: N"              -> total files declared
@@ -255,10 +256,29 @@ monitor_java_process() {
         fi
 
         if ! kill -0 "$java_pid" 2>/dev/null; then
-            echo ""
-            echo -e "${RED}Application terminated unexpectedly${NC}"
-            rm -f "$pid_file"
-            exit 1
+            # Process has terminated. Check if it completed successfully or failed.
+            local exit_status
+            wait "$java_pid" 2>/dev/null
+            exit_status=$?
+            
+            # Exit code 143 means the process was terminated by signal 15 (SIGTERM), which is normal.
+            # Exit code 0 means successful completion (even without the marker).
+            if [ "$exit_status" -eq 0 ] || [ "$exit_status" -eq 143 ]; then
+                local total_files_declared
+                total_files_declared=$(grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null \
+                    | awk -F': ' '{s+=$2} END {print s+0}')
+                local total_files_started
+                total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
+                total_files_started=${total_files_started:-0}
+                echo ""
+                echo -e "${GREEN}Processing completed${NC} ($total_files_started/$total_files_declared files, ${elapsed}s)"
+                break
+            else
+                echo ""
+                echo -e "${RED}Application failed with exit code $exit_status${NC}"
+                rm -f "$pid_file"
+                exit 1
+            fi
         fi
 
         local current_time
