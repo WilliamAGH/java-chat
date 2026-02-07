@@ -116,21 +116,21 @@ public class LexicalSparseVectorEncoder {
      */
     private static int murmurHash32(String token) {
         Objects.requireNonNull(token, "token");
-        byte[] data = token.getBytes(StandardCharsets.UTF_8);
+        byte[] tokenBytes = token.getBytes(StandardCharsets.UTF_8);
 
         final int seed = 0;
         final int c1 = 0xcc9e2d51;
         final int c2 = 0x1b873593;
 
         int h1 = seed;
-        int length = data.length;
+        int length = tokenBytes.length;
         int roundedEnd = length & 0xFFFFFFFC; // round down to 4 byte block
 
         for (int i = 0; i < roundedEnd; i += 4) {
-            int k1 = (data[i] & 0xff)
-                    | ((data[i + 1] & 0xff) << 8)
-                    | ((data[i + 2] & 0xff) << 16)
-                    | ((data[i + 3] & 0xff) << 24);
+            int k1 = (tokenBytes[i] & 0xff)
+                    | ((tokenBytes[i + 1] & 0xff) << 8)
+                    | ((tokenBytes[i + 2] & 0xff) << 16)
+                    | ((tokenBytes[i + 3] & 0xff) << 24);
             k1 *= c1;
             k1 = Integer.rotateLeft(k1, 15);
             k1 *= c2;
@@ -143,13 +143,13 @@ public class LexicalSparseVectorEncoder {
         int k1 = 0;
         int remainder = length & 3;
         if (remainder >= 3) {
-            k1 ^= (data[roundedEnd + 2] & 0xff) << 16;
+            k1 ^= (tokenBytes[roundedEnd + 2] & 0xff) << 16;
         }
         if (remainder >= 2) {
-            k1 ^= (data[roundedEnd + 1] & 0xff) << 8;
+            k1 ^= (tokenBytes[roundedEnd + 1] & 0xff) << 8;
         }
         if (remainder >= 1) {
-            k1 ^= (data[roundedEnd] & 0xff);
+            k1 ^= (tokenBytes[roundedEnd] & 0xff);
             k1 *= c1;
             k1 = Integer.rotateLeft(k1, 15);
             k1 *= c2;

@@ -202,13 +202,13 @@ public class ChatService {
      */
     private List<ConversationTurnSegment> buildConversationSegments(List<Message> history) {
         List<ConversationTurnSegment> segments = new ArrayList<>();
-        for (Message msg : history) {
+        for (Message historyMessage : history) {
             String role;
             String text;
-            if (msg instanceof UserMessage userMsg) {
+            if (historyMessage instanceof UserMessage userMessage) {
                 role = ConversationTurnSegment.ROLE_USER;
-                text = userMsg.getText();
-            } else if (msg instanceof AssistantMessage assistantMsg) {
+                text = userMessage.getText();
+            } else if (historyMessage instanceof AssistantMessage assistantMsg) {
                 role = ConversationTurnSegment.ROLE_ASSISTANT;
                 text = assistantMsg.getText();
             } else {

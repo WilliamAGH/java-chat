@@ -25,6 +25,13 @@ import org.springframework.stereotype.Service;
 public class RerankerService {
 
     private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
+
+    /** Markdown code fence delimiter used when parsing fenced LLM output. */
+    private static final String CODE_FENCE_MARKER = "```";
+
+    /** Maximum character length of document text included in the rerank prompt. */
+    private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
+
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
     private final Duration rerankerTimeout;
@@ -51,22 +58,22 @@ public class RerankerService {
     @Cacheable(
             value = "reranker-cache",
             key =
-                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#docs) + ':' + #returnK")
-    public List<Document> rerank(String query, List<Document> docs, int returnK) {
-        if (docs.size() <= 1) {
-            return docs;
+                    "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
+    public List<Document> rerank(String query, List<Document> documents, int returnK) {
+        if (documents.size() <= 1) {
+            return documents;
         }
 
-        log.debug("Reranking {} documents", docs.size());
+        log.debug("Reranking {} documents", documents.size());
 
-        Optional<String> responseOpt = callLlmForReranking(query, docs);
-        if (responseOpt.isEmpty() || responseOpt.get().isBlank()) {
+        Optional<String> llmOutputOptional = callLlmForReranking(query, documents);
+        if (llmOutputOptional.isEmpty() || llmOutputOptional.get().isBlank()) {
             throw new RerankingFailureException("Reranking response was empty");
         }
 
         List<Document> reordered;
         try {
-            reordered = parseRerankResponse(responseOpt.get(), docs);
+            reordered = parseRerankResponse(llmOutputOptional.get(), documents);
         } catch (JsonProcessingException jsonException) {
             throw new RerankingFailureException("Reranking response parse failed", jsonException);
         }
@@ -75,7 +82,7 @@ public class RerankerService {
         }
 
         log.debug("Successfully reranked {} documents", reordered.size());
-        return limitDocs(reordered, returnK);
+        return limitDocuments(reordered, returnK);
     }
 
     /**
@@ -83,13 +90,13 @@ public class RerankerService {
      *
      * @return reranking response, or empty if service unavailable or times out
      */
-    private Optional<String> callLlmForReranking(String query, List<Document> docs) {
+    private Optional<String> callLlmForReranking(String query, List<Document> documents) {
         if (openAIStreamingService == null || !openAIStreamingService.isAvailable()) {
             log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
             throw new RerankingFailureException("Reranking service unavailable");
         }
 
-        String prompt = buildRerankPrompt(query, docs);
+        String prompt = buildRerankPrompt(query, documents);
 
         try {
             return openAIStreamingService
@@ -107,7 +114,7 @@ public class RerankerService {
     /**
      * Build the prompt for the reranking LLM call.
      */
-    private String buildRerankPrompt(String query, List<Document> docs) {
+    private String buildRerankPrompt(String query, List<Document> documents) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are a document re-ranker for the Java learning assistant system.\n");
         prompt.append("Reorder the following documents by relevance to the query.\n");
@@ -117,8 +124,8 @@ public class RerankerService {
         prompt.append("Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
 
-        for (int docIndex = 0; docIndex < docs.size(); docIndex++) {
-            Document document = docs.get(docIndex);
+        for (int docIndex = 0; docIndex < documents.size(); docIndex++) {
+            Document document = documents.get(docIndex);
             Map<String, ?> metadata = document.getMetadata();
             String title = extractMetadataString(metadata, "title");
             String url = extractMetadataString(metadata, "url");
@@ -130,7 +137,7 @@ public class RerankerService {
                     .append(" | ")
                     .append(url)
                     .append("\n")
-                    .append(trim(text == null ? "" : text, 500))
+                    .append(trim(text == null ? "" : text, RERANK_PROMPT_TEXT_MAX_LENGTH))
                     .append("\n\n");
         }
 
@@ -140,9 +147,10 @@ public class RerankerService {
     /**
      * Parse the LLM response to extract document ordering.
      */
-    private List<Document> parseRerankResponse(String response, List<Document> docs) throws JsonProcessingException {
+    private List<Document> parseRerankResponse(String llmOutput, List<Document> documents)
+            throws JsonProcessingException {
         List<Document> reordered = new ArrayList<>();
-        RerankOrderResponse orderResponse = parseRerankOrderResponse(response);
+        RerankOrderResponse orderResponse = parseRerankOrderResponse(llmOutput);
         if (orderResponse == null || orderResponse.order() == null) {
             return reordered;
         }
@@ -150,8 +158,8 @@ public class RerankerService {
             if (documentIndex == null) {
                 continue;
             }
-            if (documentIndex >= 0 && documentIndex < docs.size()) {
-                reordered.add(docs.get(documentIndex));
+            if (documentIndex >= 0 && documentIndex < documents.size()) {
+                reordered.add(documents.get(documentIndex));
             }
         }
         return reordered;
@@ -160,8 +168,8 @@ public class RerankerService {
     /**
      * Extracts a JSON object from the LLM response, preferring fenced blocks when present.
      */
-    private RerankOrderResponse parseRerankOrderResponse(String response) throws JsonProcessingException {
-        String jsonObject = extractFirstJsonObject(response);
+    private RerankOrderResponse parseRerankOrderResponse(String llmOutput) throws JsonProcessingException {
+        String jsonObject = extractFirstJsonObject(llmOutput);
         if (jsonObject.isBlank()) {
             throw new RerankParsingException("Rerank response did not contain a JSON object");
         }
@@ -172,25 +180,25 @@ public class RerankerService {
         }
     }
 
-    private String extractFirstJsonObject(String response) {
-        if (response == null || response.isBlank()) {
+    private String extractFirstJsonObject(String llmOutput) {
+        if (llmOutput == null || llmOutput.isBlank()) {
             return "";
         }
-        String fencedCandidate = extractFirstFencedBlock(response);
-        String candidate = fencedCandidate.isEmpty() ? response : fencedCandidate;
+        String fencedCandidate = extractFirstFencedBlock(llmOutput);
+        String candidate = fencedCandidate.isEmpty() ? llmOutput : fencedCandidate;
         return findFirstJsonObject(candidate);
     }
 
     private String extractFirstFencedBlock(String text) {
-        int fenceStartIndex = text.indexOf("```");
+        int fenceStartIndex = text.indexOf(CODE_FENCE_MARKER);
         if (fenceStartIndex < 0) {
             return "";
         }
-        int fenceLineBreakIndex = text.indexOf('\n', fenceStartIndex + 3);
+        int fenceLineBreakIndex = text.indexOf('\n', fenceStartIndex + CODE_FENCE_MARKER.length());
         if (fenceLineBreakIndex < 0) {
             return "";
         }
-        int fenceEndIndex = text.indexOf("```", fenceLineBreakIndex + 1);
+        int fenceEndIndex = text.indexOf(CODE_FENCE_MARKER, fenceLineBreakIndex + 1);
         if (fenceEndIndex < 0) {
             return "";
         }
@@ -246,8 +254,8 @@ public class RerankerService {
     /**
      * Limit document list to returnK elements.
      */
-    private List<Document> limitDocs(List<Document> docs, int returnK) {
-        return docs.subList(0, Math.min(returnK, docs.size()));
+    private List<Document> limitDocuments(List<Document> documents, int returnK) {
+        return documents.subList(0, Math.min(returnK, documents.size()));
     }
 
     private String trim(String text, int maxLength) {
@@ -269,14 +277,14 @@ public class RerankerService {
      * Compute a stable hash of documents for cache key.
      * Uses URLs as document identity since they are unique in the context of reranking.
      */
-    public static String computeDocsHash(List<Document> docs) {
-        if (docs == null || docs.isEmpty()) {
+    public static String computeDocsHash(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
             return "empty";
         }
         StringBuilder hashBuilder = new StringBuilder();
-        for (Document doc : docs) {
-            Object url = doc.getMetadata().get("url");
-            String text = doc.getText();
+        for (Document document : documents) {
+            Object url = document.getMetadata().get("url");
+            String text = document.getText();
             hashBuilder.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
             hashBuilder.append("|");
         }

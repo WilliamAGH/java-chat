@@ -256,11 +256,11 @@ public class RateLimitState {
                 throw new IOException("Failed to create state directory: " + parent);
             }
 
-            PersistedState data = new PersistedState();
-            data.setProviders(new ConcurrentHashMap<>(providerStates));
-            data.setSavedAt(Instant.now());
+            PersistedState persistedState = new PersistedState();
+            persistedState.setProviders(new ConcurrentHashMap<>(providerStates));
+            persistedState.setSavedAt(Instant.now());
 
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, data);
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, persistedState);
         }
     }
 

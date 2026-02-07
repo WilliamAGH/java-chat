@@ -315,7 +315,8 @@ public class OpenAIStreamingService {
                     Flux<String> textChunksFlux = executeStreamingWithProviderFallback(
                                     structuredPrompt, temperature, attemptContext)
                             .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
-                    return Mono.just(new StreamingResult(textChunksFlux, initialProvider.provider(), noticeSink.asFlux()));
+                    return Mono.just(
+                            new StreamingResult(textChunksFlux, initialProvider.provider(), noticeSink.asFlux()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }

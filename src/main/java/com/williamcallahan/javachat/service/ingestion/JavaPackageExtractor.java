@@ -27,17 +27,17 @@ public final class JavaPackageExtractor {
         Objects.requireNonNull(bodyText, "bodyText");
 
         if (url.contains(API_PATH_SEGMENT)) {
-            int idx = url.indexOf(API_PATH_SEGMENT) + API_PATH_SEGMENT.length();
-            String tail = url.substring(idx);
-            String[] parts = tail.split("/");
-            StringBuilder sb = new StringBuilder();
-            for (String pathSegment : parts) {
+            int apiPathOffset = url.indexOf(API_PATH_SEGMENT) + API_PATH_SEGMENT.length();
+            String pathAfterApi = url.substring(apiPathOffset);
+            String[] pathSegments = pathAfterApi.split("/");
+            StringBuilder packageBuilder = new StringBuilder();
+            for (String pathSegment : pathSegments) {
                 if (pathSegment.endsWith(".html")) break;
-                if (sb.length() > 0) sb.append('.');
-                sb.append(pathSegment);
+                if (packageBuilder.length() > 0) packageBuilder.append('.');
+                packageBuilder.append(pathSegment);
             }
-            String pkg = sb.toString();
-            if (pkg.contains(".")) return pkg;
+            String packageName = packageBuilder.toString();
+            if (packageName.contains(".")) return packageName;
         }
 
         int packageIndex = bodyText.indexOf("Package ");
