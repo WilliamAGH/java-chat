@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.core.Ordered;
@@ -11,6 +13,8 @@ import org.springframework.core.env.PropertySource;
  * Ensures a usable server port is selected before Spring Boot starts.
  */
 public class PortInitializer implements EnvironmentPostProcessor, Ordered {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(PortInitializer.class);
 
     private static final int DEFAULT_MIN = 8085;
     private static final int DEFAULT_MAX = 8090;
@@ -34,25 +38,41 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         if (isCliOrNonWebExecution(environment)) {
-            System.err.println("[startup] PortInitializer disabled for CLI/non-web execution");
+            LOGGER.info("[startup] PortInitializer disabled for CLI/non-web execution");
             return;
         }
 
-        // Disable port manipulation entirely when running under the 'test' profile
+        if (isTestProfile(environment)) {
+            return;
+        }
+
+        PortRange portRange = resolvePortRange(environment);
+        int preferredPort = resolvePreferredPort(environment, portRange);
+        applyPortConfiguration(environment, preferredPort, portRange);
+    }
+
+    private boolean isTestProfile(ConfigurableEnvironment environment) {
+        // Check active profiles
         for (String activeProfileName : environment.getActiveProfiles()) {
             String normalizedProfile =
                     AsciiTextNormalizer.toLowerAscii(activeProfileName == null ? "" : activeProfileName.trim());
             if (PROFILE_TEST.equals(normalizedProfile)) {
-                System.err.println("[startup] PortInitializer disabled under 'test' profile");
-                return;
+                LOGGER.info("[startup] PortInitializer disabled under 'test' profile");
+                return true;
             }
         }
+
+        // Check environment variable
         String activeEnv = System.getenv(ENV_ACTIVE_PROFILE);
         if (activeEnv != null && AsciiTextNormalizer.toLowerAscii(activeEnv).contains(PROFILE_TEST)) {
-            System.err.println("[startup] PortInitializer disabled via SPRING_PROFILES_ACTIVE=test");
-            return;
+            LOGGER.info("[startup] PortInitializer disabled via SPRING_PROFILES_ACTIVE=test");
+            return true;
         }
 
+        return false;
+    }
+
+    private PortRange resolvePortRange(ConfigurableEnvironment environment) {
         int min = getInt(environment, "app.ports.min", "APP_PORT_MIN", DEFAULT_MIN);
         int max = getInt(environment, "app.ports.max", "APP_PORT_MAX", DEFAULT_MAX);
 
@@ -62,36 +82,52 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
             try {
                 min = Integer.parseInt(parts[0].trim());
                 max = Integer.parseInt(parts[1].trim());
-            } catch (NumberFormatException ignored) {
-                System.err.println("[startup] Invalid port range format; using defaults");
+            } catch (NumberFormatException _) {
+                LOGGER.warn("[startup] Invalid port range format; using defaults");
             }
         }
+
         if (min > max) {
             int swap = min;
             min = max;
             max = swap;
         }
 
-        // Preserve explicit server.port=0 for ephemeral port selection.
+        return new PortRange(min, max);
+    }
+
+    private int resolvePreferredPort(ConfigurableEnvironment environment, PortRange portRange) {
         String configuredServerPort = get(environment, PORT_PROPERTY, "PORT", null);
-        int preferred = min;
+        int preferred = portRange.min();
+
         if (configuredServerPort != null) {
             try {
                 preferred = Integer.parseInt(configuredServerPort.trim());
-            } catch (NumberFormatException ignored) {
-                preferred = min;
+            } catch (NumberFormatException _) {
+                preferred = portRange.min();
             }
         }
-        if (preferred != 0 && (preferred < min || preferred > max)) {
-            preferred = min;
+
+        if (preferred != 0 && (preferred < portRange.min() || preferred > portRange.max())) {
+            preferred = portRange.min();
         }
 
+        return preferred;
+    }
+
+    private void applyPortConfiguration(ConfigurableEnvironment environment, int preferredPort, PortRange portRange) {
         environment
                 .getPropertySources()
-                .addFirst(new ServerPortPropertySource(PORT_SOURCE_NAME, Integer.toString(preferred)));
+                .addFirst(new ServerPortPropertySource(PORT_SOURCE_NAME, Integer.toString(preferredPort)));
 
-        System.err.println("[startup] Using server.port=" + preferred + " (allowed range " + min + "-" + max + ")");
+        LOGGER.info(
+                "[startup] Using server.port={} (allowed range {}-{})",
+                preferredPort,
+                portRange.min(),
+                portRange.max());
     }
+
+    private record PortRange(int min, int max) {}
 
     private static boolean isCliOrNonWebExecution(ConfigurableEnvironment environment) {
         for (String activeProfileName : environment.getActiveProfiles()) {
@@ -126,7 +162,7 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
         if (propertyValue == null) return def;
         try {
             return Integer.parseInt(propertyValue.trim());
-        } catch (NumberFormatException ignored) {
+        } catch (NumberFormatException _) {
             return def;
         }
     }
