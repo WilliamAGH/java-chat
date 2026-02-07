@@ -21,7 +21,7 @@ export interface ChatMessage {
   /** Stable client-side identifier for rendering and list keying. */
   messageId: string
   role: 'user' | 'assistant'
-  content: string
+  messageText: string
   timestamp: number
   isError?: boolean
 }
@@ -119,7 +119,7 @@ export async function fetchCitationsByEndpoint(
       return { success: false, error: citationsValidation.error }
     }
 
-    return { success: true, citations: citationsValidation.data }
+    return { success: true, citations: citationsValidation.validated }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
     console.error(`[${logLabel}] Unexpected error:`, error)

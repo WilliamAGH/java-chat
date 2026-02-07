@@ -7,7 +7,7 @@ describe("MessageBubble", () => {
   it("does not render copy action for user messages", () => {
     const { container } = render(MessageBubble, {
       props: {
-        message: { messageId: "msg-test-user", role: "user", content: "Hello", timestamp: 1 },
+        message: { messageId: "msg-test-user", role: "user", messageText: "Hello", timestamp: 1 },
         index: 0,
       },
     });
@@ -21,7 +21,7 @@ describe("MessageBubble", () => {
         message: {
           messageId: "msg-test-assistant",
           role: "assistant",
-          content: "Hello",
+          messageText: "Hello",
           timestamp: 1,
         },
         index: 0,
@@ -38,7 +38,7 @@ describe("MessageBubble", () => {
         message: {
           messageId: "msg-test-csrf-error",
           role: "assistant",
-          content: CSRF_INVALID_MESSAGE,
+          messageText: CSRF_INVALID_MESSAGE,
           timestamp: 1,
           isError: true,
         },

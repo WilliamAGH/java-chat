@@ -73,7 +73,7 @@
             (existingMessage) =>
                 existingMessage.messageId === activeStreamingMessageId,
         );
-        return !!activeMessage?.content;
+        return !!activeMessage?.messageText;
     });
 
     // Desktop chat panel ref for scroll management
@@ -310,7 +310,7 @@
             {
                 messageId,
                 role: "assistant",
-                content: "",
+                messageText: "",
                 timestamp: Date.now(),
             },
         ];
@@ -352,7 +352,7 @@
             {
                 messageId: createChatMessageId("guided", lessonSessionId),
                 role: "user",
-                content: userQuery,
+                messageText: userQuery,
                 timestamp: Date.now(),
             },
         ];
@@ -388,7 +388,7 @@
                             assistantMessageId,
                             (existingMessage) => ({
                                 ...existingMessage,
-                                content: existingMessage.content + chunk,
+                                messageText: existingMessage.messageText + chunk,
                             }),
                         );
                         scrollAnchor.onContentAdded();
@@ -435,7 +435,7 @@
             ensureAssistantMessage(assistantMessageId);
             updateAssistantMessage(assistantMessageId, (existingMessage) => ({
                 ...existingMessage,
-                content: errorMessage,
+                messageText: errorMessage,
                 isError: true,
             }));
         } finally {

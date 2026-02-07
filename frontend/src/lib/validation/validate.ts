@@ -17,7 +17,7 @@ import { z } from 'zod/v4'
 /** Success result with validated data. */
 interface ValidationSuccess<T> {
   success: true
-  data: T
+  validated: T
 }
 
 /** Failure result with Zod error. */
@@ -43,9 +43,9 @@ export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
  * @param error - The caught error (may or may not be ZodError)
  * @param payload - The raw payload that failed validation
  */
-export function logZodFailure(context: string, error: unknown, payload?: unknown): void {
-  const payloadKeys =
-    typeof payload === 'object' && payload !== null ? Object.keys(payload).slice(0, 20) : []
+export function logZodFailure(context: string, error: unknown, rawInput?: unknown): void {
+  const inputKeys =
+    typeof rawInput === 'object' && rawInput !== null ? Object.keys(rawInput).slice(0, 20) : []
 
   if (error instanceof z.ZodError) {
     const issueSummaries = error.issues.slice(0, 10).map((issue) => {
@@ -66,14 +66,14 @@ export function logZodFailure(context: string, error: unknown, payload?: unknown
     console.error(
       `[Zod] ${context} validation failed\n` +
         `Issues:\n${issueSummaries.join('\n')}\n` +
-        `Payload keys: ${payloadKeys.join(', ')}`
+        `Payload keys: ${inputKeys.join(', ')}`
     )
 
     // Full details for deep debugging
     console.error(`[Zod] ${context} - full details:`, {
       prettifiedError: z.prettifyError(error),
       issues: error.issues,
-      payload
+      rawInput
     })
   } else {
     console.error(`[Zod] ${context} validation failed (non-ZodError):`, error)
@@ -97,17 +97,17 @@ export function logZodFailure(context: string, error: unknown, payload?: unknown
  */
 export function validateWithSchema<T>(
   schema: z.ZodType<T>,
-  payload: unknown,
+  rawInput: unknown,
   recordId: string
 ): ValidationResult<T> {
-  const result = schema.safeParse(payload)
+  const result = schema.safeParse(rawInput)
 
   if (!result.success) {
-    logZodFailure(`validateWithSchema [${recordId}]`, result.error, payload)
+    logZodFailure(`validateWithSchema [${recordId}]`, result.error, rawInput)
     return { success: false, error: result.error }
   }
 
-  return { success: true, data: result.data }
+  return { success: true, validated: result.data }
 }
 
 /**
@@ -125,29 +125,29 @@ export async function validateFetchJson<T>(
   response: Response,
   schema: z.ZodType<T>,
   recordId: string
-): Promise<{ success: true; data: T } | { success: false; error: string }> {
+): Promise<{ success: true; validated: T } | { success: false; error: string }> {
   if (!response.ok) {
     const errorMessage = `HTTP ${response.status}: ${response.statusText}`
     console.error(`[Fetch] ${recordId} failed: ${errorMessage}`)
     return { success: false, error: errorMessage }
   }
 
-  let payload: unknown
+  let fetchedJson: unknown
   try {
-    payload = await response.json()
+    fetchedJson = await response.json()
   } catch (parseError) {
     const errorMessage = `JSON parse failed: ${parseError instanceof Error ? parseError.message : String(parseError)}`
     console.error(`[Fetch] ${recordId} ${errorMessage}`)
     return { success: false, error: errorMessage }
   }
 
-  const validationResult = validateWithSchema(schema, payload, recordId)
+  const validationResult = validateWithSchema(schema, fetchedJson, recordId)
 
   if (!validationResult.success) {
     return { success: false, error: `Validation failed for ${recordId}` }
   }
 
-  return { success: true, data: validationResult.data }
+  return { success: true, validated: validationResult.validated }
 }
 
 /**

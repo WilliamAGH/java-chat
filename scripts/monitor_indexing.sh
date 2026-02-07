@@ -31,7 +31,7 @@ get_qdrant_stats() {
 
 # Function to get embedding server status
 check_embedding_server_status() {
-    local probe_url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
+    local probe_url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:8088}/v1/models"
     local http_code
     http_code=$(curl -s -o /dev/null -w "%{http_code}" "$probe_url" 2>/dev/null)
     if [ "$http_code" = "200" ]; then

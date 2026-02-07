@@ -85,14 +85,14 @@ function processEvent(
   if (normalizedType === SSE_EVENT_STATUS) {
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(StreamStatusSchema, parsed, `${source}:status`)
-    callbacks.onStatus?.(validated.success ? validated.data : { message: eventData })
+    callbacks.onStatus?.(validated.success ? validated.validated : { message: eventData })
     return
   }
 
   if (normalizedType === SSE_EVENT_ERROR) {
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(StreamErrorSchema, parsed, `${source}:error`)
-    const streamError: StreamError = validated.success ? validated.data : { message: eventData }
+    const streamError: StreamError = validated.success ? validated.validated : { message: eventData }
     callbacks.onError?.(streamError)
     const error = new Error(streamError.message)
     ;(error as Error & { details?: string }).details = streamError.details
@@ -103,7 +103,7 @@ function processEvent(
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(CitationsArraySchema, parsed, `${source}:citations`)
     if (validated.success) {
-      callbacks.onCitations?.(validated.data)
+      callbacks.onCitations?.(validated.validated)
     }
     return
   }
@@ -112,7 +112,7 @@ function processEvent(
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(ProviderEventSchema, parsed, `${source}:provider`)
     if (validated.success) {
-      callbacks.onProvider?.(validated.data)
+      callbacks.onProvider?.(validated.validated)
     }
     return
   }
@@ -120,7 +120,7 @@ function processEvent(
   // Default and "text" events - extract text from JSON wrapper if present
   const parsed = tryParseJson(eventData, source)
   const validated = validateWithSchema(TextEventPayloadSchema, parsed, `${source}:text`)
-  const textContent = validated.success ? validated.data.text : eventData
+  const textContent = validated.success ? validated.validated.text : eventData
   if (textContent !== '') {
     callbacks.onText(textContent)
   }

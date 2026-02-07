@@ -44,7 +44,7 @@ export async function fetchTOC(): Promise<GuidedLesson[]> {
     throw new Error(`Failed to fetch TOC: ${tocValidation.error}`)
   }
 
-  return tocValidation.data
+  return tocValidation.validated
 }
 
 /**
@@ -65,7 +65,7 @@ export async function fetchLesson(slug: string): Promise<GuidedLesson> {
     throw new Error(`Failed to fetch lesson: ${lessonValidation.error}`)
   }
 
-  return lessonValidation.data
+  return lessonValidation.validated
 }
 
 /**
@@ -86,7 +86,7 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
     throw new Error(`Failed to fetch lesson content: ${contentValidation.error}`)
   }
 
-  return contentValidation.data
+  return contentValidation.validated
 }
 
 /**

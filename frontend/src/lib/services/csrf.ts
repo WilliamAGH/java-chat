@@ -71,7 +71,7 @@ async function readApiErrorResponse(
   if (!validation.success) {
     return null;
   }
-  return validation.data;
+  return validation.validated;
 }
 
 export async function extractApiErrorMessage(

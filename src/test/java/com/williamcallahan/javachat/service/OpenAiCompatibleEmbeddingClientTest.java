@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
  */
 class OpenAiCompatibleEmbeddingClientTest {
 
+    private static final int EXPECTED_EMBEDDING_DIMENSION = 2;
+
     @Test
     void callUsesSdkAndPreservesIndexOrdering() {
         OpenAIClient client = mock(OpenAIClient.class);
@@ -47,8 +49,8 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
-        try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
+        try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
+                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
             List<float[]> vectors = clientAdapter.embed(List.of("a", "b"));
 
             assertEquals(2, vectors.size());
@@ -82,8 +84,8 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
-        try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
+        try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
+                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
             EmbeddingServiceUnavailableException thrownException =
                     assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
             assertTrue(thrownException.getMessage().contains("dimension mismatch"));
@@ -125,8 +127,8 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class)))
                 .thenReturn(malformedResponse, recoveredResponse);
 
-        try (OpenAiCompatibleEmbeddingClient clientAdapter =
-                OpenAiCompatibleEmbeddingClient.create(client, "text-embedding-qwen3-embedding-8b", 2)) {
+        try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
+                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
             List<float[]> vectors = clientAdapter.embed(List.of("single"));
 
             assertEquals(1, vectors.size());

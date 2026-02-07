@@ -24,7 +24,7 @@ echo -e "\n${BOLD}${YELLOW}1. Checking Services${NC}"
 echo -e "───────────────────────────"
 
 # Check embedding server
-EMBED_URL="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:1234}/v1/models"
+EMBED_URL="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:8088}/v1/models"
 EMBED_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$EMBED_URL" 2>/dev/null)
 if [ "$EMBED_STATUS" = "200" ]; then
     echo -e "Embedding server: ${GREEN}Available${NC} at $LOCAL_EMBEDDING_SERVER_URL"
@@ -38,8 +38,7 @@ fi
 # Check Qdrant
 QDRANT_BASE_URL="$(qdrant_rest_base_url)"
 QDRANT_URL="${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}"
-QDRANT_INFO=$(qdrant_curl -s "$QDRANT_URL" 2>/dev/null)
-if [ $? -eq 0 ]; then
+if QDRANT_INFO=$(qdrant_curl -s "$QDRANT_URL" 2>/dev/null); then
     VECTOR_COUNT=$(echo "$QDRANT_INFO" | jq -r '.result.points_count' 2>/dev/null || echo "0")
     echo -e "Qdrant: ${GREEN}Connected${NC}"
     echo -e "   Collection: ${CYAN}$QDRANT_COLLECTION${NC}"

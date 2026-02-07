@@ -33,7 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class GuidedLearningControllerTest {
 
     @Autowired
-    MockMvc mvc;
+    MockMvc mockMvc;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -61,13 +61,13 @@ class GuidedLearningControllerTest {
 
     @Test
     void guided_enrich_filters_empty_strings_and_whitespace() throws Exception {
-        Enrichment e = new Enrichment();
-        e.setHints(List.of(" ", "Hint"));
-        e.setReminders(List.of("", "Remember"));
-        e.setBackground(List.of(" Background ", "\t"));
-        given(guidedLearningService.enrichmentForLesson(anyString())).willReturn(e);
+        Enrichment testEnrichment = new Enrichment();
+        testEnrichment.setHints(List.of(" ", "Hint"));
+        testEnrichment.setReminders(List.of("", "Remember"));
+        testEnrichment.setBackground(List.of(" Background ", "\t"));
+        given(guidedLearningService.enrichmentForLesson(anyString())).willReturn(testEnrichment);
 
-        mvc.perform(get("/api/guided/enrich").param("slug", "intro"))
+        mockMvc.perform(get("/api/guided/enrich").param("slug", "intro"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hints", contains("Hint")))
                 .andExpect(jsonPath("$.reminders", contains("Remember")))

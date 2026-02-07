@@ -46,7 +46,7 @@ import reactor.core.publisher.Mono;
 class GuidedSseCitationEventTest {
 
     @Autowired
-    MockMvc mvc;
+    MockMvc mockMvc;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -79,14 +79,14 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.citationsForBookDocuments(anyList()))
                 .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
 
-        var asyncResult = mvc.perform(post("/api/guided/stream")
+        var asyncResult = mockMvc.perform(post("/api/guided/stream")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sessionId\":\"guided:test\",\"slug\":\"intro\",\"latest\":\"Hello\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
 
-        String aggregated = mvc.perform(asyncDispatch(asyncResult))
+        String aggregated = mockMvc.perform(asyncDispatch(asyncResult))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

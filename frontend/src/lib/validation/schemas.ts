@@ -15,7 +15,7 @@ import { z } from 'zod/v4'
 // =============================================================================
 
 /** Shared field shape for SSE status and error event payloads. */
-const sseEventPayloadShape = {
+const sseEventFieldShape = {
   message: z.string(),
   details: z.string().nullish(),
   code: z.string().nullish(),
@@ -27,10 +27,10 @@ const sseEventPayloadShape = {
 }
 
 /** Status message from SSE status events. */
-export const StreamStatusSchema = z.object(sseEventPayloadShape)
+export const StreamStatusSchema = z.object(sseEventFieldShape)
 
 /** Error response from SSE error events. */
-export const StreamErrorSchema = z.object(sseEventPayloadShape)
+export const StreamErrorSchema = z.object(sseEventFieldShape)
 
 /** Text event payload wrapper. */
 export const TextEventPayloadSchema = z.object({

@@ -22,15 +22,15 @@
 
   // Render markdown synchronously - SSR-safe parsing without DOM operations
   let renderedContent = $derived(
-    message.role === 'assistant' && message.content
-      ? parseMarkdown(message.content)
+    message.role === 'assistant' && message.messageText
+      ? parseMarkdown(message.messageText)
       : ''
   )
 
   let showCsrfRefreshButton = $derived(
     message.role === 'assistant' &&
       message.isError === true &&
-      isRecoverableCsrfErrorMessage(message.content)
+      isRecoverableCsrfErrorMessage(message.messageText)
   )
 
   // Apply Java language detection and highlight code blocks after render
@@ -95,13 +95,13 @@
 
   <div class="bubble">
     {#if message.role === 'user'}
-      <p class="user-text">{message.content}</p>
+      <p class="user-text">{message.messageText}</p>
     {:else}
       <div class="assistant-content" bind:this={contentEl}>
         {#if renderedContent}
           {@html renderedContent}
         {:else}
-          <p>{message.content}</p>
+          <p>{message.messageText}</p>
         {/if}
         <span class="cursor" class:visible={isStreaming}></span>
       </div>
@@ -119,7 +119,7 @@
           class="action-btn"
           class:action-btn--success={copyState === 'success'}
           class:action-btn--error={copyState === 'error'}
-          onclick={() => copyToClipboard(message.content)}
+          onclick={() => copyToClipboard(message.messageText)}
           title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
           aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
         >
