@@ -13,6 +13,7 @@ import java.util.Objects;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
+import org.apache.lucene.util.StringHelper;
 import org.springframework.stereotype.Service;
 
 /**
@@ -112,57 +113,13 @@ public class LexicalSparseVectorEncoder {
     /**
      * Murmur3 32-bit hash for stable token feature hashing.
      *
-     * <p>This is intentionally self-contained to avoid introducing additional hashing dependencies.</p>
+     * <p>Delegates to Lucene's vetted {@link StringHelper#murmurhash3_x86_32} with seed zero
+     * to maintain hash compatibility with existing indexed vectors.</p>
      */
     private static int murmurHash32(String token) {
         Objects.requireNonNull(token, "token");
         byte[] tokenBytes = token.getBytes(StandardCharsets.UTF_8);
-
-        final int seed = 0;
-        final int c1 = 0xcc9e2d51;
-        final int c2 = 0x1b873593;
-
-        int h1 = seed;
-        int length = tokenBytes.length;
-        int roundedEnd = length & 0xFFFFFFFC; // round down to 4 byte block
-
-        for (int i = 0; i < roundedEnd; i += 4) {
-            int k1 = (tokenBytes[i] & 0xff)
-                    | ((tokenBytes[i + 1] & 0xff) << 8)
-                    | ((tokenBytes[i + 2] & 0xff) << 16)
-                    | ((tokenBytes[i + 3] & 0xff) << 24);
-            k1 *= c1;
-            k1 = Integer.rotateLeft(k1, 15);
-            k1 *= c2;
-
-            h1 ^= k1;
-            h1 = Integer.rotateLeft(h1, 13);
-            h1 = h1 * 5 + 0xe6546b64;
-        }
-
-        int k1 = 0;
-        int remainder = length & 3;
-        if (remainder >= 3) {
-            k1 ^= (tokenBytes[roundedEnd + 2] & 0xff) << 16;
-        }
-        if (remainder >= 2) {
-            k1 ^= (tokenBytes[roundedEnd + 1] & 0xff) << 8;
-        }
-        if (remainder >= 1) {
-            k1 ^= (tokenBytes[roundedEnd] & 0xff);
-            k1 *= c1;
-            k1 = Integer.rotateLeft(k1, 15);
-            k1 *= c2;
-            h1 ^= k1;
-        }
-
-        h1 ^= length;
-        h1 ^= (h1 >>> 16);
-        h1 *= 0x85ebca6b;
-        h1 ^= (h1 >>> 13);
-        h1 *= 0xc2b2ae35;
-        h1 ^= (h1 >>> 16);
-        return h1;
+        return StringHelper.murmurhash3_x86_32(tokenBytes, 0, tokenBytes.length, 0);
     }
 
     private record TokenCount(long index, int count) {}
