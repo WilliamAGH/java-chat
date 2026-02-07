@@ -24,6 +24,7 @@ caffeine = "3.2.3"
 
 # Qdrant
 qdrant-client = "1.16.2"
+guava = "33.5.0-android"
 
 # gRPC/Networking
 grpc = "1.78.0"
@@ -89,6 +90,9 @@ caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "c
 
 # Qdrant client
 qdrant-client = { module = "io.qdrant:client", version.ref = "qdrant-client" }
+
+# Guava (transitive via Qdrant gRPC client; declared explicitly for direct ListenableFuture usage)
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
 
 # gRPC
 grpc-core = { module = "io.grpc:grpc-core" }
