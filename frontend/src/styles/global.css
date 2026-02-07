@@ -48,6 +48,16 @@
    * TYPOGRAPHY - DM Sans + Fraunces
    * ═══════════════════════════════════════════════════════════════════════════ */
 
+  @font-face {
+    font-family: 'Fraunces';
+    src: url('/fonts/Fraunces-Variable.ttf') format('truetype');
+    font-weight: 100 900;
+    font-display: swap;
+    font-style: normal italic;
+    /* Force "Clean" axes defaults: no wonky, no soft, text-optimized opsz base */
+    font-variation-settings: 'SOFT' 0, 'WONK' 0, 'opsz' 9;
+  }
+
   --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-serif: 'Fraunces', 'Georgia', 'Times New Roman', serif;
   --font-mono: 'DM Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
