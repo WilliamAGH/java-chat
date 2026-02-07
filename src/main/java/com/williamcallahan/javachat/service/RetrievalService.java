@@ -339,7 +339,7 @@ public class RetrievalService {
         }
         try {
             return String.valueOf(metadataValue);
-        } catch (RuntimeException metadataFailure) {
+        } catch (RuntimeException _) {
             return "[unprintable:" + metadataValue.getClass().getSimpleName() + "]";
         }
     }

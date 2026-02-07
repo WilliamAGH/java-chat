@@ -89,7 +89,7 @@ public class LexicalSparseVectorEncoder {
                     continue;
                 }
                 long tokenIndex = unsigned32ToLong(murmurHash32(lexicalToken));
-                countsByIndex.merge(tokenIndex, 1, Integer::sum);
+                countsByIndex.merge(tokenIndex, 1, (existing, one) -> existing + one);
             }
             tokenStream.end();
         } catch (IOException ioException) {

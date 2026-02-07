@@ -29,19 +29,19 @@ public class QdrantRetrievalConstraintBuilder {
         int mustConditionCount = 0;
 
         if (!retrievalConstraint.docVersion().isBlank()) {
-            filterBuilder.addMust(matchKeyword("docVersion", retrievalConstraint.docVersion()));
+            filterBuilder.addMust(matchKeyword("docVersion", Objects.requireNonNull(retrievalConstraint.docVersion())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceKind().isBlank()) {
-            filterBuilder.addMust(matchKeyword("sourceKind", retrievalConstraint.sourceKind()));
+            filterBuilder.addMust(matchKeyword("sourceKind", Objects.requireNonNull(retrievalConstraint.sourceKind())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.docType().isBlank()) {
-            filterBuilder.addMust(matchKeyword("docType", retrievalConstraint.docType()));
+            filterBuilder.addMust(matchKeyword("docType", Objects.requireNonNull(retrievalConstraint.docType())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceName().isBlank()) {
-            filterBuilder.addMust(matchKeyword("sourceName", retrievalConstraint.sourceName()));
+            filterBuilder.addMust(matchKeyword("sourceName", Objects.requireNonNull(retrievalConstraint.sourceName())));
             mustConditionCount++;
         }
 

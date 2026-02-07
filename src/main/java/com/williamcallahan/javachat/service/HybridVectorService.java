@@ -233,6 +233,10 @@ public class HybridVectorService {
      * @param collectionName target Qdrant collection name
      * @return all unique URL values found across points in the collection
      */
+    private static List<String> createUrlPayloadSelector() {
+        return List.of("url");
+    }
+
     public Set<String> scrollAllUrlsInCollection(String collectionName) {
         Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
         if (collectionName.isBlank()) {
@@ -242,14 +246,15 @@ public class HybridVectorService {
         Set<String> collectedUrls = new LinkedHashSet<>();
         ScrollPoints.Builder scrollRequestBuilder = ScrollPoints.newBuilder()
                 .setCollectionName(collectionName)
-                .setWithPayload(WithPayloadSelectorFactory.include(List.of("url")))
+                .setWithPayload(WithPayloadSelectorFactory.include(Objects.requireNonNull(createUrlPayloadSelector())))
                 .setWithVectors(WithVectorsSelectorFactory.enable(false))
                 .setLimit(SCROLL_PAGE_LIMIT);
 
         while (true) {
             ScrollPoints scrollRequest = scrollRequestBuilder.build();
             ScrollResponse scrollResponse = RetrySupport.executeWithRetry(
-                    () -> awaitFuture(qdrantClient.scrollAsync(scrollRequest), SCROLL_TIMEOUT_SECONDS),
+                    () -> awaitFuture(
+                            qdrantClient.scrollAsync(Objects.requireNonNull(scrollRequest)), SCROLL_TIMEOUT_SECONDS),
                     "Qdrant scroll URLs");
 
             for (RetrievedPoint retrievedPoint : scrollResponse.getResultList()) {
@@ -348,11 +353,8 @@ public class HybridVectorService {
             points.add(point);
         }
 
-        RetrySupport.executeWithRetry(
-                () -> awaitFuture(
-                        qdrantClient.upsertAsync(collectionName, points),
-                        UPSERT_TIMEOUT_SECONDS),
-                "Qdrant hybrid upsert");
+        var upsertFuture = qdrantClient.upsertAsync(Objects.requireNonNull(collectionName), points);
+        RetrySupport.executeWithRetry(() -> awaitFuture(upsertFuture, UPSERT_TIMEOUT_SECONDS), "Qdrant hybrid upsert");
 
         log.info("[QDRANT] Upserted {} hybrid points", points.size());
     }
@@ -440,11 +442,9 @@ public class HybridVectorService {
 
         Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
 
-        RetrySupport.executeWithRetry(
-                () -> awaitFuture(
-                        qdrantClient.deleteAsync(collectionName, filter),
-                        DELETE_TIMEOUT_SECONDS),
-                "Qdrant delete by URL");
+        var deleteFuture =
+                qdrantClient.deleteAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter));
+        RetrySupport.executeWithRetry(() -> awaitFuture(deleteFuture, DELETE_TIMEOUT_SECONDS), "Qdrant delete by URL");
 
         log.debug("[QDRANT] Deleted points by URL filter");
     }
@@ -457,27 +457,29 @@ public class HybridVectorService {
 
         Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
 
+        var countFuture =
+                qdrantClient.countAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter), true);
         Long count = RetrySupport.executeWithRetry(
-                () -> awaitFuture(
-                        qdrantClient.countAsync(collectionName, filter, true),
-                        COUNT_TIMEOUT_SECONDS),
-                "Qdrant count by URL");
+                () -> awaitFuture(countFuture, COUNT_TIMEOUT_SECONDS), "Qdrant count by URL");
         return count == null ? 0 : count;
     }
 
     private PointStruct buildPoint(String pointId, HybridVectorData vectorData, Document document) {
         Map<String, Vector> namedVectorMap = new LinkedHashMap<>();
-        namedVectorMap.put(vectorData.denseVectorName(), vector(vectorData.denseVector()));
+        var denseVector = vector(Objects.requireNonNull(vectorData.denseVector()));
+        namedVectorMap.put(vectorData.denseVectorName(), denseVector);
         if (!vectorData.sparseVector().indices().isEmpty()) {
-            namedVectorMap.put(
-                    vectorData.sparseVectorName(),
-                    vector(vectorData.sparseVector().values(), vectorData.sparseVector().integerIndices()));
+            var sparseVector = vector(
+                    Objects.requireNonNull(vectorData.sparseVector().values()),
+                    Objects.requireNonNull(vectorData.sparseVector().integerIndices()));
+            namedVectorMap.put(vectorData.sparseVectorName(), sparseVector);
         }
 
         Map<String, Value> pointPayload = buildPayload(document);
 
+        var pointIdValue = id(Objects.requireNonNull(UUID.fromString(pointId)));
         return PointStruct.newBuilder()
-                .setId(id(UUID.fromString(pointId)))
+                .setId(pointIdValue)
                 .setVectors(namedVectors(namedVectorMap))
                 .putAllPayload(pointPayload)
                 .build();
@@ -527,7 +529,8 @@ public class HybridVectorService {
         if (obj instanceof Number n) {
             return Optional.of(io.qdrant.client.ValueFactory.value(n.doubleValue()));
         }
-        return Optional.of(io.qdrant.client.ValueFactory.value(String.valueOf(obj)));
+        var value = io.qdrant.client.ValueFactory.value(Objects.requireNonNull(String.valueOf(obj)));
+        return Optional.of(value);
     }
 
     private static String resolvePointId(Document doc) {
