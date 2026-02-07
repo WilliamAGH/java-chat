@@ -321,6 +321,12 @@ public class GuidedLearningService {
      * @throws UncheckedIOException when the resource exists but cannot be read
      */
     private Optional<String> loadCuratedLessonMarkdown(String slug) {
+        if (slug == null || slug.isBlank()) {
+            return Optional.empty();
+        }
+        if (!slug.matches("^[a-z0-9][a-z0-9-]*$") || slug.endsWith("-")) {
+            return Optional.empty();
+        }
         String resourcePath = CURATED_LESSONS_RESOURCE_DIR + slug + ".md";
         try (InputStream lessonStream = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
             if (lessonStream == null) {
@@ -333,10 +339,14 @@ public class GuidedLearningService {
     }
 
     private List<Document> filterToBook(List<Document> retrievedDocuments) {
+        String thinkJavaPdfPath = appProperties.getGuidedLearning().getThinkJavaPdfPath();
+        if (thinkJavaPdfPath == null || thinkJavaPdfPath.isBlank()) {
+            throw new IllegalStateException("Think Java PDF path is not configured");
+        }
         List<Document> bookDocuments = new ArrayList<>();
         for (Document document : retrievedDocuments) {
             String sourceUrl = String.valueOf(document.getMetadata().getOrDefault(METADATA_KEY_URL, ""));
-            if (sourceUrl.contains(appProperties.getGuidedLearning().getThinkJavaPdfPath())) {
+            if (sourceUrl.contains(thinkJavaPdfPath)) {
                 bookDocuments.add(document);
             }
         }
