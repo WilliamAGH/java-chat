@@ -28,6 +28,9 @@ final class JavadocTypeCanonicalizer {
 
         // Strip generics
         trimmedType = stripGenerics(trimmedType);
+        if (trimmedType.isEmpty()) {
+            return Optional.empty();
+        }
 
         // Handle varargs and arrays
         boolean isVarargs = trimmedType.endsWith("...");
@@ -36,6 +39,9 @@ final class JavadocTypeCanonicalizer {
         }
         int arrayDimensions = countArrayDimensions(trimmedType);
         trimmedType = trimArraySuffix(trimmedType, arrayDimensions);
+        if (trimmedType.isEmpty()) {
+            return Optional.empty();
+        }
 
         // Primitives and void
         if (isPrimitiveOrVoid(trimmedType)) {
@@ -75,6 +81,9 @@ final class JavadocTypeCanonicalizer {
 
     private static Optional<String> resolveRelativeQualifiedType(
             String trimmedType, String packageName, int arrayDimensions, boolean isVarargs) {
+        if (trimmedType.isBlank()) {
+            return Optional.empty();
+        }
         if (!Character.isUpperCase(trimmedType.charAt(0))) {
             return Optional.empty();
         }
