@@ -43,6 +43,15 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
      */
     public LocalEmbeddingClient(
             String baseUrl, String modelName, int dimensions, int batchSize, RestTemplateBuilder restTemplateBuilder) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalArgumentException("baseUrl must not be blank");
+        }
+        if (modelName == null || modelName.isBlank()) {
+            throw new IllegalArgumentException("modelName must not be blank");
+        }
+        if (dimensions <= 0) {
+            throw new IllegalArgumentException("dimensions must be positive");
+        }
         this.baseUrl = baseUrl;
         this.modelName = modelName;
         this.dimensions = dimensions;
