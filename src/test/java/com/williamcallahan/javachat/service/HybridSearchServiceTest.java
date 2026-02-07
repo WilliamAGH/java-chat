@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.notNull;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -51,12 +49,15 @@ class HybridSearchServiceTest {
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L, 3L), List.of(2.0f, 1.0f)));
 
         List<QueryPoints> capturedQueries = new ArrayList<>();
-        doAnswer(invocation -> {
-                    capturedQueries.add(invocation.getArgument(0));
-                    return Futures.immediateFuture(List.of(scoredPoint()));
-                })
-                .when(qdrantClient)
-                .queryAsync(notNull());
+        qdrantClient = mock(QdrantClient.class, invocation -> {
+            if ("queryAsync".equals(invocation.getMethod().getName())) {
+                QueryPoints request =
+                        Objects.requireNonNull((QueryPoints) invocation.getArguments()[0], "request");
+                capturedQueries.add(request);
+                return Futures.immediateFuture(List.of(scoredPoint()));
+            }
+            throw new UnsupportedOperationException("Unexpected call: " + invocation.getMethod());
+        });
 
         HybridSearchService hybridSearchService = buildSearchService();
 
@@ -118,15 +119,16 @@ class HybridSearchServiceTest {
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
 
         AtomicInteger invocationCounter = new AtomicInteger();
-        doAnswer(unusedInvocation -> {
-                    int invocationIndex = invocationCounter.getAndIncrement();
-                    if (invocationIndex == 0) {
-                        return Futures.immediateFailedFuture(new RuntimeException("collection unavailable"));
-                    }
-                    return Futures.immediateFuture(List.of(scoredPoint()));
-                })
-                .when(qdrantClient)
-                .queryAsync(notNull());
+        qdrantClient = mock(QdrantClient.class, invocation -> {
+            if ("queryAsync".equals(invocation.getMethod().getName())) {
+                int invocationIndex = invocationCounter.getAndIncrement();
+                if (invocationIndex == 0) {
+                    return Futures.immediateFailedFuture(new RuntimeException("collection unavailable"));
+                }
+                return Futures.immediateFuture(List.of(scoredPoint()));
+            }
+            throw new UnsupportedOperationException("Unexpected call: " + invocation.getMethod());
+        });
     }
 
     private static ScoredPoint scoredPoint() {
