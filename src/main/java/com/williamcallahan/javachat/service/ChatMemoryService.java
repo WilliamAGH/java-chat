@@ -105,4 +105,13 @@ public class ChatMemoryService {
     }
 
     // TODO: Persist chat history embeddings to Qdrant for long-term memory (future feature)
+    //
+    // This feature would enable:
+    // - Persistent chat sessions across application restarts
+    // - Historical context retrieval for better conversation continuity
+    // - User-specific chat memory with configurable retention policies
+    // Implementation should consider:
+    // - Embedding strategy for chat turns (user messages + AI responses)
+    // - Semantic similarity search for relevant historical context
+    // - Privacy and data retention compliance
 }

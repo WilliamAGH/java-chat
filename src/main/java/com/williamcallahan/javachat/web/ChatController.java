@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import static com.williamcallahan.javachat.web.SseConstants.*;
-
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.config.AppProperties;

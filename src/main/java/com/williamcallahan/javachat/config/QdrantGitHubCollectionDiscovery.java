@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -45,7 +46,7 @@ public class QdrantGitHubCollectionDiscovery {
     private final EmbeddingClient embeddingClient;
     private final AppProperties appProperties;
 
-    private volatile List<String> discoveredCollections = List.of();
+    private final AtomicReference<List<String>> discoveredCollections = new AtomicReference<>(List.of());
 
     /**
      * Wires Qdrant gRPC client and embedding client for collection discovery and validation.
@@ -94,14 +95,14 @@ public class QdrantGitHubCollectionDiscovery {
                 }
             }
 
-            discoveredCollections = List.copyOf(validatedCollections);
+            discoveredCollections.set(List.copyOf(validatedCollections));
             if (!validatedCollections.isEmpty()) {
                 log.info(
                         "[QDRANT] Discovered {} GitHub collection(s): {}",
                         validatedCollections.size(),
                         validatedCollections);
             }
-        } catch (InterruptedException interruptedException) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             log.warn("[QDRANT] GitHub collection discovery interrupted");
         } catch (ExecutionException executionException) {
@@ -124,14 +125,15 @@ public class QdrantGitHubCollectionDiscovery {
      * @return immutable list of GitHub collection names with matching vector configuration
      */
     public List<String> getDiscoveredCollections() {
-        return discoveredCollections;
+        return discoveredCollections.get();
     }
 
     private boolean validateGitHubCollection(
             String collectionName, int expectedDimensions, String denseVectorName, String sparseVectorName) {
         try {
-            CollectionInfo collectionInfo =
-                    qdrantClient.getCollectionInfoAsync(collectionName).get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            CollectionInfo collectionInfo = qdrantClient
+                    .getCollectionInfoAsync(Objects.requireNonNull(collectionName))
+                    .get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             VectorsConfig vectorsConfig = collectionInfo.getConfig().getParams().getVectorsConfig();
             if (!vectorsConfig.hasParamsMap()) {
@@ -172,7 +174,7 @@ public class QdrantGitHubCollectionDiscovery {
             }
 
             return true;
-        } catch (InterruptedException interruptedException) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             log.warn("[QDRANT] Validation interrupted for GitHub collection '{}'", collectionName);
             return false;

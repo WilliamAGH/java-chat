@@ -26,6 +26,9 @@ public class LocalEmbedding {
     private int dimensions = DIM_DEF;
     private int batchSize = BATCH_SIZE_DEF;
 
+    /**
+     * Creates local embedding configuration with safe defaults for local inference.
+     */
     public LocalEmbedding() {}
 
     /**

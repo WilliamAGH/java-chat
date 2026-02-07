@@ -350,36 +350,78 @@ public class SseSupport {
                 this.message = message;
             }
 
+            /**
+             * Sets diagnostic details for developer-facing troubleshooting context.
+             *
+             * @param details diagnostic details to include in the payload
+             * @return this builder instance
+             */
             public Builder details(String details) {
                 this.details = details;
                 return this;
             }
 
+            /**
+             * Sets the stable status code consumed by frontend event handling.
+             *
+             * @param code status code value for machine-readable handling
+             * @return this builder instance
+             */
             public Builder code(String code) {
                 this.code = code;
                 return this;
             }
 
+            /**
+             * Marks whether the current event represents a retryable condition.
+             *
+             * @param retryable true when clients may retry automatically
+             * @return this builder instance
+             */
             public Builder retryable(Boolean retryable) {
                 this.retryable = retryable;
                 return this;
             }
 
+            /**
+             * Sets the provider identifier that emitted the event.
+             *
+             * @param provider provider identifier for event attribution
+             * @return this builder instance
+             */
             public Builder provider(String provider) {
                 this.provider = provider;
                 return this;
             }
 
+            /**
+             * Sets the pipeline stage associated with this status or error event.
+             *
+             * @param stage pipeline stage identifier
+             * @return this builder instance
+             */
             public Builder stage(String stage) {
                 this.stage = stage;
                 return this;
             }
 
+            /**
+             * Sets the current retry attempt number for this event.
+             *
+             * @param attempt current attempt index (1-based)
+             * @return this builder instance
+             */
             public Builder attempt(Integer attempt) {
                 this.attempt = attempt;
                 return this;
             }
 
+            /**
+             * Sets the maximum allowed retry attempts for this event sequence.
+             *
+             * @param maxAttempts configured retry-attempt ceiling
+             * @return this builder instance
+             */
             public Builder maxAttempts(Integer maxAttempts) {
                 this.maxAttempts = maxAttempts;
                 return this;

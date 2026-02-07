@@ -24,6 +24,9 @@ public class RemoteEmbedding {
     private String apiKey = API_KEY_DEF;
     private int dimensions = DIM_DEF;
 
+    /**
+     * Creates remote embedding configuration with conservative defaults.
+     */
     public RemoteEmbedding() {}
 
     /**

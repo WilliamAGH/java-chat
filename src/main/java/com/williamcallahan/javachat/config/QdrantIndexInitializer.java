@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -169,7 +170,7 @@ public class QdrantIndexInitializer {
                 restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
                 log.info("[QDRANT] Collection present (collection={})", collection);
                 return true;
-            } catch (HttpClientErrorException.NotFound notFound) {
+            } catch (HttpClientErrorException.NotFound _) {
                 return false;
             } catch (RuntimeException exception) {
                 log.debug(
@@ -383,12 +384,16 @@ public class QdrantIndexInitializer {
         }
 
         LinkedHashMap<String, String> payloadIndexTypes = new LinkedHashMap<>();
-        payloadSchemaNode.fields().forEachRemaining(fieldEntry -> {
+        // Using properties() method (Jackson 2.13+) instead of deprecated fields()
+        for (Iterator<Map.Entry<String, JsonNode>> it =
+                        payloadSchemaNode.properties().iterator();
+                it.hasNext(); ) {
+            Map.Entry<String, JsonNode> fieldEntry = it.next();
             String payloadDataType = extractPayloadDataType(fieldEntry.getValue());
             if (!payloadDataType.isBlank()) {
                 payloadIndexTypes.put(fieldEntry.getKey(), payloadDataType);
             }
-        });
+        }
         return Map.copyOf(payloadIndexTypes);
     }
 

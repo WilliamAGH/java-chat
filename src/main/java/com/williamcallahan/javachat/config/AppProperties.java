@@ -54,12 +54,18 @@ public class AppProperties {
     private CorsConfig cors = new CorsConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
+    private GuidedLearning guidedLearning = new GuidedLearning();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
     /**
      * Creates configuration sections with default values.
+     *
+     * <p>Empty constructor is required by Spring's @ConfigurationProperties binding mechanism.
+     * All configuration values are injected via setter methods after construction.</p>
      */
-    public AppProperties() {}
+    public AppProperties() {
+        // Empty constructor required for Spring @ConfigurationProperties binding
+    }
 
     @PostConstruct
     void validateConfiguration() {
@@ -72,6 +78,7 @@ public class AppProperties {
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
+        requireConfiguredSection(guidedLearning, "guided-learning").validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
 
@@ -91,6 +98,14 @@ public class AppProperties {
      */
     public void setPublicBaseUrl(final String publicBaseUrl) {
         this.publicBaseUrl = publicBaseUrl;
+    }
+
+    public GuidedLearning getGuidedLearning() {
+        return guidedLearning;
+    }
+
+    public void setGuidedLearning(GuidedLearning guidedLearning) {
+        this.guidedLearning = guidedLearning;
     }
 
     private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
@@ -500,6 +515,29 @@ public class AppProperties {
                         MIN_TEMPERATURE,
                         MAX_TEMPERATURE,
                         temperature));
+            }
+            return this;
+        }
+    }
+
+    /** Guided learning configuration for Think Java book integration. */
+    public static class GuidedLearning {
+        private static final String DEFAULT_THINK_JAVA_PDF_PATH =
+                "${app.guided-learning.think-java-pdf-path:/pdfs/Think Java - 2nd Edition Book.pdf}";
+
+        private String thinkJavaPdfPath = DEFAULT_THINK_JAVA_PDF_PATH;
+
+        public String getThinkJavaPdfPath() {
+            return thinkJavaPdfPath;
+        }
+
+        public void setThinkJavaPdfPath(String thinkJavaPdfPath) {
+            this.thinkJavaPdfPath = thinkJavaPdfPath;
+        }
+
+        GuidedLearning validateConfiguration() {
+            if (thinkJavaPdfPath == null || thinkJavaPdfPath.isBlank()) {
+                throw new IllegalArgumentException("app.guided-learning.think-java-pdf-path cannot be null or blank");
             }
             return this;
         }

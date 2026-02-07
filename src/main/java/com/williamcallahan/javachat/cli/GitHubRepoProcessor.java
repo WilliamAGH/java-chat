@@ -176,7 +176,7 @@ public class GitHubRepoProcessor {
                     .filter(path -> {
                         try {
                             return Files.size(path) <= MAX_FILE_SIZE_BYTES;
-                        } catch (IOException sizeException) {
+                        } catch (IOException _) {
                             return false;
                         }
                     });
@@ -260,17 +260,17 @@ public class GitHubRepoProcessor {
     private void refreshCollectionMetadata(String collectionName, GitHubRepoMetadata repoMetadata) {
         Map<String, Value> metadataUpdates = new LinkedHashMap<>();
         if (!repoMetadata.commitHash().isBlank()) {
-            metadataUpdates.put("commitHash", ValueFactory.value(repoMetadata.commitHash()));
+            metadataUpdates.put("commitHash", ValueFactory.value(Objects.requireNonNull(repoMetadata.commitHash())));
         }
         if (!repoMetadata.repoBranch().isBlank()) {
-            metadataUpdates.put("repoBranch", ValueFactory.value(repoMetadata.repoBranch()));
+            metadataUpdates.put("repoBranch", ValueFactory.value(Objects.requireNonNull(repoMetadata.repoBranch())));
         }
         if (metadataUpdates.isEmpty()) {
             return;
         }
 
         Filter repoFilter = Filter.newBuilder()
-                .addMust(matchKeyword("repoName", repoMetadata.repoName()))
+                .addMust(matchKeyword("repoName", Objects.requireNonNull(repoMetadata.repoName())))
                 .build();
 
         hybridVectorService.updatePayloadByFilter(collectionName, metadataUpdates, repoFilter);

@@ -11,6 +11,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * Verifies environment-variable precedence over .env values for embedding settings.
+ */
 class EnvironmentVariablePrecedenceTest {
 
     private static final String ENV_LOADER_SCRIPT_RELATIVE_PATH = "scripts/lib/env_loader.sh";

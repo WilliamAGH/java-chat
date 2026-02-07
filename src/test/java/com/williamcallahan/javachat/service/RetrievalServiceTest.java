@@ -97,6 +97,9 @@ class RetrievalServiceTest {
         assertTrue(citationOutcome.citations().get(0).getUrl().contains("docs.oracle.com"));
     }
 
+    /**
+     * Simulates malformed metadata values whose string conversion fails at runtime.
+     */
     private static final class BrokenUrlValue {
         @Override
         public String toString() {
