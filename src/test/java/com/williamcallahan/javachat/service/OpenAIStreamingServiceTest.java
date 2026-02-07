@@ -9,21 +9,25 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
-import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 
 /**
- * Verifies primary-provider backoff classification for OpenAI streaming failures.
+ * Verifies primary-provider backoff and streaming failure classification.
  *
- * <p>The {@code shouldBackoffPrimary} method determines whether a failure type
- * should trigger temporary backoff of the primary provider, so that subsequent
- * calls route to the secondary. These tests verify correct classification of
- * transient vs. permanent failure types.</p>
+ * <p>Backoff tests target {@link OpenAiProviderRoutingService#shouldBackoffPrimary} directly
+ * (package-private, same package). Streaming recovery tests exercise the public
+ * {@link OpenAIStreamingService#isRecoverableStreamingFailure} API that delegates to
+ * the routing service.</p>
  */
 class OpenAIStreamingServiceTest {
 
-    private OpenAIStreamingService createService() {
+    private OpenAiProviderRoutingService createRoutingService() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        return new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+    }
+
+    private OpenAIStreamingService createStreamingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
@@ -33,65 +37,45 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void shouldBackoffPrimaryTreatsSdkIoAsBackoffEligible() throws ReflectiveOperationException {
-        OpenAIStreamingService service = createService();
-        boolean backoffEligible = invokeShouldBackoffPrimary(service, new OpenAIIoException("io"));
-        assertTrue(backoffEligible);
+    void shouldBackoffPrimaryTreatsSdkIoAsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        assertTrue(routingService.shouldBackoffPrimary(new OpenAIIoException("io")));
     }
 
     @Test
-    void shouldBackoffPrimaryTreats401AsBackoffEligible() throws ReflectiveOperationException {
-        OpenAIStreamingService service = createService();
+    void shouldBackoffPrimaryTreats401AsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();
         UnauthorizedException unauthorized =
                 UnauthorizedException.builder().headers(headers).build();
-        boolean backoffEligible = invokeShouldBackoffPrimary(service, unauthorized);
-        assertTrue(backoffEligible);
+        assertTrue(routingService.shouldBackoffPrimary(unauthorized));
     }
 
     @Test
-    void shouldBackoffPrimaryTreats429AsBackoffEligible() throws ReflectiveOperationException {
-        OpenAIStreamingService service = createService();
+    void shouldBackoffPrimaryTreats429AsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();
         RateLimitException rateLimit =
                 RateLimitException.builder().headers(headers).build();
-        boolean backoffEligible = invokeShouldBackoffPrimary(service, rateLimit);
-        assertTrue(backoffEligible);
+        assertTrue(routingService.shouldBackoffPrimary(rateLimit));
     }
 
     @Test
-    void shouldBackoffPrimaryDoesNotBackoffOnGenericRuntime() throws ReflectiveOperationException {
-        OpenAIStreamingService service = createService();
-        boolean backoffEligible = invokeShouldBackoffPrimary(service, new IllegalArgumentException("no"));
-        assertFalse(backoffEligible);
-    }
-
-    @Test
-    void recoverableStreamingFailureTreatsOverflowAsRetryable() {
-        OpenAIStreamingService service = createService();
-        boolean retryable = service.isRecoverableStreamingFailure(new RuntimeException("OverflowException in stream"));
-        assertTrue(retryable);
+    void shouldBackoffPrimaryDoesNotBackoffOnGenericRuntime() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        assertFalse(routingService.shouldBackoffPrimary(new IllegalArgumentException("no")));
     }
 
     @Test
     void recoverableStreamingFailureTreatsReactorOverflowTypeAsRetryable() {
-        OpenAIStreamingService service = createService();
-        boolean retryable = service.isRecoverableStreamingFailure(Exceptions.failWithOverflow());
-        assertTrue(retryable);
+        OpenAIStreamingService streamingService = createStreamingService();
+        assertTrue(streamingService.isRecoverableStreamingFailure(Exceptions.failWithOverflow()));
     }
 
     @Test
     void recoverableStreamingFailureTreatsValidationErrorsAsNonRetryable() {
-        OpenAIStreamingService service = createService();
-        boolean retryable = service.isRecoverableStreamingFailure(new IllegalArgumentException("bad request payload"));
-        assertFalse(retryable);
-    }
-
-    private boolean invokeShouldBackoffPrimary(OpenAIStreamingService service, Throwable throwable)
-            throws ReflectiveOperationException {
-        Method method = OpenAIStreamingService.class.getDeclaredMethod("shouldBackoffPrimary", Throwable.class);
-        method.setAccessible(true);
-        Object methodResult = method.invoke(service, throwable);
-        return (boolean) methodResult;
+        OpenAIStreamingService streamingService = createStreamingService();
+        assertFalse(
+                streamingService.isRecoverableStreamingFailure(new IllegalArgumentException("bad request payload")));
     }
 }

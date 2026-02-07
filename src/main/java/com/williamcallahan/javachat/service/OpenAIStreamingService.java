@@ -17,7 +17,9 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import com.williamcallahan.javachat.web.SseConstants;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -272,16 +274,18 @@ public class OpenAIStreamingService {
 
                     emitStreamingNotice(
                             attemptContext.noticeSink(),
-                            new StreamingNotice(
-                                    "Retrying stream with alternate provider",
-                                    "The API returned an invalid or transient streaming response. "
-                                            + "Retrying before any response text was emitted.",
-                                    STREAM_STATUS_CODE_PROVIDER_FALLBACK,
-                                    true,
-                                    fallbackProvider.provider().getName(),
-                                    STREAM_STAGE_STREAM,
-                                    nextAttempt.currentAttempt(),
-                                    nextAttempt.maxAttempts()));
+                            StreamingNotice.builder(
+                                            "Retrying stream with alternate provider",
+                                            STREAM_STATUS_CODE_PROVIDER_FALLBACK)
+                                    .diagnosticContext("The API returned an invalid or transient streaming response. "
+                                            + "Retrying before any response text was emitted.")
+                                    .retryable(true)
+                                    .origin(new StreamingNoticeOrigin(
+                                            fallbackProvider.provider().getName(),
+                                            STREAM_STAGE_STREAM,
+                                            nextAttempt.currentAttempt(),
+                                            nextAttempt.maxAttempts()))
+                                    .build());
 
                     return executeStreamingWithProviderFallback(structuredPrompt, temperature, nextAttempt);
                 });
@@ -308,14 +312,14 @@ public class OpenAIStreamingService {
 
     private Timeout streamingTimeout() {
         return Timeout.builder()
-                .request(java.time.Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
-                .read(java.time.Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
+                .request(Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
+                .read(Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
                 .build();
     }
 
     private Timeout completeTimeout() {
         return Timeout.builder()
-                .request(java.time.Duration.ofSeconds(COMPLETE_REQUEST_TIMEOUT_SECONDS))
+                .request(Duration.ofSeconds(COMPLETE_REQUEST_TIMEOUT_SECONDS))
                 .build();
     }
 
@@ -345,7 +349,7 @@ public class OpenAIStreamingService {
         return OpenAiSdkUrlNormalizer.normalize(baseUrl);
     }
 
-    private java.util.Optional<String> extractTextDelta(ResponseStreamEvent event) {
+    private Optional<String> extractTextDelta(ResponseStreamEvent event) {
         return event.outputTextDelta().map(ResponseTextDeltaEvent::delta);
     }
 

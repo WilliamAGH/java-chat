@@ -5,7 +5,7 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
-import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.StreamingNotice;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
@@ -262,7 +262,7 @@ public class SseSupport {
      * @param notices flux of streaming notices from the provider
      * @return flux of ServerSentEvents with structured status payloads
      */
-    public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<OpenAIStreamingService.StreamingNotice> notices) {
+    public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<StreamingNotice> notices) {
         return notices.map(notice -> statusEvent(SseEventPayload.builder(notice.summary())
                 .details(notice.diagnosticContext())
                 .code(notice.code())
