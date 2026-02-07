@@ -22,6 +22,7 @@ import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
+import com.williamcallahan.javachat.web.SseConstants;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,8 +72,9 @@ public class OpenAIStreamingService {
     private static final String PROVIDER_SETTING_GITHUB_MODELS = "github_models";
     private static final String PROVIDER_SETTING_GITHUB_MODELS_ALT = "github-models";
     private static final String PROVIDER_SETTING_GITHUB = "github";
-    private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK = "stream.provider.fallback";
-    private static final String STREAM_STAGE_STREAM = "stream";
+    private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK =
+            SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
+    private static final String STREAM_STAGE_STREAM = SseConstants.STATUS_STAGE_STREAM;
 
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final int HTTP_FORBIDDEN = 403;
@@ -310,10 +312,10 @@ public class OpenAIStreamingService {
                             Sinks.many().multicast().onBackpressureBuffer();
                     StreamingAttemptContext attemptContext =
                             new StreamingAttemptContext(availableProviders, 0, noticeSink);
-                    Flux<String> contentFlux = executeStreamingWithProviderFallback(
+                    Flux<String> textChunksFlux = executeStreamingWithProviderFallback(
                                     structuredPrompt, temperature, attemptContext)
                             .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
-                    return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
+                    return Mono.just(new StreamingResult(textChunksFlux, initialProvider.provider(), noticeSink.asFlux()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
