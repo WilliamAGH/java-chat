@@ -18,7 +18,7 @@ import org.springframework.web.client.RestTemplate;
  * <p>This implementation fails fast when the provider is unreachable or returns invalid
  * responses so ingestion and retrieval never cache synthetic vectors.</p>
  */
-public class LocalEmbeddingClient implements EmbeddingClient {
+public final class LocalEmbeddingClient implements EmbeddingClient {
 
     private static final Logger log = LoggerFactory.getLogger(LocalEmbeddingClient.class);
 

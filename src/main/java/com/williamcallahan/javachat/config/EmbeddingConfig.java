@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.LocalEmbeddingClient;
 import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient;
+import java.util.Locale;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,7 +107,8 @@ public class EmbeddingConfig {
     }
 
     private static void rejectGitHubModelsEmbeddingEndpoint(String configuredBaseUrl, String configurationKey) {
-        if (configuredBaseUrl != null && configuredBaseUrl.toLowerCase().contains(GITHUB_MODELS_HOST)) {
+        if (configuredBaseUrl != null
+                && configuredBaseUrl.toLowerCase(Locale.ROOT).contains(GITHUB_MODELS_HOST)) {
             throw new EmbeddingServiceUnavailableException("Invalid embedding endpoint in " + configurationKey
                     + ": GitHub Models does not provide embeddings API. Configure an embedding provider that "
                     + "supports /v1/embeddings.");
