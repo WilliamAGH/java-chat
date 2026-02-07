@@ -43,6 +43,9 @@ public final class ExpiringCookieCsrfTokenRepository implements CsrfTokenReposit
     ExpiringCookieCsrfTokenRepository(CookieCsrfTokenRepository delegate, Duration tokenTtl, Clock clock) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.tokenTtl = Objects.requireNonNull(tokenTtl, "tokenTtl");
+        if (tokenTtl.isZero() || tokenTtl.isNegative()) {
+            throw new IllegalArgumentException("tokenTtl must be positive");
+        }
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
