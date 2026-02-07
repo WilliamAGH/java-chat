@@ -137,6 +137,9 @@ public class OpenAiProviderRoutingService {
         if (shouldBackoffPrimary(throwable)) {
             return true;
         }
+        if (throwable instanceof NotFoundException) {
+            return true;
+        }
         if (throwable instanceof SseException || Exceptions.isOverflow(throwable)) {
             return true;
         }
@@ -168,10 +171,7 @@ public class OpenAiProviderRoutingService {
      * @return true when the failure appears transient and retryable
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
-        if (throwable == null) {
-            return false;
-        }
-        return isStreamingFallbackEligible(throwable);
+        return throwable != null && isStreamingFallbackEligible(throwable);
     }
 
     boolean shouldBackoffPrimary(Throwable throwable) {
@@ -189,6 +189,9 @@ public class OpenAiProviderRoutingService {
             return true;
         }
         if (throwable instanceof InternalServerException) {
+            return true;
+        }
+        if (throwable instanceof NotFoundException) {
             return true;
         }
         if (throwable instanceof OpenAIServiceException serviceException) {

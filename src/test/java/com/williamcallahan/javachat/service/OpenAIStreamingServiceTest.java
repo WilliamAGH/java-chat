@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import com.openai.core.http.Headers;
+import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
@@ -61,6 +62,15 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
+    void shouldBackoffPrimaryTreats404AsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        Headers headers = Headers.builder().build();
+        NotFoundException notFoundException =
+                NotFoundException.builder().headers(headers).build();
+        assertTrue(routingService.shouldBackoffPrimary(notFoundException));
+    }
+
+    @Test
     void shouldBackoffPrimaryDoesNotBackoffOnGenericRuntime() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         assertFalse(routingService.shouldBackoffPrimary(new IllegalArgumentException("no")));
@@ -77,5 +87,14 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = createStreamingService();
         assertFalse(
                 streamingService.isRecoverableStreamingFailure(new IllegalArgumentException("bad request payload")));
+    }
+
+    @Test
+    void recoverableStreamingFailureTreatsNotFoundAsRetryable() {
+        OpenAIStreamingService streamingService = createStreamingService();
+        Headers headers = Headers.builder().build();
+        NotFoundException notFoundException =
+                NotFoundException.builder().headers(headers).build();
+        assertTrue(streamingService.isRecoverableStreamingFailure(notFoundException));
     }
 }
