@@ -8,7 +8,6 @@ import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Common.Filter;
-import io.qdrant.client.grpc.JsonWithInt.Value;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
 import io.qdrant.client.grpc.Points.Rrf;
@@ -49,9 +48,6 @@ import org.springframework.stereotype.Service;
 public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
-    private static final String PAYLOAD_DOC_CONTENT = QdrantPayloadFieldSchema.DOC_CONTENT_FIELD;
-    private static final String METADATA_KEY_SCORE = "score";
-    private static final String METADATA_KEY_COLLECTION = "collection";
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
 
     /**
@@ -169,7 +165,8 @@ public class HybridSearchService {
         for (String collection : collectionNames) {
             QueryPoints queryRequest = Objects.requireNonNull(
                     buildHybridQueryRequest(collection, encodedQuery, queryConfig, topK), "QueryPoints");
-            CompletableFuture<List<ScoredPoint>> future = toCompletableFuture(qdrantClient.queryAsync(queryRequest));
+            CompletableFuture<List<ScoredPoint>> future =
+                    QdrantListenableFutureBridge.toCompletableFuture(qdrantClient.queryAsync(queryRequest));
             futures.add(future);
         }
 
@@ -186,7 +183,8 @@ public class HybridSearchService {
         List<Document> rankedDocuments = scoredPointsByUuid.values().stream()
                 .sorted(Comparator.comparingDouble(ScoredResult::score).reversed())
                 .limit(topK)
-                .map(this::toDocument)
+                .map(scoredResult -> QdrantScoredPointDocumentMapper.toDocument(
+                        scoredResult.point(), scoredResult.id(), scoredResult.score(), scoredResult.collection()))
                 .toList();
         List<HybridSearchNotice> retrievalNotices =
                 collectionFailures.stream().map(HybridSearchService::toNotice).toList();
@@ -245,6 +243,31 @@ public class HybridSearchService {
             Objects.requireNonNull(sparseVector, "sparseVector");
             Objects.requireNonNull(retrievalFilter, "retrievalFilter");
         }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            EncodedQuery that = (EncodedQuery) obj;
+            return java.util.Arrays.equals(denseVector, that.denseVector)
+                    && java.util.Objects.equals(sparseVector, that.sparseVector)
+                    && java.util.Objects.equals(retrievalFilter, that.retrievalFilter);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = java.util.Objects.hash(sparseVector, retrievalFilter);
+            result = 31 * result + java.util.Arrays.hashCode(denseVector);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "EncodedQuery{" + "denseVector="
+                    + java.util.Arrays.toString(denseVector) + ", sparseVector="
+                    + sparseVector + ", retrievalFilter="
+                    + retrievalFilter + '}';
+        }
     }
 
     private QueryPoints buildHybridQueryRequest(
@@ -257,7 +280,7 @@ public class HybridSearchService {
         encodedQuery.retrievalFilter().ifPresent(builder::setFilter);
 
         PrefetchQuery.Builder densePrefetchBuilder = PrefetchQuery.newBuilder()
-                .setQuery(nearest(encodedQuery.denseVector()))
+                .setQuery(nearest(Objects.requireNonNull(encodedQuery.denseVector())))
                 .setUsing(queryConfig.denseVectorName())
                 .setLimit(queryConfig.prefetchLimit());
         encodedQuery.retrievalFilter().ifPresent(densePrefetchBuilder::setFilter);
@@ -266,15 +289,16 @@ public class HybridSearchService {
         if (!encodedQuery.sparseVector().indices().isEmpty()) {
             PrefetchQuery.Builder sparsePrefetchBuilder = PrefetchQuery.newBuilder()
                     .setQuery(nearest(vectorInput(
-                            encodedQuery.sparseVector().values(),
-                            encodedQuery.sparseVector().integerIndices())))
+                            Objects.requireNonNull(encodedQuery.sparseVector().values()),
+                            Objects.requireNonNull(encodedQuery.sparseVector().integerIndices()))))
                     .setUsing(queryConfig.sparseVectorName())
                     .setLimit(queryConfig.prefetchLimit());
             encodedQuery.retrievalFilter().ifPresent(sparsePrefetchBuilder::setFilter);
             builder.addPrefetch(sparsePrefetchBuilder.build());
         }
 
-        builder.setQuery(rrf(Rrf.newBuilder().setK(queryConfig.rrfK()).build()));
+        builder.setQuery(rrf(
+                Objects.requireNonNull(Rrf.newBuilder().setK(queryConfig.rrfK()).build())));
         return builder.build();
     }
 
@@ -340,124 +364,11 @@ public class HybridSearchService {
         return List.copyOf(combined);
     }
 
-    private Document toDocument(ScoredResult scoredResult) {
-        ScoredPoint point = scoredResult.point();
-
-        Document document = Document.builder()
-                .id(scoredResult.id())
-                .text(extractPayloadString(point.getPayloadMap(), PAYLOAD_DOC_CONTENT))
-                .build();
-
-        // Keep metadata explicit and typed; do not attempt to round-trip arbitrary payloads.
-        applyKnownMetadata(point.getPayloadMap(), document);
-        document.getMetadata().put(METADATA_KEY_SCORE, scoredResult.score());
-        document.getMetadata().put(METADATA_KEY_COLLECTION, scoredResult.collection());
-
-        return document;
-    }
-
-    private static void applyKnownMetadata(Map<String, Value> payload, Document target) {
-        if (payload == null || payload.isEmpty()) {
-            return;
-        }
-        for (String stringField : QdrantPayloadFieldSchema.STRING_METADATA_FIELDS) {
-            putIfPresentString(payload, target, stringField);
-        }
-        for (String integerField : QdrantPayloadFieldSchema.INTEGER_METADATA_FIELDS) {
-            putIfPresentInteger(payload, target, integerField);
-        }
-    }
-
-    private static void putIfPresentString(Map<String, Value> payload, Document target, String key) {
-        String stringFieldValue = extractPayloadString(payload, key);
-        if (!stringFieldValue.isBlank()) {
-            target.getMetadata().put(key, stringFieldValue);
-        }
-    }
-
-    private static void putIfPresentInteger(Map<String, Value> payload, Document target, String key) {
-        extractPayloadInteger(payload, key)
-                .ifPresent(integerFieldValue -> target.getMetadata().put(key, integerFieldValue));
-    }
-
-    private static String extractPayloadString(Map<String, Value> payload, String key) {
-        if (payload == null || payload.isEmpty() || key == null || key.isBlank()) {
-            return "";
-        }
-        Value payloadValue = payload.get(key);
-        if (payloadValue == null) {
-            return "";
-        }
-        if (payloadValue.getKindCase() == Value.KindCase.STRING_VALUE) {
-            return payloadValue.getStringValue();
-        }
-        return fromValue(payloadValue).map(String::valueOf).orElse("");
-    }
-
-    private static Optional<Integer> extractPayloadInteger(Map<String, Value> payload, String key) {
-        if (payload == null || payload.isEmpty() || key == null || key.isBlank()) {
-            return Optional.empty();
-        }
-        Value payloadValue = payload.get(key);
-        if (payloadValue == null) {
-            return Optional.empty();
-        }
-        if (payloadValue.getKindCase() == Value.KindCase.INTEGER_VALUE) {
-            long integerValue = payloadValue.getIntegerValue();
-            if (integerValue > Integer.MAX_VALUE) {
-                return Optional.of(Integer.MAX_VALUE);
-            }
-            if (integerValue < Integer.MIN_VALUE) {
-                return Optional.of(Integer.MIN_VALUE);
-            }
-            return Optional.of((int) integerValue);
-        }
-        Optional<Object> maybePayloadValue = fromValue(payloadValue);
-        return maybePayloadValue
-                .filter(Number.class::isInstance)
-                .map(Number.class::cast)
-                .map(Number::intValue);
-    }
-
-    private static Optional<Object> fromValue(Value payloadValue) {
-        if (payloadValue == null) {
-            return Optional.empty();
-        }
-        return switch (payloadValue.getKindCase()) {
-            case STRING_VALUE -> Optional.of(payloadValue.getStringValue());
-            case INTEGER_VALUE -> Optional.of(payloadValue.getIntegerValue());
-            case DOUBLE_VALUE -> Optional.of(payloadValue.getDoubleValue());
-            case BOOL_VALUE -> Optional.of(payloadValue.getBoolValue());
-            case NULL_VALUE -> Optional.empty();
-            default -> Optional.empty();
-        };
-    }
-
     private static String extractPointId(ScoredPoint point) {
         if (point.getId().hasUuid()) {
             return point.getId().getUuid();
         }
         return String.valueOf(point.getId().getNum());
-    }
-
-    private static <T> CompletableFuture<T> toCompletableFuture(
-            com.google.common.util.concurrent.ListenableFuture<T> listenableFuture) {
-        CompletableFuture<T> completable = new CompletableFuture<>();
-        com.google.common.util.concurrent.Futures.addCallback(
-                listenableFuture,
-                new com.google.common.util.concurrent.FutureCallback<>() {
-                    @Override
-                    public void onSuccess(T completedValue) {
-                        completable.complete(completedValue);
-                    }
-
-                    @Override
-                    public void onFailure(Throwable throwable) {
-                        completable.completeExceptionally(throwable);
-                    }
-                },
-                com.google.common.util.concurrent.MoreExecutors.directExecutor());
-        return completable;
     }
 
     private static HybridSearchNotice toNotice(
