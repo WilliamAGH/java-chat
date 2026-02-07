@@ -77,6 +77,33 @@ public class HybridVectorService {
             Objects.requireNonNull(denseVectorName, "denseVectorName");
             Objects.requireNonNull(sparseVectorName, "sparseVectorName");
         }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            HybridVectorData that = (HybridVectorData) obj;
+            return java.util.Arrays.equals(denseVector, that.denseVector)
+                    && java.util.Objects.equals(sparseVector, that.sparseVector)
+                    && java.util.Objects.equals(denseVectorName, that.denseVectorName)
+                    && java.util.Objects.equals(sparseVectorName, that.sparseVectorName);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = java.util.Objects.hash(sparseVector, denseVectorName, sparseVectorName);
+            result = 31 * result + java.util.Arrays.hashCode(denseVector);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "HybridVectorData{" + "denseVector="
+                    + java.util.Arrays.toString(denseVector) + ", sparseVector="
+                    + sparseVector + ", denseVectorName='"
+                    + denseVectorName + '\'' + ", sparseVectorName='"
+                    + sparseVectorName + '\'' + '}';
+        }
     }
 
     private final QdrantClient qdrantClient;
@@ -322,7 +349,9 @@ public class HybridVectorService {
         }
 
         RetrySupport.executeWithRetry(
-                () -> awaitFuture(qdrantClient.upsertAsync(collectionName, points), UPSERT_TIMEOUT_SECONDS),
+                () -> awaitFuture(
+                        qdrantClient.upsertAsync(collectionName, points),
+                        UPSERT_TIMEOUT_SECONDS),
                 "Qdrant hybrid upsert");
 
         log.info("[QDRANT] Upserted {} hybrid points", points.size());
@@ -412,7 +441,9 @@ public class HybridVectorService {
         Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
 
         RetrySupport.executeWithRetry(
-                () -> awaitFuture(qdrantClient.deleteAsync(collectionName, filter), DELETE_TIMEOUT_SECONDS),
+                () -> awaitFuture(
+                        qdrantClient.deleteAsync(collectionName, filter),
+                        DELETE_TIMEOUT_SECONDS),
                 "Qdrant delete by URL");
 
         log.debug("[QDRANT] Deleted points by URL filter");
@@ -427,7 +458,9 @@ public class HybridVectorService {
         Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
 
         Long count = RetrySupport.executeWithRetry(
-                () -> awaitFuture(qdrantClient.countAsync(collectionName, filter, true), COUNT_TIMEOUT_SECONDS),
+                () -> awaitFuture(
+                        qdrantClient.countAsync(collectionName, filter, true),
+                        COUNT_TIMEOUT_SECONDS),
                 "Qdrant count by URL");
         return count == null ? 0 : count;
     }
@@ -438,9 +471,7 @@ public class HybridVectorService {
         if (!vectorData.sparseVector().indices().isEmpty()) {
             namedVectorMap.put(
                     vectorData.sparseVectorName(),
-                    vector(
-                            vectorData.sparseVector().values(),
-                            vectorData.sparseVector().integerIndices()));
+                    vector(vectorData.sparseVector().values(), vectorData.sparseVector().integerIndices()));
         }
 
         Map<String, Value> pointPayload = buildPayload(document);
