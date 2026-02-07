@@ -158,6 +158,7 @@ public class HybridSearchService {
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(query);
         Optional<Filter> retrievalFilter = queryEncoding.constraintBuilder().buildFilter(retrievalConstraint);
+        EncodedQuery encodedQuery = new EncodedQuery(denseVector, sparseVector, retrievalFilter);
 
         List<String> collectionNames = allCollectionNames();
         HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
@@ -165,8 +166,7 @@ public class HybridSearchService {
         List<CompletableFuture<List<ScoredPoint>>> futures = new ArrayList<>(collectionNames.size());
         for (String collection : collectionNames) {
             QueryPoints queryRequest = Objects.requireNonNull(
-                    buildHybridQueryRequest(collection, denseVector, sparseVector, queryConfig, topK, retrievalFilter),
-                    "QueryPoints");
+                    buildHybridQueryRequest(collection, encodedQuery, queryConfig, topK), "QueryPoints");
             CompletableFuture<List<ScoredPoint>> future = toCompletableFuture(qdrantClient.queryAsync(queryRequest));
             futures.add(future);
         }
@@ -227,33 +227,48 @@ public class HybridSearchService {
         }
     }
 
-    private QueryPoints buildHybridQueryRequest(
-            String collection,
+    /**
+     * Groups the three query-encoding outputs that always travel together into a single search call.
+     *
+     * @param denseVector dense embedding vector for nearest-neighbor prefetch
+     * @param sparseVector sparse BM25-style token vector for lexical prefetch
+     * @param retrievalFilter optional Qdrant metadata filter from retrieval constraints
+     */
+    private record EncodedQuery(
             float[] denseVector,
             LexicalSparseVectorEncoder.SparseVector sparseVector,
-            HybridQueryConfig queryConfig,
-            int limit,
             Optional<Filter> retrievalFilter) {
+        EncodedQuery {
+            Objects.requireNonNull(denseVector, "denseVector");
+            Objects.requireNonNull(sparseVector, "sparseVector");
+            Objects.requireNonNull(retrievalFilter, "retrievalFilter");
+        }
+    }
+
+    private QueryPoints buildHybridQueryRequest(
+            String collection, EncodedQuery encodedQuery, HybridQueryConfig queryConfig, int limit) {
 
         QueryPoints.Builder builder = QueryPoints.newBuilder()
                 .setCollectionName(collection)
                 .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
                 .setLimit(limit);
-        retrievalFilter.ifPresent(builder::setFilter);
+        encodedQuery.retrievalFilter().ifPresent(builder::setFilter);
 
         PrefetchQuery.Builder densePrefetchBuilder = PrefetchQuery.newBuilder()
-                .setQuery(nearest(Objects.requireNonNull(denseVector, "denseVector")))
+                .setQuery(nearest(encodedQuery.denseVector()))
                 .setUsing(queryConfig.denseVectorName())
                 .setLimit(queryConfig.prefetchLimit());
-        retrievalFilter.ifPresent(densePrefetchBuilder::setFilter);
+        encodedQuery.retrievalFilter().ifPresent(densePrefetchBuilder::setFilter);
         builder.addPrefetch(densePrefetchBuilder.build());
 
-        if (!sparseVector.indices().isEmpty()) {
+        if (!encodedQuery.sparseVector().indices().isEmpty()) {
             PrefetchQuery.Builder sparsePrefetchBuilder = PrefetchQuery.newBuilder()
-                    .setQuery(nearest(vectorInput(sparseVector.values(), sparseVector.integerIndices())))
+                    .setQuery(nearest(vectorInput(
+                            encodedQuery.sparseVector().values(),
+                            encodedQuery.sparseVector().integerIndices())))
                     .setUsing(queryConfig.sparseVectorName())
                     .setLimit(queryConfig.prefetchLimit());
-            retrievalFilter.ifPresent(sparsePrefetchBuilder::setFilter);
+            encodedQuery.retrievalFilter().ifPresent(sparsePrefetchBuilder::setFilter);
             builder.addPrefetch(sparsePrefetchBuilder.build());
         }
 

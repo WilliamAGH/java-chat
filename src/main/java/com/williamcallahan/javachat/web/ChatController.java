@@ -4,6 +4,7 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
@@ -27,7 +28,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 /**
@@ -41,12 +47,14 @@ public class ChatController extends BaseController {
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
     private static final String SESSION_ID_REQUIRED = "Session ID is required";
+    private static final String PIPELINE_LOG_SEPARATOR = "============================================";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SseSupport sseSupport;
+    private final AppProperties appProperties;
 
     /**
      * Creates the chat controller wired to chat, retrieval, and streaming services.
@@ -57,6 +65,7 @@ public class ChatController extends BaseController {
      * @param retrievalService retrieval service for diagnostics
      * @param sseSupport shared SSE serialization and event support
      * @param exceptionBuilder shared exception response builder
+     * @param appProperties application configuration
      */
     public ChatController(
             ChatService chatService,
@@ -64,13 +73,15 @@ public class ChatController extends BaseController {
             OpenAIStreamingService openAIStreamingService,
             RetrievalService retrievalService,
             SseSupport sseSupport,
-            ExceptionResponseBuilder exceptionBuilder) {
+            ExceptionResponseBuilder exceptionBuilder,
+            AppProperties appProperties) {
         super(exceptionBuilder);
         this.chatService = chatService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.sseSupport = sseSupport;
+        this.appProperties = appProperties;
     }
 
     /**
@@ -86,13 +97,7 @@ public class ChatController extends BaseController {
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
      * Uses the OpenAI Java SDK for clean, reliable streaming without manual SSE parsing.
      *
-     * @param body A JSON object containing the user's request. Expected format:
-     *             <pre>{@code
-     *               {
-     *                 "sessionId": "some-session-id", // Optional, defaults to "default"
-     *                 "latest": "The user's question?"   // The user's message
-     *               }
-     *             }</pre>
+     * @param request the chat stream request containing sessionId and user query
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -103,9 +108,9 @@ public class ChatController extends BaseController {
         String sessionId = request.resolvedSessionId();
         String userQuery = request.userQuery();
 
-        PIPELINE_LOG.info("[{}] ============================================", requestToken);
+        PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
-        PIPELINE_LOG.info("[{}] ============================================", requestToken);
+        PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
@@ -133,7 +138,9 @@ public class ChatController extends BaseController {
 
             // Stream with provider transparency - surfaces which LLM is responding
             return openAIStreamingService
-                    .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                    .streamResponse(
+                            promptOutcome.structuredPrompt(),
+                            appProperties.getLlm().getTemperature())
                     .flatMapMany(streamingResult -> {
                         // Provider event first - surfaces which LLM is handling this request
                         ServerSentEvent<String> providerEvent =

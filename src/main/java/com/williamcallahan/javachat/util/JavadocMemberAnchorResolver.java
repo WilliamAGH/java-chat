@@ -14,6 +14,20 @@ final class JavadocMemberAnchorResolver {
 
     private JavadocMemberAnchorResolver() {}
 
+    /**
+     * Appends a JDK-style member anchor fragment to a Javadoc class URL when a method or
+     * constructor signature can be confidently extracted from the surrounding document text.
+     *
+     * <p>The method only modifies URLs that end in {@code .html} and do not already contain a
+     * fragment. Spring-hosted docs are excluded because their anchor format differs from the
+     * standard JDK convention.
+     *
+     * @param url         Javadoc class page URL (e.g. {@code .../String.html})
+     * @param text        surrounding document text that may contain a method/constructor call
+     * @param packageName Java package used to resolve unqualified type names in signatures
+     * @return the original URL with an appended {@code #member(params)} fragment, or the
+     *         original URL unchanged when no signature can be resolved with confidence
+     */
     static String refineMemberAnchorUrl(String url, String text, String packageName) {
         if (url == null || text == null) {
             return url;
@@ -100,11 +114,10 @@ final class JavadocMemberAnchorResolver {
             if (canonicalType.isEmpty()) {
                 return Optional.empty(); // abort if an unknown type can't be resolved confidently
             }
-            if (canonicalBuilder.length() > 0) {
+            if (!canonicalBuilder.isEmpty()) {
                 canonicalBuilder.append(',');
             }
-            canonicalBuilder.append(canonicalType.orElseThrow(
-                    () -> new IllegalStateException("Canonical type absent after presence check")));
+            canonicalBuilder.append(canonicalType.get());
         }
         return Optional.of(canonicalBuilder.toString());
     }

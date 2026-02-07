@@ -7,11 +7,15 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Parses rate limit headers into structured values for backoff decisions.
  */
 final class RateLimitHeaderParser {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitHeaderParser.class);
 
     private static final long HOURS_PER_DAY = 24;
     private static final long MINUTES_PER_HOUR = 60;
@@ -111,7 +115,7 @@ final class RateLimitHeaderParser {
         if (retryAfterHeader.isEmpty()) {
             return 0;
         }
-        String trimmed = retryAfterHeader.orElse("").trim();
+        String trimmed = retryAfterHeader.get().trim();
         if (isDigits(trimmed)) {
             return Long.parseLong(trimmed);
         }
@@ -317,6 +321,11 @@ final class RateLimitHeaderParser {
         try {
             return parseDuration(durationString);
         } catch (IllegalArgumentException parseError) {
+            log.warn(
+                    "Invalid duration string '{}', using fallback {}: {}",
+                    durationString,
+                    fallbackDuration,
+                    parseError.getMessage());
             return fallbackDuration;
         }
     }

@@ -25,6 +25,7 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -294,65 +295,98 @@ public class OpenAIStreamingService {
         return Mono.<StreamingResult>defer(() -> {
                     List<ProviderCandidate> availableProviders = selectAvailableProviderCandidates();
                     if (availableProviders.isEmpty()) {
-                        String error = "LLM providers unavailable - active provider is rate limited or misconfigured";
-                        log.error("[LLM] {}", error);
-                        return Mono.<StreamingResult>error(new IllegalStateException(error));
+                        String unavailableReason =
+                                "LLM providers unavailable - active provider is rate limited or misconfigured";
+                        log.error("[LLM] {}", unavailableReason);
+                        return Mono.<StreamingResult>error(new IllegalStateException(unavailableReason));
                     }
 
                     ProviderCandidate initialProvider = availableProviders.get(0);
                     Sinks.Many<StreamingNotice> noticeSink =
                             Sinks.many().multicast().onBackpressureBuffer();
+                    StreamingAttemptContext attemptContext =
+                            new StreamingAttemptContext(availableProviders, 0, noticeSink);
                     Flux<String> contentFlux = executeStreamingWithProviderFallback(
-                                    structuredPrompt, temperature, availableProviders, 0, noticeSink)
+                                    structuredPrompt, temperature, attemptContext)
                             .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
                     return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    /**
+     * Tracks the mutable state of a provider-fallback streaming attempt chain.
+     *
+     * @param availableProviders ordered list of providers to try
+     * @param providerIndex index of the current provider in the ordered list
+     * @param noticeSink sink for runtime streaming notices emitted during fallback
+     */
+    private record StreamingAttemptContext(
+            List<ProviderCandidate> availableProviders, int providerIndex, Sinks.Many<StreamingNotice> noticeSink) {
+        StreamingAttemptContext {
+            Objects.requireNonNull(availableProviders, "availableProviders");
+            Objects.requireNonNull(noticeSink, "noticeSink");
+        }
+
+        ProviderCandidate currentProvider() {
+            return availableProviders.get(providerIndex);
+        }
+
+        int currentAttempt() {
+            return providerIndex + 1;
+        }
+
+        int maxAttempts() {
+            return availableProviders.size();
+        }
+
+        boolean hasNextProvider() {
+            return providerIndex + 1 < availableProviders.size();
+        }
+
+        StreamingAttemptContext withNextProvider() {
+            return new StreamingAttemptContext(availableProviders, providerIndex + 1, noticeSink);
+        }
+    }
+
     private Flux<String> executeStreamingWithProviderFallback(
-            StructuredPrompt structuredPrompt,
-            double temperature,
-            List<ProviderCandidate> availableProviders,
-            int providerIndex,
-            Sinks.Many<StreamingNotice> noticeSink) {
-        ProviderCandidate providerCandidate = availableProviders.get(providerIndex);
+            StructuredPrompt structuredPrompt, double temperature, StreamingAttemptContext attemptContext) {
+        ProviderCandidate providerCandidate = attemptContext.currentProvider();
         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
         PreparedStreamingRequest preparedStreamingRequest =
                 prepareStreamingRequest(structuredPrompt, temperature, activeProvider);
         AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
-        int currentAttempt = providerIndex + 1;
-        int maxAttempts = availableProviders.size();
 
         log.info(
                 "[LLM] Streaming started (structured, providerId={}, attempt={}/{}, model={})",
                 activeProvider.ordinal(),
-                currentAttempt,
-                maxAttempts,
+                attemptContext.currentAttempt(),
+                attemptContext.maxAttempts(),
                 preparedStreamingRequest.modelId());
 
         return executeStreamingRequest(
                         providerCandidate.client(), preparedStreamingRequest.responseParams(), activeProvider)
                 .doOnNext(ignoredChunk -> emittedTextChunk.set(true))
                 .onErrorResume(streamingFailure -> {
-                    boolean hasNextProvider = providerIndex + 1 < availableProviders.size();
-                    if (!hasNextProvider || emittedTextChunk.get() || !isStreamingFallbackEligible(streamingFailure)) {
+                    if (!attemptContext.hasNextProvider()
+                            || emittedTextChunk.get()
+                            || !isStreamingFallbackEligible(streamingFailure)) {
                         return Flux.error(streamingFailure);
                     }
 
-                    ProviderCandidate fallbackProvider = availableProviders.get(providerIndex + 1);
-                    int fallbackAttempt = providerIndex + 2;
+                    StreamingAttemptContext nextAttempt = attemptContext.withNextProvider();
+                    ProviderCandidate fallbackProvider = nextAttempt.currentProvider();
                     log.warn(
                             "[LLM] Falling back to providerId={} before first chunk "
                                     + "(failedProviderId={}, attempt={}/{}, exceptionType={})",
                             fallbackProvider.provider().ordinal(),
                             activeProvider.ordinal(),
-                            fallbackAttempt,
-                            maxAttempts,
+                            nextAttempt.currentAttempt(),
+                            nextAttempt.maxAttempts(),
                             streamingFailure.getClass().getSimpleName());
 
                     emitStreamingNotice(
-                            noticeSink,
+                            attemptContext.noticeSink(),
                             new StreamingNotice(
                                     "Retrying stream with alternate provider",
                                     "The API returned an invalid or transient streaming response. "
@@ -361,11 +395,10 @@ public class OpenAIStreamingService {
                                     true,
                                     fallbackProvider.provider().getName(),
                                     STREAM_STAGE_STREAM,
-                                    fallbackAttempt,
-                                    maxAttempts));
+                                    nextAttempt.currentAttempt(),
+                                    nextAttempt.maxAttempts()));
 
-                    return executeStreamingWithProviderFallback(
-                            structuredPrompt, temperature, availableProviders, providerIndex + 1, noticeSink);
+                    return executeStreamingWithProviderFallback(structuredPrompt, temperature, nextAttempt);
                 });
     }
 
@@ -395,25 +428,21 @@ public class OpenAIStreamingService {
      * Executes the streaming request and handles completion/error callbacks.
      */
     private Flux<String> executeStreamingRequest(
-            OpenAIClient client, ResponseCreateParams params, RateLimitService.ApiProvider activeProvider) {
+            OpenAIClient client, ResponseCreateParams requestParameters, RateLimitService.ApiProvider activeProvider) {
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(streamingTimeout()).build();
 
         return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
-                        () -> client.responses().createStreaming(params, requestOptions),
+                        () -> client.responses().createStreaming(requestParameters, requestOptions),
                         (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
                                 .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event))))
                 .doOnComplete(() -> {
                     log.debug("[LLM] Stream completed successfully (providerId={})", activeProvider.ordinal());
-                    if (rateLimitManager != null) {
-                        rateLimitManager.recordSuccess(activeProvider);
-                    }
+                    rateLimitManager.recordSuccess(activeProvider);
                 })
                 .doOnError(exception -> {
                     log.error("[LLM] Streaming failed (providerId={})", activeProvider.ordinal(), exception);
-                    if (rateLimitManager != null) {
-                        recordProviderFailure(activeProvider, exception);
-                    }
+                    recordProviderFailure(activeProvider, exception);
                     maybeBackoffPrimary(activeProvider, exception);
                 });
     }
@@ -431,9 +460,10 @@ public class OpenAIStreamingService {
         return Mono.<String>defer(() -> {
                     List<ProviderCandidate> availableProviders = selectAvailableProviderCandidates();
                     if (availableProviders.isEmpty()) {
-                        String error = "LLM providers unavailable - active provider is rate limited or misconfigured";
-                        log.error("[LLM] {}", error);
-                        return Mono.error(new IllegalStateException(error));
+                        String unavailableReason =
+                                "LLM providers unavailable - active provider is rate limited or misconfigured";
+                        log.error("[LLM] {}", unavailableReason);
+                        return Mono.error(new IllegalStateException(unavailableReason));
                     }
 
                     RuntimeException lastProviderFailure = null;
@@ -443,17 +473,16 @@ public class OpenAIStreamingService {
                         String modelId =
                                 normalizedModelId(activeProvider == RateLimitService.ApiProvider.GITHUB_MODELS);
 
-                        ResponseCreateParams params = buildResponseParams(truncatedPrompt, temperature, modelId);
+                        ResponseCreateParams requestParameters =
+                                buildResponseParams(truncatedPrompt, temperature, modelId);
                         try {
                             log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
                             RequestOptions requestOptions = RequestOptions.builder()
                                     .timeout(completeTimeout())
                                     .build();
                             Response completion =
-                                    providerCandidate.client().responses().create(params, requestOptions);
-                            if (rateLimitManager != null) {
-                                rateLimitManager.recordSuccess(activeProvider);
-                            }
+                                    providerCandidate.client().responses().create(requestParameters, requestOptions);
+                            rateLimitManager.recordSuccess(activeProvider);
                             log.debug("[LLM] Complete succeeded (providerId={})", activeProvider.ordinal());
                             String completionText = extractTextFromResponse(completion);
                             return Mono.just(completionText);
@@ -463,9 +492,7 @@ public class OpenAIStreamingService {
                                     "[LLM] Complete failed (providerId={})",
                                     activeProvider.ordinal(),
                                     completionException);
-                            if (rateLimitManager != null) {
-                                recordProviderFailure(activeProvider, completionException);
-                            }
+                            recordProviderFailure(activeProvider, completionException);
                             maybeBackoffPrimary(activeProvider, completionException);
 
                             boolean hasNextProvider = providerIndex + 1 < availableProviders.size();
@@ -576,7 +603,9 @@ public class OpenAIStreamingService {
      * OpenAI (gpt-5.2) share the same 8K input constraint.</p>
      */
     private String truncatePromptForModel(String prompt) {
-        if (prompt == null || prompt.isEmpty()) return prompt;
+        if (prompt == null || prompt.isEmpty()) {
+            return prompt;
+        }
 
         // Both gpt-5 and gpt-5.2 are GPT-5 family with same token limits,
         // so we use conservative limits regardless of which provider is selected later
@@ -684,9 +713,6 @@ public class OpenAIStreamingService {
             log.warn("Primary provider unavailable (backoff active, providerId={})", provider.ordinal());
             return false;
         }
-        if (rateLimitManager == null) {
-            return true;
-        }
         if (rateLimitManager.isProviderAvailable(provider)) {
             return true;
         }
@@ -715,7 +741,7 @@ public class OpenAIStreamingService {
     private boolean isRateLimit(Throwable throwable) {
         return throwable instanceof RateLimitException
                 || (throwable instanceof OpenAIServiceException serviceException
-                        && serviceException.statusCode() == 429);
+                        && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS);
     }
 
     /**
@@ -813,7 +839,7 @@ public class OpenAIStreamingService {
     private void markPrimaryBackoff() {
         long until = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
         this.primaryBackoffUntilEpochMs = until;
-        long seconds = Math.max(1, (until - System.currentTimeMillis()) / 1000);
+        long seconds = Math.max(1, TimeUnit.MILLISECONDS.toSeconds(until - System.currentTimeMillis()));
         log.warn("Primary provider temporarily disabled for {}s due to failure", seconds);
     }
 

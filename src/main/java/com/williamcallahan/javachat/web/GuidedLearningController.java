@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.*;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
@@ -14,14 +15,22 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 /**
@@ -43,6 +52,7 @@ public class GuidedLearningController extends BaseController {
     private final OpenAIStreamingService openAIStreamingService;
     private final MarkdownService markdownService;
     private final SseSupport sseSupport;
+    private final AppProperties appProperties;
 
     /**
      * Creates the guided learning controller wired to the guided learning orchestration services.
@@ -54,7 +64,8 @@ public class GuidedLearningController extends BaseController {
             OpenAIStreamingService openAIStreamingService,
             ExceptionResponseBuilder exceptionBuilder,
             MarkdownService markdownService,
-            SseSupport sseSupport) {
+            SseSupport sseSupport,
+            AppProperties appProperties) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
         this.retrievalService = retrievalService;
@@ -62,6 +73,7 @@ public class GuidedLearningController extends BaseController {
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
         this.sseSupport = sseSupport;
+        this.appProperties = appProperties;
     }
 
     /**
@@ -236,14 +248,15 @@ public class GuidedLearningController extends BaseController {
             computedCitations = retrievalService
                     .toCitations(promptOutcome.bookContextDocuments())
                     .citations();
-            citationWarning = "Page anchors unavailable for some citations";
+            citationWarning = "PDF page-anchor enhancement failed; using base citations without page anchors";
         }
         final List<Citation> finalCitations = computedCitations;
         final String finalCitationWarning = citationWarning;
 
         // Stream with provider transparency - surfaces which LLM is responding
         return openAIStreamingService
-                .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                .streamResponse(
+                        promptOutcome.structuredPrompt(), appProperties.getLlm().getTemperature())
                 .flatMapMany(streamingResult -> {
                     // Provider event first - surfaces which LLM is handling this request
                     ServerSentEvent<String> providerEvent =

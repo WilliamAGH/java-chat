@@ -39,6 +39,45 @@ public class GuidedLearningService {
     // Public server path of the Think Java book (as mapped by DocsSourceRegistry)
     private static final String THINK_JAVA_PDF_PATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
 
+    /** Maximum retrieved book snippets to include in enrichment requests. */
+    private static final int MAX_ENRICHMENT_SNIPPETS = 6;
+
+    /**
+     * Pre-authored introduction lesson content, used instead of LLM generation because
+     * the model consistently mis-formats the code block for this specific lesson.
+     */
+    private static final String INTRODUCTION_LESSON_CONTENT = """
+Java is a versatile, high-level programming language that is widely used for building applications across different platforms. Understanding Java begins with grasping what a program is and how it operates. A program is essentially a set of instructions written in a specific programming language to perform a task. In Java, these instructions are encapsulated in source code files, which must be compiled into bytecode before they can be executed by the Java Virtual Machine (JVM).
+
+Here are some key points about Java programs:
+*   **Source Code**: Java programs are written in plain text files with a `.java` extension.
+*   **Compilation**: The Java Compiler (javac) translates source code into bytecode, stored in `.class` files.
+*   **Execution**: The Java Virtual Machine (JVM) executes the bytecode, allowing the program to run on any machine with a JVM installed.
+
+Here's a simple example of a "Hello, World!" program in Java:
+
+```java
+// HelloWorld.java
+public class HelloWorld {
+    public static void main(String[] args) {
+        // Print a greeting to the console
+        System.out.println("Hello, World!"); // Output: Hello, World!
+    }
+}
+```
+
+To run this program, follow these steps:
+1.  Write the code in a file named `HelloWorld.java`.
+2.  Open a terminal and compile the program using `javac HelloWorld.java`.
+3.  Execute the compiled bytecode with `java HelloWorld`.
+""";
+
+    /** Metadata key for the document source URL in Qdrant payload. */
+    private static final String METADATA_KEY_URL = "url";
+
+    /** Classpath directory containing curated lesson markdown files. */
+    private static final String CURATED_LESSONS_RESOURCE_DIR = "guided/lessons/";
+
     /**
      * Base guidance for Think Java-grounded responses with learning aid markers.
      *
@@ -106,12 +145,12 @@ public class GuidedLearningService {
                 .findBySlug(slug)
                 .map(lesson -> {
                     String query = buildLessonQuery(lesson);
-                    List<Document> docs = retrievalService.retrieve(query);
-                    List<Document> filtered = filterToBook(docs);
-                    if (filtered.isEmpty()) return List.<Citation>of();
+                    List<Document> retrievedDocuments = retrievalService.retrieve(query);
+                    List<Document> bookDocuments = filterToBook(retrievedDocuments);
+                    if (bookDocuments.isEmpty()) return List.<Citation>of();
                     List<Citation> baseCitations =
-                            retrievalService.toCitations(filtered).citations();
-                    return pdfCitationEnhancer.enhanceWithPageAnchors(filtered, baseCitations);
+                            retrievalService.toCitations(bookDocuments).citations();
+                    return pdfCitationEnhancer.enhanceWithPageAnchors(bookDocuments, baseCitations);
                 })
                 .orElse(List.of());
     }
@@ -125,10 +164,12 @@ public class GuidedLearningService {
                 .findBySlug(slug)
                 .map(lesson -> {
                     String query = buildLessonQuery(lesson);
-                    List<Document> docs = retrievalService.retrieve(query);
-                    List<Document> filtered = filterToBook(docs);
-                    List<String> snippets =
-                            filtered.stream().map(Document::getText).limit(6).collect(Collectors.toList());
+                    List<Document> retrievedDocuments = retrievalService.retrieve(query);
+                    List<Document> bookDocuments = filterToBook(retrievedDocuments);
+                    List<String> snippets = bookDocuments.stream()
+                            .map(Document::getText)
+                            .limit(MAX_ENRICHMENT_SNIPPETS)
+                            .collect(Collectors.toList());
                     Enrichment enrichment = enrichmentService.enrich(query, jdkVersion, snippets);
                     logger.debug(
                             "GuidedLearningService returning enrichment with hints: {}, reminders: {}, background: {}",
@@ -148,11 +189,11 @@ public class GuidedLearningService {
         String query = lessonOptional
                 .map(lesson -> buildLessonQuery(lesson) + "\n" + userMessage)
                 .orElse(userMessage);
-        List<Document> docs = retrievalService.retrieve(query);
-        List<Document> filtered = filterToBook(docs);
+        List<Document> retrievedDocuments = retrievalService.retrieve(query);
+        List<Document> bookDocuments = filterToBook(retrievedDocuments);
 
-        String guidance = buildLessonGuidance(lessonOptional.orElse(null));
-        return chatService.streamAnswerWithContext(history, userMessage, filtered, guidance);
+        String guidance = lessonOptional.map(this::buildLessonGuidance).orElseGet(this::buildDefaultGuidance);
+        return chatService.streamAnswerWithContext(history, userMessage, bookDocuments, guidance);
     }
 
     /**
@@ -172,13 +213,13 @@ public class GuidedLearningService {
         String query = lessonOptional
                 .map(lesson -> buildLessonQuery(lesson) + "\n" + userMessage)
                 .orElse(userMessage);
-        List<Document> docs = retrievalService.retrieve(query);
-        List<Document> filtered = filterToBook(docs);
+        List<Document> retrievedDocuments = retrievalService.retrieve(query);
+        List<Document> bookDocuments = filterToBook(retrievedDocuments);
 
-        String guidance = buildLessonGuidance(lessonOptional.orElse(null));
+        String guidance = lessonOptional.map(this::buildLessonGuidance).orElseGet(this::buildDefaultGuidance);
         StructuredPrompt structuredPrompt =
-                chatService.buildStructuredPromptWithContextAndGuidance(history, userMessage, filtered, guidance);
-        return new GuidedChatPromptOutcome(structuredPrompt, filtered);
+                chatService.buildStructuredPromptWithContextAndGuidance(history, userMessage, bookDocuments, guidance);
+        return new GuidedChatPromptOutcome(structuredPrompt, bookDocuments);
     }
 
     /**
@@ -229,36 +270,10 @@ public class GuidedLearningService {
      * Produces markdown with headings, paragraphs, lists, and an example code block.
      */
     public Flux<String> streamLessonContent(String slug) {
-        // CRITICAL FIX: For the intro lesson, the AI consistently fails to format the
-        // code block correctly. We will provide a well-formatted, hardcoded response
-        // for this specific lesson to ensure a reliable user experience.
-        if ("introduction-to-java".equals(slug)) {
-            String hardcodedContent = """
-Java is a versatile, high-level programming language that is widely used for building applications across different platforms. Understanding Java begins with grasping what a program is and how it operates. A program is essentially a set of instructions written in a specific programming language to perform a task. In Java, these instructions are encapsulated in source code files, which must be compiled into bytecode before they can be executed by the Java Virtual Machine (JVM).
-
-Here are some key points about Java programs:
-*   **Source Code**: Java programs are written in plain text files with a `.java` extension.
-*   **Compilation**: The Java Compiler (javac) translates source code into bytecode, stored in `.class` files.
-*   **Execution**: The Java Virtual Machine (JVM) executes the bytecode, allowing the program to run on any machine with a JVM installed.
-
-Here's a simple example of a "Hello, World!" program in Java:
-
-```java
-// HelloWorld.java
-public class HelloWorld {
-    public static void main(String[] args) {
-        // Print a greeting to the console
-        System.out.println("Hello, World!"); // Output: Hello, World!
-    }
-}
-```
-
-To run this program, follow these steps:
-1.  Write the code in a file named `HelloWorld.java`.
-2.  Open a terminal and compile the program using `javac HelloWorld.java`.
-3.  Execute the compiled bytecode with `java HelloWorld`.
-""";
-            return Flux.just(hardcodedContent);
+        // Curated lessons override AI generation for slugs where the model produces unreliable formatting.
+        Optional<String> curatedMarkdown = loadCuratedLessonMarkdown(slug);
+        if (curatedMarkdown.isPresent()) {
+            return Flux.just(curatedMarkdown.get());
         }
 
         Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
@@ -266,8 +281,8 @@ To run this program, follow these steps:
         String query = lessonOptional.map(this::buildLessonQuery).orElse(slug);
 
         // Retrieve Think Java-only context
-        List<Document> docs = retrievalService.retrieve(query);
-        List<Document> filtered = filterToBook(docs);
+        List<Document> retrievedDocuments = retrievalService.retrieve(query);
+        List<Document> bookDocuments = filterToBook(retrievedDocuments);
 
         // Guidance: produce a clean, layered markdown lesson body
         String guidance = String.join(
@@ -288,14 +303,13 @@ To run this program, follow these steps:
         List<Message> emptyHistory = List.of();
         StringBuilder lessonMarkdownBuilder = new StringBuilder();
         return chatService
-                .streamAnswerWithContext(emptyHistory, latestUserMessage, filtered, guidance)
+                .streamAnswerWithContext(emptyHistory, latestUserMessage, bookDocuments, guidance)
                 .doOnNext(lessonMarkdownBuilder::append)
                 .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
     }
 
     // ===== In-memory cache for lesson markdown =====
-    private static final long LESSON_MARKDOWN_CACHE_TTL_MINUTES = 30;
-    private static final Duration LESSON_MARKDOWN_CACHE_TTL = Duration.ofMinutes(LESSON_MARKDOWN_CACHE_TTL_MINUTES);
+    private static final Duration LESSON_MARKDOWN_CACHE_TTL = Duration.ofMinutes(30);
 
     /**
      * Stores lesson markdown alongside the time it was cached to enforce an in-memory TTL.
@@ -333,15 +347,25 @@ To run this program, follow these steps:
         lessonMarkdownCache.put(slug, new LessonMarkdownCacheEntry(markdown, Instant.now()));
     }
 
-    private List<Document> filterToBook(List<Document> docs) {
-        List<Document> filtered = new ArrayList<>();
-        for (Document document : docs) {
-            String url = String.valueOf(document.getMetadata().getOrDefault("url", ""));
-            if (url.contains(THINK_JAVA_PDF_PATH)) {
-                filtered.add(document);
+    /**
+     * Returns pre-authored lesson markdown for slugs where LLM generation is unreliable.
+     */
+    private Optional<String> loadCuratedLessonMarkdown(String slug) {
+        if ("introduction-to-java".equals(slug)) {
+            return Optional.of(INTRODUCTION_LESSON_CONTENT);
+        }
+        return Optional.empty();
+    }
+
+    private List<Document> filterToBook(List<Document> retrievedDocuments) {
+        List<Document> bookDocuments = new ArrayList<>();
+        for (Document document : retrievedDocuments) {
+            String sourceUrl = String.valueOf(document.getMetadata().getOrDefault(METADATA_KEY_URL, ""));
+            if (sourceUrl.contains(THINK_JAVA_PDF_PATH)) {
+                bookDocuments.add(document);
             }
         }
-        return filtered;
+        return bookDocuments;
     }
 
     private String buildLessonQuery(GuidedLesson lesson) {
@@ -358,18 +382,35 @@ To run this program, follow these steps:
     /**
      * Builds complete guidance for a guided learning chat, combining lesson context with system prompts.
      *
-     * <p>When a lesson is provided, the guidance includes the lesson title, summary, and keywords
-     * to keep responses focused on the current topic. It also integrates the guided learning
-     * mode instructions from SystemPromptConfig.</p>
+     * <p>Includes the lesson title, summary, and keywords to keep responses focused on the
+     * current topic. Integrates the guided learning mode instructions from SystemPromptConfig.</p>
      *
-     * @param lesson current lesson or null if no lesson context
+     * @param lesson current lesson (never null)
      * @return complete guidance string for the LLM
      */
     private String buildLessonGuidance(GuidedLesson lesson) {
         String lessonContext = buildLessonContextDescription(lesson);
-        String thinkJavaGuidance = String.format(THINK_JAVA_GUIDANCE_TEMPLATE, lessonContext);
+        return buildGuidanceFromContext(lessonContext);
+    }
 
-        // Combine with guided learning mode instructions from SystemPromptConfig
+    /**
+     * Builds default guidance when no specific lesson is selected.
+     *
+     * @return general Java learning guidance string for the LLM
+     */
+    private String buildDefaultGuidance() {
+        String defaultLessonContext = "No specific lesson selected. Provide general Java learning assistance.";
+        return buildGuidanceFromContext(defaultLessonContext);
+    }
+
+    /**
+     * Combines a lesson context description with the Think Java guidance template and system prompts.
+     *
+     * @param lessonContext human-readable lesson context to embed in the template
+     * @return complete guidance string for the LLM
+     */
+    private String buildGuidanceFromContext(String lessonContext) {
+        String thinkJavaGuidance = String.format(THINK_JAVA_GUIDANCE_TEMPLATE, lessonContext);
         String guidedLearningPrompt = systemPromptConfig.getGuidedLearningPrompt();
         return systemPromptConfig.buildFullPrompt(thinkJavaGuidance, guidedLearningPrompt);
     }
@@ -377,14 +418,10 @@ To run this program, follow these steps:
     /**
      * Builds a human-readable description of the current lesson context for the LLM.
      *
-     * @param lesson current lesson or null
+     * @param lesson current lesson (never null)
      * @return description of the lesson context
      */
     private String buildLessonContextDescription(GuidedLesson lesson) {
-        if (lesson == null) {
-            return "No specific lesson selected. Provide general Java learning assistance.";
-        }
-
         StringBuilder contextBuilder = new StringBuilder();
         contextBuilder
                 .append("The user is currently studying the lesson: **")

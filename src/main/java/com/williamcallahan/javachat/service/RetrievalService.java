@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
@@ -28,7 +29,6 @@ public class RetrievalService {
 
     private static final int DEBUG_FIRST_DOC_PREVIEW_LENGTH = 200;
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
-    private static final int ESTIMATED_CHARS_PER_TOKEN = 4;
     private static final double TRUNCATION_BREAK_THRESHOLD = 0.8;
 
     private static final String METADATA_URL = "url";
@@ -125,8 +125,9 @@ public class RetrievalService {
         if (!reranked.isEmpty()) {
             Map<String, ?> firstDocMetadata = reranked.get(0).getMetadata();
             int metadataSize = firstDocMetadata.size();
-            String docText = Optional.ofNullable(reranked.get(0).getText()).orElse("");
-            int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, docText.length());
+            String firstDocumentText =
+                    Optional.ofNullable(reranked.get(0).getText()).orElse("");
+            int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, firstDocumentText.length());
             log.debug("First doc metadata size: {}", metadataSize);
             log.debug("First doc content preview length: {}", previewLength);
         }
@@ -200,9 +201,9 @@ public class RetrievalService {
         for (Document document : withoutHash) {
             String url = stringMetadataValue(document.getMetadata(), METADATA_URL);
             if (!url.isBlank()) {
-                byUrl.putIfAbsent(url, doc);
+                byUrl.putIfAbsent(url, document);
             } else {
-                unidentified.add(doc);
+                unidentified.add(document);
             }
         }
         if (!unidentified.isEmpty()) {
@@ -227,7 +228,7 @@ public class RetrievalService {
         if (documentText == null || documentText.isEmpty()) {
             return sourceDocument;
         }
-        int maxChars = Math.max(1, maxTokens) * ESTIMATED_CHARS_PER_TOKEN;
+        int maxChars = Math.max(1, maxTokens) * ModelConfiguration.ESTIMATED_CHARS_PER_TOKEN;
         if (documentText.length() <= maxChars) {
             return sourceDocument;
         }
@@ -291,7 +292,8 @@ public class RetrievalService {
                         "Citation conversion failed (exceptionType={}, docUrl={}, docTitle={})",
                         citationConversionFailure.getClass().getSimpleName(),
                         safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_URL),
-                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_TITLE));
+                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_TITLE),
+                        citationConversionFailure);
             }
         }
         if (failedConversionCount > 0) {
