@@ -53,6 +53,14 @@ class EnvironmentVariablePrecedenceTest {
         shellEnvironmentMap.put("SCRIPT_PATH", environmentLoaderScriptPath.toString());
         shellEnvironmentMap.put("ENV_FILE_PATH", environmentFilePath.toString());
 
+        // Remove variables under test from the inherited parent environment so that
+        // only values explicitly exported in the shell script or sourced from the
+        // .env file participate in the precedence check.
+        shellEnvironmentMap.remove("REMOTE_EMBEDDING_SERVER_URL");
+        shellEnvironmentMap.remove("REMOTE_EMBEDDING_MODEL_NAME");
+        shellEnvironmentMap.remove("REMOTE_EMBEDDING_API_KEY");
+        shellEnvironmentMap.remove("APP_EMBEDDING_TIMEOUT_SECONDS");
+
         Process shellProcess = shellProcessBuilder.start();
         int shellExitCode = shellProcess.waitFor();
         String shellOutput = readStream(shellProcess.getInputStream()).trim();
