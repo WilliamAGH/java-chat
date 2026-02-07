@@ -9,7 +9,6 @@ import {
   GuidedTOCSchema,
   GuidedLessonSchema,
   LessonContentResponseSchema,
-  CitationsArraySchema,
   type StreamStatus,
   type StreamError,
   type Citation,
@@ -17,7 +16,7 @@ import {
   type LessonContentResponse
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
-import type { CitationFetchResult } from './chat'
+import { fetchCitationsByEndpoint, type CitationFetchResult } from './chat'
 import { streamWithRetry } from './streamRecovery'
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse }
@@ -38,14 +37,14 @@ export interface GuidedStreamCallbacks {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchTOC(): Promise<GuidedLesson[]> {
-  const response = await fetch('/api/guided/toc')
-  const result = await validateFetchJson(response, GuidedTOCSchema, 'fetchTOC [/api/guided/toc]')
+  const tocResponse = await fetch('/api/guided/toc')
+  const tocValidation = await validateFetchJson(tocResponse, GuidedTOCSchema, 'fetchTOC [/api/guided/toc]')
 
-  if (!result.success) {
-    throw new Error(`Failed to fetch TOC: ${result.error}`)
+  if (!tocValidation.success) {
+    throw new Error(`Failed to fetch TOC: ${tocValidation.error}`)
   }
 
-  return result.data
+  return tocValidation.data
 }
 
 /**
@@ -55,18 +54,18 @@ export async function fetchTOC(): Promise<GuidedLesson[]> {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchLesson(slug: string): Promise<GuidedLesson> {
-  const response = await fetch(`/api/guided/lesson?slug=${encodeURIComponent(slug)}`)
-  const result = await validateFetchJson(
-    response,
+  const lessonResponse = await fetch(`/api/guided/lesson?slug=${encodeURIComponent(slug)}`)
+  const lessonValidation = await validateFetchJson(
+    lessonResponse,
     GuidedLessonSchema,
     `fetchLesson [slug=${slug}]`
   )
 
-  if (!result.success) {
-    throw new Error(`Failed to fetch lesson: ${result.error}`)
+  if (!lessonValidation.success) {
+    throw new Error(`Failed to fetch lesson: ${lessonValidation.error}`)
   }
 
-  return result.data
+  return lessonValidation.data
 }
 
 /**
@@ -76,18 +75,18 @@ export async function fetchLesson(slug: string): Promise<GuidedLesson> {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchLessonContent(slug: string): Promise<LessonContentResponse> {
-  const response = await fetch(`/api/guided/content?slug=${encodeURIComponent(slug)}`)
-  const result = await validateFetchJson(
-    response,
+  const lessonContentResponse = await fetch(`/api/guided/content?slug=${encodeURIComponent(slug)}`)
+  const contentValidation = await validateFetchJson(
+    lessonContentResponse,
     LessonContentResponseSchema,
     `fetchLessonContent [slug=${slug}]`
   )
 
-  if (!result.success) {
-    throw new Error(`Failed to fetch lesson content: ${result.error}`)
+  if (!contentValidation.success) {
+    throw new Error(`Failed to fetch lesson content: ${contentValidation.error}`)
   }
 
-  return result.data
+  return contentValidation.data
 }
 
 /**
@@ -95,24 +94,10 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
  * Used by LearnView to render lesson sources with proper PDF page anchors.
  */
 export async function fetchGuidedLessonCitations(slug: string): Promise<CitationFetchResult> {
-  try {
-    const response = await fetch(`/api/guided/citations?slug=${encodeURIComponent(slug)}`)
-    const result = await validateFetchJson(
-      response,
-      CitationsArraySchema,
-      `fetchGuidedLessonCitations [slug=${slug}]`
-    )
-
-    if (!result.success) {
-      return { success: false, error: result.error }
-    }
-
-    return { success: true, citations: result.data }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Network error fetching lesson sources'
-    console.error(`[fetchGuidedLessonCitations] Unexpected error for slug="${slug}":`, error)
-    return { success: false, error: errorMessage }
-  }
+  return fetchCitationsByEndpoint(
+    `/api/guided/citations?slug=${encodeURIComponent(slug)}`,
+    `fetchGuidedLessonCitations [slug=${slug}]`
+  )
 }
 
 /**
