@@ -85,8 +85,10 @@
     </Match>
 
     <!--
-        CRLF injection warnings for log entries are mitigated by internal sanitization in these classes.
-        Each class implements its own sanitizeLogValue/sanitizeLogMessage method.
+        CRLF injection warnings for log entries are suppressed for classes whose logged values
+        originate from internal configuration, API responses, or programmatic identifiers rather
+        than untrusted user input.  Four classes (RateLimitManager, RateLimitState, RetrySupport,
+        AppProperties) additionally implement sanitizeLogValue/sanitizeLogMessage methods.
     -->
     <Match>
         <Bug pattern="CRLF_INJECTION_LOGS"/>
