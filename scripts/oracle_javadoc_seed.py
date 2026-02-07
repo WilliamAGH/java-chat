@@ -35,6 +35,9 @@ class JavadocIndexUrls:
 
 
 def fetch_text(url: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
     print(f"fetch: {url}", file=sys.stderr)
     request = urllib.request.Request(
         url,
