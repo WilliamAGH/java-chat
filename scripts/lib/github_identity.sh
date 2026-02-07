@@ -143,7 +143,10 @@ ensure_repository_cache_clone() {
         fi
     else
         echo -e "${YELLOW}Cloning repository into cache: $REPOSITORY_URL${NC}"
-        git clone "$REPOSITORY_URL" "$cache_path" >/dev/null
+        if ! git clone "$REPOSITORY_URL" "$cache_path" >/dev/null 2>&1; then
+            echo -e "${RED}Error: git clone failed for: $REPOSITORY_URL${NC}"
+            exit 1
+        fi
     fi
 
     echo "$cache_path"
