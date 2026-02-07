@@ -1,6 +1,22 @@
 import type { StreamError, StreamStatus, Citation } from '../validation/schemas'
 import { streamSse } from './sse'
 
+const GENERIC_STREAM_FAILURE_MESSAGE = 'Streaming request failed'
+
+/**
+ * Error subclass carrying structured SSE stream failure details.
+ * Replaces unsafe `as` casts that monkey-patched `details` onto plain Error objects.
+ */
+export class StreamFailureError extends Error {
+  readonly details?: string
+
+  constructor(message: string, details?: string) {
+    super(message)
+    this.name = 'StreamFailureError'
+    this.details = details
+  }
+}
+
 const RECOVERABLE_STREAM_ERROR_PATTERNS = [
   /overflowexception/i,
   /invalid\s+(stream|response)/i,
@@ -97,26 +113,18 @@ export function toStreamError(streamFailure: unknown, streamErrorEvent: StreamEr
   if (streamFailure instanceof Error) {
     return { message: streamFailure.message }
   }
-  return { message: 'Streaming request failed' }
+  return { message: GENERIC_STREAM_FAILURE_MESSAGE }
 }
 
 /**
- * Converts stream failures into a thrown Error that preserves structured StreamError details.
+ * Converts stream failures into a typed StreamFailureError that preserves structured details.
  */
-export function toStreamFailureException(streamFailure: unknown, streamErrorEvent: StreamError | null): Error {
+export function toStreamFailureException(
+  streamFailure: unknown,
+  streamErrorEvent: StreamError | null
+): StreamFailureError {
   const mappedStreamError = toStreamError(streamFailure, streamErrorEvent)
-  if (streamFailure instanceof Error && streamFailure.message === mappedStreamError.message) {
-    if (mappedStreamError.details) {
-      ;(streamFailure as Error & { details?: string }).details = mappedStreamError.details
-    }
-    return streamFailure
-  }
-
-  const streamFailureException = new Error(mappedStreamError.message)
-  if (mappedStreamError.details) {
-    ;(streamFailureException as Error & { details?: string }).details = mappedStreamError.details
-  }
-  return streamFailureException
+  return new StreamFailureError(mappedStreamError.message, mappedStreamError.details)
 }
 
 export function resolveStreamRecoveryRetryCount(rawRetrySetting: unknown): number {

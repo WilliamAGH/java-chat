@@ -4,6 +4,7 @@ import {
   buildStreamRetryStatus,
   resolveStreamRecoveryRetryCount,
   shouldRetryStreamRequest,
+  StreamFailureError,
   toStreamError,
   toStreamFailureException
 } from './streamRecovery'
@@ -97,10 +98,9 @@ describe('streamRecovery', () => {
       details: 'Malformed response frame at byte 512'
     })
 
+    expect(streamFailureException).toBeInstanceOf(StreamFailureError)
     expect(streamFailureException.message).toBe('OverflowException')
-    expect((streamFailureException as Error & { details?: string }).details).toBe(
-      'Malformed response frame at byte 512'
-    )
+    expect(streamFailureException.details).toBe('Malformed response frame at byte 512')
   })
 
   it('uses default retry count for missing config', () => {
