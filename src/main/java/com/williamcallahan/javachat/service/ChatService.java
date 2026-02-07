@@ -84,8 +84,8 @@ public class ChatService {
      * Resolves citations for a query using the retrieval pipeline.
      */
     public List<Citation> citationsFor(String userQuery) {
-        List<Document> docs = retrievalService.retrieve(userQuery);
-        return retrievalService.toCitations(docs).citations();
+        List<Document> documents = retrievalService.retrieve(userQuery);
+        return retrievalService.toCitations(documents).citations();
     }
 
     /**
