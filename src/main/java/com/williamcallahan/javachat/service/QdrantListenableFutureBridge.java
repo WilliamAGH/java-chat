@@ -12,6 +12,15 @@ import java.util.concurrent.CompletableFuture;
  * <p>Hybrid search aggregates many asynchronous collection queries and relies on
  * {@link CompletableFuture} composition APIs. This bridge keeps Guava interop in one place
  * so retrieval flow remains focused on query semantics.</p>
+ *
+ * <p>Uses Guava's {@link Futures#addCallback(ListenableFuture, FutureCallback, java.util.concurrent.Executor)
+ * Futures.addCallback} with {@link MoreExecutors#directExecutor()} per the
+ * <a href="https://github.com/google/guava/wiki/ListenableFutureExplained">ListenableFuture
+ * Explained</a> guide. {@code directExecutor} is safe here because the callback performs only
+ * lightweight {@link CompletableFuture#complete}/{@link CompletableFuture#completeExceptionally}
+ * calls with no blocking. Guava 33.5.0-android provides no built-in
+ * {@code ListenableFuture → CompletableFuture} converter (verified via source inspection
+ * of {@code Futures.java}).</p>
  */
 final class QdrantListenableFutureBridge {
 
