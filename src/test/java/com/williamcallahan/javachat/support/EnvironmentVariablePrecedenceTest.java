@@ -22,7 +22,7 @@ class EnvironmentVariablePrecedenceTest {
     Path temporaryDirectoryPath;
 
     @Test
-    void processEnvironmentOverridesDotEnvThenDefaultsApply() throws Exception {
+    void processEnvironmentOverridesDotEnvThenDefaultsApply() throws IOException, InterruptedException {
         Path environmentFilePath = temporaryDirectoryPath.resolve("embedding-test.env");
         Files.writeString(environmentFilePath, """
                 REMOTE_EMBEDDING_SERVER_URL=https://from-dotenv.example/v1

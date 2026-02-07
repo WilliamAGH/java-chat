@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.service;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 
@@ -9,6 +11,9 @@ import java.util.Objects;
  * <p>This exception is raised in strict mode to prevent silent relevance degradation.</p>
  */
 public class HybridSearchPartialFailureException extends RuntimeException {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final List<CollectionSearchFailure> collectionFailures;
 
@@ -39,7 +44,12 @@ public class HybridSearchPartialFailureException extends RuntimeException {
      * @param failureType normalized failure type
      * @param failureDetails compact failure details
      */
-    public record CollectionSearchFailure(String collectionName, String failureType, String failureDetails) {
+    public record CollectionSearchFailure(String collectionName, String failureType, String failureDetails)
+            implements Serializable {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         public CollectionSearchFailure {
             collectionName = sanitize(collectionName);
             failureType = sanitize(failureType);

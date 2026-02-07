@@ -197,5 +197,17 @@ public class PortInitializer implements EnvironmentPostProcessor, Ordered {
             // This is intentional for non-matching keys in this focused source.
             return null;
         }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof ServerPortPropertySource that)) return false;
+            return portValue.equals(that.portValue) && getName().equals(that.getName());
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(portValue, getName());
+        }
     }
 }

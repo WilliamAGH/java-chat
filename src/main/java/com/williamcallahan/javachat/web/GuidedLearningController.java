@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import static com.williamcallahan.javachat.web.SseConstants.*;
-
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
@@ -295,6 +293,7 @@ public class GuidedLearningController extends BaseController {
      * @param validationException the validation exception with the error details
      * @return standardized bad request error response
      */
+    @Override
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);

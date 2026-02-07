@@ -184,7 +184,11 @@ public class SourceCodeFileIngestionProcessor {
 
     private ValidatedFileContext buildFileContext(
             Path sourceFilePath, Path repositoryRoot, GitHubRepoMetadata repositoryMetadata) {
-        String fileName = sourceFilePath.getFileName().toString();
+        Path fileNamePath = sourceFilePath.getFileName();
+        if (fileNamePath == null) {
+            throw new IllegalStateException("File path does not include a filename: " + sourceFilePath);
+        }
+        String fileName = fileNamePath.toString();
         long fileSizeBytes;
         long lastModifiedMillis;
         try {

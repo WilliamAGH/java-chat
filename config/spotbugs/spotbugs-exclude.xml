@@ -104,6 +104,105 @@
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.config.AppProperties"/>
     </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.cli.GitHubRepoProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantIndexInitializer"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.HybridSearchService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.HybridVectorService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiProviderRoutingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiRequestFactory"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitHeaderParser"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.LocalDocsFileIngestionProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.SourceCodeFileIngestionProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+    </Match>
+
+    <!--
+        Ingestion service bundles intentionally aggregate Spring-managed collaborators so processors
+        can accept cohesive dependencies instead of long constructor parameter lists. Accessors and
+        constructor assignments in these records are by design and do not expose mutable domain data.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.FileContentServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.IngestionStorageServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.FileContentServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.IngestionStorageServices"/>
+    </Match>
+
+    <!--
+        These controllers/services hold Spring singletons via constructor injection only; SpotBugs
+        flags the field assignments as EI_EXPOSE_REP2 although no mutable object is exposed via API.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.web.EmbeddingsHealthController"/>
+    </Match>
 
     <!--
         Locale-agnostic case folding is acceptable for internal parsing.

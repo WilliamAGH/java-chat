@@ -18,6 +18,7 @@ import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,7 +36,7 @@ import org.springframework.ai.document.Document;
 class SourceCodeFileIngestionProcessorTest {
 
     @Test
-    void changedFilePrunesAndForcesReindex(@TempDir Path tempDirectory) throws Exception {
+    void changedFilePrunesAndForcesReindex(@TempDir Path tempDirectory) throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -105,7 +106,7 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     @Test
-    void unchangedFileWithSufficientPointCoverageSkipsProcessing(@TempDir Path tempDirectory) throws Exception {
+    void unchangedFileWithSufficientPointCoverageSkipsProcessing(@TempDir Path tempDirectory) throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -161,7 +162,7 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     @Test
-    void unchangedFileWithNullChunkHashesStillSkipsWhenPointsExist(@TempDir Path tempDirectory) throws Exception {
+    void unchangedFileWithNullChunkHashesStillSkipsWhenPointsExist(@TempDir Path tempDirectory) throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
@@ -214,7 +215,7 @@ class SourceCodeFileIngestionProcessorTest {
     }
 
     @Test
-    void processAlwaysIncludesFileUrlInResult(@TempDir Path tempDirectory) throws Exception {
+    void processAlwaysIncludesFileUrlInResult(@TempDir Path tempDirectory) throws IOException {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
