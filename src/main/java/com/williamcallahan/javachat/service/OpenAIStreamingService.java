@@ -156,14 +156,18 @@ public class OpenAIStreamingService {
      */
     private record PreparedStreamingRequest(ResponseCreateParams responseParams, String modelId) {}
 
-    private OpenAIClient clientPrimary; // GitHub Models client when configured
-    private OpenAIClient clientSecondary; // OpenAI client when configured
+    /** GitHub Models client when configured. */
+    private OpenAIClient clientPrimary;
+
+    /** OpenAI direct client when configured. */
+    private OpenAIClient clientSecondary;
+
     private volatile boolean isAvailable = false;
     private final RateLimitService rateLimitManager;
     private final Chunker chunker;
     private final PromptTruncator promptTruncator;
 
-    // When primary (GitHub Models) fails with rate limit/timeout/auth, temporarily avoid using it
+    /** Epoch millis until which the primary provider (GitHub Models) is temporarily avoided after failure. */
     private volatile long primaryBackoffUntilEpochMs = 0L;
 
     /**
