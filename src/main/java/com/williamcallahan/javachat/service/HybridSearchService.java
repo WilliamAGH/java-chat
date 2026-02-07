@@ -340,18 +340,18 @@ public class HybridSearchService {
         return List.copyOf(combined);
     }
 
-    private Document toDocument(ScoredResult result) {
-        ScoredPoint point = result.point();
+    private Document toDocument(ScoredResult scoredResult) {
+        ScoredPoint point = scoredResult.point();
 
         Document document = Document.builder()
-                .id(result.id())
+                .id(scoredResult.id())
                 .text(extractPayloadString(point.getPayloadMap(), PAYLOAD_DOC_CONTENT))
                 .build();
 
         // Keep metadata explicit and typed; do not attempt to round-trip arbitrary payloads.
         applyKnownMetadata(point.getPayloadMap(), document);
-        document.getMetadata().put(METADATA_KEY_SCORE, result.score());
-        document.getMetadata().put(METADATA_KEY_COLLECTION, result.collection());
+        document.getMetadata().put(METADATA_KEY_SCORE, scoredResult.score());
+        document.getMetadata().put(METADATA_KEY_COLLECTION, scoredResult.collection());
 
         return document;
     }

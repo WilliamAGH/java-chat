@@ -25,9 +25,6 @@ public class RemoteEmbedding {
     private String apiKey = API_KEY_DEF;
     private int dimensions = DIM_DEF;
 
-    /**
-     * Creates remote embedding configuration.
-     */
     public RemoteEmbedding() {}
 
     /**
@@ -42,74 +39,34 @@ public class RemoteEmbedding {
         }
     }
 
-    /**
-     * Returns the remote embedding server URL.
-     *
-     * @return remote embedding server URL
-     */
     public String getServerUrl() {
         return serverUrl;
     }
 
-    /**
-     * Sets the remote embedding server URL.
-     *
-     * @param serverUrl remote embedding server URL
-     */
     public void setServerUrl(final String serverUrl) {
         this.serverUrl = requireNonNullText(URL_KEY, serverUrl);
     }
 
-    /**
-     * Returns the remote embedding model name.
-     *
-     * @return remote embedding model name
-     */
     public String getModel() {
         return model;
     }
 
-    /**
-     * Sets the remote embedding model name.
-     *
-     * @param model remote embedding model name
-     */
     public void setModel(final String model) {
         this.model = requireNonNullText(MODEL_KEY, model);
     }
 
-    /**
-     * Returns the remote embedding API key.
-     *
-     * @return remote embedding API key
-     */
     public String getApiKey() {
         return apiKey;
     }
 
-    /**
-     * Sets the remote embedding API key.
-     *
-     * @param apiKey remote embedding API key
-     */
     public void setApiKey(final String apiKey) {
         this.apiKey = requireNonNullText(API_KEY_PROP, apiKey);
     }
 
-    /**
-     * Returns the embedding dimensions.
-     *
-     * @return embedding dimensions
-     */
     public int getDimensions() {
         return dimensions;
     }
 
-    /**
-     * Sets the embedding dimensions.
-     *
-     * @param dimensions embedding dimensions
-     */
     public void setDimensions(final int dimensions) {
         this.dimensions = dimensions;
     }

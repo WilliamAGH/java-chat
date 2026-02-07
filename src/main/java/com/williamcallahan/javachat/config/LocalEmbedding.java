@@ -25,9 +25,7 @@ public class LocalEmbedding {
     private String model = MODEL_DEF;
     private int dimensions = DIM_DEF;
     private int batchSize = BATCH_SIZE_DEF;
-    /**
-     * Creates local embedding configuration.
-     */
+
     public LocalEmbedding() {}
 
     /**
@@ -47,92 +45,42 @@ public class LocalEmbedding {
         }
     }
 
-    /**
-     * Returns whether local embedding is enabled.
-     *
-     * @return whether local embedding is enabled
-     */
     public boolean isEnabled() {
         return enabled;
     }
 
-    /**
-     * Sets whether local embedding is enabled.
-     *
-     * @param enabled whether local embedding is enabled
-     */
     public void setEnabled(final boolean enabled) {
         this.enabled = enabled;
     }
 
-    /**
-     * Returns the local embedding server URL.
-     *
-     * @return local embedding server URL
-     */
     public String getServerUrl() {
         return serverUrl;
     }
 
-    /**
-     * Sets the local embedding server URL.
-     *
-     * @param serverUrl local embedding server URL
-     */
     public void setServerUrl(final String serverUrl) {
         this.serverUrl = requireNonNullText(URL_KEY, serverUrl);
     }
 
-    /**
-     * Returns the local embedding model name.
-     *
-     * @return local embedding model name
-     */
     public String getModel() {
         return model;
     }
 
-    /**
-     * Sets the local embedding model name.
-     *
-     * @param model local embedding model name
-     */
     public void setModel(final String model) {
         this.model = requireNonNullText(MODEL_KEY, model);
     }
 
-    /**
-     * Returns the embedding dimensions.
-     *
-     * @return embedding dimensions
-     */
     public int getDimensions() {
         return dimensions;
     }
 
-    /**
-     * Sets the embedding dimensions.
-     *
-     * @param dimensions embedding dimensions
-     */
     public void setDimensions(final int dimensions) {
         this.dimensions = dimensions;
     }
 
-    /**
-     * Returns the local embedding batch size.
-     *
-     * @return local embedding batch size
-     */
     public int getBatchSize() {
         return batchSize;
     }
 
-    /**
-     * Sets the local embedding batch size.
-     *
-     * @param batchSize local embedding batch size
-     */
     public void setBatchSize(final int batchSize) {
         this.batchSize = batchSize;
     }
