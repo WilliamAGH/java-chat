@@ -1,9 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import static io.qdrant.client.ConditionFactory.matchKeyword;
-import static io.qdrant.client.PointIdFactory.id;
-import static io.qdrant.client.VectorFactory.vector;
-import static io.qdrant.client.VectorsFactory.namedVectors;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.RetrySupport;
@@ -12,23 +9,15 @@ import io.qdrant.client.WithPayloadSelectorFactory;
 import io.qdrant.client.WithVectorsSelectorFactory;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.JsonWithInt.Value;
-import io.qdrant.client.grpc.Points.PointStruct;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
-import io.qdrant.client.grpc.Points.Vector;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -54,57 +43,8 @@ public class HybridVectorService {
     private static final long SCROLL_TIMEOUT_SECONDS = 30;
     private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
     private static final int SCROLL_PAGE_LIMIT = 256;
-    private static final int EMBEDDING_REQUEST_BATCH_SIZE = 1;
     private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
     private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
-
-    /**
-     * Bundles the dense and sparse vector data for a single document point.
-     *
-     * @param denseVector dense embedding from the embedding model
-     * @param sparseVector sparse BM25-style vector from lexical encoder
-     * @param denseVectorName Qdrant named vector key for dense embeddings
-     * @param sparseVectorName Qdrant named vector key for sparse tokens
-     */
-    record HybridVectorData(
-            float[] denseVector,
-            LexicalSparseVectorEncoder.SparseVector sparseVector,
-            String denseVectorName,
-            String sparseVectorName) {
-        HybridVectorData {
-            Objects.requireNonNull(denseVector, "denseVector");
-            Objects.requireNonNull(sparseVector, "sparseVector");
-            Objects.requireNonNull(denseVectorName, "denseVectorName");
-            Objects.requireNonNull(sparseVectorName, "sparseVectorName");
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (obj == null || getClass() != obj.getClass()) return false;
-            HybridVectorData that = (HybridVectorData) obj;
-            return java.util.Arrays.equals(denseVector, that.denseVector)
-                    && java.util.Objects.equals(sparseVector, that.sparseVector)
-                    && java.util.Objects.equals(denseVectorName, that.denseVectorName)
-                    && java.util.Objects.equals(sparseVectorName, that.sparseVectorName);
-        }
-
-        @Override
-        public int hashCode() {
-            int result = java.util.Objects.hash(sparseVector, denseVectorName, sparseVectorName);
-            result = 31 * result + java.util.Arrays.hashCode(denseVector);
-            return result;
-        }
-
-        @Override
-        public String toString() {
-            return "HybridVectorData{" + "denseVector="
-                    + java.util.Arrays.toString(denseVector) + ", sparseVector="
-                    + sparseVector + ", denseVectorName='"
-                    + denseVectorName + '\'' + ", sparseVectorName='"
-                    + sparseVectorName + '\'' + '}';
-        }
-    }
 
     private final QdrantClient qdrantClient;
     private final EmbeddingClient embeddingClient;
@@ -233,10 +173,6 @@ public class HybridVectorService {
      * @param collectionName target Qdrant collection name
      * @return all unique URL values found across points in the collection
      */
-    private static List<String> createUrlPayloadSelector() {
-        return List.of("url");
-    }
-
     public Set<String> scrollAllUrlsInCollection(String collectionName) {
         Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
         if (collectionName.isBlank()) {
@@ -244,16 +180,17 @@ public class HybridVectorService {
         }
 
         Set<String> collectedUrls = new LinkedHashSet<>();
+        List<String> urlPayloadFields = Objects.requireNonNull(List.of("url"), "urlPayloadFields");
         ScrollPoints.Builder scrollRequestBuilder = ScrollPoints.newBuilder()
                 .setCollectionName(collectionName)
-                .setWithPayload(WithPayloadSelectorFactory.include(Objects.requireNonNull(createUrlPayloadSelector())))
+                .setWithPayload(WithPayloadSelectorFactory.include(urlPayloadFields))
                 .setWithVectors(WithVectorsSelectorFactory.enable(false))
                 .setLimit(SCROLL_PAGE_LIMIT);
 
         while (true) {
             ScrollPoints scrollRequest = scrollRequestBuilder.build();
             ScrollResponse scrollResponse = RetrySupport.executeWithRetry(
-                    () -> awaitFuture(
+                    () -> QdrantFutureAwaiter.awaitFuture(
                             qdrantClient.scrollAsync(Objects.requireNonNull(scrollRequest)), SCROLL_TIMEOUT_SECONDS),
                     "Qdrant scroll URLs");
 
@@ -300,7 +237,7 @@ public class HybridVectorService {
         }
 
         RetrySupport.executeWithRetry(
-                () -> awaitFuture(
+                () -> QdrantFutureAwaiter.awaitFuture(
                         qdrantClient.setPayloadAsync(
                                 collectionName, metadataFieldUpdates, pointFilter, true, null, null),
                         SET_PAYLOAD_TIMEOUT_SECONDS),
@@ -337,101 +274,29 @@ public class HybridVectorService {
         String denseVectorName = appProperties.getQdrant().getDenseVectorName();
         String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
 
-        List<float[]> embeddings = embedDocumentsInBatches(documents);
+        List<float[]> embeddings = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, documents);
 
-        List<PointStruct> points = new ArrayList<>(documents.size());
+        List<io.qdrant.client.grpc.Points.PointStruct> points = new ArrayList<>(documents.size());
         for (int i = 0; i < documents.size(); i++) {
             Document document = documents.get(i);
-            String pointId = resolvePointId(document);
-            HybridVectorData vectorData = new HybridVectorData(
+            String pointId = HybridVectorPointFactory.resolvePointId(document);
+            HybridVectorPointFactory.HybridVectorSet vectorSet = new HybridVectorPointFactory.HybridVectorSet(
                     embeddings.get(i),
                     sparseVectorEncoder.encode(document.getText()),
                     denseVectorName,
                     sparseVectorName);
 
-            PointStruct point = buildPoint(pointId, vectorData, document);
+            io.qdrant.client.grpc.Points.PointStruct point =
+                    HybridVectorPointFactory.buildPoint(pointId, vectorSet, document);
             points.add(point);
         }
 
         var upsertFuture = qdrantClient.upsertAsync(Objects.requireNonNull(collectionName), points);
-        RetrySupport.executeWithRetry(() -> awaitFuture(upsertFuture, UPSERT_TIMEOUT_SECONDS), "Qdrant hybrid upsert");
+        RetrySupport.executeWithRetry(
+                () -> QdrantFutureAwaiter.awaitFuture(upsertFuture, UPSERT_TIMEOUT_SECONDS),
+                "Qdrant hybrid upsert");
 
         log.info("[QDRANT] Upserted {} hybrid points", points.size());
-    }
-
-    private List<float[]> embedDocumentsInBatches(List<Document> documents) {
-        if (documents.isEmpty()) {
-            return List.of();
-        }
-
-        List<float[]> allEmbeddings = new ArrayList<>(documents.size());
-        for (int batchStartIndex = 0;
-                batchStartIndex < documents.size();
-                batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
-            int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
-            List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
-            List<float[]> batchEmbeddings = embedSingleBatch(documentBatch, batchStartIndex, batchEndIndex);
-            allEmbeddings.addAll(batchEmbeddings);
-        }
-        return List.copyOf(allEmbeddings);
-    }
-
-    /**
-     * Embeds a single batch of documents with contextual error wrapping.
-     *
-     * <p>Re-wraps embedding failures with batch range and URL context so upstream
-     * callers can identify which documents caused the failure.</p>
-     */
-    private List<float[]> embedSingleBatch(List<Document> documentBatch, int batchStartIndex, int batchEndIndex) {
-        List<String> textBatch = documentBatch.stream()
-                .map(document -> {
-                    String text = document.getText();
-                    return text == null ? "" : text;
-                })
-                .toList();
-
-        List<float[]> batchEmbeddings;
-        try {
-            batchEmbeddings = embeddingClient.embed(textBatch);
-        } catch (EmbeddingServiceUnavailableException embeddingFailure) {
-            String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
-            String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);
-            throw new EmbeddingServiceUnavailableException(
-                    "Embedding failed for batch ["
-                            + batchStartIndex
-                            + ".."
-                            + (batchEndIndex - 1)
-                            + "] (firstUrl="
-                            + firstBatchUrl
-                            + ", lastUrl="
-                            + lastBatchUrl
-                            + ")",
-                    embeddingFailure);
-        }
-
-        if (batchEmbeddings.size() != textBatch.size()) {
-            throw new EmbeddingServiceUnavailableException("Embedding response count mismatch: expected "
-                    + textBatch.size()
-                    + " but received "
-                    + batchEmbeddings.size()
-                    + " for batch ["
-                    + batchStartIndex
-                    + ".."
-                    + (batchEndIndex - 1)
-                    + "]");
-        }
-        return batchEmbeddings;
-    }
-
-    private static String extractDocumentUrl(Document document, int fallbackIndex) {
-        if (document == null) {
-            return "unknown-url@" + fallbackIndex;
-        }
-        Object urlMetadata = document.getMetadata().get("url");
-        if (urlMetadata instanceof String documentUrl && !documentUrl.isBlank()) {
-            return documentUrl;
-        }
-        return "unknown-url@" + fallbackIndex;
     }
 
     private void doDeleteByUrl(String collectionName, String url) {
@@ -444,7 +309,9 @@ public class HybridVectorService {
 
         var deleteFuture =
                 qdrantClient.deleteAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter));
-        RetrySupport.executeWithRetry(() -> awaitFuture(deleteFuture, DELETE_TIMEOUT_SECONDS), "Qdrant delete by URL");
+        RetrySupport.executeWithRetry(
+                () -> QdrantFutureAwaiter.awaitFuture(deleteFuture, DELETE_TIMEOUT_SECONDS),
+                "Qdrant delete by URL");
 
         log.debug("[QDRANT] Deleted points by URL filter");
     }
@@ -460,103 +327,8 @@ public class HybridVectorService {
         var countFuture =
                 qdrantClient.countAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter), true);
         Long count = RetrySupport.executeWithRetry(
-                () -> awaitFuture(countFuture, COUNT_TIMEOUT_SECONDS), "Qdrant count by URL");
+                () -> QdrantFutureAwaiter.awaitFuture(countFuture, COUNT_TIMEOUT_SECONDS),
+                "Qdrant count by URL");
         return count == null ? 0 : count;
-    }
-
-    private PointStruct buildPoint(String pointId, HybridVectorData vectorData, Document document) {
-        Map<String, Vector> namedVectorMap = new LinkedHashMap<>();
-        var denseVector = vector(Objects.requireNonNull(vectorData.denseVector()));
-        namedVectorMap.put(vectorData.denseVectorName(), denseVector);
-        if (!vectorData.sparseVector().indices().isEmpty()) {
-            var sparseVector = vector(
-                    Objects.requireNonNull(vectorData.sparseVector().values()),
-                    Objects.requireNonNull(vectorData.sparseVector().integerIndices()));
-            namedVectorMap.put(vectorData.sparseVectorName(), sparseVector);
-        }
-
-        Map<String, Value> pointPayload = buildPayload(document);
-
-        var pointIdValue = id(Objects.requireNonNull(UUID.fromString(pointId)));
-        return PointStruct.newBuilder()
-                .setId(pointIdValue)
-                .setVectors(namedVectors(namedVectorMap))
-                .putAllPayload(pointPayload)
-                .build();
-    }
-
-    private Map<String, Value> buildPayload(Document document) {
-        LinkedHashMap<String, Value> pointPayload = new LinkedHashMap<>();
-        String documentText = document.getText();
-        pointPayload.put(
-                QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
-                io.qdrant.client.ValueFactory.value(documentText == null ? "" : documentText));
-
-        Map<String, ?> metadata = document.getMetadata();
-        for (String fieldName : QdrantPayloadFieldSchema.ALL_METADATA_FIELDS) {
-            toValue(metadata.get(fieldName))
-                    .ifPresent(qdrantFieldValue -> pointPayload.put(fieldName, qdrantFieldValue));
-        }
-
-        return pointPayload;
-    }
-
-    private static Optional<Value> toValue(Object obj) {
-        if (obj == null) {
-            return Optional.empty();
-        }
-        if (obj instanceof String s) {
-            if (s.isBlank()) {
-                return Optional.empty();
-            }
-            return Optional.of(io.qdrant.client.ValueFactory.value(s));
-        }
-        if (obj instanceof Integer i) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(i.longValue()));
-        }
-        if (obj instanceof Long l) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(l));
-        }
-        if (obj instanceof Double d) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(d));
-        }
-        if (obj instanceof Float f) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(f.doubleValue()));
-        }
-        if (obj instanceof Boolean b) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(b));
-        }
-        if (obj instanceof Number n) {
-            return Optional.of(io.qdrant.client.ValueFactory.value(n.doubleValue()));
-        }
-        var value = io.qdrant.client.ValueFactory.value(Objects.requireNonNull(String.valueOf(obj)));
-        return Optional.of(value);
-    }
-
-    private static String resolvePointId(Document doc) {
-        String docId = Objects.requireNonNull(doc.getId(), "doc.id");
-        if (!docId.isBlank()) {
-            return docId;
-        }
-        return UUID.randomUUID().toString();
-    }
-
-    private static <T> T awaitFuture(
-            com.google.common.util.concurrent.ListenableFuture<T> future, long timeoutSeconds) {
-        try {
-            return future.get(timeoutSeconds, TimeUnit.SECONDS);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Qdrant operation interrupted", interrupted);
-        } catch (ExecutionException executionException) {
-            Throwable cause = executionException.getCause();
-            if (cause == null) {
-                throw new IllegalStateException("Qdrant operation failed", executionException);
-            }
-            throw new IllegalStateException("Qdrant operation failed", cause);
-        } catch (TimeoutException timeoutException) {
-            throw new IllegalStateException(
-                    "Qdrant operation timed out after " + timeoutSeconds + "s", timeoutException);
-        }
     }
 }

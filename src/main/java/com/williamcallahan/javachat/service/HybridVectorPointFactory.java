@@ -69,39 +69,44 @@ final class HybridVectorPointFactory {
 
     static PointStruct buildPoint(String pointId, HybridVectorSet vectorSet, Document document) {
         Map<String, Vector> namedVectorMap = new LinkedHashMap<>();
-        var denseVector = vector(Objects.requireNonNull(vectorSet.denseVector(), "denseVector"));
+        float[] denseVectorValues = Objects.requireNonNull(vectorSet.denseVector(), "denseVector");
+        Vector denseVector = vector(denseVectorValues);
         namedVectorMap.put(vectorSet.denseVectorName(), denseVector);
-        if (!vectorSet.sparseVector().indices().isEmpty()) {
-            var sparseVector = vector(
-                    Objects.requireNonNull(vectorSet.sparseVector().values(), "sparseVector.values"),
-                    Objects.requireNonNull(vectorSet.sparseVector().integerIndices(), "sparseVector.indices"));
+
+        LexicalSparseVectorEncoder.SparseVector sparseVectorSet =
+                Objects.requireNonNull(vectorSet.sparseVector(), "sparseVector");
+        if (!Objects.requireNonNull(sparseVectorSet.indices(), "sparseVector.indices").isEmpty()) {
+            Vector sparseVector = vector(
+                    Objects.requireNonNull(sparseVectorSet.values(), "sparseVector.values"),
+                    Objects.requireNonNull(sparseVectorSet.integerIndices(), "sparseVector.integerIndices"));
             namedVectorMap.put(vectorSet.sparseVectorName(), sparseVector);
         }
 
-        Map<String, Value> qdrantFields = buildQdrantFields(document);
+        Map<String, Value> qdrantPayload = buildPayload(document);
 
-        var pointIdValue = id(UUID.fromString(Objects.requireNonNull(pointId, "pointId")));
+        UUID pointUuid = Objects.requireNonNull(UUID.fromString(pointId), "pointId");
+        var pointIdValue = id(pointUuid);
         return PointStruct.newBuilder()
                 .setId(pointIdValue)
                 .setVectors(namedVectors(namedVectorMap))
-                .putAllPayload(qdrantFields)
+                .putAllPayload(qdrantPayload)
                 .build();
     }
 
-    private static Map<String, Value> buildQdrantFields(Document document) {
-        LinkedHashMap<String, Value> qdrantFields = new LinkedHashMap<>();
+    private static Map<String, Value> buildPayload(Document document) {
+        LinkedHashMap<String, Value> qdrantPayload = new LinkedHashMap<>();
         String documentText = document.getText();
-        qdrantFields.put(
+        qdrantPayload.put(
                 QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
                 ValueFactory.value(documentText == null ? "" : documentText));
 
         Map<String, ?> metadata = document.getMetadata();
         for (String fieldName : QdrantPayloadFieldSchema.ALL_METADATA_FIELDS) {
             toQdrantValue(metadata.get(fieldName))
-                    .ifPresent(qdrantFieldValue -> qdrantFields.put(fieldName, qdrantFieldValue));
+                    .ifPresent(qdrantFieldValue -> qdrantPayload.put(fieldName, qdrantFieldValue));
         }
 
-        return qdrantFields;
+        return qdrantPayload;
     }
 
     private static Optional<Value> toQdrantValue(Object metadataValue) {
@@ -132,7 +137,8 @@ final class HybridVectorPointFactory {
         if (metadataValue instanceof Number numberValue) {
             return Optional.of(ValueFactory.value(numberValue.doubleValue()));
         }
-        return Optional.of(ValueFactory.value(String.valueOf(metadataValue)));
+        String metadataText = Objects.requireNonNull(String.valueOf(metadataValue), "metadataValue");
+        return Optional.of(ValueFactory.value(metadataText));
     }
 
     static String resolvePointId(Document document) {
