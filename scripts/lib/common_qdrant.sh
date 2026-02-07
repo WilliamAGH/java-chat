@@ -245,7 +245,7 @@ monitor_java_process() {
     while true; do
         if grep -q "DOCUMENT PROCESSING COMPLETE" "$log_file" 2>/dev/null; then
             local total_files_declared
-            total_files_declared=$(grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null \
+            total_files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
                 | awk -F': ' '{s+=$2} END {print s+0}')
             local total_files_started
             total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
@@ -265,7 +265,7 @@ monitor_java_process() {
             # Exit code 0 means successful completion (even without the marker).
             if [ "$exit_status" -eq 0 ] || [ "$exit_status" -eq 143 ]; then
                 local total_files_declared
-                total_files_declared=$(grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null \
+                total_files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
                     | awk -F': ' '{s+=$2} END {print s+0}')
                 local total_files_started
                 total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
@@ -286,7 +286,7 @@ monitor_java_process() {
         elapsed=$((current_time - start_time))
 
         local files_declared
-        files_declared=$(grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null \
+        files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
             | awk -F': ' '{s+=$2} END {print s+0}')
         local files_started
         files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
