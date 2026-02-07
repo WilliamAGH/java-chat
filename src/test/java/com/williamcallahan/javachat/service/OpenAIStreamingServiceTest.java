@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIIoException;
@@ -23,7 +24,12 @@ import reactor.core.Exceptions;
 class OpenAIStreamingServiceTest {
 
     private OpenAIStreamingService createService() {
-        return new OpenAIStreamingService(null, new Chunker(), new PromptTruncator());
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+        return new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
     }
 
     @Test
