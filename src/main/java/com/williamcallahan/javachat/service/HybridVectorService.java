@@ -293,8 +293,7 @@ public class HybridVectorService {
 
         var upsertFuture = qdrantClient.upsertAsync(Objects.requireNonNull(collectionName), points);
         RetrySupport.executeWithRetry(
-                () -> QdrantFutureAwaiter.awaitFuture(upsertFuture, UPSERT_TIMEOUT_SECONDS),
-                "Qdrant hybrid upsert");
+                () -> QdrantFutureAwaiter.awaitFuture(upsertFuture, UPSERT_TIMEOUT_SECONDS), "Qdrant hybrid upsert");
 
         log.info("[QDRANT] Upserted {} hybrid points", points.size());
     }
@@ -310,8 +309,7 @@ public class HybridVectorService {
         var deleteFuture =
                 qdrantClient.deleteAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter));
         RetrySupport.executeWithRetry(
-                () -> QdrantFutureAwaiter.awaitFuture(deleteFuture, DELETE_TIMEOUT_SECONDS),
-                "Qdrant delete by URL");
+                () -> QdrantFutureAwaiter.awaitFuture(deleteFuture, DELETE_TIMEOUT_SECONDS), "Qdrant delete by URL");
 
         log.debug("[QDRANT] Deleted points by URL filter");
     }
@@ -327,8 +325,7 @@ public class HybridVectorService {
         var countFuture =
                 qdrantClient.countAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter), true);
         Long count = RetrySupport.executeWithRetry(
-                () -> QdrantFutureAwaiter.awaitFuture(countFuture, COUNT_TIMEOUT_SECONDS),
-                "Qdrant count by URL");
+                () -> QdrantFutureAwaiter.awaitFuture(countFuture, COUNT_TIMEOUT_SECONDS), "Qdrant count by URL");
         return count == null ? 0 : count;
     }
 }

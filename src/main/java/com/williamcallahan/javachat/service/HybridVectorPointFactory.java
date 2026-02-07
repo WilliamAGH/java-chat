@@ -75,7 +75,8 @@ final class HybridVectorPointFactory {
 
         LexicalSparseVectorEncoder.SparseVector sparseVectorSet =
                 Objects.requireNonNull(vectorSet.sparseVector(), "sparseVector");
-        if (!Objects.requireNonNull(sparseVectorSet.indices(), "sparseVector.indices").isEmpty()) {
+        if (!Objects.requireNonNull(sparseVectorSet.indices(), "sparseVector.indices")
+                .isEmpty()) {
             Vector sparseVector = vector(
                     Objects.requireNonNull(sparseVectorSet.values(), "sparseVector.values"),
                     Objects.requireNonNull(sparseVectorSet.integerIndices(), "sparseVector.integerIndices"));
