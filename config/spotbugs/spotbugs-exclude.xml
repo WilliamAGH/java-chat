@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+        Error handlers must respond to any HTTP method that may trigger an error.
+        CustomErrorController explicitly allows common methods to ensure consistent error rendering
+        for browser requests and API clients; this is not an application endpoint intended for state changes.
+    -->
+    <Match>
+        <Bug pattern="SPRING_CSRF_UNRESTRICTED_REQUEST_MAPPING"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+        <Method name="handleError"/>
+    </Match>
+
+
+    <!--
+        Spring-managed dependencies are intentionally shared; SpotBugs flags these as EI_EXPOSE_REP2,
+        but these fields are not exposed via accessors and are required for DI.
+    -->
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.EmbeddingCacheService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.MarkdownService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.ChatService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedLearningService"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.MarkdownController"/>
+    </Match>
+    <Match>
+        <Bug code="EI2"/>
+        <Class name="com.williamcallahan.javachat.web.TooltipController"/>
+    </Match>
+
+    <!--
+        AppProperties is a Spring @ConfigurationProperties holder; nested objects are intentionally mutable for
+        binding and are not exposed outside the Spring context as a security boundary.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.config.AppProperties"/>
+    </Match>
+
+    <!--
+        Controllers store Spring-managed singleton dependencies for request handling; SpotBugs reports these as
+        EI_EXPOSE_REP2 even though the fields are not exposed via accessors.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+    </Match>
+
+    <!--
+        FindSecBugs reports every Spring MVC endpoint as remotely reachable. In this application the
+        endpoint surface is intentional and reviewed; suppress these informational SPRING_ENDPOINT
+        findings to keep SpotBugs actionable.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+    </Match>
+
+    <!--
+        CRLF injection warnings for log entries are suppressed for classes whose logged values
+        originate from internal configuration, API responses, or programmatic identifiers rather
+        than untrusted user input.  Four classes (RateLimitManager, RateLimitState, RetrySupport,
+        AppProperties) additionally implement sanitizeLogValue/sanitizeLogMessage methods.
+    -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitState"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.support.RetrySupport"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.AppProperties"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.cli.GitHubRepoProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantIndexInitializer"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.HybridSearchService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.HybridVectorService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiProviderRoutingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAiRequestFactory"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitHeaderParser"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.RetrievalService"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.LocalDocsFileIngestionProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.SourceCodeFileIngestionProcessor"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+    </Match>
+
+    <!--
+        Ingestion service bundles intentionally aggregate Spring-managed collaborators so processors
+        can accept cohesive dependencies instead of long constructor parameter lists. Accessors and
+        constructor assignments in these records are by design and do not expose mutable domain data.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.FileContentServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.IngestionStorageServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.FileContentServices"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.ingestion.IngestionStorageServices"/>
+    </Match>
+
+    <!--
+        These controllers/services hold Spring singletons via constructor injection only; SpotBugs
+        flags the field assignments as EI_EXPOSE_REP2 although no mutable object is exposed via API.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="com.williamcallahan.javachat.web.EmbeddingsHealthController"/>
+    </Match>
+
+    <!--
+        Locale-agnostic case folding is acceptable for internal parsing.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="~com\\.williamcallahan\\.javachat\\..*"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+    </Match>
+
+    <!--
+        Known-null reset times are intentionally passed to RateLimitState, which computes fallback windows.
+    -->
+    <Match>
+        <Bug pattern="NP_LOAD_OF_KNOWN_NULL_VALUE"/>
+        <Class name="com.williamcallahan.javachat.service.RateLimitManager"/>
+        <Method name="recordRateLimit"/>
+    </Match>
+
+    <!--
+        Legacy cache imports rely on a constrained ObjectInputFilter; suppress deserialization warnings
+        for this vetted code path.
+    -->
+    <Match>
+        <Bug pattern="OBJECT_DESERIALIZATION"/>
+        <Class name="com.williamcallahan.javachat.service.EmbeddingCacheFileImporter"/>
+        <Method name="readLegacyJavaSerializedCache"/>
+    </Match>
+
+    <!--
+        Retry and ingestion workflows intentionally surface runtime exceptions to ensure failures
+        propagate to callers; suppress the THROWS warning for these methods.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.support.RetrySupport"/>
+        <Method name="executeWithRetry"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+        <Method name="processDocuments"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+        <Method name="storeDocumentsWithRetry"/>
+    </Match>
+
+    <!--
+        SpotBugs can report redundant null checks for implicit receiver null checks (bytecode-level NPE checks)
+        when nullability annotations indicate a value is non-null. These are noise and not actionable.
+    -->
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.EnrichmentController"/>
+        <Method name="enrich"/>
+    </Match>
+    <Match>
+        <Bug code="RCN"/>
+        <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
+        <Method name="enrich"/>
+    </Match>
+
+    <!--
+        Case-insensitive comparisons are used only for parsing or display convenience.
+        Suppress IMPROPER_UNICODE where normalization is non-security-critical.
+    -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.ApiKeyLoggingConfig"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.DocsSourceRegistry"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.config.PortInitializer"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.DocsIngestionService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.GuidedTOCProvider"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.HtmlContentExtractor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.OpenAIStreamingService"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentPlaceholderizer$EnrichmentKind"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.service.markdown.EnrichmentProcessor$EnrichmentVisitor"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.ChatController"/>
+    </Match>
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE"/>
+        <Class name="com.williamcallahan.javachat.web.SiteUrlResolver"/>
+    </Match>
+
+    <!--
+        ErrorTestController intentionally throws exceptions to validate error handling paths.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.web.ErrorTestController"/>
+    </Match>
+</FindBugsFilter>

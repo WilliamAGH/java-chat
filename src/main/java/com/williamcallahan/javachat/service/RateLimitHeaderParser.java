@@ -6,11 +6,16 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Objects;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Parses rate limit headers into structured values for backoff decisions.
  */
 final class RateLimitHeaderParser {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitHeaderParser.class);
 
     private static final long HOURS_PER_DAY = 24;
     private static final long MINUTES_PER_HOUR = 60;
@@ -56,22 +61,22 @@ final class RateLimitHeaderParser {
      * Parses the X-RateLimit-Reset header (epoch seconds or ISO instant).
      *
      * @param resetHeader raw header value
-     * @return parsed instant, or null when header is absent
+     * @return parsed instant when a header is present
      * @throws IllegalArgumentException when a non-empty header is unparseable
      */
-    Instant parseResetHeader(String resetHeader) {
+    Optional<Instant> parseResetHeader(String resetHeader) {
         if (resetHeader == null) {
-            return null;
+            return Optional.empty();
         }
         String trimmed = resetHeader.trim();
         if (trimmed.isEmpty()) {
-            return null;
+            return Optional.empty();
         }
         if (isDigits(trimmed)) {
-            return Instant.ofEpochSecond(Long.parseLong(trimmed));
+            return Optional.of(Instant.ofEpochSecond(Long.parseLong(trimmed)));
         }
         try {
-            return Instant.parse(trimmed);
+            return Optional.of(Instant.parse(trimmed));
         } catch (DateTimeParseException parseException) {
             throw new IllegalArgumentException("Invalid X-RateLimit-Reset header: " + trimmed, parseException);
         }
@@ -106,11 +111,11 @@ final class RateLimitHeaderParser {
      * @throws IllegalArgumentException when a provided header is unparseable
      */
     long parseRetryAfterSeconds(Headers headers) {
-        String retryAfter = firstHeaderValue(headers, "Retry-After");
-        if (retryAfter == null) {
+        Optional<String> retryAfterHeader = firstHeaderValue(headers, "Retry-After");
+        if (retryAfterHeader.isEmpty()) {
             return 0;
         }
-        String trimmed = retryAfter.trim();
+        String trimmed = retryAfterHeader.get().trim();
         if (isDigits(trimmed)) {
             return Long.parseLong(trimmed);
         }
@@ -128,26 +133,37 @@ final class RateLimitHeaderParser {
      * Parses rate limit reset instants from known OpenAI headers.
      *
      * @param headers response headers
-     * @return parsed instant, or null when no reset headers are present
+     * @return parsed instant when one of the known reset headers is present
      * @throws IllegalArgumentException when a provided header is unparseable
      */
-    Instant parseResetInstant(Headers headers) {
-        String resetSeconds = firstHeaderValue(headers, "X-RateLimit-Reset");
-        if (resetSeconds != null) {
-            return parseInstantSecondsFromEpoch(resetSeconds);
+    Optional<Instant> parseResetInstant(Headers headers) {
+        Optional<Instant> epochResetInstant =
+                firstHeaderValue(headers, "X-RateLimit-Reset").map(this::parseInstantSecondsFromEpoch);
+        if (epochResetInstant.isPresent()) {
+            return epochResetInstant;
         }
 
         long candidateSeconds = minPositive(
-                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-requests")),
-                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset-tokens")),
-                parseDurationSeconds(firstHeaderValue(headers, "x-ratelimit-reset")),
-                parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Requests")),
-                parseDurationSeconds(firstHeaderValue(headers, "X-RateLimit-Reset-Tokens")));
+                firstHeaderValue(headers, "x-ratelimit-reset-requests")
+                        .map(this::parseDurationSeconds)
+                        .orElse(0L),
+                firstHeaderValue(headers, "x-ratelimit-reset-tokens")
+                        .map(this::parseDurationSeconds)
+                        .orElse(0L),
+                firstHeaderValue(headers, "x-ratelimit-reset")
+                        .map(this::parseDurationSeconds)
+                        .orElse(0L),
+                firstHeaderValue(headers, "X-RateLimit-Reset-Requests")
+                        .map(this::parseDurationSeconds)
+                        .orElse(0L),
+                firstHeaderValue(headers, "X-RateLimit-Reset-Tokens")
+                        .map(this::parseDurationSeconds)
+                        .orElse(0L));
         if (candidateSeconds > 0) {
-            return Instant.now().plusSeconds(candidateSeconds);
+            return Optional.of(Instant.now().plusSeconds(candidateSeconds));
         }
 
-        return null;
+        return Optional.empty();
     }
 
     private Instant parseInstantSecondsFromEpoch(String rawSeconds) {
@@ -186,9 +202,9 @@ final class RateLimitHeaderParser {
         throw new IllegalArgumentException("Invalid reset duration header: " + rawDuration);
     }
 
-    private String firstHeaderValue(Headers headers, String name) {
+    private Optional<String> firstHeaderValue(Headers headers, String name) {
         if (headers == null || name == null || name.isBlank()) {
-            return null;
+            return Optional.empty();
         }
         if (!headers.names().contains(name)) {
             for (String headerName : headers.names()) {
@@ -196,13 +212,13 @@ final class RateLimitHeaderParser {
                     return firstHeaderValue(headers, headerName);
                 }
             }
-            return null;
+            return Optional.empty();
         }
         var headerValues = headers.values(name);
         if (headerValues.isEmpty()) {
-            return null;
+            return Optional.empty();
         }
-        return headerValues.get(0);
+        return Optional.ofNullable(headerValues.get(0));
     }
 
     private long minPositive(long... candidates) {
@@ -305,6 +321,11 @@ final class RateLimitHeaderParser {
         try {
             return parseDuration(durationString);
         } catch (IllegalArgumentException parseError) {
+            log.warn(
+                    "Invalid duration string '{}', using fallback {}: {}",
+                    durationString,
+                    fallbackDuration,
+                    parseError.getMessage());
             return fallbackDuration;
         }
     }

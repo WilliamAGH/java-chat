@@ -4,7 +4,12 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -32,6 +37,7 @@ public class AppProperties {
     private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
     private static final String EMBEDDINGS_KEY = "app.embeddings";
     private static final String LLM_KEY = "app.llm";
+    private static final String GUIDED_LEARNING_KEY = "app.guided-learning";
 
     /**
      * Default base URL for SEO endpoints when no explicit public base URL is configured.
@@ -50,12 +56,18 @@ public class AppProperties {
     private CorsConfig cors = new CorsConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
+    private GuidedLearning guidedLearning = new GuidedLearning();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
     /**
      * Creates configuration sections with default values.
+     *
+     * <p>Empty constructor is required by Spring's @ConfigurationProperties binding mechanism.
+     * All configuration values are injected via setter methods after construction.</p>
      */
-    public AppProperties() {}
+    public AppProperties() {
+        // Empty constructor required for Spring @ConfigurationProperties binding
+    }
 
     @PostConstruct
     void validateConfiguration() {
@@ -64,10 +76,11 @@ public class AppProperties {
         requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
         requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
-        requireConfiguredSection(qdrant, QDRANT_KEY);
+        requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
+        requireConfiguredSection(guidedLearning, GUIDED_LEARNING_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
 
@@ -87,6 +100,14 @@ public class AppProperties {
      */
     public void setPublicBaseUrl(final String publicBaseUrl) {
         this.publicBaseUrl = publicBaseUrl;
+    }
+
+    public GuidedLearning getGuidedLearning() {
+        return guidedLearning;
+    }
+
+    public void setGuidedLearning(GuidedLearning guidedLearning) {
+        this.guidedLearning = requireConfiguredSection(guidedLearning, GUIDED_LEARNING_KEY);
     }
 
     private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
@@ -231,6 +252,14 @@ public class AppProperties {
     /** Qdrant vector store settings. */
     public static class Qdrant {
         private boolean ensurePayloadIndexes = true;
+        private QdrantCollections collections = new QdrantCollections();
+        private String denseVectorName = "dense";
+        private String sparseVectorName = "bm25";
+        private boolean ensureCollections = true;
+        private int prefetchLimit = 20;
+        private int rrfK = 60;
+        private boolean failOnPartialSearchError = true;
+        private Duration queryTimeout = Duration.ofSeconds(5);
 
         public boolean isEnsurePayloadIndexes() {
             return ensurePayloadIndexes;
@@ -239,12 +268,215 @@ public class AppProperties {
         public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) {
             this.ensurePayloadIndexes = ensurePayloadIndexes;
         }
+
+        /**
+         * Returns the configured collection names used for routing ingested content.
+         *
+         * <p>Collections are used to split content by source type (books, docs, articles, PDFs)
+         * while still allowing cross-collection retrieval.
+         */
+        public QdrantCollections getCollections() {
+            return collections.copy();
+        }
+
+        public void setCollections(QdrantCollections collections) {
+            this.collections = requireConfiguredSection(collections, QDRANT_KEY + ".collections")
+                    .copy();
+        }
+
+        /**
+         * Returns the configured dense vector name used for embeddings.
+         *
+         * <p>This name must match the collection schema's {@code vectors} key when using
+         * named-vector mode (required for storing dense + sparse vectors in a single point).</p>
+         */
+        public String getDenseVectorName() {
+            return denseVectorName;
+        }
+
+        public void setDenseVectorName(String denseVectorName) {
+            this.denseVectorName = denseVectorName;
+        }
+
+        /**
+         * Returns the configured sparse vector name used for lexical (hybrid) retrieval.
+         *
+         * <p>This name must match the collection schema's {@code sparse_vectors} key.
+         */
+        public String getSparseVectorName() {
+            return sparseVectorName;
+        }
+
+        public void setSparseVectorName(String sparseVectorName) {
+            this.sparseVectorName = sparseVectorName;
+        }
+
+        /**
+         * Returns the timeout budget for hybrid query fan-out.
+         */
+        public Duration getQueryTimeout() {
+            return queryTimeout;
+        }
+
+        public void setQueryTimeout(Duration queryTimeout) {
+            this.queryTimeout = queryTimeout;
+        }
+
+        /**
+         * Returns whether the application should ensure hybrid-capable collections exist at startup.
+         */
+        public boolean isEnsureCollections() {
+            return ensureCollections;
+        }
+
+        public void setEnsureCollections(boolean ensureCollections) {
+            this.ensureCollections = ensureCollections;
+        }
+
+        /**
+         * Returns the per-collection prefetch limit for hybrid queries.
+         *
+         * <p>Controls how many candidates each dense/sparse prefetch stage retrieves
+         * before RRF fusion selects the final results.</p>
+         */
+        public int getPrefetchLimit() {
+            return prefetchLimit;
+        }
+
+        public void setPrefetchLimit(int prefetchLimit) {
+            this.prefetchLimit = prefetchLimit;
+        }
+
+        /**
+         * Returns the reciprocal-rank-fusion k value used for hybrid result fusion.
+         */
+        public int getRrfK() {
+            return rrfK;
+        }
+
+        public void setRrfK(int rrfK) {
+            this.rrfK = rrfK;
+        }
+
+        /**
+         * Returns whether retrieval should fail when any collection query fails.
+         */
+        public boolean isFailOnPartialSearchError() {
+            return failOnPartialSearchError;
+        }
+
+        public void setFailOnPartialSearchError(boolean failOnPartialSearchError) {
+            this.failOnPartialSearchError = failOnPartialSearchError;
+        }
+
+        Qdrant validateConfiguration() {
+            if (collections == null) {
+                throw new IllegalArgumentException("app.qdrant.collections must not be null");
+            }
+            collections.validateConfiguration();
+
+            if (denseVectorName == null || denseVectorName.isBlank()) {
+                throw new IllegalArgumentException("app.qdrant.dense-vector-name must not be blank");
+            }
+            if (sparseVectorName == null || sparseVectorName.isBlank()) {
+                throw new IllegalArgumentException("app.qdrant.sparse-vector-name must not be blank");
+            }
+            if (prefetchLimit <= 0) {
+                throw new IllegalArgumentException("app.qdrant.prefetch-limit must be positive, got: " + prefetchLimit);
+            }
+            if (rrfK <= 0) {
+                throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
+            }
+            if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
+                throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");
+            }
+            return this;
+        }
+    }
+
+    /**
+     * Qdrant collection names used by the ingestion and retrieval pipelines.
+     */
+    public static class QdrantCollections {
+        private String books = "java-chat-books";
+        private String docs = "java-docs";
+        private String articles = "java-articles";
+        private String pdfs = "java-pdfs";
+
+        /**
+         * Creates collection-name defaults used when no explicit configuration is provided.
+         */
+        public QdrantCollections() {}
+
+        private QdrantCollections(String books, String docs, String articles, String pdfs) {
+            this.books = books;
+            this.docs = docs;
+            this.articles = articles;
+            this.pdfs = pdfs;
+        }
+
+        public String getBooks() {
+            return books;
+        }
+
+        public void setBooks(String books) {
+            this.books = books;
+        }
+
+        public String getDocs() {
+            return docs;
+        }
+
+        public void setDocs(String docs) {
+            this.docs = docs;
+        }
+
+        public String getArticles() {
+            return articles;
+        }
+
+        public void setArticles(String articles) {
+            this.articles = articles;
+        }
+
+        public String getPdfs() {
+            return pdfs;
+        }
+
+        public void setPdfs(String pdfs) {
+            this.pdfs = pdfs;
+        }
+
+        /**
+         * Returns all configured collection names in deterministic order.
+         */
+        public List<String> all() {
+            return Arrays.asList(books, docs, articles, pdfs);
+        }
+
+        QdrantCollections copy() {
+            return new QdrantCollections(books, docs, articles, pdfs);
+        }
+
+        QdrantCollections validateConfiguration() {
+            List<String> all = all();
+            Set<String> unique = new LinkedHashSet<>();
+            for (String name : all) {
+                if (name == null || name.isBlank()) {
+                    throw new IllegalArgumentException("app.qdrant.collections.* must not be blank");
+                }
+                unique.add(name);
+            }
+            if (unique.size() != all.size()) {
+                throw new IllegalArgumentException("app.qdrant.collections.* must be distinct");
+            }
+            return this;
+        }
     }
 
     /** Embedding vector configuration. */
     public static class Embeddings {
         private int dimensions = 1536;
-        private String cacheDir = "./data/embeddings-cache";
 
         public int getDimensions() {
             return dimensions;
@@ -252,14 +484,6 @@ public class AppProperties {
 
         public void setDimensions(int dimensions) {
             this.dimensions = dimensions;
-        }
-
-        public String getCacheDir() {
-            return cacheDir;
-        }
-
-        public void setCacheDir(String cacheDir) {
-            this.cacheDir = cacheDir;
         }
 
         Embeddings validateConfiguration() {
@@ -293,6 +517,29 @@ public class AppProperties {
                         MIN_TEMPERATURE,
                         MAX_TEMPERATURE,
                         temperature));
+            }
+            return this;
+        }
+    }
+
+    /** Guided learning configuration for Think Java book integration. */
+    public static class GuidedLearning {
+        /** Classpath resource path to the Think Java 2nd Edition PDF used for guided lessons. */
+        private static final String DEFAULT_THINK_JAVA_PDF_CLASSPATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
+
+        private String thinkJavaPdfPath = DEFAULT_THINK_JAVA_PDF_CLASSPATH;
+
+        public String getThinkJavaPdfPath() {
+            return thinkJavaPdfPath;
+        }
+
+        public void setThinkJavaPdfPath(String thinkJavaPdfPath) {
+            this.thinkJavaPdfPath = thinkJavaPdfPath;
+        }
+
+        GuidedLearning validateConfiguration() {
+            if (thinkJavaPdfPath == null || thinkJavaPdfPath.isBlank()) {
+                throw new IllegalArgumentException("app.guided-learning.think-java-pdf-path cannot be null or blank");
             }
             return this;
         }

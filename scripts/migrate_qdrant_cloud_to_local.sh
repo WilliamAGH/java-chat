@@ -24,19 +24,17 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 
+# shellcheck source=lib/shell_bootstrap.sh
+source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
+# shellcheck source=lib/env_loader.sh
+source "$SCRIPT_DIR/lib/env_loader.sh"
+
 # Load .env if present (do not echo secrets)
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
-  set -a
-  # shellcheck source=/dev/null
-  source "$PROJECT_ROOT/.env"
-  set +a
+    preserve_process_env_then_source_file "$PROJECT_ROOT/.env"
 fi
 
-# Check jq
-if ! command -v jq >/dev/null 2>&1; then
-  echo "ERROR: jq is required. Install with: brew install jq" >&2
-  exit 1
-fi
+require_command jq "brew install jq"
 
 # Inputs
 SOURCE_QDRANT_HOST=${SOURCE_QDRANT_HOST:-}
@@ -71,7 +69,7 @@ fi
 
 # Check source and get stats
 echo "Checking source collection..."
-SRC_INFO=$(${src_curl[@]} "${SRC_BASE}/collections/${SOURCE_QDRANT_COLLECTION}" || true)
+SRC_INFO=$("${src_curl[@]}" "${SRC_BASE}/collections/${SOURCE_QDRANT_COLLECTION}" || true)
 if [[ -z "$SRC_INFO" || "$(echo "$SRC_INFO" | jq -r '.status')" != "ok" ]]; then
   echo "ERROR: Unable to reach source collection at ${SRC_BASE}/collections/${SOURCE_QDRANT_COLLECTION}" >&2
   exit 1
@@ -105,7 +103,7 @@ START_TS=$(date +%s)
 echo "Starting migration from ${SOURCE_QDRANT_COLLECTION} -> ${DEST_QDRANT_COLLECTION}"
 while :; do
   REQ=$(jq -n --argjson off "$OFFSET" --argjson limit "$BATCH" '{ limit: $limit, with_payload: true, with_vector: true, offset: $off }')
-  RESP=$(${src_curl[@]} -H 'Content-Type: application/json' -X POST "${SRC_BASE}/collections/${SOURCE_QDRANT_COLLECTION}/points/scroll" -d "$REQ" || true)
+  RESP=$("${src_curl[@]}" -H 'Content-Type: application/json' -X POST "${SRC_BASE}/collections/${SOURCE_QDRANT_COLLECTION}/points/scroll" -d "$REQ" || true)
   # Basic validation
   OK=$(echo "$RESP" | jq -r '.status // empty')
   if [[ "$OK" != "ok" ]]; then
@@ -142,19 +140,13 @@ while :; do
   COPIED=$((COPIED + COUNT))
   ELAPSED=$(( $(date +%s) - START_TS ))
   RATE=0
-  if [[ "$ELAPSED" -gt 0 ]]; then RATE=$(python3 - <<PY 2>/dev/null || echo 0
-import sys
-c=int(sys.argv[1]); e=int(sys.argv[2])
-print(int(c/e)) if e>0 else print(0)
-PY
- "$COPIED" "$ELAPSED"); fi
-  PCT=0
-  if [[ "$SRC_POINTS" -gt 0 ]]; then PCT=$(python3 - <<PY 2>/dev/null || echo 0
-import sys
-c=int(sys.argv[1]); t=int(sys.argv[2])
-print(f"{(c/t)*100:.2f}") if t>0 else print("0.00")
-PY
- "$COPIED" "$SRC_POINTS"); fi
+  if [[ "$ELAPSED" -gt 0 ]]; then
+    RATE=$((COPIED / ELAPSED))
+  fi
+  PCT="0.00"
+  if [[ "$SRC_POINTS" -gt 0 ]]; then
+    PCT=$(awk "BEGIN {printf \"%.2f\", ($COPIED/$SRC_POINTS)*100}")
+  fi
   echo "→ Copied batch ${COUNT}; total ${COPIED}/${SRC_POINTS} (${PCT}%), ~${RATE} pts/sec"
 
   # Next offset

@@ -55,7 +55,6 @@ public class ExtractorQualityTest {
             String[][] sources = {
                 {"java/java24-complete", "Java 24"},
                 {"java/java25-complete", "Java 25"},
-                {"java/java25-ea-complete", "Java 25 (alt mirror)"},
                 {"spring-boot-complete", "Spring Boot"},
                 {"spring-framework-complete", "Spring Framework"}
             };

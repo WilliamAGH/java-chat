@@ -36,7 +36,8 @@ RUN chmod +x gradlew
 
 # 2. Build configuration (changes occasionally)
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
-COPY pmd-ruleset.xml spotbugs-exclude.xml spotbugs-include.xml ./
+COPY config/pmd/ config/pmd/
+COPY config/spotbugs/ config/spotbugs/
 
 # 3. Download dependencies with cache mount (quiet to avoid verbose tree)
 RUN --mount=type=cache,target=/root/.gradle \
@@ -74,7 +75,6 @@ RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index
 ENV PORT=8085
 ENV QDRANT_INIT_SCHEMA=false
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
-ENV APP_LOCAL_EMBEDDING_USE_HASH_WHEN_DISABLED=true
 ENV APP_KILL_ON_CONFLICT=false
 ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
 ENV DOCS_PARSED_DIR=/app/data/parsed
@@ -95,6 +95,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 ENTRYPOINT ["/bin/sh", "-c", "java \
   -XX:+IgnoreUnrecognizedVMOptions \
+  --enable-native-access=ALL-UNNAMED \
+  --sun-misc-unsafe-memory-access=allow \
   -Xms64m -Xmx192m \
   -XX:MaxMetaspaceSize=192m \
   -XX:ReservedCodeCacheSize=32m \

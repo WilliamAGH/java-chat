@@ -61,13 +61,7 @@ curl -N -H "Content-Type: application/json" \
 - GET `/api/enrich?q=...`
 - GET `/api/chat/enrich?q=...` (alias)
 
-## Ingestion + embeddings cache
+## Ingestion
 
 - POST `/api/ingest?maxPages=...`
 - POST `/api/ingest/local?dir=...&maxFiles=...`
-- GET `/api/embeddings-cache/stats`
-- POST `/api/embeddings-cache/upload?batchSize=...`
-- POST `/api/embeddings-cache/snapshot`
-- POST `/api/embeddings-cache/export?filename=...`
-- POST `/api/embeddings-cache/import?filename=...`
-

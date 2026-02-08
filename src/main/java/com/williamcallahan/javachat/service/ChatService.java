@@ -64,37 +64,6 @@ public class ChatService {
      * @param latestUserMessage user query
      * @return streaming response chunks
      */
-    public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
-        logger.debug("ChatService.streamAnswer called");
-
-        StructuredPromptOutcome outcome = buildStructuredPromptWithContextOutcome(history, latestUserMessage, null);
-
-        if (!openAIStreamingService.isAvailable()) {
-            logger.error("OpenAI streaming service is not available - check API credentials");
-            return Flux.error(new IllegalStateException("Chat service unavailable - no API credentials configured"));
-        }
-
-        return openAIStreamingService
-                .streamResponse(outcome.structuredPrompt(), temperature)
-                .flatMapMany(result -> result.content())
-                .onErrorResume(streamingException -> {
-                    logger.error("Streaming failed", streamingException);
-                    return Flux.error(streamingException);
-                });
-    }
-
-    /**
-     * Streams a chat response with preselected context and custom guidance using structured prompts.
-     *
-     * <p>Uses structure-aware truncation to preserve semantic boundaries when the prompt
-     * exceeds model token limits.</p>
-     *
-     * @param history conversation history
-     * @param latestUserMessage user query
-     * @param contextDocs pre-selected context documents
-     * @param guidance custom system guidance to append
-     * @return streaming response chunks
-     */
     public Flux<String> streamAnswerWithContext(
             List<Message> history, String latestUserMessage, List<Document> contextDocs, String guidance) {
         if (contextDocs == null) contextDocs = List.of();
@@ -104,7 +73,7 @@ public class ChatService {
 
         return openAIStreamingService
                 .streamResponse(structuredPrompt, temperature)
-                .flatMapMany(result -> result.content())
+                .flatMapMany(streamingResult -> streamingResult.textChunks())
                 .onErrorResume(exception -> {
                     logger.error("Streaming failed", exception);
                     return Flux.error(exception);
@@ -115,8 +84,8 @@ public class ChatService {
      * Resolves citations for a query using the retrieval pipeline.
      */
     public List<Citation> citationsFor(String userQuery) {
-        List<Document> docs = retrievalService.retrieve(userQuery);
-        return retrievalService.toCitations(docs);
+        List<Document> documents = retrievalService.retrieve(userQuery);
+        return retrievalService.toCitations(documents).citations();
     }
 
     /**
@@ -217,12 +186,13 @@ public class ChatService {
         List<ContextDocumentSegment> segments = new ArrayList<>();
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
             Document doc = contextDocs.get(docIndex);
-            Object urlMetadata = doc.getMetadata().get("url");
-            String rawUrl = urlMetadata != null ? urlMetadata.toString() : "";
+            Object rawUrlValue = doc.getMetadata().get("url");
+            String rawUrl = rawUrlValue != null ? rawUrlValue.toString() : "";
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-            String content = doc.getText();
+            String documentText = doc.getText();
 
-            segments.add(new ContextDocumentSegment(docIndex + 1, normalizedUrl, content, estimateTokens(content)));
+            segments.add(new ContextDocumentSegment(
+                    docIndex + 1, normalizedUrl, documentText, estimateTokens(documentText)));
         }
         return segments;
     }
@@ -232,13 +202,13 @@ public class ChatService {
      */
     private List<ConversationTurnSegment> buildConversationSegments(List<Message> history) {
         List<ConversationTurnSegment> segments = new ArrayList<>();
-        for (Message msg : history) {
+        for (Message historyMessage : history) {
             String role;
             String text;
-            if (msg instanceof UserMessage userMsg) {
+            if (historyMessage instanceof UserMessage userMessage) {
                 role = ConversationTurnSegment.ROLE_USER;
-                text = userMsg.getText();
-            } else if (msg instanceof AssistantMessage assistantMsg) {
+                text = userMessage.getText();
+            } else if (historyMessage instanceof AssistantMessage assistantMsg) {
                 role = ConversationTurnSegment.ROLE_ASSISTANT;
                 text = assistantMsg.getText();
             } else {
@@ -263,7 +233,7 @@ public class ChatService {
             return 0;
         }
         // Conservative: ~4 chars per token, add 1 for rounding
-        return (text.length() / 4) + 1;
+        return (text.length() / ModelConfiguration.ESTIMATED_CHARS_PER_TOKEN) + 1;
     }
 
     /**

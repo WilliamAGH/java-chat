@@ -36,6 +36,34 @@ describe('parseMarkdown', () => {
     expect(renderedHtml).toContain('data-enrichment-type="hint"')
   })
 
+  it('preserves trailing content brace when enrichment closes with }}}', () => {
+    const markdown = '{{example: try (var scope = open()) { doWork(); }}}'
+    const renderedHtml = parseMarkdown(markdown)
+
+    // The final `}` belongs to content; it must not leak as an orphan node.
+    expect(renderedHtml).toContain('doWork(); }')
+    expect(renderedHtml).not.toContain('<p>}</p>')
+  })
+
+  it('normalizes attached fenced code blocks with trailing prose', () => {
+    const markdown = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1."
+    const renderedHtml = parseMarkdown(markdown)
+
+    expect(renderedHtml).toContain('<pre>')
+    expect(renderedHtml).toContain('<code class="language-java">')
+    expect(renderedHtml).toContain('The result is 1.')
+    expect(renderedHtml).not.toContain('```The')
+  })
+
+  it('auto-closes unbalanced fenced code while streaming partial content', () => {
+    const markdown = '```java\nSystem.out.println("hi");'
+    const renderedHtml = parseMarkdown(markdown)
+
+    expect(renderedHtml).toContain('<pre>')
+    expect(renderedHtml).toContain('<code class="language-java">')
+    expect(renderedHtml).toContain('System.out.println')
+  })
+
   it('is SSR-safe - does not use document APIs', () => {
     // This test verifies parseMarkdown works without DOM
     // If it used document.createElement, this would fail in Node

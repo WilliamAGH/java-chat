@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.util;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -13,6 +14,20 @@ final class JavadocMemberAnchorResolver {
 
     private JavadocMemberAnchorResolver() {}
 
+    /**
+     * Appends a JDK-style member anchor fragment to a Javadoc class URL when a method or
+     * constructor signature can be confidently extracted from the surrounding document text.
+     *
+     * <p>The method only modifies URLs that end in {@code .html} and do not already contain a
+     * fragment. Spring-hosted docs are excluded because their anchor format differs from the
+     * standard JDK convention.
+     *
+     * @param url         Javadoc class page URL (e.g. {@code .../String.html})
+     * @param text        surrounding document text that may contain a method/constructor call
+     * @param packageName Java package used to resolve unqualified type names in signatures
+     * @return the original URL with an appended {@code #member(params)} fragment, or the
+     *         original URL unchanged when no signature can be resolved with confidence
+     */
     static String refineMemberAnchorUrl(String url, String text, String packageName) {
         if (url == null || text == null) {
             return url;
@@ -30,24 +45,27 @@ final class JavadocMemberAnchorResolver {
             return url;
         }
 
-        String classFileName = url.substring(url.lastIndexOf('/') + 1);
+        int lastSlashIndex = url.lastIndexOf('/');
+        if (lastSlashIndex < 0 || lastSlashIndex + 1 >= url.length()) {
+            return url;
+        }
+        String classFileName = url.substring(lastSlashIndex + 1);
+        if (classFileName.length() < ".html".length()) {
+            return url;
+        }
         String className = classFileName.substring(0, classFileName.length() - ".html".length());
+        if (className.isBlank()) {
+            return url;
+        }
         String outerSimpleName = className.contains(".") ? className.substring(0, className.indexOf('.')) : className;
 
-        String constructorAnchor = findConstructorAnchor(outerSimpleName, text, packageName, className);
-        if (constructorAnchor != null) {
-            return url + "#" + constructorAnchor;
-        }
-
-        String methodAnchor = findMethodAnchor(text, packageName, className);
-        if (methodAnchor != null) {
-            return url + "#" + methodAnchor;
-        }
-
-        return url;
+        return findConstructorAnchor(outerSimpleName, text, packageName, className)
+                .or(() -> findMethodAnchor(text, packageName, className))
+                .map(anchor -> url + "#" + anchor)
+                .orElse(url);
     }
 
-    private static String findConstructorAnchor(
+    private static Optional<String> findConstructorAnchor(
             String classSimpleName, String text, String packageName, String fullClassName) {
         Pattern constructorPattern = Pattern.compile("\\b" + Pattern.quote(classSimpleName) + "\\s*\\(([^)]*)\\)");
         Matcher constructorMatcher = constructorPattern.matcher(text);
@@ -55,17 +73,15 @@ final class JavadocMemberAnchorResolver {
             String rawParameterList = constructorMatcher.group(1);
             // Ignore annotation-style or class literal params (e.g., SomeType.class)
             if (rawParameterList.contains(".class")) {
-                return null;
+                return Optional.empty();
             }
-            String canonicalParams = canonicalizeParams(rawParameterList, packageName, fullClassName);
-            if (canonicalParams != null) {
-                return "%3Cinit%3E(" + canonicalParams + ")"; // <init>(...)
-            }
+            return canonicalizeParams(rawParameterList, packageName, fullClassName)
+                    .map(canonicalParamList -> "%3Cinit%3E(" + canonicalParamList + ")"); // <init>(...)
         }
-        return null;
+        return Optional.empty();
     }
 
-    private static String findMethodAnchor(String text, String packageName, String fullClassName) {
+    private static Optional<String> findMethodAnchor(String text, String packageName, String fullClassName) {
         Pattern methodPattern = Pattern.compile("\\b([a-z][A-Za-z0-9_$]*)\\s*\\(([^)]*)\\)");
         Matcher methodMatcher = methodPattern.matcher(text);
         while (methodMatcher.find()) {
@@ -74,33 +90,36 @@ final class JavadocMemberAnchorResolver {
             if (rawParameterList.contains(".class")) {
                 continue;
             }
-            String canonicalParams = canonicalizeParams(rawParameterList, packageName, fullClassName);
-            if (canonicalParams != null) {
-                return methodName + "(" + canonicalParams + ")";
+            Optional<String> canonicalMethodAnchor = canonicalizeParams(rawParameterList, packageName, fullClassName)
+                    .map(canonicalParamList -> methodName + "(" + canonicalParamList + ")");
+            if (canonicalMethodAnchor.isPresent()) {
+                return canonicalMethodAnchor;
             }
         }
-        return null;
+        return Optional.empty();
     }
 
-    private static String canonicalizeParams(String rawParameterList, String packageName, String fullClassName) {
+    private static Optional<String> canonicalizeParams(
+            String rawParameterList, String packageName, String fullClassName) {
         String trimmedParams = rawParameterList.trim();
         if (trimmedParams.isEmpty()) {
-            return ""; // no-arg
+            return Optional.of(""); // no-arg
         }
 
         String[] parameterTokens = splitParams(trimmedParams);
         StringBuilder canonicalBuilder = new StringBuilder();
         for (String token : parameterTokens) {
-            String canonicalType = JavadocTypeCanonicalizer.canonicalizeType(token.trim(), packageName, fullClassName);
-            if (canonicalType == null) {
-                return null; // abort if an unknown type can't be resolved confidently
+            Optional<String> canonicalType =
+                    JavadocTypeCanonicalizer.canonicalizeType(token.trim(), packageName, fullClassName);
+            if (canonicalType.isEmpty()) {
+                return Optional.empty(); // abort if an unknown type can't be resolved confidently
             }
-            if (canonicalBuilder.length() > 0) {
+            if (!canonicalBuilder.isEmpty()) {
                 canonicalBuilder.append(',');
             }
-            canonicalBuilder.append(canonicalType);
+            canonicalBuilder.append(canonicalType.get());
         }
-        return canonicalBuilder.toString();
+        return Optional.of(canonicalBuilder.toString());
     }
 
     private static String[] splitParams(String rawParams) {

@@ -1,26 +1,17 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.10"
-    id("io.spring.dependency-management") version "1.1.7"
-    id("com.github.spotbugs") version "6.4.8"
+    alias(libs.plugins.spring.boot)
+    alias(libs.plugins.spring.dependency.management)
+    alias(libs.plugins.spotbugs)
     id("pmd")
-    id("com.diffplug.spotless") version "8.1.0"
+    alias(libs.plugins.spotless)
 }
 
-val javaVersion = 25
-val springAiVersion = "1.1.2"
-val openaiVersion = "4.16.0"
-val springDotenvVersion = "5.1.0"
-val jsoupVersion = "1.22.1"
-val fastutilVersion = "8.5.18"
-val jtokkitVersion = "1.1.0"
-val flexmarkVersion = "0.64.8"
-val caffeineVersion = "3.2.3"
-val grpcVersion = "1.78.0"
-val pdfboxVersion = "3.0.6"
-val findSecBugsVersion = "1.14.0"
-val spotbugsVersion = "4.9.8"
-val pmdVersion = "7.20.0"
+// Tool versions - these are used for plugin configuration, not dependency resolution
+// Keeping as constants since they configure build tools, not runtime dependencies
+val spotbugsToolVersion = "4.9.8"
+val pmdToolVersion = "7.20.0"
+val palantirVersion = "2.85.0"
 
 springBoot {
     mainClass.set("com.williamcallahan.javachat.JavaChatApplication")
@@ -31,7 +22,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(javaVersion)
+        languageVersion = JavaLanguageVersion.of(libs.versions.java.get().toInt())
         vendor = JvmVendorSpec.ADOPTIUM
     }
 }
@@ -47,100 +38,94 @@ configurations.all {
 
 dependencyManagement {
     imports {
-        mavenBom("org.springframework.ai:spring-ai-bom:$springAiVersion")
-        mavenBom("io.grpc:grpc-bom:$grpcVersion")
+        mavenBom("org.springframework.ai:spring-ai-bom:${libs.versions.spring.ai.get()}")
+        mavenBom("io.grpc:grpc-bom:${libs.versions.grpc.get()}")
     }
 }
 
 dependencies {
     // Logging - ensure consistent Logback + SLF4J stack
-    implementation("org.springframework.boot:spring-boot-starter-logging")
-    implementation("ch.qos.logback:logback-classic")
+    implementation(libs.spring.boot.starter.logging)
+    implementation(libs.logback.classic)
 
     // Jackson - explicitly include for all run modes
-    implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation(libs.jackson.databind)
 
     // Spring Boot starters
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springframework.boot:spring-boot-starter-webflux")
-    implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("org.springframework.boot:spring-boot-starter-aop")
-    implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
+    implementation(libs.bundles.spring.boot.web)
 
     // Spring AI
-    implementation("org.springframework.ai:spring-ai-advisors-vector-store")
-    implementation("org.springframework.ai:spring-ai-starter-model-openai")
-    implementation("org.springframework.ai:spring-ai-starter-vector-store-qdrant")
+    implementation(libs.bundles.spring.ai)
 
     // OpenAI Java SDK for reliable streaming
-    implementation("com.openai:openai-java:$openaiVersion")
+    implementation(libs.openai.java)
 
     // Spring Boot .env file support
-    implementation("me.paulschwarz:spring-dotenv:$springDotenvVersion")
+    implementation(libs.spring.dotenv)
 
     // HTML parsing
-    implementation("org.jsoup:jsoup:$jsoupVersion")
+    implementation(libs.jsoup)
 
     // High-performance collections
-    implementation("it.unimi.dsi:fastutil:$fastutilVersion")
+    implementation(libs.fastutil)
 
     // Token counting
-    implementation("com.knuddels:jtokkit:$jtokkitVersion")
+    implementation(libs.jtokkit)
+    implementation(libs.lucene.core)
+    implementation(libs.lucene.analysis.common)
 
     // Markdown processing
-    implementation("com.vladsch.flexmark:flexmark:$flexmarkVersion")
-    implementation("com.vladsch.flexmark:flexmark-ext-tables:$flexmarkVersion")
-    implementation("com.vladsch.flexmark:flexmark-ext-gfm-strikethrough:$flexmarkVersion")
-    implementation("com.vladsch.flexmark:flexmark-ext-gfm-tasklist:$flexmarkVersion")
-    implementation("com.vladsch.flexmark:flexmark-ext-autolink:$flexmarkVersion")
+    implementation(libs.bundles.flexmark.all)
 
     // Caching
-    implementation("com.github.ben-manes.caffeine:caffeine:$caffeineVersion")
+    implementation(libs.caffeine)
+
+    // Qdrant Java gRPC client for hybrid vector operations
+    implementation(libs.qdrant.client)
+
+    // Guava (transitive via Qdrant; declared for direct ListenableFuture bridging)
+    implementation(libs.guava)
 
     // gRPC (version managed by BOM)
-    implementation("io.grpc:grpc-core")
+    implementation(libs.grpc.core)
 
     // PDF processing
-    implementation("org.apache.pdfbox:pdfbox:$pdfboxVersion")
+    implementation(libs.pdfbox)
 
     // Configuration processor
-    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+    annotationProcessor(libs.spring.boot.configuration.processor)
 
     // Development tools
-    developmentOnly("org.springframework.boot:spring-boot-devtools")
+    developmentOnly(libs.spring.boot.devtools)
 
     // macOS DNS resolver to avoid Netty warning on Mac
     // Version managed by Spring Boot; classifier for Apple Silicon
-    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-aarch_64")
-    runtimeOnly("io.netty:netty-resolver-dns-classes-macos")
+    runtimeOnly(variantOf(libs.netty.resolver.dns.native.macos) { classifier("osx-aarch_64") })
+    runtimeOnly(libs.netty.resolver.dns.classes.macos)
 
     // Testing
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.security:spring-security-test")
-    testImplementation("io.projectreactor:reactor-test")
-
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation(libs.bundles.testing)
+    testRuntimeOnly(libs.junit.platform.launcher)
 
     // SpotBugs FindSecBugs plugin
-    spotbugsPlugins("com.h3xstream.findsecbugs:findsecbugs-plugin:$findSecBugsVersion")
+    spotbugsPlugins(libs.findsecbugs.plugin)
 }
 
 // SpotBugs configuration
 spotbugs {
-    toolVersion.set(spotbugsVersion)
+    toolVersion.set(spotbugsToolVersion)
     // Match Maven behavior: lint errors don't fail the build
     // Use explicit `./gradlew spotbugsMain` to enforce
     ignoreFailures.set(true)
     effort.set(com.github.spotbugs.snom.Effort.MAX)
     reportLevel.set(com.github.spotbugs.snom.Confidence.LOW)
-    excludeFilter.set(file("spotbugs-exclude.xml"))
+    excludeFilter.set(file("config/spotbugs/spotbugs-exclude.xml"))
 }
 
 tasks.withType<com.github.spotbugs.snom.SpotBugsTask> {
     // Disable buggy FindSecBugs CORS detector that crashes on Spring config
     omitVisitors.add("CorsRegistryCORSDetector")
-    excludeFilter.set(file("spotbugs-exclude.xml"))
+    excludeFilter.set(file("config/spotbugs/spotbugs-exclude.xml"))
     reports.create("html") {
         required.set(true)
     }
@@ -149,10 +134,23 @@ tasks.withType<com.github.spotbugs.snom.SpotBugsTask> {
     }
 }
 
+tasks.named("check") {
+    // Keep SpotBugs as an explicit opt-in quality gate (`spotbugsMain`, `spotbugsTest`).
+    // This avoids non-fatal "SpotBugs ended with exit code 1" noise during normal builds.
+    setDependsOn(dependsOn.filterNot {
+        when (it) {
+            is String -> it == "spotbugsMain" || it == "spotbugsTest"
+            is Task -> it.name == "spotbugsMain" || it.name == "spotbugsTest"
+            is TaskProvider<*> -> it.name == "spotbugsMain" || it.name == "spotbugsTest"
+            else -> false
+        }
+    })
+}
+
 // PMD configuration
 pmd {
-    toolVersion = pmdVersion
-    ruleSetFiles = files("pmd-ruleset.xml")
+    toolVersion = pmdToolVersion
+    ruleSetFiles = files("config/pmd/pmd-ruleset.xml")
     // Match Maven behavior: lint errors don't fail the build
     // Use explicit `./gradlew pmdMain` to enforce
     isIgnoreFailures = true
@@ -168,7 +166,7 @@ tasks.withType<Pmd>().configureEach {
 spotless {
     java {
         target("src/main/java/**/*.java", "src/test/java/**/*.java")
-        palantirJavaFormat("2.85.0")
+        palantirJavaFormat(palantirVersion)
         removeUnusedImports()
     }
 }

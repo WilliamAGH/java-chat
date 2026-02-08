@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.util;
 
+import java.util.Optional;
+
 /**
  * Canonicalizes Javadoc parameter type tokens into fully qualified names.
  */
@@ -13,12 +15,12 @@ final class JavadocTypeCanonicalizer {
      * @param rawType raw type token extracted from Javadoc
      * @param packageName package of the enclosing class
      * @param fullClassName fully qualified class name for nested type resolution
-     * @return canonicalized type signature or null when the type cannot be resolved
+     * @return canonicalized type signature when the type can be resolved
      */
-    static String canonicalizeType(String rawType, String packageName, String fullClassName) {
+    static Optional<String> canonicalizeType(String rawType, String packageName, String fullClassName) {
         String trimmedType = rawType.trim();
         if (trimmedType.isEmpty()) {
-            return null;
+            return Optional.empty();
         }
 
         // Remove parameter names if present (assume last whitespace splits type and name)
@@ -26,6 +28,9 @@ final class JavadocTypeCanonicalizer {
 
         // Strip generics
         trimmedType = stripGenerics(trimmedType);
+        if (trimmedType.isEmpty()) {
+            return Optional.empty();
+        }
 
         // Handle varargs and arrays
         boolean isVarargs = trimmedType.endsWith("...");
@@ -34,25 +39,30 @@ final class JavadocTypeCanonicalizer {
         }
         int arrayDimensions = countArrayDimensions(trimmedType);
         trimmedType = trimArraySuffix(trimmedType, arrayDimensions);
+        if (trimmedType.isEmpty()) {
+            return Optional.empty();
+        }
 
         // Primitives and void
         if (isPrimitiveOrVoid(trimmedType)) {
-            return appendSuffix(trimmedType, isVarargs, arrayDimensions);
+            return Optional.of(appendSuffix(trimmedType, isVarargs, arrayDimensions));
         }
 
         // java.lang simple types
-        String javaLang = mapJavaLang(trimmedType);
-        if (javaLang != null) {
-            return appendSuffix(javaLang, isVarargs, arrayDimensions);
+        Optional<String> javaLangType = mapJavaLang(trimmedType);
+        if (javaLangType.isPresent()) {
+            return javaLangType.map(
+                    resolvedJavaLangType -> appendSuffix(resolvedJavaLangType, isVarargs, arrayDimensions));
         }
 
         // If already qualified with a package
         if (trimmedType.contains(".")) {
-            String qualified = resolveRelativeQualifiedType(trimmedType, packageName, arrayDimensions, isVarargs);
-            if (qualified != null) {
-                return qualified;
+            Optional<String> qualifiedType =
+                    resolveRelativeQualifiedType(trimmedType, packageName, arrayDimensions, isVarargs);
+            if (qualifiedType.isPresent()) {
+                return qualifiedType;
             }
-            return appendSuffix(trimmedType, isVarargs, arrayDimensions);
+            return Optional.of(appendSuffix(trimmedType, isVarargs, arrayDimensions));
         }
 
         // Possibly nested type of current class (e.g., Builder on Outer page)
@@ -61,25 +71,28 @@ final class JavadocTypeCanonicalizer {
             if (packagePrefix != null) {
                 String enclosing = fullClassName;
                 String fullyQualified = packagePrefix + "." + enclosing + "." + trimmedType;
-                return appendSuffix(fullyQualified, isVarargs, arrayDimensions);
+                return Optional.of(appendSuffix(fullyQualified, isVarargs, arrayDimensions));
             }
         }
 
         // Unknown non-java.lang simple type; avoid producing a bad anchor
-        return null;
+        return Optional.empty();
     }
 
-    private static String resolveRelativeQualifiedType(
+    private static Optional<String> resolveRelativeQualifiedType(
             String trimmedType, String packageName, int arrayDimensions, boolean isVarargs) {
+        if (trimmedType.isBlank()) {
+            return Optional.empty();
+        }
         if (!Character.isUpperCase(trimmedType.charAt(0))) {
-            return null;
+            return Optional.empty();
         }
         String packagePrefix = (packageName == null || packageName.isBlank()) ? null : packageName;
         if (packagePrefix == null) {
-            return null;
+            return Optional.empty();
         }
         String fullyQualified = packagePrefix + "." + trimmedType;
-        return appendSuffix(fullyQualified, isVarargs, arrayDimensions);
+        return Optional.of(appendSuffix(fullyQualified, isVarargs, arrayDimensions));
     }
 
     private static int countArrayDimensions(String typeText) {
@@ -157,22 +170,23 @@ final class JavadocTypeCanonicalizer {
                 || typeText.equals("void");
     }
 
-    private static String mapJavaLang(String typeText) {
-        return switch (typeText) {
-            case "String" -> "java.lang.String";
-            case "Integer" -> "java.lang.Integer";
-            case "Long" -> "java.lang.Long";
-            case "Short" -> "java.lang.Short";
-            case "Byte" -> "java.lang.Byte";
-            case "Character" -> "java.lang.Character";
-            case "Boolean" -> "java.lang.Boolean";
-            case "Double" -> "java.lang.Double";
-            case "Float" -> "java.lang.Float";
-            case "Void" -> "java.lang.Void";
-            case "Object" -> "java.lang.Object";
-            case "Class" -> "java.lang.Class";
-            default -> null;
-        };
+    private static Optional<String> mapJavaLang(String typeText) {
+        return Optional.ofNullable(
+                switch (typeText) {
+                    case "String" -> "java.lang.String";
+                    case "Integer" -> "java.lang.Integer";
+                    case "Long" -> "java.lang.Long";
+                    case "Short" -> "java.lang.Short";
+                    case "Byte" -> "java.lang.Byte";
+                    case "Character" -> "java.lang.Character";
+                    case "Boolean" -> "java.lang.Boolean";
+                    case "Double" -> "java.lang.Double";
+                    case "Float" -> "java.lang.Float";
+                    case "Void" -> "java.lang.Void";
+                    case "Object" -> "java.lang.Object";
+                    case "Class" -> "java.lang.Class";
+                    default -> null;
+                });
     }
 
     private static String repeatArray(int arrayDimensions) {

@@ -39,7 +39,7 @@ Modify the LLM prompt to enforce structured output with explicit source tagging.
 public Flux<String> streamAnswer(List<Message> history, String latestUserMessage) {
     List<Document> contextDocs = retrievalService.retrieve(latestUserMessage);
     StringBuilder systemContext = new StringBuilder(
-        "You are a Java learning assistant with knowledge of Java 24, Java 25, and Java 25 EA features.\n" +
+        "You are a Java learning assistant focused on Java 24 and current stable JDK releases.\n" +
         "CRITICAL: Structure your response with explicit source markers:\n" +
         "- {{rag:text}} for information directly from provided context\n" +
         "- {{llm:text}} for your own knowledge/reasoning\n" +

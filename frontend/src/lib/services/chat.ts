@@ -5,7 +5,6 @@
  * @see {@link ../validation/schemas.ts} for type definitions
  */
 
-import { streamSse } from './sse'
 import {
   CitationsArraySchema,
   type StreamStatus,
@@ -13,7 +12,8 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateFetchJson } from '../validation/validate'
-import { csrfHeader } from './csrf'
+import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from './csrf'
+import { streamWithRetry } from './streamRecovery'
 
 export type { StreamStatus, StreamError, Citation }
 
@@ -21,7 +21,7 @@ export interface ChatMessage {
   /** Stable client-side identifier for rendering and list keying. */
   messageId: string
   role: 'user' | 'assistant'
-  content: string
+  messageText: string
   timestamp: number
   isError?: boolean
 }
@@ -52,17 +52,17 @@ export async function streamChat(
   onChunk: (chunk: string) => void,
   options: StreamChatOptions = {}
 ): Promise<void> {
-  await streamSse(
+  return streamWithRetry(
     '/api/chat/stream',
     { sessionId, latest: message },
     {
-      onText: onChunk,
+      onChunk,
       onStatus: options.onStatus,
       onError: options.onError,
-      onCitations: options.onCitations
+      onCitations: options.onCitations,
+      signal: options.signal
     },
-    'chat.ts',
-    { signal: options.signal }
+    'chat.ts'
   )
 }
 
@@ -77,17 +77,53 @@ export async function clearChatSession(sessionId: string): Promise<void> {
     throw new Error('Session ID is required')
   }
 
-  const response = await fetch(`/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`, {
-    method: 'POST',
-    headers: {
-      ...csrfHeader()
-    }
-  })
+  const clearSessionResponse = await fetchWithCsrfRetry(
+    `/api/chat/clear?sessionId=${encodeURIComponent(normalizedSessionId)}`,
+    {
+      method: 'POST',
+      headers: {
+        ...csrfHeader()
+      }
+    },
+    'clearChatSession'
+  )
 
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '')
-    const suffix = errorBody ? `: ${errorBody}` : ''
-    throw new Error(`Failed to clear chat session (HTTP ${response.status})${suffix}`)
+  if (!clearSessionResponse.ok) {
+    const apiMessage = await extractApiErrorMessage(clearSessionResponse, 'clearChatSession')
+    const httpStatusLabel = `HTTP ${clearSessionResponse.status}`
+    const suffix = apiMessage ? `: ${apiMessage}` : `: ${httpStatusLabel}`
+    throw new Error(`Failed to clear chat session${suffix}`)
+  }
+}
+
+/**
+ * Fetches and validates citations from any citation endpoint.
+ * Shared implementation for both chat and guided learning citation fetches.
+ *
+ * @param citationUrl - Full URL to fetch citations from
+ * @param logLabel - Label for validation and error logging context
+ */
+export async function fetchCitationsByEndpoint(
+  citationUrl: string,
+  logLabel: string
+): Promise<CitationFetchResult> {
+  try {
+    const citationsResponse = await fetch(citationUrl)
+    const citationsValidation = await validateFetchJson(
+      citationsResponse,
+      CitationsArraySchema,
+      logLabel
+    )
+
+    if (!citationsValidation.success) {
+      return { success: false, error: citationsValidation.error }
+    }
+
+    return { success: true, citations: citationsValidation.validated }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
+    console.error(`[${logLabel}] Unexpected error:`, error)
+    return { success: false, error: errorMessage }
   }
 }
 
@@ -97,22 +133,8 @@ export async function clearChatSession(sessionId: string): Promise<void> {
  * Returns a Result type to distinguish between empty results and fetch failures.
  */
 export async function fetchCitations(query: string): Promise<CitationFetchResult> {
-  try {
-    const response = await fetch(`/api/chat/citations?q=${encodeURIComponent(query)}`)
-    const result = await validateFetchJson(
-      response,
-      CitationsArraySchema,
-      `fetchCitations [query=${query}]`
-    )
-
-    if (!result.success) {
-      return { success: false, error: result.error }
-    }
-
-    return { success: true, citations: result.data }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Network error fetching citations'
-    console.error(`[fetchCitations] Unexpected error for query="${query}":`, error)
-    return { success: false, error: errorMessage }
-  }
+  return fetchCitationsByEndpoint(
+    `/api/chat/citations?q=${encodeURIComponent(query)}`,
+    `fetchCitations [query=${query}]`
+  )
 }

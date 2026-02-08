@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.config.AppProperties;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -19,7 +20,8 @@ class RerankerServiceTest {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.isAvailable()).thenReturn(false);
 
-        RerankerService rerankerService = new RerankerService(streamingService, new ObjectMapper());
+        RerankerService rerankerService =
+                new RerankerService(streamingService, new ObjectMapper(), new AppProperties());
         List<Document> docs = List.of(new Document("first"), new Document("second"));
 
         assertThrows(RerankingFailureException.class, () -> rerankerService.rerank("query", docs, 2));

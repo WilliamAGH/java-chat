@@ -1,0 +1,5 @@
+# ast-grep configuration for Java code quality rules
+# See: https://ast-grep.github.io/reference/sgconfig.html
+
+ruleDirs:
+  - ast-grep

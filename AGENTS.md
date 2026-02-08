@@ -10,14 +10,15 @@ alwaysApply: true
 - [ORG1] Purpose: keep every critical rule within the first ~250 lines; move long examples/notes to Appendix.
 - [ORG2] Structure: Rule Summary first, then detailed sections keyed by short hashes (e.g., `[GT1a]`).
 - [ORG3] Usage: cite hashes when giving guidance or checking compliance; add new rules without renumbering older ones.
+- [ORG4] Directive language: rules use imperative/prohibitive phrasing ("do X", "no Y", "never Z"); no discretionary hedges ("prefer", "consider", "try to", "ideally", "when possible") that give agents interpretive latitude.
 
 ## Rule Summary [SUM]
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
-- [GT1a-j] Git, history safety, hooks/signing, lock files, and clean commits
+- [GT1a-l] Git, history safety, hooks/signing, lock files, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
 - [ID1a-d] Idiomatic Patterns & Defaults
-- [RC1a-e] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
+- [RC1a-f] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
 - [FS1a-k] File Creation & Clean Architecture (search first, strict types, single responsibility)
 - [TY1a-d] Type Safety (strict generics, no raw types, no unchecked casts)
 - [FV1a-h] Frontend Validation (Zod schemas, discriminated unions, never swallow errors)
@@ -27,6 +28,7 @@ alwaysApply: true
 - [CS1a-h] Code Smells (primitive obsession, data clumps, magic literals)
 - [VR1a-c] Verification Loops (build/test/run)
 - [JD1a-h] Javadoc Standards (mandatory, why > what)
+- [ND1a-h] Naming Discipline (intent-revealing, banned generics, constant naming, type names)
 
 ## [ZA1] Epistemic Humility (Zero Assumptions)
 
@@ -51,6 +53,8 @@ alwaysApply: true
 - [GT1h] Never delete lock files automatically (including `.git/index.lock`). Stop and ask for instruction.
 - [GT1i] Treat existing staged/unstaged changes as intentional unless the user says otherwise; never “clean up” someone else’s work unprompted.
 - [GT1j] Git commands that write to the working tree, index, or history require elevated permissions; never run without escalation.
+- [GT1k] **Do Not Block On Baseline Diffs**: If `git status` already shows modified files when you start, assume those changes are intentional and continue the requested task without stopping to ask about them. Avoid touching unrelated files.
+- [GT1l] **Stop Only On Concurrent Drift**: Only stop and ask for direction if a file changes unexpectedly *during your work* in a way that conflicts with edits you are actively making (e.g., a file you are editing changes on disk between reads/writes). Otherwise, proceed and keep changes scoped.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -73,6 +77,10 @@ alwaysApply: true
 - [RC1c] **Fix Roots**: Investigate → understand → fix root causes. Do not add band-aids to silence errors.
 - [RC1d] **Dev Logging**: Dev-only logging is allowed to learn (must not change behavior, remove before shipping).
 - [RC1e] **Exceptions**: Use typed exception handling patterns; propagate meaningful errors, never swallow silently.
+- [RC1f] **Explicit Violations**: Any of the following is a violation that must be removed, not justified:
+  - Returning "best effort" results after a dependency failure (LLM, embeddings, vector store, database, filesystem).
+  - Catching and logging an exception while continuing as if the operation succeeded.
+  - Adding a secondary retrieval/indexing path that runs only when the primary path fails.
 
 ## [FS1] File Creation & Clean Architecture
 
@@ -198,6 +206,11 @@ alwaysApply: true
 
 ## [ND1] Naming Discipline
 
-- [ND1a] **Intent**: No generic identifiers; names must be domain-specific and intent-revealing.
-- [ND1b] **Banned**: `data`, `info`, `value`, `items`, `obj`, `result`, `temp`, `misc`, `foo`, `bar`.
-- [ND1c] **Legacy**: When legacy code uses generic names, rename in the same edit; never introduce new generic names.
+- [ND1a] **Intent-Revealing**: Every identifier (variable, parameter, method, class, constant) must be domain-specific and intent-revealing; a reader must understand purpose without context from surrounding code.
+- [ND1b] **Banned Single-Letter Variables**: `a`, `b`, `c`, `d`, `n`, `o`, `p`, `s`, `t`, `v`, `x`, `y`, `z` are prohibited as variable/parameter names. Exceptions: `i`, `j`, `k` in trivial indexed `for` loops; single-char lambda params only when the type is unambiguous in a one-expression pipeline (e.g., `list.stream().map(e -> e.name())`); `e` in `catch` blocks.
+- [ND1c] **Banned Generic Nouns**: These names (and close variants) are prohibited as variable, parameter, or field names: `data`, `info`, `value`, `val`, `item`, `items`, `obj`, `object`, `result`, `results`, `response`, `payload`, `content`, `stuff`, `thing`, `entry`, `element`, `record`, `temp`, `tmp`, `misc`, `foo`, `bar`, `baz`, `dummy`, `sample`. Use domain-specific names that describe what the variable holds (e.g., `embeddingVector` not `data`; `chatMessage` not `item`; `rankedDocuments` not `results`).
+- [ND1d] **Banned Abbreviations**: No abbreviated variable names: `val`, `res`, `req`, `resp`, `msg`, `str`, `num`, `cnt`, `idx`, `len`, `buf`, `ctx`, `cfg`, `mgr`, `impl`, `proc`, `ref`, `desc`, `doc`, `col`, `cb`. Use full words: `message`, `request`, `response`, `count`, `index`, `length`, `buffer`, `context`, `configuration`, `manager`, `description`, `document`, `column`, `callback`.
+- [ND1e] **Constants**: `UPPER_SNAKE_CASE` with domain-qualifying prefix; no bare generic constant names like `VALUE`, `DATA`, `DEFAULT`, `THRESHOLD`, `LIMIT`, `SIZE`, `TIMEOUT`, `COUNT`, `MAX`, `MIN` without a qualifying domain noun (e.g., `EMBEDDING_DIMENSION` not `SIZE`; `RERANKER_TIMEOUT_MS` not `TIMEOUT`; `MAX_RETRIEVAL_RESULTS` not `MAX`).
+- [ND1f] **Type Names**: No generic suffixes `*Data`, `*Info`, `*Object`, `*Item`, `*Wrapper`, `*Holder`, `*Container`, `*Manager` (unless the class genuinely manages a lifecycle); class and record names declare their domain role.
+- [ND1g] **Alias Consistency**: The same concept uses the same name across method signatures, variable assignments, log messages, and documentation; do not alias the same thing with different names in the same scope or call chain.
+- [ND1h] **Legacy Fix-on-Touch**: When editing code that uses banned or generic names, rename them in the same edit; never introduce new generic names into existing code.

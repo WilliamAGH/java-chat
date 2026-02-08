@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ChatMessage } from '../services/chat'
+  import { isRecoverableCsrfErrorMessage } from '../services/csrf'
   import { parseMarkdown, applyJavaLanguageDetection } from '../services/markdown'
   import { createDebouncedHighlighter } from '../utils/highlight'
 
@@ -21,9 +22,15 @@
 
   // Render markdown synchronously - SSR-safe parsing without DOM operations
   let renderedContent = $derived(
-    message.role === 'assistant' && message.content
-      ? parseMarkdown(message.content)
+    message.role === 'assistant' && message.messageText
+      ? parseMarkdown(message.messageText)
       : ''
+  )
+
+  let showCsrfRefreshButton = $derived(
+    message.role === 'assistant' &&
+      message.isError === true &&
+      isRecoverableCsrfErrorMessage(message.messageText)
   )
 
   // Apply Java language detection and highlight code blocks after render
@@ -61,6 +68,13 @@
   }
 
   let animationDelay = $derived(`${Math.min(index * 50, 200)}ms`)
+
+  function reloadCurrentPage(): void {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.location.reload()
+  }
 </script>
 
 <div
@@ -81,16 +95,21 @@
 
   <div class="bubble">
     {#if message.role === 'user'}
-      <p class="user-text">{message.content}</p>
+      <p class="user-text">{message.messageText}</p>
     {:else}
       <div class="assistant-content" bind:this={contentEl}>
         {#if renderedContent}
           {@html renderedContent}
         {:else}
-          <p>{message.content}</p>
+          <p>{message.messageText}</p>
         {/if}
         <span class="cursor" class:visible={isStreaming}></span>
       </div>
+      {#if showCsrfRefreshButton}
+        <button type="button" class="csrf-refresh-btn" onclick={reloadCurrentPage}>
+          Refresh and retry
+        </button>
+      {/if}
     {/if}
 
     {#if message.role === 'assistant'}
@@ -100,7 +119,7 @@
           class="action-btn"
           class:action-btn--success={copyState === 'success'}
           class:action-btn--error={copyState === 'error'}
-          onclick={() => copyToClipboard(message.content)}
+          onclick={() => copyToClipboard(message.messageText)}
           title={copyState === 'success' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy message'}
           aria-label={copyState === 'success' ? 'Copied to clipboard' : copyState === 'error' ? 'Failed to copy' : 'Copy message'}
         >
@@ -235,8 +254,16 @@
     font-size: var(--text-xl);
   }
 
+  .assistant-content :global(h1) {
+    font-size: var(--text-2xl);
+  }
+
   .assistant-content :global(h3) {
     font-size: var(--text-lg);
+  }
+
+  .assistant-content :global(h4) {
+    font-size: var(--text-base);
   }
 
   .assistant-content :global(ul),
@@ -314,6 +341,26 @@
     animation: typing-cursor 0.8s ease-in-out infinite;
   }
 
+  .csrf-refresh-btn {
+    margin-top: var(--space-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .csrf-refresh-btn:hover {
+    background: var(--color-bg-hover);
+  }
+
   @keyframes typing-cursor {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
@@ -324,7 +371,10 @@
     display: none;
     position: absolute;
     top: var(--space-2);
-    left: calc(100% + var(--space-2));
+    left: 100%;
+    /* Keep a hover bridge between bubble edge and button hit area. */
+    padding-left: var(--space-2);
+    width: max-content;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--duration-fast) var(--ease-out);
@@ -337,7 +387,9 @@
     }
 
     .bubble:hover .bubble-actions,
-    .bubble:focus-within .bubble-actions {
+    .bubble:focus-within .bubble-actions,
+    .bubble-actions:hover,
+    .bubble-actions:focus-within {
       opacity: 1;
       pointer-events: auto;
     }

@@ -16,6 +16,9 @@ public final class ModelConfiguration {
     /** Model family prefix for GPT-5.x models with token constraints. */
     private static final String GPT5_FAMILY_PREFIX = "gpt-5";
 
+    /** Estimated characters per token for conservative token counting. */
+    public static final int ESTIMATED_CHARS_PER_TOKEN = 4;
+
     /** RAG document limit for token-constrained models like GPT-5.2. */
     public static final int RAG_LIMIT_CONSTRAINED = 3;
 

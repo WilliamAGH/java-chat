@@ -71,7 +71,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
     <!--
       Lightweight SEO: keep reasonable defaults in static HTML, then refine per-path using a tiny inline script.
@@ -80,8 +80,8 @@
     <script type="application/ld+json" id="java-chat-structured-data"></script>
     <script>
       ;(function () {
-        var origin = window.location.origin
-        var path = window.location.pathname || '/'
+        var origin = globalThis.location.origin
+        var path = globalThis.location.pathname || '/'
         var normalizedPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path
 
         var baseSeo = {

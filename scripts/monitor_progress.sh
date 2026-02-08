@@ -1,28 +1,22 @@
 #!/bin/bash
 
-source .env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR/.."
+
+# shellcheck source=lib/common_qdrant.sh
+source "$SCRIPT_DIR/lib/common_qdrant.sh"
+
+load_env_file
+apply_pipeline_defaults
+
+QDRANT_BASE_URL="$(qdrant_rest_base_url)"
 
 while true; do
-    protocol="https"
-    base_url=""
-    if [ "${QDRANT_SSL:-false}" = "true" ] || [ "${QDRANT_SSL:-false}" = "1" ]; then
-        rest_port="${QDRANT_REST_PORT:-8087}"
-        base_url="${protocol}://${QDRANT_HOST}:${rest_port}"
-    else
-        protocol="http"
-        rest_port="${QDRANT_REST_PORT:-8087}"
-        base_url="${protocol}://${QDRANT_HOST}:${rest_port}"
-    fi
+    point_count=$(qdrant_curl -s "${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}" 2>/dev/null \
+        | jq -r '.result.points_count // "unknown"' 2>/dev/null || echo "unknown")
+    embedding_calls=$(grep -c "EMBEDDING.*Calling API" process_qdrant.log 2>/dev/null || echo "0")
+    last_file=$(grep "Processing file:" process_qdrant.log 2>/dev/null | tail -1 | cut -d: -f2)
 
-    auth=()
-    if [ -n "${QDRANT_API_KEY:-}" ]; then
-        auth=(-H "api-key: $QDRANT_API_KEY")
-    fi
-
-    count=$(curl -s "${auth[@]}" "${base_url}/collections/${QDRANT_COLLECTION}" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
-    embedding_calls=$(grep -c "EMBEDDING.*Calling API" process_qdrant.log)
-    last_file=$(grep "Processing file:" process_qdrant.log | tail -1 | cut -d: -f2)
-    
-    echo -ne "\r[$(date +%H:%M:%S)] Vectors: $count | Embedding calls: $embedding_calls | Last: $last_file          "
+    echo -ne "\r[$(date +%H:%M:%S)] Vectors: $point_count | Embedding calls: $embedding_calls | Last: $last_file          "
     sleep 5
 done

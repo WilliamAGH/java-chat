@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
@@ -101,7 +102,7 @@ public class CustomErrorController implements ErrorController {
     /**
      * Handles API error responses with JSON format.
      */
-    private ResponseEntity<ApiErrorResponse> handleApiError(int statusCode, String message, Exception exception) {
+    private ResponseEntity<ApiResponse> handleApiError(int statusCode, String message, Exception exception) {
         HttpStatus httpStatus = HttpStatus.resolve(statusCode);
         if (httpStatus == null) {
             httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;

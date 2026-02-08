@@ -1,6 +1,9 @@
 package com.williamcallahan.javachat.web;
 
 import com.openai.errors.OpenAIServiceException;
+import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
+import com.williamcallahan.javachat.domain.errors.ApiResponse;
+import com.williamcallahan.javachat.domain.errors.ApiSuccessResponse;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -24,7 +27,7 @@ public class ExceptionResponseBuilder {
      * @param message The error message
      * @return ResponseEntity with error details
      */
-    public ResponseEntity<ApiErrorResponse> buildErrorResponse(HttpStatus status, String message) {
+    public ResponseEntity<ApiResponse> buildErrorResponse(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(ApiErrorResponse.error(message));
     }
 
@@ -36,7 +39,7 @@ public class ExceptionResponseBuilder {
      * @param exception The exception that occurred
      * @return ResponseEntity with error details
      */
-    public ResponseEntity<ApiErrorResponse> buildErrorResponse(HttpStatus status, String message, Exception exception) {
+    public ResponseEntity<ApiResponse> buildErrorResponse(HttpStatus status, String message, Exception exception) {
         return ResponseEntity.status(status).body(ApiErrorResponse.error(message, describeException(exception)));
     }
 
@@ -46,7 +49,7 @@ public class ExceptionResponseBuilder {
      * @param message The success message
      * @return ResponseEntity with success details
      */
-    public ResponseEntity<ApiSuccessResponse> buildSuccessResponse(String message) {
+    public ResponseEntity<ApiResponse> buildSuccessResponse(String message) {
         return ResponseEntity.ok(ApiSuccessResponse.success(message));
     }
 

@@ -54,7 +54,7 @@
             (existingMessage) =>
                 existingMessage.messageId === activeStreamingMessageId,
         );
-        return !!activeMessage?.content;
+        return !!activeMessage?.messageText;
     });
 
     function findMessageIndex(messageId: string): number {
@@ -70,7 +70,7 @@
             {
                 messageId,
                 role: "assistant",
-                content: "",
+                messageText: "",
                 timestamp: Date.now(),
             },
         ];
@@ -107,7 +107,7 @@
                         assistantMessageId,
                         (existingMessage) => ({
                             ...existingMessage,
-                            content: existingMessage.content + chunk,
+                            messageText: existingMessage.messageText + chunk,
                         }),
                     );
                     scrollAnchor.onContentAdded();
@@ -135,7 +135,7 @@
             ensureAssistantMessage(assistantMessageId);
             updateAssistantMessage(assistantMessageId, (existingMessage) => ({
                 ...existingMessage,
-                content: errorMessage,
+                messageText: errorMessage,
                 isError: true,
             }));
         }
@@ -152,7 +152,7 @@
             {
                 messageId: createChatMessageId("chat", sessionId),
                 role: "user",
-                content: userQuery,
+                messageText: userQuery,
                 timestamp: Date.now(),
             },
         ];

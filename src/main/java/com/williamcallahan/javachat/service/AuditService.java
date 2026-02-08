@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.AuditReport;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,7 +15,10 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -45,9 +49,11 @@ public class AuditService {
             8086, 8087 // Docker compose mapping: gRPC -> REST
             );
 
-    private final LocalStoreService localStore;
+    private final Function<String, String> safeNameResolver;
+    private final Supplier<Path> parsedDirSupplier;
     private final ContentHasher hasher;
     private final RestTemplate restTemplate;
+    private final List<String> collectionNames;
 
     @Value("${spring.ai.vectorstore.qdrant.host}")
     private String host;
@@ -61,20 +67,32 @@ public class AuditService {
     @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String apiKey;
 
-    @Value("${spring.ai.vectorstore.qdrant.collection-name}")
-    private String collection;
-
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
      *
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
      * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
+     * @param appProperties application configuration for collection names
      */
-    public AuditService(LocalStoreService localStore, ContentHasher hasher, RestTemplateBuilder restTemplateBuilder) {
-        this.localStore = localStore;
-        this.hasher = hasher;
+    public AuditService(
+            LocalStoreService localStore,
+            ContentHasher hasher,
+            RestTemplateBuilder restTemplateBuilder,
+            AppProperties appProperties) {
+        LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
+        AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
+        AppProperties.QdrantCollections configuredCollections =
+                requiredAppProperties.getQdrant().getCollections();
+        this.safeNameResolver = requiredLocalStore::toSafeName;
+        this.parsedDirSupplier = requiredLocalStore::getParsedDir;
+        this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.restTemplate = restTemplateBuilder.build();
+        this.collectionNames = List.of(
+                configuredCollections.getBooks(),
+                configuredCollections.getDocs(),
+                configuredCollections.getArticles(),
+                configuredCollections.getPdfs());
     }
 
     /**
@@ -93,12 +111,12 @@ public class AuditService {
 
     private Set<String> getExpectedHashes(String url) throws IOException {
         // 1) Enumerate parsed chunks for this URL
-        String safeName = localStore.toSafeName(url);
+        String safeName = safeNameResolver.apply(url);
         if (safeName == null || safeName.isEmpty()) {
             throw new IllegalStateException("Cannot audit URL: invalid safe name mapping for " + url);
         }
         String safeBase = safeName + "_";
-        Path parsedRoot = localStore.getParsedDir();
+        Path parsedRoot = parsedDirSupplier.get();
         if (parsedRoot == null || !Files.exists(parsedRoot)) {
             throw new IllegalStateException("Parsed chunk directory not available: " + parsedRoot);
         }
@@ -148,7 +166,7 @@ public class AuditService {
         // Detect duplicates in Qdrant by hash (should be 0 if id=hash going forward)
         Map<String, Integer> duplicateCounts = new HashMap<>();
         for (String hashValue : qdrantHashList) {
-            duplicateCounts.merge(hashValue, 1, Integer::sum);
+            duplicateCounts.merge(hashValue, 1, (a, b) -> a + b);
         }
         List<String> duplicateHashes = duplicateCounts.entrySet().stream()
                 .filter(countEntry -> countEntry.getValue() != null && countEntry.getValue() > 1)
@@ -177,11 +195,19 @@ public class AuditService {
 
     private List<String> fetchQdrantHashes(String url) {
         List<String> hashes = new ArrayList<>();
+        for (String collectionName : collectionNames) {
+            hashes.addAll(fetchQdrantHashesFromCollection(url, collectionName));
+        }
+        return hashes;
+    }
+
+    private List<String> fetchQdrantHashesFromCollection(String url, String collectionName) {
+        List<String> hashes = new ArrayList<>();
 
         // Build REST base URL with correct port mapping
         // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
         String base = buildQdrantRestBaseUrl();
-        String endpoint = base + "/collections/" + collection + "/points/scroll";
+        String endpoint = base + "/collections/" + collectionName + "/points/scroll";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

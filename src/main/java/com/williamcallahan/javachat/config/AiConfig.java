@@ -22,8 +22,7 @@ public class AiConfig {
     private static final long RESPONSE_TIMEOUT_MINUTES = 2;
     private static final int CONNECT_TIMEOUT_MILLIS = 30_000;
 
-    // ChatModel and EmbeddingModel are auto-configured by Spring AI starter
-    // using spring.ai.openai.* properties (OpenAI-compatible)
+    // ChatModel is auto-configured by Spring AI starter using spring.ai.openai.* properties.
     // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
     // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
 

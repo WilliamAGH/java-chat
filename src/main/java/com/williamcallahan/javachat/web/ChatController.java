@@ -1,7 +1,5 @@
 package com.williamcallahan.javachat.web;
 
-import static com.williamcallahan.javachat.web.SseConstants.*;
-
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.config.AppProperties;
@@ -23,14 +21,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 /**
@@ -41,16 +42,16 @@ import reactor.core.publisher.Flux;
 @PermitAll
 @PreAuthorize("permitAll()")
 public class ChatController extends BaseController {
-    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
+    private static final String SESSION_ID_REQUIRED = "Session ID is required";
+    private static final String PIPELINE_LOG_SEPARATOR = "============================================";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final RetrievalService retrievalService;
     private final SseSupport sseSupport;
-    private final RestTemplate restTemplate;
     private final AppProperties appProperties;
 
     /**
@@ -61,9 +62,8 @@ public class ChatController extends BaseController {
      * @param openAIStreamingService streaming LLM client
      * @param retrievalService retrieval service for diagnostics
      * @param sseSupport shared SSE serialization and event support
-     * @param restTemplateBuilder builder for creating the RestTemplate
      * @param exceptionBuilder shared exception response builder
-     * @param appProperties centralized application configuration
+     * @param appProperties application configuration
      */
     public ChatController(
             ChatService chatService,
@@ -71,7 +71,6 @@ public class ChatController extends BaseController {
             OpenAIStreamingService openAIStreamingService,
             RetrievalService retrievalService,
             SseSupport sseSupport,
-            RestTemplateBuilder restTemplateBuilder,
             ExceptionResponseBuilder exceptionBuilder,
             AppProperties appProperties) {
         super(exceptionBuilder);
@@ -80,7 +79,6 @@ public class ChatController extends BaseController {
         this.openAIStreamingService = openAIStreamingService;
         this.retrievalService = retrievalService;
         this.sseSupport = sseSupport;
-        this.restTemplate = restTemplateBuilder.build();
         this.appProperties = appProperties;
     }
 
@@ -97,13 +95,7 @@ public class ChatController extends BaseController {
      * Streams a response to a user's chat message using Server-Sent Events (SSE).
      * Uses the OpenAI Java SDK for clean, reliable streaming without manual SSE parsing.
      *
-     * @param body A JSON object containing the user's request. Expected format:
-     *             <pre>{@code
-     *               {
-     *                 "sessionId": "some-session-id", // Optional, defaults to "default"
-     *                 "latest": "The user's question?"   // The user's message
-     *               }
-     *             }</pre>
+     * @param request the chat stream request containing sessionId and user query
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -114,16 +106,14 @@ public class ChatController extends BaseController {
         String sessionId = request.resolvedSessionId();
         String userQuery = request.userQuery();
 
-        PIPELINE_LOG.info("[{}] ============================================", requestToken);
+        PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
-        PIPELINE_LOG.info("[{}] ============================================", requestToken);
+        PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
         List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
         chatMemory.addUser(sessionId, userQuery);
-        StringBuilder fullResponse = new StringBuilder();
-        AtomicInteger chunkCount = new AtomicInteger(0);
 
         // Build structured prompt for intelligent truncation
         // Pass model hint to optimize RAG for token-constrained models
@@ -132,33 +122,30 @@ public class ChatController extends BaseController {
 
         // Use OpenAI streaming only (legacy fallback removed)
         if (openAIStreamingService.isAvailable()) {
+            StringBuilder fullResponse = new StringBuilder();
+            AtomicInteger chunkCount = new AtomicInteger(0);
             PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
             // Emit citations inline at stream end - compute before streaming starts
-            // Citation conversion errors are surfaced to UI via status event, not silently swallowed
-            List<Citation> citations;
-            String citationWarning;
-            try {
-                citations = retrievalService.toCitations(promptOutcome.documents());
-                citationWarning = null;
-            } catch (Exception citationError) {
-                PIPELINE_LOG.warn("[{}] Citation conversion failed: {}", requestToken, citationError.getMessage());
-                citations = List.of();
-                citationWarning = "Citation retrieval failed - sources unavailable for this response";
-            }
-            final List<Citation> finalCitations = citations;
-            final String finalCitationWarning = citationWarning;
+            // Citation conversion failures are surfaced to UI via status event
+            RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(promptOutcome.documents());
+            final List<Citation> finalCitations = citationOutcome.citations();
+            final String finalCitationWarning = citationOutcome.failedConversionCount() > 0
+                    ? "Some citations could not be loaded (" + citationOutcome.failedConversionCount() + " failed)"
+                    : null;
 
             // Stream with provider transparency - surfaces which LLM is responding
             return openAIStreamingService
-                    .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                    .streamResponse(
+                            promptOutcome.structuredPrompt(),
+                            appProperties.getLlm().getTemperature())
                     .flatMapMany(streamingResult -> {
                         // Provider event first - surfaces which LLM is handling this request
                         ServerSentEvent<String> providerEvent =
                                 sseSupport.providerEvent(streamingResult.providerDisplayName());
 
                         // Stream with structure-aware truncation - preserves semantic boundaries
-                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.content(), chunk -> {
+                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
                             fullResponse.append(chunk);
                             chunkCount.incrementAndGet();
                         });
@@ -169,10 +156,11 @@ public class ChatController extends BaseController {
                         // Combine retrieval notices with citation warning if present
                         Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                                 .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-                        if (finalCitationWarning != null) {
-                            statusEvents = statusEvents.concatWith(Flux.just(
-                                    sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded")));
-                        }
+                        statusEvents =
+                                statusEvents.concatWith(sseSupport.citationWarningStatusFlux(finalCitationWarning));
+
+                        Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                sseSupport.streamingNoticeEvents(streamingResult.notices());
 
                         // Wrap chunks in JSON to preserve whitespace
                         Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
@@ -183,7 +171,7 @@ public class ChatController extends BaseController {
                         return Flux.concat(
                                 Flux.just(providerEvent),
                                 statusEvents,
-                                Flux.merge(dataEvents, heartbeats),
+                                Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
                                 citationEvent);
                     })
                     .doOnComplete(() -> {
@@ -191,12 +179,17 @@ public class ChatController extends BaseController {
                         PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                     })
                     .onErrorResume(error -> {
-                        // Log and send error event to client - errors must be communicated, not silently dropped
                         String errorDetail = buildUserFacingErrorMessage(error);
                         String diagnostics =
                                 error instanceof Exception exception ? describeException(exception) : error.toString();
-                        PIPELINE_LOG.error("[{}] STREAMING ERROR", requestToken);
-                        return sseSupport.sseError(errorDetail, diagnostics);
+                        PIPELINE_LOG.error(
+                                "[{}] STREAMING ERROR (sessionId={}, exceptionType={})",
+                                requestToken,
+                                sessionId,
+                                error.getClass().getSimpleName(),
+                                error);
+                        boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                        return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
                     });
 
         } else {
@@ -216,7 +209,8 @@ public class ChatController extends BaseController {
         RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
                 query, ModelConfiguration.RAG_LIMIT_CONSTRAINED, ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations = retrievalService.toCitations(outcome.documents());
+        List<Citation> citations =
+                retrievalService.toCitations(outcome.documents()).citations();
         if (outcome.notices().isEmpty()) {
             return RetrievalDiagnosticsResponse.success(citations);
         }
@@ -247,7 +241,7 @@ public class ChatController extends BaseController {
     @GetMapping(value = "/export/last", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> exportLast(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest().body("Session ID is required");
+            return ResponseEntity.badRequest().body(SESSION_ID_REQUIRED);
         }
         var turns = chatMemory.getTurns(sessionId);
         for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
@@ -256,7 +250,7 @@ public class ChatController extends BaseController {
                 return ResponseEntity.ok(turn.getText());
             }
         }
-        return ResponseEntity.status(404).body("No assistant message found in session: " + sessionId);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("No assistant message found in session: " + sessionId);
     }
 
     /**
@@ -268,11 +262,11 @@ public class ChatController extends BaseController {
     @GetMapping(value = "/export/session", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> exportSession(@RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest().body("Session ID is required");
+            return ResponseEntity.badRequest().body(SESSION_ID_REQUIRED);
         }
         var turns = chatMemory.getTurns(sessionId);
         if (turns.isEmpty()) {
-            return ResponseEntity.status(404).body("No history found for session: " + sessionId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("No history found for session: " + sessionId);
         }
         StringBuilder formatted = new StringBuilder();
         for (var turn : turns) {
@@ -314,36 +308,13 @@ public class ChatController extends BaseController {
     public ResponseEntity<SessionValidationResponse> validateSession(
             @RequestParam(name = "sessionId") String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return ResponseEntity.badRequest()
-                    .body(new SessionValidationResponse("", 0, false, "Session ID is required"));
+            return ResponseEntity.badRequest().body(new SessionValidationResponse("", 0, false, SESSION_ID_REQUIRED));
         }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
         boolean exists = turnCount > 0;
         return ResponseEntity.ok(new SessionValidationResponse(
                 sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
-    }
-
-    /**
-     * Reports whether the configured local embedding server is reachable when the feature is enabled.
-     */
-    @GetMapping("/health/embeddings")
-    public ResponseEntity<EmbeddingsHealthResponse> checkEmbeddingsHealth() {
-        String serverUrl = appProperties.getLocalEmbedding().getServerUrl();
-        if (!appProperties.getLocalEmbedding().isEnabled()) {
-            return ResponseEntity.ok(EmbeddingsHealthResponse.disabled(serverUrl));
-        }
-
-        try {
-            // Simple health check - try to get models list
-            String healthUrl = serverUrl + "/v1/models";
-            restTemplate.getForEntity(healthUrl, String.class);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.healthy(serverUrl));
-        } catch (RestClientException httpError) {
-            log.debug("Embedding server health check failed", httpError);
-            String details = describeException(httpError);
-            return ResponseEntity.ok(EmbeddingsHealthResponse.unhealthy(serverUrl, "UNREACHABLE: " + details));
-        }
     }
 
     /**

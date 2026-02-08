@@ -41,7 +41,10 @@ public final class RetrievalErrorClassifier {
             return "429 Rate Limited";
         } else if (message.contains("connection") || message.contains("timeout")) {
             return "Connection Error";
-        } else if (message.contains("embedding") && message.contains("unavailable")) {
+        } else if (message.contains("embedding")
+                && (message.contains("unavailable")
+                        || message.contains("unreachable")
+                        || message.contains("provider"))) {
             return "Embedding Service Unavailable";
         }
         return "Unknown Error";
@@ -114,9 +117,7 @@ public final class RetrievalErrorClassifier {
      * @param error original exception
      */
     public static void logUserFriendlyErrorContext(Logger log, String errorType, Throwable error) {
-        if (error.getCause()
-                instanceof
-                com.williamcallahan.javachat.service.GracefulEmbeddingModel.EmbeddingServiceUnavailableException) {
+        if (error.getCause() instanceof com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException) {
             log.info(
                     "Embedding services are unavailable. Using keyword-based search with limited semantic understanding.");
         } else if (errorType.contains("404")) {

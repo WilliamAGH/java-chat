@@ -7,10 +7,9 @@ import java.util.Locale;
  */
 public class RemoteEmbedding {
 
-    private static final String EMPTY_TEXT = "";
-    private static final String URL_DEF = EMPTY_TEXT;
-    private static final String MODEL_DEF = "text-embedding-3-small";
-    private static final String API_KEY_DEF = EMPTY_TEXT;
+    private static final String URL_DEF = "";
+    private static final String MODEL_DEF = "text-embedding-qwen3-embedding-8b";
+    private static final String API_KEY_DEF = "";
     private static final int DIM_DEF = 4_096;
     private static final int MIN_POSITIVE = 1;
     private static final String URL_KEY = "app.remote-embedding.server-url";
@@ -26,7 +25,7 @@ public class RemoteEmbedding {
     private int dimensions = DIM_DEF;
 
     /**
-     * Creates remote embedding configuration.
+     * Creates remote embedding configuration with conservative defaults.
      */
     public RemoteEmbedding() {}
 
@@ -42,74 +41,34 @@ public class RemoteEmbedding {
         }
     }
 
-    /**
-     * Returns the remote embedding server URL.
-     *
-     * @return remote embedding server URL
-     */
     public String getServerUrl() {
         return serverUrl;
     }
 
-    /**
-     * Sets the remote embedding server URL.
-     *
-     * @param serverUrl remote embedding server URL
-     */
     public void setServerUrl(final String serverUrl) {
         this.serverUrl = requireNonNullText(URL_KEY, serverUrl);
     }
 
-    /**
-     * Returns the remote embedding model name.
-     *
-     * @return remote embedding model name
-     */
     public String getModel() {
         return model;
     }
 
-    /**
-     * Sets the remote embedding model name.
-     *
-     * @param model remote embedding model name
-     */
     public void setModel(final String model) {
         this.model = requireNonNullText(MODEL_KEY, model);
     }
 
-    /**
-     * Returns the remote embedding API key.
-     *
-     * @return remote embedding API key
-     */
     public String getApiKey() {
         return apiKey;
     }
 
-    /**
-     * Sets the remote embedding API key.
-     *
-     * @param apiKey remote embedding API key
-     */
     public void setApiKey(final String apiKey) {
         this.apiKey = requireNonNullText(API_KEY_PROP, apiKey);
     }
 
-    /**
-     * Returns the embedding dimensions.
-     *
-     * @return embedding dimensions
-     */
     public int getDimensions() {
         return dimensions;
     }
 
-    /**
-     * Sets the embedding dimensions.
-     *
-     * @param dimensions embedding dimensions
-     */
     public void setDimensions(final int dimensions) {
         this.dimensions = dimensions;
     }

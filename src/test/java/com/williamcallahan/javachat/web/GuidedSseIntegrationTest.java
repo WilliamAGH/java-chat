@@ -3,6 +3,8 @@ package com.williamcallahan.javachat.web;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.williamcallahan.javachat.TestConfiguration;
+import com.williamcallahan.javachat.service.EmbeddingClient;
+import io.qdrant.client.QdrantClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 
@@ -26,6 +29,12 @@ class GuidedSseIntegrationTest {
 
     @Autowired
     WebTestClient webTestClient;
+
+    @MockitoBean
+    EmbeddingClient embeddingClient;
+
+    @MockitoBean
+    QdrantClient qdrantClient;
 
     @Test
     @DisplayName("Guided stream returns clean plain text without artifacts and server stores processed HTML")

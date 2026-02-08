@@ -22,6 +22,8 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RetrievalService;
+import com.williamcallahan.javachat.service.StreamingResult;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,7 +47,7 @@ import reactor.core.publisher.Mono;
 class GuidedSseCitationEventTest {
 
     @Autowired
-    MockMvc mvc;
+    MockMvc mockMvc;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -62,27 +64,30 @@ class GuidedSseCitationEventTest {
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
 
+    @MockitoBean
+    RetrievalService retrievalService;
+
     @Test
     void guidedStreamEmitsCitationEvent() throws Exception {
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .willReturn(Mono.just(new OpenAIStreamingService.StreamingResult(
-                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .willReturn(Mono.just(
+                        new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         given(guidedLearningService.citationsForBookDocuments(anyList()))
                 .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
 
-        var asyncResult = mvc.perform(post("/api/guided/stream")
+        var asyncResult = mockMvc.perform(post("/api/guided/stream")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sessionId\":\"guided:test\",\"slug\":\"intro\",\"latest\":\"Hello\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
 
-        String aggregated = mvc.perform(asyncDispatch(asyncResult))
+        String aggregated = mockMvc.perform(asyncDispatch(asyncResult))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

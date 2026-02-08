@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.web;
 
-import static com.williamcallahan.javachat.web.SseConstants.*;
-
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -9,17 +9,26 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 /**
@@ -36,27 +45,33 @@ public class GuidedLearningController extends BaseController {
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
 
     private final GuidedLearningService guidedService;
+    private final RetrievalService retrievalService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final MarkdownService markdownService;
     private final SseSupport sseSupport;
+    private final AppProperties appProperties;
 
     /**
      * Creates the guided learning controller wired to the guided learning orchestration services.
      */
     public GuidedLearningController(
             GuidedLearningService guidedService,
+            RetrievalService retrievalService,
             ChatMemoryService chatMemory,
             OpenAIStreamingService openAIStreamingService,
             ExceptionResponseBuilder exceptionBuilder,
             MarkdownService markdownService,
-            SseSupport sseSupport) {
+            SseSupport sseSupport,
+            AppProperties appProperties) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
+        this.retrievalService = retrievalService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
         this.sseSupport = sseSupport;
+        this.appProperties = appProperties;
     }
 
     /**
@@ -115,15 +130,10 @@ public class GuidedLearningController extends BaseController {
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamLesson(@RequestParam("slug") String slug) {
         // If cached, emit immediately as a single-frame stream with proper SSE formatting
-        var cached = guidedService.getCachedLessonMarkdown(slug);
-        if (cached.isPresent()) {
-            String payload = cached.get().replace("\r", "");
-            // Return raw content and let Spring handle SSE formatting automatically
-            return Flux.just(payload);
-        }
-
-        // Stream raw content and let Spring handle SSE formatting automatically
-        return guidedService.streamLessonContent(slug);
+        return guidedService
+                .getCachedLessonMarkdown(slug)
+                .map(cachedMarkdown -> Flux.just(cachedMarkdown.replace("\r", "")))
+                .orElseGet(() -> guidedService.streamLessonContent(slug));
     }
 
     /**
@@ -135,12 +145,10 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping(value = "/content", produces = MediaType.APPLICATION_JSON_VALUE)
     public LessonContentResponse content(@RequestParam("slug") String slug) {
-        var cached = guidedService.getCachedLessonMarkdown(slug);
-        if (cached.isPresent()) {
-            return new LessonContentResponse(cached.get(), true);
-        }
-        String md = generateAndCacheLessonContent(slug);
-        return new LessonContentResponse(md, false);
+        return guidedService
+                .getCachedLessonMarkdown(slug)
+                .map(cachedMarkdown -> new LessonContentResponse(cachedMarkdown, true))
+                .orElseGet(() -> new LessonContentResponse(generateAndCacheLessonContent(slug), false));
     }
 
     /**
@@ -153,8 +161,8 @@ public class GuidedLearningController extends BaseController {
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
     public String contentHtml(@RequestParam("slug") String slug) {
         var cached = guidedService.getCachedLessonMarkdown(slug);
-        String md = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
-        return markdownService.processStructured(md).html();
+        String lessonMarkdownContent = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
+        return markdownService.processStructured(lessonMarkdownContent).html();
     }
 
     /**
@@ -171,9 +179,9 @@ public class GuidedLearningController extends BaseController {
             log.error("Content generation timed out or returned empty for lesson");
             throw new IllegalStateException("Content generation failed for lesson");
         }
-        String content = String.join("", chunks);
-        guidedService.putLessonCache(slug, content);
-        return content;
+        String lessonMarkdown = String.join("", chunks);
+        guidedService.putLessonCache(slug, lessonMarkdown);
+        return lessonMarkdown;
     }
 
     /**
@@ -218,50 +226,64 @@ public class GuidedLearningController extends BaseController {
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-        // Compute citations before streaming starts - errors surfaced to UI, not silently swallowed
-        List<Citation> citations;
+        // Compute citations before streaming starts - page-anchor failures surfaced to UI via status event
+        List<Citation> computedCitations;
         String citationWarning;
         try {
-            citations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+            computedCitations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
             citationWarning = null;
-        } catch (Exception citationError) {
-            log.warn("Citation conversion failed for guided lesson: {}", citationError.getMessage());
-            citations = List.of();
-            citationWarning = "Citation retrieval failed - sources unavailable for this response";
+        } catch (RuntimeException citationEnhancementFailure) {
+            log.warn(
+                    "PDF page-anchor enhancement failed; returning base citations (exceptionType={})",
+                    citationEnhancementFailure.getClass().getSimpleName());
+            computedCitations = retrievalService
+                    .toCitations(promptOutcome.bookContextDocuments())
+                    .citations();
+            citationWarning = "PDF page-anchor enhancement failed; using base citations without page anchors";
         }
-        final List<Citation> finalCitations = citations;
+        final List<Citation> finalCitations = computedCitations;
         final String finalCitationWarning = citationWarning;
 
         // Stream with provider transparency - surfaces which LLM is responding
         return openAIStreamingService
-                .streamResponse(promptOutcome.structuredPrompt(), DEFAULT_TEMPERATURE)
+                .streamResponse(
+                        promptOutcome.structuredPrompt(), appProperties.getLlm().getTemperature())
                 .flatMapMany(streamingResult -> {
                     // Provider event first - surfaces which LLM is handling this request
                     ServerSentEvent<String> providerEvent =
                             sseSupport.providerEvent(streamingResult.providerDisplayName());
 
                     Flux<String> dataStream =
-                            sseSupport.prepareDataStream(streamingResult.content(), fullResponse::append);
+                            sseSupport.prepareDataStream(streamingResult.textChunks(), fullResponse::append);
 
                     Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
                     Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(finalCitations));
 
-                    // Include citation warning in stream if citations failed
-                    Flux<ServerSentEvent<String>> statusEvents = finalCitationWarning != null
-                            ? Flux.just(sseSupport.statusEvent(finalCitationWarning, "Citations could not be loaded"))
-                            : Flux.empty();
+                    Flux<ServerSentEvent<String>> statusEvents =
+                            sseSupport.citationWarningStatusFlux(finalCitationWarning);
+                    Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                            sseSupport.streamingNoticeEvents(streamingResult.notices());
 
                     return Flux.concat(
-                            Flux.just(providerEvent), statusEvents, Flux.merge(dataEvents, heartbeats), citationEvent);
+                            Flux.just(providerEvent),
+                            statusEvents,
+                            Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                            citationEvent);
                 })
                 .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
-                    String errorType = error.getClass().getSimpleName();
-                    log.error("Guided streaming error: {} - {}", errorType, error.getMessage());
-                    return sseSupport.sseError(
-                            "Streaming error: " + errorType,
-                            "The response stream encountered an error. Please try again.");
+                    log.error(
+                            "Guided streaming error (sessionId={}, lessonSlug={}, exceptionType={})",
+                            sessionId,
+                            lessonSlug,
+                            error.getClass().getSimpleName(),
+                            error);
+                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                    return sseSupport.streamErrorEvent(
+                            "Streaming error: " + error.getClass().getSimpleName(),
+                            "The response stream encountered an error. Please try again.",
+                            retryable);
                 });
     }
 
@@ -271,8 +293,9 @@ public class GuidedLearningController extends BaseController {
      * @param validationException the validation exception with the error details
      * @return standardized bad request error response
      */
+    @Override
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiErrorResponse> handleValidationException(IllegalArgumentException validationException) {
+    public ResponseEntity<ApiResponse> handleValidationException(IllegalArgumentException validationException) {
         return super.handleValidationException(validationException);
     }
 }

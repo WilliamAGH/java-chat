@@ -166,7 +166,7 @@ describe('LearnView guided chat streaming stability', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/chat/clear?sessionId=${encodeURIComponent(guidedSessionIds[0])}`,
-      { method: 'POST' }
+      expect.objectContaining({ method: 'POST' })
     )
     expect(abortSignalsByStream[0]?.aborted ?? false).toBe(true)
   })

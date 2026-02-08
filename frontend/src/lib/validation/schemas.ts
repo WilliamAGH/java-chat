@@ -14,17 +14,23 @@ import { z } from 'zod/v4'
 // SSE Stream Event Schemas
 // =============================================================================
 
-/** Status message from SSE status events. */
-export const StreamStatusSchema = z.object({
+/** Shared field shape for SSE status and error event payloads. */
+const sseEventFieldShape = {
   message: z.string(),
-  details: z.string().optional()
-})
+  details: z.string().nullish(),
+  code: z.string().nullish(),
+  retryable: z.boolean().nullish(),
+  provider: z.string().nullish(),
+  stage: z.string().nullish(),
+  attempt: z.number().int().positive().nullish(),
+  maxAttempts: z.number().int().positive().nullish()
+}
+
+/** Status message from SSE status events. */
+export const StreamStatusSchema = z.object(sseEventFieldShape)
 
 /** Error response from SSE error events. */
-export const StreamErrorSchema = z.object({
-  message: z.string(),
-  details: z.string().optional()
-})
+export const StreamErrorSchema = z.object(sseEventFieldShape)
 
 /** Text event payload wrapper. */
 export const TextEventPayloadSchema = z.object({
@@ -73,6 +79,17 @@ export const LessonContentResponseSchema = z.object({
 })
 
 // =============================================================================
+// Error Response Schemas
+// =============================================================================
+
+/** Standard API error response payload. */
+export const ApiErrorResponseSchema = z.object({
+  status: z.string(),
+  message: z.string(),
+  details: z.string().nullable().optional()
+})
+
+// =============================================================================
 // Inferred Types (export for service layer)
 // =============================================================================
 
@@ -83,3 +100,4 @@ export type ProviderEvent = z.infer<typeof ProviderEventSchema>
 export type Citation = z.infer<typeof CitationSchema>
 export type GuidedLesson = z.infer<typeof GuidedLessonSchema>
 export type LessonContentResponse = z.infer<typeof LessonContentResponseSchema>
+export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>

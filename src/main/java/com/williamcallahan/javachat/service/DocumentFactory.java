@@ -14,6 +14,16 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DocumentFactory {
+    private final ContentHasher hasher;
+
+    /**
+     * Creates the document factory with hash utilities for stable identifiers.
+     *
+     * @param hasher content hash helper
+     */
+    public DocumentFactory(ContentHasher hasher) {
+        this.hasher = Objects.requireNonNull(hasher, "hasher");
+    }
 
     /**
      * Creates a Spring AI Document with standardized metadata structure.
@@ -106,6 +116,7 @@ public class DocumentFactory {
         if (hash == null || hash.isBlank()) {
             return new org.springframework.ai.document.Document(text);
         }
-        return new org.springframework.ai.document.Document(hash, text, new HashMap<>());
+        String documentId = hasher.uuidFromHash(hash);
+        return new org.springframework.ai.document.Document(documentId, text, new HashMap<>());
     }
 }

@@ -18,7 +18,7 @@ import {
   type Citation
 } from '../validation/schemas'
 import { validateWithSchema } from '../validation/validate'
-import { csrfHeader } from './csrf'
+import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from './csrf'
 
 /** SSE event types emitted by streaming endpoints. */
 const SSE_EVENT_STATUS = 'status'
@@ -85,25 +85,25 @@ function processEvent(
   if (normalizedType === SSE_EVENT_STATUS) {
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(StreamStatusSchema, parsed, `${source}:status`)
-    callbacks.onStatus?.(validated.success ? validated.data : { message: eventData })
+    callbacks.onStatus?.(validated.success ? validated.validated : { message: eventData })
     return
   }
 
   if (normalizedType === SSE_EVENT_ERROR) {
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(StreamErrorSchema, parsed, `${source}:error`)
-    const streamError: StreamError = validated.success ? validated.data : { message: eventData }
+    const streamError: StreamError = validated.success ? validated.validated : { message: eventData }
     callbacks.onError?.(streamError)
-    const error = new Error(streamError.message)
-    ;(error as Error & { details?: string }).details = streamError.details
-    throw error
+    const errorWithDetails: Error & { details?: string } = new Error(streamError.message)
+    errorWithDetails.details = streamError.details ?? undefined
+    throw errorWithDetails
   }
 
   if (normalizedType === SSE_EVENT_CITATION) {
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(CitationsArraySchema, parsed, `${source}:citations`)
     if (validated.success) {
-      callbacks.onCitations?.(validated.data)
+      callbacks.onCitations?.(validated.validated)
     }
     return
   }
@@ -112,7 +112,7 @@ function processEvent(
     const parsed = tryParseJson(eventData, source)
     const validated = validateWithSchema(ProviderEventSchema, parsed, `${source}:provider`)
     if (validated.success) {
-      callbacks.onProvider?.(validated.data)
+      callbacks.onProvider?.(validated.validated)
     }
     return
   }
@@ -120,7 +120,7 @@ function processEvent(
   // Default and "text" events - extract text from JSON wrapper if present
   const parsed = tryParseJson(eventData, source)
   const validated = validateWithSchema(TextEventPayloadSchema, parsed, `${source}:text`)
-  const textContent = validated.success ? validated.data.text : eventData
+  const textContent = validated.success ? validated.validated.text : eventData
   if (textContent !== '') {
     callbacks.onText(textContent)
   }
@@ -152,15 +152,19 @@ export async function streamSse(
   let response: Response
 
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...csrfHeader()
+    response = await fetchWithCsrfRetry(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...csrfHeader()
+        },
+        body: JSON.stringify(body),
+        signal: abortSignal
       },
-      body: JSON.stringify(body),
-      signal: abortSignal
-    })
+      `streamSse:${source}`
+    )
   } catch (fetchError) {
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return
@@ -169,7 +173,10 @@ export async function streamSse(
   }
 
   if (!response.ok) {
-    const httpError = new Error(`HTTP ${response.status}: ${response.statusText}`)
+    const apiMessage = await extractApiErrorMessage(response, `streamSse:${source}`)
+    const errorMessage =
+      apiMessage ?? `HTTP ${response.status}: ${response.statusText || 'Request failed'}`
+    const httpError = new Error(errorMessage)
     callbacks.onError?.({ message: httpError.message })
     throw httpError
   }

@@ -15,6 +15,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class HtmlContentExtractor {
 
+    private static final int MIN_INLINE_TEXT_LENGTH = 20;
+    private static final String CODE_FENCE_MARKER = "```";
+    private static final int CODE_FENCE_LENGTH = CODE_FENCE_MARKER.length();
+    private static final int MAX_CONSECUTIVE_NEWLINES = 2;
+
     // Common noise patterns to filter out
     private static final Set<String> NOISE_PATTERNS = Set.of(
             "JavaScript is disabled",
@@ -121,61 +126,51 @@ public class HtmlContentExtractor {
      * Extract text from element with better formatting.
      */
     private String extractTextFromElement(Element element) {
-        // Use wholeText() for better preservation of structure
         StringBuilder sb = new StringBuilder();
+        boolean hasStructuredContent = !element.select("h1, h2, h3, h4, h5, h6").isEmpty()
+                || !element.select("p").isEmpty();
 
-        // Process specific elements for better formatting
-        Elements headers = element.select("h1, h2, h3, h4, h5, h6");
-        Elements paragraphs = element.select("p");
-
-        // If we have structured content, process it
-        if (!headers.isEmpty() || !paragraphs.isEmpty()) {
-            element.children().forEach(child -> {
-                String tagName = child.tagName();
-                String text = child.text().trim();
-
-                if (text.isEmpty()) return;
-
-                switch (tagName) {
-                    case "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                        sb.append("\n\n").append(text).append("\n");
-                    }
-                    case "p", "div" -> {
-                        if (!isNavigationElement(child)) {
-                            sb.append("\n").append(text);
-                        }
-                    }
-                    case "pre", "code" -> {
-                        String rawCode = child.wholeText();
-                        sb.append("\n```\n").append(rawCode).append("\n```\n");
-                    }
-                    case "ul", "ol" -> {
-                        child.select("li").forEach(li -> sb.append("\n• ").append(li.text()));
-                        sb.append("\n");
-                    }
-                    case "table" -> {
-                        // Extract table content in readable format
-                        Elements rows = child.select("tr");
-                        rows.forEach(row -> {
-                            Elements cells = row.select("td, th");
-                            String rowText = cells.stream().map(Element::text).collect(Collectors.joining(" | "));
-                            sb.append("\n").append(rowText);
-                        });
-                        sb.append("\n");
-                    }
-                    default -> {
-                        if (!isNavigationElement(child) && text.length() > 20) {
-                            sb.append(" ").append(text);
-                        }
-                    }
-                }
-            });
+        if (hasStructuredContent) {
+            element.children().forEach(child -> appendFormattedChild(child, sb));
         } else {
-            // Fallback to simple text extraction
             sb.append(element.text());
         }
-
         return sb.toString().trim();
+    }
+
+    private void appendFormattedChild(Element child, StringBuilder sb) {
+        String text = child.text().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        switch (child.tagName()) {
+            case "h1", "h2", "h3", "h4", "h5", "h6" ->
+                sb.append("\n\n").append(text).append("\n");
+            case String tag
+            when ("p".equals(tag) || "div".equals(tag)) && !isNavigationElement(child) ->
+                sb.append("\n").append(text);
+            case "pre", "code" -> sb.append("\n```\n").append(child.wholeText()).append("\n```\n");
+            case "ul", "ol" -> {
+                appendListItems(child, sb, 0);
+                sb.append("\n");
+            }
+            case "table" -> appendTableContent(child, sb);
+            default -> {
+                if (!isNavigationElement(child) && text.length() > MIN_INLINE_TEXT_LENGTH) {
+                    sb.append(" ").append(text);
+                }
+            }
+        }
+    }
+
+    private void appendTableContent(Element table, StringBuilder sb) {
+        Elements rows = table.select("tr");
+        rows.forEach(row -> {
+            Elements cells = row.select("td, th");
+            String rowText = cells.stream().map(Element::text).collect(Collectors.joining(" | "));
+            sb.append("\n").append(rowText);
+        });
+        sb.append("\n");
     }
 
     /**
@@ -196,6 +191,31 @@ public class HtmlContentExtractor {
                 || text.startsWith("skip")
                 || text.startsWith("hide")
                 || text.startsWith("show");
+    }
+
+    private void appendListItems(Element listElement, StringBuilder sb, int depth) {
+        if (listElement == null) {
+            return;
+        }
+        for (Element li : listElement.children()) {
+            if (!"li".equals(li.tagName())) {
+                continue;
+            }
+            String itemText = li.ownText().trim();
+            if (!itemText.isEmpty()) {
+                sb.append("\n");
+                if (depth > 0) {
+                    sb.append("  ".repeat(depth));
+                }
+                sb.append("• ").append(itemText);
+            }
+            Elements nestedLists = li.select("> ul, > ol");
+            if (!nestedLists.isEmpty()) {
+                for (Element nestedList : nestedLists) {
+                    appendListItems(nestedList, sb, depth + 1);
+                }
+            }
+        }
     }
 
     /**
@@ -229,35 +249,21 @@ public class HtmlContentExtractor {
             if (trimmed.startsWith("```")) {
                 inCodeFence = !inCodeFence;
                 cleaned.append(line).append("\n");
-                continue;
-            }
-
-            if (inCodeFence) {
+            } else if (inCodeFence) {
                 cleaned.append(line).append("\n");
-                continue;
-            }
-
-            // Skip empty lines
-            if (trimmed.isEmpty()) {
+            } else if (trimmed.isEmpty()) {
                 cleaned.append("\n");
-                continue;
-            }
-
-            // Skip lines that are pure noise
-            String trimmedLower = AsciiTextNormalizer.toLowerAscii(trimmed);
-            boolean isNoise = NOISE_PATTERNS.stream()
-                    .anyMatch(noise -> trimmedLower.equals(AsciiTextNormalizer.toLowerAscii(noise)));
-
-            if (!isNoise) {
-                // Also skip very short lines that are likely navigation
-                if (trimmed.length() > 3 || startsWithUppercaseLetter(trimmed)) {
-                    cleaned.append(line).append("\n");
-                }
+            } else if (!isNoiseLine(trimmed) && (trimmed.length() > 3 || startsWithUppercaseLetter(trimmed))) {
+                cleaned.append(line).append("\n");
             }
         }
 
-        // Clean up excessive whitespace without disturbing code fences
         return normalizeWhitespaceOutsideCodeFences(cleaned.toString()).trim();
+    }
+
+    private boolean isNoiseLine(String trimmedLine) {
+        String trimmedLower = AsciiTextNormalizer.toLowerAscii(trimmedLine);
+        return NOISE_PATTERNS.stream().anyMatch(noise -> trimmedLower.equals(AsciiTextNormalizer.toLowerAscii(noise)));
     }
 
     private boolean startsWithUppercaseLetter(String text) {
@@ -274,47 +280,50 @@ public class HtmlContentExtractor {
         int newlineRun = 0;
         int index = 0;
         while (index < text.length()) {
-            if (index + 2 < text.length()
-                    && text.charAt(index) == '`'
-                    && text.charAt(index + 1) == '`'
-                    && text.charAt(index + 2) == '`') {
-                normalized.append("```");
-                index += 3;
+            if (isCodeFenceAt(text, index)) {
+                normalized.append(CODE_FENCE_MARKER);
+                index += CODE_FENCE_LENGTH;
                 inFence = !inFence;
                 newlineRun = 0;
-                continue;
+            } else if (inFence) {
+                normalized.append(text.charAt(index));
+                index++;
+            } else {
+                newlineRun = appendCollapsedWhitespace(text.charAt(index), normalized, newlineRun);
+                index++;
             }
-
-            char character = text.charAt(index);
-            if (!inFence) {
-                if (character == '\n') {
-                    newlineRun++;
-                    if (newlineRun <= 2) {
-                        normalized.append(character);
-                    }
-                    index++;
-                    continue;
-                }
-                newlineRun = 0;
-                if (character == ' ') {
-                    if (normalized.length() == 0) {
-                        normalized.append(character);
-                        index++;
-                        continue;
-                    }
-                    char previous = normalized.charAt(normalized.length() - 1);
-                    if (previous == ' ' || previous == '\n') {
-                        index++;
-                        continue;
-                    }
-                }
-            }
-
-            newlineRun = 0;
-            normalized.append(character);
-            index++;
         }
         return normalized.toString();
+    }
+
+    private static boolean isCodeFenceAt(String text, int index) {
+        return index + (CODE_FENCE_LENGTH - 1) < text.length()
+                && text.charAt(index) == '`'
+                && text.charAt(index + 1) == '`'
+                && text.charAt(index + 2) == '`';
+    }
+
+    private static int appendCollapsedWhitespace(char character, StringBuilder normalized, int newlineRun) {
+        if (character == '\n') {
+            int updatedRun = newlineRun + 1;
+            if (updatedRun <= MAX_CONSECUTIVE_NEWLINES) {
+                normalized.append(character);
+            }
+            return updatedRun;
+        }
+        if (character == ' ' && shouldCollapseSpace(normalized)) {
+            return 0;
+        }
+        normalized.append(character);
+        return 0;
+    }
+
+    private static boolean shouldCollapseSpace(StringBuilder sb) {
+        if (sb.isEmpty()) {
+            return false;
+        }
+        char previous = sb.charAt(sb.length() - 1);
+        return previous == ' ' || previous == '\n';
     }
 
     /**

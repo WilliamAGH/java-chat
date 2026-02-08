@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.openai.core.http.Headers;
 import java.time.Instant;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -28,9 +29,9 @@ class RateLimitHeaderParserTest {
     @Test
     void parseResetHeader_acceptsEpochSeconds() {
         RateLimitHeaderParser parser = new RateLimitHeaderParser();
-        Instant parsed = parser.parseResetHeader("1700000000");
-        assertNotNull(parsed);
-        assertEquals(Instant.ofEpochSecond(1700000000L), parsed);
+        Optional<Instant> parsedResetInstant = parser.parseResetHeader("1700000000");
+        assertNotNull(parsedResetInstant);
+        assertEquals(Instant.ofEpochSecond(1700000000L), parsedResetInstant.orElseThrow());
     }
 
     @Test

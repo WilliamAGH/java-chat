@@ -2,13 +2,17 @@ package com.williamcallahan.javachat.service;
 
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +30,10 @@ public class LocalStoreService {
     private static final int SAFE_NAME_MAX_LENGTH = 150;
     private static final int SAFE_NAME_PREFIX_LENGTH = 80;
     private static final int SAFE_NAME_SUFFIX_LENGTH = 40;
+    private static final String FILE_MARKER_PREFIX = "file_";
+    private static final String FILE_MARKER_EXTENSION = ".marker";
+    private static final String FILE_MARKER_HASH_PREFIX = "hash=";
+    private static final String FILE_MARKER_FINGERPRINT_PREFIX = "fingerprint=";
 
     private final String snapshotDirConfig;
     private final String parsedDirConfig;
@@ -112,6 +120,287 @@ public class LocalStoreService {
         }
     }
 
+    /**
+     * Returns true when the given URL has been fully ingested and the local file fingerprint
+     * (size + last modified time) matches the marker stored under {@code app.docs.index-dir}.
+     *
+     * This is a fast incremental check that avoids re-parsing unchanged files on re-runs.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileSizeBytes current file size in bytes
+     * @param lastModifiedMillis current last modified timestamp in millis since epoch
+     * @return true when a matching marker exists, false otherwise
+     */
+    public boolean isFileIngestedAndUnchanged(String url, long fileSizeBytes, long lastModifiedMillis) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        return readFileIngestionRecord(url)
+                .map(record ->
+                        record.fileSizeBytes() == fileSizeBytes && record.lastModifiedMillis() == lastModifiedMillis)
+                .orElse(false);
+    }
+
+    /**
+     * Records a file-level ingestion marker keyed by URL.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileSizeBytes file size in bytes
+     * @param lastModifiedMillis last modified timestamp in millis since epoch
+     * @throws IOException if marker write fails
+     */
+    public void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis) throws IOException {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("URL is required for file ingestion marker");
+        }
+        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", List.of());
+    }
+
+    private Path fileMarkerPath(String url) {
+        return indexDir.resolve(FILE_MARKER_PREFIX + safeName(url) + FILE_MARKER_EXTENSION);
+    }
+
+    /**
+     * Records a file-level ingestion marker keyed by URL, including the chunk hashes created for the file.
+     *
+     * Persisting chunk hashes enables incremental re-runs to delete obsolete vectors when a file changes,
+     * preventing stale embeddings from accumulating in the vector store.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileSizeBytes file size in bytes
+     * @param lastModifiedMillis last modified timestamp in millis since epoch
+     * @param chunkHashes chunk hashes for the file content (may be empty)
+     * @throws IOException if marker write fails
+     */
+    public void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes)
+            throws IOException {
+        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", chunkHashes);
+    }
+
+    /**
+     * Records a file-level ingestion marker keyed by URL, including a content fingerprint and chunk hashes.
+     *
+     * Persisting a content fingerprint prevents false unchanged detection when size and last-modified metadata
+     * alone are insufficient to detect edits.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileSizeBytes file size in bytes
+     * @param lastModifiedMillis last modified timestamp in millis since epoch
+     * @param contentFingerprint SHA-256 fingerprint of file content
+     * @param chunkHashes chunk hashes for the file content (may be empty)
+     * @throws IOException if marker write fails
+     */
+    public void markFileIngested(
+            String url,
+            long fileSizeBytes,
+            long lastModifiedMillis,
+            String contentFingerprint,
+            List<String> chunkHashes)
+            throws IOException {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("URL is required for file ingestion marker");
+        }
+        Path markerPath = fileMarkerPath(url);
+        ensureParentDirectoryExists(markerPath);
+        String payload = buildFileMarkerPayload(fileSizeBytes, lastModifiedMillis, contentFingerprint, chunkHashes);
+        Files.writeString(markerPath, payload, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Loads the file ingestion marker record for a URL.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @return ingestion record when a marker exists and is readable
+     */
+    public Optional<FileIngestionRecord> readFileIngestionRecord(String url) {
+        if (url == null || url.isBlank()) {
+            return Optional.empty();
+        }
+        Path markerPath = fileMarkerPath(url);
+        if (!Files.exists(markerPath)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(readFileMarker(markerPath));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to read file ingestion marker for URL: " + url, exception);
+        }
+    }
+
+    /**
+     * Deletes the file-level ingestion marker for a URL when present.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @throws IOException if delete fails
+     */
+    public void deleteFileIngestionRecord(String url) throws IOException {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        Files.deleteIfExists(fileMarkerPath(url));
+    }
+
+    /**
+     * Deletes per-chunk ingest markers for the provided hashes.
+     *
+     * @param hashes chunk hashes to unmark
+     * @throws IOException if any delete fails
+     */
+    public void deleteChunkIngestionMarkers(List<String> hashes) throws IOException {
+        if (hashes == null || hashes.isEmpty()) {
+            return;
+        }
+        IOException firstFailure = null;
+        for (String hash : hashes) {
+            if (hash == null || hash.isBlank()) {
+                continue;
+            }
+            try {
+                Files.deleteIfExists(indexDir.resolve(hash));
+            } catch (IOException exception) {
+                if (firstFailure == null) {
+                    firstFailure = exception;
+                }
+            }
+        }
+        if (firstFailure != null) {
+            throw firstFailure;
+        }
+    }
+
+    /**
+     * Deletes locally parsed chunk text files for the provided URL.
+     * Chunk filenames are prefixed with {@code safeName(url) + "_"}.
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @throws IOException if any delete fails
+     */
+    public void deleteParsedChunksForUrl(String url) throws IOException {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        String prefix = safeName(url) + "_";
+        if (!Files.isDirectory(parsedDir)) {
+            return;
+        }
+        IOException firstFailure = null;
+        try (var stream = Files.newDirectoryStream(parsedDir, path -> {
+            Path fileNamePath = path.getFileName();
+            if (fileNamePath == null) {
+                return false;
+            }
+            String fileName = fileNamePath.toString();
+            return fileName.startsWith(prefix) && fileName.endsWith(".txt");
+        })) {
+            for (Path candidate : stream) {
+                try {
+                    Files.deleteIfExists(candidate);
+                } catch (IOException exception) {
+                    if (firstFailure == null) {
+                        firstFailure = exception;
+                    }
+                }
+            }
+        }
+        if (firstFailure != null) {
+            throw firstFailure;
+        }
+    }
+
+    private FileIngestionRecord readFileMarker(Path markerPath) throws IOException {
+        String raw = Files.readString(markerPath, StandardCharsets.UTF_8);
+        long size = -1;
+        long mtime = -1;
+        String fingerprint = "";
+        List<String> hashes = new ArrayList<>();
+        for (String line : raw.split("\n")) {
+            String trimmed = line == null ? "" : line.trim();
+            if (trimmed.startsWith("size=")) {
+                size = parseLongSafely(trimmed.substring("size=".length()));
+            } else if (trimmed.startsWith("mtime=")) {
+                mtime = parseLongSafely(trimmed.substring("mtime=".length()));
+            } else if (trimmed.startsWith(FILE_MARKER_FINGERPRINT_PREFIX)) {
+                fingerprint = trimmed.substring(FILE_MARKER_FINGERPRINT_PREFIX.length())
+                        .trim();
+            } else if (trimmed.startsWith(FILE_MARKER_HASH_PREFIX)) {
+                String hash =
+                        trimmed.substring(FILE_MARKER_HASH_PREFIX.length()).trim();
+                if (!hash.isBlank()) {
+                    hashes.add(hash);
+                }
+            }
+        }
+        if (size < 0 || mtime < 0) {
+            throw new IOException("Invalid file ingestion marker format: " + markerPath);
+        }
+        return new FileIngestionRecord(size, mtime, fingerprint, List.copyOf(hashes));
+    }
+
+    private long parseLongSafely(String value) throws IOException {
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException nfe) {
+            throw new IOException("Invalid marker value: " + value, nfe);
+        }
+    }
+
+    private String buildFileMarkerPayload(
+            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
+        StringBuilder payload = new StringBuilder();
+        payload.append("size=").append(fileSizeBytes).append('\n');
+        payload.append("mtime=").append(lastModifiedMillis).append('\n');
+        payload.append(FILE_MARKER_FINGERPRINT_PREFIX)
+                .append(contentFingerprint == null ? "" : contentFingerprint)
+                .append('\n');
+        if (chunkHashes != null) {
+            for (String hash : chunkHashes) {
+                if (hash == null || hash.isBlank()) {
+                    continue;
+                }
+                payload.append(FILE_MARKER_HASH_PREFIX).append(hash).append('\n');
+            }
+        }
+        return payload.toString();
+    }
+
+    /**
+     * File-level ingestion marker contents.
+     *
+     * @param fileSizeBytes file size in bytes at ingestion time
+     * @param lastModifiedMillis file last modified timestamp in millis at ingestion time
+     * @param contentFingerprint SHA-256 file content fingerprint captured at ingestion time
+     * @param chunkHashes chunk hashes ingested for the file
+     */
+    public record FileIngestionRecord(
+            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
+        public FileIngestionRecord {
+            contentFingerprint = contentFingerprint == null ? "" : contentFingerprint;
+            chunkHashes = chunkHashes == null ? List.of() : List.copyOf(chunkHashes);
+        }
+    }
+
+    /**
+     * Computes the SHA-256 fingerprint for a file's current content.
+     *
+     * @param filePath file path to fingerprint
+     * @return lowercase hex-encoded SHA-256 value
+     * @throws IOException if the file cannot be read
+     */
+    public String computeFileContentFingerprint(Path filePath) throws IOException {
+        MessageDigest messageDigest = newSha256Digest();
+        byte[] buffer = new byte[8192];
+        try (InputStream input = Files.newInputStream(filePath)) {
+            int read = input.read(buffer);
+            while (read >= 0) {
+                if (read > 0) {
+                    messageDigest.update(buffer, 0, read);
+                }
+                read = input.read(buffer);
+            }
+        }
+        return HexFormat.of().formatHex(messageDigest.digest());
+    }
+
     private String safeName(String url) {
         String sanitized = url.replaceAll("[^a-zA-Z0-9._-]", "_");
         // Ensure filename stays within safe limits for most filesystems
@@ -161,10 +450,14 @@ public class LocalStoreService {
     }
 
     private String shortSha256(String input) {
+        MessageDigest messageDigest = newSha256Digest();
+        byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
+        return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
+    }
+
+    private MessageDigest newSha256Digest() {
         try {
-            MessageDigest messageDigest = MessageDigest.getInstance(SHA_256_ALGORITHM);
-            byte[] digest = messageDigest.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, SHORT_SHA_BYTES);
+            return MessageDigest.getInstance(SHA_256_ALGORITHM);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 MessageDigest is not available", exception);
         }
