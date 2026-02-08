@@ -84,7 +84,7 @@ export function shouldRetryStreamRequest(
 }
 
 /**
- * Builds a small user-facing retry status notice for the streaming indicator.
+ * Shows users that the client detected a transient stream fault and is retrying automatically.
  */
 export function buildStreamRetryStatus(nextAttemptNumber: number, maxRecoveryRetries: number): StreamStatus {
   return {
@@ -94,7 +94,7 @@ export function buildStreamRetryStatus(nextAttemptNumber: number, maxRecoveryRet
 }
 
 /**
- * Builds a user-visible status when a retry has succeeded and streaming resumes.
+ * Reassures users that the retry path succeeded and normal streaming has resumed.
  */
 export function buildStreamRecoverySucceededStatus(recoveryAttemptCount: number): StreamStatus {
   return {
