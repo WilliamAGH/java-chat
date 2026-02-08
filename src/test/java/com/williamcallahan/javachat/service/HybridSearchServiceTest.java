@@ -106,9 +106,7 @@ class HybridSearchServiceTest {
     private HybridSearchService buildSearchService() {
         return new HybridSearchService(
                 qdrantClient,
-                embeddingClient,
-                sparseEncoder,
-                new QdrantRetrievalConstraintBuilder(),
+                new QueryEncodingServices(embeddingClient, sparseEncoder, new QdrantRetrievalConstraintBuilder()),
                 appProperties,
                 Optional.empty());
     }
