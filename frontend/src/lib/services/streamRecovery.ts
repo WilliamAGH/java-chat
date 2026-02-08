@@ -124,7 +124,7 @@ export function toStreamFailureException(
   streamErrorEvent: StreamError | null
 ): StreamFailureError {
   const mappedStreamError = toStreamError(streamFailure, streamErrorEvent)
-  return new StreamFailureError(mappedStreamError.message, mappedStreamError.details)
+  return new StreamFailureError(mappedStreamError.message, mappedStreamError.details ?? undefined)
 }
 
 export function resolveStreamRecoveryRetryCount(rawRetrySetting: unknown): number {
