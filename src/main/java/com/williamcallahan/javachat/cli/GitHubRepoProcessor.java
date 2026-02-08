@@ -54,8 +54,6 @@ public class GitHubRepoProcessor {
     private static final String LOG_BANNER_LINE = "===============================================";
     private static final String LOG_COMPLETE_TITLE = "DOCUMENT PROCESSING COMPLETE";
 
-    private static final long MAX_FILE_SIZE_BYTES = SourceCodeFileIngestionProcessor.MAX_FILE_SIZE_BYTES;
-
     /** Directories excluded from repository traversal. */
     private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
             ".git",
@@ -172,13 +170,6 @@ public class GitHubRepoProcessor {
                     .filter(path -> {
                         Path fileNamePath = path.getFileName();
                         return fileNamePath != null && SourceFileLanguage.isIndexableFile(fileNamePath.toString());
-                    })
-                    .filter(path -> {
-                        try {
-                            return Files.size(path) <= MAX_FILE_SIZE_BYTES;
-                        } catch (IOException _) {
-                            return false;
-                        }
                     });
 
             var eligibleFileIterator = eligibleFileStream.iterator();
