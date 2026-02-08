@@ -5,6 +5,12 @@ import java.util.List;
 import java.util.Objects;
 import org.springframework.ai.document.Document;
 
+/**
+ * Batches embedding requests while preserving input-document ordering guarantees.
+ *
+ * <p>Centralizing batch execution keeps embedding failures contextualized by
+ * document range and ensures callers receive vectors aligned with document positions.</p>
+ */
 final class EmbeddingBatchEmbedder {
 
     private static final int EMBEDDING_REQUEST_BATCH_SIZE = 1;
