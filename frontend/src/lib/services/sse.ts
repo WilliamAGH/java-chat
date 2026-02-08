@@ -94,9 +94,9 @@ function processEvent(
     const validated = validateWithSchema(StreamErrorSchema, parsed, `${source}:error`)
     const streamError: StreamError = validated.success ? validated.validated : { message: eventData }
     callbacks.onError?.(streamError)
-    const error = new Error(streamError.message)
-    ;(error as Error & { details?: string }).details = streamError.details
-    throw error
+    const errorWithDetails: Error & { details?: string } = new Error(streamError.message)
+    errorWithDetails.details = streamError.details ?? undefined
+    throw errorWithDetails
   }
 
   if (normalizedType === SSE_EVENT_CITATION) {
