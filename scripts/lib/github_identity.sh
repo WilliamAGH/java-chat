@@ -92,7 +92,27 @@ extract_repository_identity() {
     REPOSITORY_NAME="$(echo "$normalized_repository_url" | cut -d'/' -f5 | tr '[:upper:]' '[:lower:]')"
     REPOSITORY_KEY="$REPOSITORY_OWNER/$REPOSITORY_NAME"
     REPOSITORY_URL="https://github.com/$REPOSITORY_KEY"
-    CANONICAL_COLLECTION_NAME="github-$(encode_collection_segment "$REPOSITORY_OWNER")-$(encode_collection_segment "$REPOSITORY_NAME")"
+    local encoded_owner_segment
+    if ! encoded_owner_segment="$(encode_collection_segment "$REPOSITORY_OWNER")"; then
+        echo -e "${RED}Error: failed to encode repository owner segment${NC}"
+        exit 1
+    fi
+    if [ -z "$encoded_owner_segment" ]; then
+        echo -e "${RED}Error: encoded repository owner segment is empty${NC}"
+        exit 1
+    fi
+
+    local encoded_name_segment
+    if ! encoded_name_segment="$(encode_collection_segment "$REPOSITORY_NAME")"; then
+        echo -e "${RED}Error: failed to encode repository name segment${NC}"
+        exit 1
+    fi
+    if [ -z "$encoded_name_segment" ]; then
+        echo -e "${RED}Error: encoded repository name segment is empty${NC}"
+        exit 1
+    fi
+
+    CANONICAL_COLLECTION_NAME="github-${encoded_owner_segment}-${encoded_name_segment}"
 }
 
 # ── Cache management ─────────────────────────────────────────────────
@@ -209,7 +229,7 @@ resolve_repository_metadata_from_path() {
         remote_url="$(git -C "$resolved_path" remote get-url origin)"
     fi
 
-    if [ -n "$REPO_URL" ]; then
+    if [ -n "${REPO_URL:-}" ]; then
         extract_repository_identity "$REPO_URL"
     elif [ -n "$remote_url" ]; then
         extract_repository_identity "$remote_url"
