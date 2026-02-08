@@ -4,6 +4,7 @@ import static io.qdrant.client.PointIdFactory.id;
 import static io.qdrant.client.VectorFactory.vector;
 import static io.qdrant.client.VectorsFactory.namedVectors;
 
+import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import io.qdrant.client.ValueFactory;
 import io.qdrant.client.grpc.JsonWithInt.Value;
 import io.qdrant.client.grpc.Points.PointStruct;
@@ -78,7 +79,7 @@ final class HybridVectorPointFactory {
         if (!Objects.requireNonNull(sparseVectorSet.indices(), "sparseVector.indices")
                 .isEmpty()) {
             Vector sparseVector = vector(
-                    Objects.requireNonNull(sparseVectorSet.values(), "sparseVector.values"),
+                    Objects.requireNonNull(sparseVectorSet.termFrequencies(), "sparseVector.termFrequencies"),
                     Objects.requireNonNull(sparseVectorSet.integerIndices(), "sparseVector.integerIndices"));
             namedVectorMap.put(vectorSet.sparseVectorName(), sparseVector);
         }
