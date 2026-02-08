@@ -44,6 +44,7 @@ public class HybridVectorService {
     private static final long SCROLL_TIMEOUT_SECONDS = 30;
     private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
     private static final int SCROLL_PAGE_LIMIT = 256;
+    private static final String URL_PAYLOAD_FIELD = "url";
     private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
     private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
 
@@ -181,7 +182,7 @@ public class HybridVectorService {
         }
 
         Set<String> collectedUrls = new LinkedHashSet<>();
-        List<String> urlPayloadFields = Objects.requireNonNull(List.of("url"), "urlPayloadFields");
+        List<String> urlPayloadFields = Objects.requireNonNull(List.of(URL_PAYLOAD_FIELD), "urlPayloadFields");
         ScrollPoints.Builder scrollRequestBuilder = ScrollPoints.newBuilder()
                 .setCollectionName(collectionName)
                 .setWithPayload(WithPayloadSelectorFactory.include(urlPayloadFields))
@@ -196,7 +197,7 @@ public class HybridVectorService {
                     "Qdrant scroll URLs");
 
             for (RetrievedPoint retrievedPoint : scrollResponse.getResultList()) {
-                Value urlPayloadValue = retrievedPoint.getPayloadMap().get("url");
+                Value urlPayloadValue = retrievedPoint.getPayloadMap().get(URL_PAYLOAD_FIELD);
                 if (urlPayloadValue != null && urlPayloadValue.hasStringValue()) {
                     String urlString = urlPayloadValue.getStringValue();
                     if (!urlString.isBlank()) {
@@ -305,7 +306,9 @@ public class HybridVectorService {
             return;
         }
 
-        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+        Filter filter = Filter.newBuilder()
+                .addMust(matchKeyword(URL_PAYLOAD_FIELD, url))
+                .build();
 
         var deleteFuture =
                 qdrantClient.deleteAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter));
@@ -321,7 +324,9 @@ public class HybridVectorService {
             return 0;
         }
 
-        Filter filter = Filter.newBuilder().addMust(matchKeyword("url", url)).build();
+        Filter filter = Filter.newBuilder()
+                .addMust(matchKeyword(URL_PAYLOAD_FIELD, url))
+                .build();
 
         var countFuture =
                 qdrantClient.countAsync(Objects.requireNonNull(collectionName), Objects.requireNonNull(filter), true);
