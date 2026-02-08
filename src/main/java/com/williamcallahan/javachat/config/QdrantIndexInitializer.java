@@ -173,10 +173,7 @@ public class QdrantIndexInitializer {
                 return true;
             } catch (HttpClientErrorException.NotFound notFoundException) {
                 observedNotFound = true;
-                log.debug(
-                        "[QDRANT] Collection lookup returned 404 (collection={}, base={})",
-                        collection,
-                        base);
+                log.debug("[QDRANT] Collection lookup returned 404 (collection={}, base={})", collection, base);
             } catch (RuntimeException exception) {
                 log.debug(
                         "[QDRANT] Collection existence check failed (exceptionType={})",
