@@ -189,7 +189,8 @@ public class GuidedLearningService {
      * Builds UI-ready citations from Think Java context documents with PDF page anchors.
      *
      * <p>Converts documents to citations and enhances them with page-anchor fragments.
-     * Propagates all failures to the caller; UI resilience decisions belong in the controller layer.</p>
+     * Logs conversion failures and returns successfully converted citations so UI resilience
+     * decisions remain in the controller layer.</p>
      *
      * @param bookContextDocuments retrieved Think Java documents used to ground the response
      * @return citations enhanced with PDF page anchors
