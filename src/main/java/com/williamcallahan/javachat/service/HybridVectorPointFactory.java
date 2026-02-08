@@ -16,6 +16,12 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.ai.document.Document;
 
+/**
+ * Assembles Qdrant point payloads from documents and hybrid dense/sparse vectors.
+ *
+ * <p>Keeping point construction centralized enforces a single schema for vector names,
+ * payload field mapping, and point identifier materialization across all upsert paths.</p>
+ */
 final class HybridVectorPointFactory {
 
     /**
