@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -18,7 +19,7 @@ class LexicalSparseVectorEncoderTest {
         LexicalSparseVectorEncoder.SparseVector sparseVector = encoder.encode("   ");
 
         assertTrue(sparseVector.indices().isEmpty());
-        assertTrue(sparseVector.values().isEmpty());
+        assertTrue(sparseVector.termFrequencies().isEmpty());
     }
 
     @Test
@@ -34,6 +35,7 @@ class LexicalSparseVectorEncoderTest {
         LexicalSparseVectorEncoder.SparseVector sparseVector = encoder.encode("Map<String, Integer> stream().count()");
 
         assertFalse(sparseVector.indices().isEmpty());
-        assertEquals(sparseVector.indices().size(), sparseVector.values().size());
+        assertEquals(
+                sparseVector.indices().size(), sparseVector.termFrequencies().size());
     }
 }
