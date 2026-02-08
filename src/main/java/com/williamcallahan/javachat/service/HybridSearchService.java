@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static io.qdrant.client.QueryFactory.nearest;
 import static io.qdrant.client.QueryFactory.rrf;
 
+import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
 import io.qdrant.client.QdrantClient;
@@ -288,7 +289,7 @@ public class HybridSearchService {
         if (!encodedQuery.sparseVector().indices().isEmpty()) {
             PrefetchQuery.Builder sparsePrefetchBuilder = PrefetchQuery.newBuilder()
                     .setQuery(nearest(
-                            Objects.requireNonNull(encodedQuery.sparseVector().values()),
+                            Objects.requireNonNull(encodedQuery.sparseVector().termFrequencies()),
                             Objects.requireNonNull(encodedQuery.sparseVector().integerIndices())))
                     .setUsing(queryConfig.sparseVectorName())
                     .setLimit(queryConfig.prefetchLimit());
