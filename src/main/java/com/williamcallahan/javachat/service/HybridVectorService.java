@@ -276,17 +276,20 @@ public class HybridVectorService {
         String denseVectorName = appProperties.getQdrant().getDenseVectorName();
         String sparseVectorName = appProperties.getQdrant().getSparseVectorName();
 
-        List<float[]> embeddings = EmbeddingBatchEmbedder.embedDocuments(embeddingClient, documents);
+        List<float[]> embeddings =
+                Objects.requireNonNull(EmbeddingBatchEmbedder.embedDocuments(embeddingClient, documents), "embeddings");
+        if (embeddings.size() != documents.size()) {
+            throw new IllegalStateException(
+                    "Embedding count mismatch: expected " + documents.size() + " but received " + embeddings.size());
+        }
 
         List<io.qdrant.client.grpc.Points.PointStruct> points = new ArrayList<>(documents.size());
         for (int i = 0; i < documents.size(); i++) {
-            Document document = documents.get(i);
+            Document document = Objects.requireNonNull(documents.get(i), "documents[" + i + "]");
+            float[] denseEmbedding = Objects.requireNonNull(embeddings.get(i), "embeddings[" + i + "]");
             String pointId = HybridVectorPointFactory.resolvePointId(document);
             HybridVectorPointFactory.HybridVectorSet vectorSet = new HybridVectorPointFactory.HybridVectorSet(
-                    embeddings.get(i),
-                    sparseVectorEncoder.encode(document.getText()),
-                    denseVectorName,
-                    sparseVectorName);
+                    denseEmbedding, sparseVectorEncoder.encode(document.getText()), denseVectorName, sparseVectorName);
 
             io.qdrant.client.grpc.Points.PointStruct point =
                     HybridVectorPointFactory.buildPoint(pointId, vectorSet, document);
