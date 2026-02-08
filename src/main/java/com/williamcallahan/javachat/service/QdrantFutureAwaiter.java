@@ -5,6 +5,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Waits for Qdrant futures and normalizes asynchronous failures for service callers.
+ *
+ * <p>Consolidating timeout and interruption handling keeps retry wrappers simple and
+ * consistently preserves interrupt status for upstream execution contexts.</p>
+ */
 final class QdrantFutureAwaiter {
 
     private QdrantFutureAwaiter() {}
