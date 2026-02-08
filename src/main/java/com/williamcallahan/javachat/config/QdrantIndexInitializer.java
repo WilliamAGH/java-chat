@@ -164,19 +164,27 @@ public class QdrantIndexInitializer {
 
     private boolean collectionExists(String collection, HttpHeaders headers) {
         String path = "/collections/" + collection;
+        boolean observedNotFound = false;
         for (String base : restBaseUrls()) {
             String url = base + path;
             try {
                 restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
                 log.info("[QDRANT] Collection present (collection={})", collection);
                 return true;
-            } catch (HttpClientErrorException.NotFound _) {
-                return false;
+            } catch (HttpClientErrorException.NotFound notFoundException) {
+                observedNotFound = true;
+                log.debug(
+                        "[QDRANT] Collection lookup returned 404 (collection={}, base={})",
+                        collection,
+                        base);
             } catch (RuntimeException exception) {
                 log.debug(
                         "[QDRANT] Collection existence check failed (exceptionType={})",
                         exception.getClass().getSimpleName());
             }
+        }
+        if (observedNotFound) {
+            log.debug("[QDRANT] Collection missing after probing candidate base URLs (collection={})", collection);
         }
         return false;
     }
