@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static io.qdrant.client.ConditionFactory.matchKeyword;
 
+import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.RetrySupport;
 import io.qdrant.client.QdrantClient;
