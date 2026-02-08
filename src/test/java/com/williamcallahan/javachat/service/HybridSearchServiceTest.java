@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.google.common.util.concurrent.Futures;
+import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
