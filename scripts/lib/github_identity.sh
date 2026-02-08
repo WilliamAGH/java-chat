@@ -64,7 +64,14 @@ encode_collection_segment() {
         return
     fi
     local hash_suffix
-    hash_suffix="$(short_sha256 "$raw_segment")"
+    if ! hash_suffix="$(short_sha256 "$raw_segment")"; then
+        echo "ERROR: failed to hash collection segment '$raw_segment' (no SHA-256 tool available)" >&2
+        return 1
+    fi
+    if [ -z "$hash_suffix" ]; then
+        echo "ERROR: failed to hash collection segment '$raw_segment' (empty hash output)" >&2
+        return 1
+    fi
     echo "${sanitized_segment}-h${hash_suffix}"
 }
 
@@ -103,6 +110,10 @@ ensure_repository_cache_clone() {
     if [ -n "$explicit_cache_path" ]; then
         cache_path="$(expand_user_path "$explicit_cache_path")"
     else
+        if [ -z "${REPO_CACHE_DIR:-}" ]; then
+            echo -e "${RED}Error: REPO_CACHE_DIR is not set${NC}"
+            exit 1
+        fi
         cache_path="$(expand_user_path "$REPO_CACHE_DIR")/$REPOSITORY_OWNER/$REPOSITORY_NAME"
     fi
     mkdir -p "$(dirname "$cache_path")"
@@ -228,6 +239,27 @@ resolve_repository_metadata_from_path() {
 GITHUB_KEYWORD_INDEX_FIELDS=(url hash docSet docPath sourceName sourceKind docVersion docType filePath language repoUrl repoOwner repoName repoKey repoBranch commitHash license repoDescription)
 GITHUB_INTEGER_INDEX_FIELDS=(chunkIndex)
 
+ensure_github_payload_index_field() {
+    local collection_name="$1"
+    local qdrant_base_url="$2"
+    local field_name="$3"
+    local field_type="$4"
+    local qdrant_status_code
+
+    if ! qdrant_status_code="$(qdrant_curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        -H "Content-Type: application/json" \
+        -d "{\"field_name\": \"$field_name\", \"field_schema\": {\"type\": \"$field_type\"}}" \
+        "$qdrant_base_url/collections/$collection_name/index" 2>/dev/null)"; then
+        echo -e "${RED}Failed to create ${field_type} index for field '$field_name' (request failed)${NC}"
+        exit 1
+    fi
+
+    if [[ ! "$qdrant_status_code" =~ ^2[0-9][0-9]$ ]] && [ "$qdrant_status_code" != "409" ]; then
+        echo -e "${RED}Failed to create ${field_type} index for field '$field_name' (HTTP $qdrant_status_code)${NC}"
+        exit 1
+    fi
+}
+
 ensure_github_payload_indexes() {
     local collection_name="$1"
     local qdrant_base_url="$2"
@@ -236,23 +268,11 @@ ensure_github_payload_indexes() {
 
     local field_name
     for field_name in "${GITHUB_KEYWORD_INDEX_FIELDS[@]}"; do
-        if ! qdrant_curl -s -o /dev/null -X PUT \
-            -H "Content-Type: application/json" \
-            -d "{\"field_name\": \"$field_name\", \"field_schema\": {\"type\": \"keyword\"}}" \
-            "$qdrant_base_url/collections/$collection_name/index" 2>/dev/null; then
-            echo -e "${RED}Failed to create keyword index for field '$field_name'${NC}"
-            exit 1
-        fi
+        ensure_github_payload_index_field "$collection_name" "$qdrant_base_url" "$field_name" "keyword"
     done
 
     for field_name in "${GITHUB_INTEGER_INDEX_FIELDS[@]}"; do
-        if ! qdrant_curl -s -o /dev/null -X PUT \
-            -H "Content-Type: application/json" \
-            -d "{\"field_name\": \"$field_name\", \"field_schema\": {\"type\": \"integer\"}}" \
-            "$qdrant_base_url/collections/$collection_name/index" 2>/dev/null; then
-            echo -e "${RED}Failed to create integer index for field '$field_name'${NC}"
-            exit 1
-        fi
+        ensure_github_payload_index_field "$collection_name" "$qdrant_base_url" "$field_name" "integer"
     done
 
     echo -e "${GREEN}Payload indexes ensured${NC}"
@@ -268,6 +288,10 @@ write_ingestion_manifest() {
     local collection_name="$1"
     local repository_path="$2"
 
+    if [ -z "${PROJECT_ROOT:-}" ]; then
+        echo -e "${RED}Error: PROJECT_ROOT is not set${NC}"
+        exit 1
+    fi
     local manifest_dir="$PROJECT_ROOT/data/github-manifests"
     mkdir -p "$manifest_dir"
     local manifest_file="$manifest_dir/${collection_name}.manifest"
