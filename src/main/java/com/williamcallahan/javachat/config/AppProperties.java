@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -450,7 +451,7 @@ public class AppProperties {
          * Returns all configured collection names in deterministic order.
          */
         public List<String> all() {
-            return List.of(books, docs, articles, pdfs);
+            return Arrays.asList(books, docs, articles, pdfs);
         }
 
         QdrantCollections copy() {
