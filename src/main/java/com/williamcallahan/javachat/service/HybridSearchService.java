@@ -50,26 +50,6 @@ public class HybridSearchService {
 
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
 
-    /**
-     * Groups the three collaborators that encode a query into search inputs (dense vector,
-     * sparse vector, and Qdrant metadata filter). These are always invoked together at
-     * the start of every search.
-     *
-     * @param embeddingClient embedding client for dense query vectors
-     * @param sparseVectorEncoder sparse encoder for lexical query vectors
-     * @param constraintBuilder builder for Qdrant payload filters from retrieval constraints
-     */
-    record QueryEncodingServices(
-            EmbeddingClient embeddingClient,
-            LexicalSparseVectorEncoder sparseVectorEncoder,
-            QdrantRetrievalConstraintBuilder constraintBuilder) {
-        QueryEncodingServices {
-            Objects.requireNonNull(embeddingClient, "embeddingClient");
-            Objects.requireNonNull(sparseVectorEncoder, "sparseVectorEncoder");
-            Objects.requireNonNull(constraintBuilder, "constraintBuilder");
-        }
-    }
-
     private final QdrantClient qdrantClient;
     private final QueryEncodingServices queryEncoding;
     private final AppProperties appProperties;
@@ -79,21 +59,17 @@ public class HybridSearchService {
      * Wires gRPC client and encoding dependencies for hybrid search.
      *
      * @param qdrantClient Qdrant gRPC client
-     * @param embeddingClient embedding client for dense query vectors
-     * @param sparseVectorEncoder sparse encoder for lexical query vectors
-     * @param constraintBuilder builder for Qdrant payload filters
+     * @param queryEncoding grouped query-encoding collaborators
      * @param appProperties application configuration
      * @param gitHubCollectionDiscovery optional discovery of dynamically created GitHub collections
      */
     public HybridSearchService(
             QdrantClient qdrantClient,
-            EmbeddingClient embeddingClient,
-            LexicalSparseVectorEncoder sparseVectorEncoder,
-            QdrantRetrievalConstraintBuilder constraintBuilder,
+            QueryEncodingServices queryEncoding,
             AppProperties appProperties,
             Optional<QdrantGitHubCollectionDiscovery> gitHubCollectionDiscovery) {
         this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
-        this.queryEncoding = new QueryEncodingServices(embeddingClient, sparseVectorEncoder, constraintBuilder);
+        this.queryEncoding = Objects.requireNonNull(queryEncoding, "queryEncoding");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.gitHubCollectionDiscovery = Objects.requireNonNull(gitHubCollectionDiscovery, "gitHubCollectionDiscovery");
     }
@@ -161,19 +137,19 @@ public class HybridSearchService {
         List<String> collectionNames = allCollectionNames();
         HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
 
-        List<CompletableFuture<List<ScoredPoint>>> futures = new ArrayList<>(collectionNames.size());
+        Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
+                new LinkedHashMap<>(collectionNames.size());
         for (String collection : collectionNames) {
             QueryPoints queryRequest = Objects.requireNonNull(
                     buildHybridQueryRequest(collection, encodedQuery, queryConfig, topK), "QueryPoints");
             CompletableFuture<List<ScoredPoint>> future =
                     QdrantListenableFutureBridge.toCompletableFuture(qdrantClient.queryAsync(queryRequest));
-            futures.add(future);
+            futuresByCollection.put(collection, future);
         }
 
-        Map<String, ScoredResult> scoredPointsByUuid = new LinkedHashMap<>();
+        Map<String, ScoredPointMatch> scoredPointsByUuid = new LinkedHashMap<>();
         List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures = new ArrayList<>();
-        collectFanOutResults(
-                futures, collectionNames, queryConfig.queryTimeout(), scoredPointsByUuid, collectionFailures);
+        collectFanOutResults(futuresByCollection, queryConfig.queryTimeout(), scoredPointsByUuid, collectionFailures);
 
         if (!collectionFailures.isEmpty() && queryConfig.failOnPartialSearchError()) {
             throw new HybridSearchPartialFailureException(
@@ -181,10 +157,13 @@ public class HybridSearchService {
         }
 
         List<Document> rankedDocuments = scoredPointsByUuid.values().stream()
-                .sorted(Comparator.comparingDouble(ScoredResult::score).reversed())
+                .sorted(Comparator.comparingDouble(ScoredPointMatch::score).reversed())
                 .limit(topK)
-                .map(scoredResult -> QdrantScoredPointDocumentMapper.toDocument(
-                        scoredResult.point(), scoredResult.id(), scoredResult.score(), scoredResult.collection()))
+                .map(scoredPointMatch -> QdrantScoredPointDocumentMapper.toDocument(
+                        scoredPointMatch.point(),
+                        scoredPointMatch.id(),
+                        scoredPointMatch.score(),
+                        scoredPointMatch.collection()))
                 .toList();
         List<HybridSearchNotice> retrievalNotices =
                 collectionFailures.stream().map(HybridSearchService::toNotice).toList();
@@ -256,9 +235,9 @@ public class HybridSearchService {
 
         @Override
         public int hashCode() {
-            int result = java.util.Objects.hash(sparseVector, retrievalFilter);
-            result = 31 * result + java.util.Arrays.hashCode(denseVector);
-            return result;
+            int hash = java.util.Objects.hash(sparseVector, retrievalFilter);
+            hash = 31 * hash + java.util.Arrays.hashCode(denseVector);
+            return hash;
         }
 
         @Override
@@ -303,20 +282,21 @@ public class HybridSearchService {
     }
 
     private void collectFanOutResults(
-            List<CompletableFuture<List<ScoredPoint>>> futures,
-            List<String> collectionNames,
+            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection,
             Duration timeout,
-            Map<String, ScoredResult> scoredPointsByUuid,
+            Map<String, ScoredPointMatch> scoredPointsByUuid,
             List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures) {
 
-        for (int i = 0; i < futures.size(); i++) {
-            String collection = collectionNames.get(i);
+        for (Map.Entry<String, CompletableFuture<List<ScoredPoint>>> futureByCollectionEntry :
+                futuresByCollection.entrySet()) {
+            String collection = futureByCollectionEntry.getKey();
+            CompletableFuture<List<ScoredPoint>> future = futureByCollectionEntry.getValue();
             try {
-                List<ScoredPoint> points = futures.get(i).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                List<ScoredPoint> points = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
                 mergePoints(points, collection, scoredPointsByUuid);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-                futures.get(i).cancel(true);
+                future.cancel(true);
                 log.warn("[QDRANT] Search interrupted for collection={}", collection);
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
                         collection, "Interrupted", "Hybrid query was interrupted"));
@@ -330,7 +310,7 @@ public class HybridSearchService {
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
                         collection, exceptionType, sanitizeFailureDetails(failureMessage)));
             } catch (TimeoutException _) {
-                futures.get(i).cancel(true);
+                future.cancel(true);
                 log.warn("[QDRANT] Search timed out for collection={}", collection);
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
                         collection, "Timeout", "Hybrid query exceeded timeout " + timeout.toMillis() + "ms"));
@@ -339,12 +319,12 @@ public class HybridSearchService {
     }
 
     private static void mergePoints(
-            List<ScoredPoint> points, String collection, Map<String, ScoredResult> scoredPointsByUuid) {
+            List<ScoredPoint> points, String collection, Map<String, ScoredPointMatch> scoredPointsByUuid) {
         for (ScoredPoint point : points) {
             String pointId = extractPointId(point);
-            ScoredResult existing = scoredPointsByUuid.get(pointId);
+            ScoredPointMatch existing = scoredPointsByUuid.get(pointId);
             if (existing == null || point.getScore() > existing.score()) {
-                scoredPointsByUuid.put(pointId, new ScoredResult(pointId, point.getScore(), point, collection));
+                scoredPointsByUuid.put(pointId, new ScoredPointMatch(pointId, point.getScore(), point, collection));
             }
         }
     }
@@ -390,5 +370,5 @@ public class HybridSearchService {
         return flattenedFailure.substring(0, MAX_FAILURE_DETAIL_LENGTH) + "...";
     }
 
-    private record ScoredResult(String id, double score, ScoredPoint point, String collection) {}
+    private record ScoredPointMatch(String id, double score, ScoredPoint point, String collection) {}
 }
