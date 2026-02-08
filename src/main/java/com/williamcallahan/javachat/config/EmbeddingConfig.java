@@ -26,6 +26,9 @@ import org.springframework.context.annotation.Primary;
 public class EmbeddingConfig {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingConfig.class);
     private static final String GITHUB_MODELS_HOST = "models.github.ai";
+    private static final String REMOTE_EMBEDDING_SERVER_URL_PROPERTY = "app.remote-embedding.server-url";
+    private static final String REMOTE_EMBEDDING_API_KEY_PROPERTY = "app.remote-embedding.api-key";
+    private static final String OPENAI_EMBEDDING_MODEL_PROPERTY = "spring.ai.openai.embedding.options.model";
 
     /**
      * Creates a local embedding model when local embeddings are enabled.
@@ -55,16 +58,15 @@ public class EmbeddingConfig {
      *
      * <p>Provider is selected at initialization from {@link AppProperties#getRemoteEmbedding()}.
      * When the remote URL and API key are both configured, the remote OpenAI-compatible provider
-     * is used. Otherwise, falls back to the direct OpenAI API when {@code OPENAI_API_KEY} is set.
-     * The remote embedding model is the single source of truth for model selection; the OpenAI
-     * path uses it as a fallback when no explicit OpenAI model is configured.</p>
+     * is used. OpenAI embeddings are selected only when {@code OPENAI_API_KEY} and
+     * {@code spring.ai.openai.embedding.options.model} are both configured.</p>
      *
      * @param appProperties application configuration (single source of truth for remote embedding)
-     * @param openaiApiKey OpenAI API key (fallback provider)
-     * @param openaiBaseUrl OpenAI base URL (fallback provider)
-     * @param openaiModel OpenAI embedding model override (falls back to remote model when blank)
+     * @param openaiApiKey OpenAI API key
+     * @param openaiBaseUrl OpenAI base URL
+     * @param openaiModel OpenAI embedding model identifier
      * @return embedding client for the selected provider
-     * @throws EmbeddingServiceUnavailableException when no embedding provider is configured
+     * @throws EmbeddingServiceUnavailableException when provider configuration is incomplete
      */
     @Bean
     @Primary
@@ -78,9 +80,18 @@ public class EmbeddingConfig {
         RemoteEmbedding remoteEmbedding = appProperties.getRemoteEmbedding();
         String remoteServerUrl = remoteEmbedding.getServerUrl();
         String remoteApiKey = remoteEmbedding.getApiKey();
+        boolean hasRemoteServerUrl = !remoteServerUrl.isBlank();
+        boolean hasRemoteApiKey = !remoteApiKey.isBlank();
 
-        if (!remoteServerUrl.isBlank() && !remoteApiKey.isBlank()) {
-            rejectGitHubModelsEmbeddingEndpoint(remoteServerUrl, "app.remote-embedding.server-url");
+        if (hasRemoteServerUrl != hasRemoteApiKey) {
+            throw new EmbeddingServiceUnavailableException(
+                    "Invalid remote embedding configuration: " + REMOTE_EMBEDDING_SERVER_URL_PROPERTY + " and "
+                            + REMOTE_EMBEDDING_API_KEY_PROPERTY
+                            + " must be configured together.");
+        }
+
+        if (hasRemoteServerUrl) {
+            rejectGitHubModelsEmbeddingEndpoint(remoteServerUrl, REMOTE_EMBEDDING_SERVER_URL_PROPERTY);
             log.info(
                     "[EMBEDDING] Using remote OpenAI-compatible provider (urlId={})",
                     Integer.toHexString(Objects.hashCode(remoteServerUrl)));
@@ -88,22 +99,28 @@ public class EmbeddingConfig {
                     remoteServerUrl, remoteApiKey, remoteEmbedding.getModel(), remoteEmbedding.getDimensions());
         }
 
-        if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
+        String trimmedOpenAiApiKey = openaiApiKey == null ? "" : openaiApiKey.trim();
+        if (!trimmedOpenAiApiKey.isEmpty()) {
             rejectGitHubModelsEmbeddingEndpoint(openaiBaseUrl, "spring.ai.openai.embedding.base-url");
-            String resolvedEmbeddingModel =
-                    (openaiModel != null && !openaiModel.isBlank()) ? openaiModel : remoteEmbedding.getModel();
+            String resolvedOpenAiEmbeddingModel = openaiModel == null ? "" : openaiModel.trim();
+            if (resolvedOpenAiEmbeddingModel.isEmpty()) {
+                throw new EmbeddingServiceUnavailableException("OpenAI embeddings require "
+                        + OPENAI_EMBEDDING_MODEL_PROPERTY
+                        + " to be configured when OPENAI_API_KEY is set.");
+            }
             log.info("[EMBEDDING] Using OpenAI embeddings provider");
             return OpenAiCompatibleEmbeddingClient.create(
                     openaiBaseUrl,
-                    openaiApiKey,
-                    resolvedEmbeddingModel,
+                    trimmedOpenAiApiKey,
+                    resolvedOpenAiEmbeddingModel,
                     appProperties.getEmbeddings().getDimensions());
         }
 
         throw new EmbeddingServiceUnavailableException(
                 "Embedding provider unavailable: no embedding provider configured. "
-                        + "Set APP_LOCAL_EMBEDDING_ENABLED=true or provide "
-                        + "REMOTE_EMBEDDING_API_KEY or OPENAI_API_KEY.");
+                        + "Set APP_LOCAL_EMBEDDING_ENABLED=true, configure both "
+                        + "REMOTE_EMBEDDING_SERVER_URL and REMOTE_EMBEDDING_API_KEY, or set OPENAI_API_KEY and "
+                        + "OPENAI_EMBEDDING_MODEL_NAME.");
     }
 
     private static void rejectGitHubModelsEmbeddingEndpoint(String configuredBaseUrl, String configurationKey) {
