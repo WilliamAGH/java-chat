@@ -80,10 +80,12 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
-        EmbeddingCreateParams params = EmbeddingCreateParams.builder()
-                .model(modelName)
-                .inputOfArrayOfStrings(texts)
-                .build();
+        EmbeddingCreateParams.Builder embeddingRequestBuilder =
+                EmbeddingCreateParams.builder().model(modelName).inputOfArrayOfStrings(texts);
+        if (supportsDimensionOverride(modelName)) {
+            embeddingRequestBuilder.dimensions((long) dimensionsHint);
+        }
+        EmbeddingCreateParams params = embeddingRequestBuilder.build();
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(embeddingTimeout()).build();
         return executeWithRetry(params, requestOptions, texts.size());
@@ -289,6 +291,14 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     @Override
     public int dimensions() {
         return dimensionsHint;
+    }
+
+    private static boolean supportsDimensionOverride(String embeddingModelName) {
+        if (embeddingModelName == null || embeddingModelName.isBlank()) {
+            return false;
+        }
+        String normalizedModelName = embeddingModelName.trim().toLowerCase(Locale.ROOT);
+        return normalizedModelName.startsWith("text-embedding-3");
     }
 
     private float[] toFloatVector(List<Float> embeddingEntries) {
