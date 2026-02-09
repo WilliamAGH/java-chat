@@ -46,7 +46,8 @@ class ChunkProcessingServiceTest {
 
         String chunkHash = contentHasher.generateChunkHash(SOURCE_URL, 0, CHUNK_TEXT);
         when(localStoreService.isHashIngested(chunkHash)).thenReturn(true);
-        when(localStoreService.hasHashMetadataChanged(chunkHash, UPDATED_TITLE, PACKAGE_NAME)).thenReturn(true);
+        when(localStoreService.hasHashMetadataChanged(chunkHash, UPDATED_TITLE, PACKAGE_NAME))
+                .thenReturn(true);
 
         ChunkProcessingService.ChunkProcessingOutcome processingOutcome =
                 chunkProcessingService.processAndStoreChunks("ignored", SOURCE_URL, UPDATED_TITLE, PACKAGE_NAME);
@@ -62,7 +63,8 @@ class ChunkProcessingServiceTest {
 
         String chunkHash = contentHasher.generateChunkHash(SOURCE_URL, 0, CHUNK_TEXT);
         when(localStoreService.isHashIngested(chunkHash)).thenReturn(true);
-        when(localStoreService.hasHashMetadataChanged(chunkHash, UPDATED_TITLE, PACKAGE_NAME)).thenReturn(false);
+        when(localStoreService.hasHashMetadataChanged(chunkHash, UPDATED_TITLE, PACKAGE_NAME))
+                .thenReturn(false);
 
         ChunkProcessingService.ChunkProcessingOutcome processingOutcome =
                 chunkProcessingService.processAndStoreChunks("ignored", SOURCE_URL, UPDATED_TITLE, PACKAGE_NAME);
@@ -72,4 +74,3 @@ class ChunkProcessingServiceTest {
         verify(localStoreService, never()).saveChunkText(SOURCE_URL, 0, CHUNK_TEXT, chunkHash);
     }
 }
-

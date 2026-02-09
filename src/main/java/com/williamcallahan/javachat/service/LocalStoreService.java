@@ -132,7 +132,8 @@ public class LocalStoreService {
             return !normalizedTitle.equals(storedMetadata.title())
                     || !normalizedPackageName.equals(storedMetadata.packageName());
         } catch (IOException markerReadFailure) {
-            throw new IllegalStateException("Failed to read hash ingestion marker for hash: " + hash, markerReadFailure);
+            throw new IllegalStateException(
+                    "Failed to read hash ingestion marker for hash: " + hash, markerReadFailure);
         }
     }
 
@@ -429,7 +430,8 @@ public class LocalStoreService {
         StringBuilder markerPayload = new StringBuilder();
         markerPayload.append(HASH_MARKER_INGESTED_FLAG).append('\n');
         markerPayload.append(HASH_MARKER_TITLE_PREFIX).append(encodedTitle).append('\n');
-        markerPayload.append(HASH_MARKER_PACKAGE_PREFIX)
+        markerPayload
+                .append(HASH_MARKER_PACKAGE_PREFIX)
                 .append(encodedPackageName)
                 .append('\n');
         return markerPayload.toString();
@@ -442,10 +444,14 @@ public class LocalStoreService {
         for (String markerLine : markerPayload.split("\n")) {
             String trimmedMarkerLine = markerLine == null ? "" : markerLine.trim();
             if (trimmedMarkerLine.startsWith(HASH_MARKER_TITLE_PREFIX)) {
-                String encodedTitle = trimmedMarkerLine.substring(HASH_MARKER_TITLE_PREFIX.length()).trim();
+                String encodedTitle = trimmedMarkerLine
+                        .substring(HASH_MARKER_TITLE_PREFIX.length())
+                        .trim();
                 resolvedTitle = decodeHashMetadataField(encodedTitle);
             } else if (trimmedMarkerLine.startsWith(HASH_MARKER_PACKAGE_PREFIX)) {
-                String encodedPackageName = trimmedMarkerLine.substring(HASH_MARKER_PACKAGE_PREFIX.length()).trim();
+                String encodedPackageName = trimmedMarkerLine
+                        .substring(HASH_MARKER_PACKAGE_PREFIX.length())
+                        .trim();
                 resolvedPackageName = decodeHashMetadataField(encodedPackageName);
             }
         }
