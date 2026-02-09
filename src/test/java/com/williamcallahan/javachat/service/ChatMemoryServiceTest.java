@@ -3,6 +3,10 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,6 +79,7 @@ class ChatMemoryServiceTest {
 
         assertNotNull(history);
         assertTrue(history.isEmpty());
+        assertFalse(chatMemoryService.hasSession("nonexistent-session"));
     }
 
     @Test
@@ -88,6 +93,7 @@ class ChatMemoryServiceTest {
 
         List<Message> history = chatMemoryService.getHistory(sessionId);
         assertTrue(history.isEmpty());
+        assertFalse(chatMemoryService.hasSession(sessionId));
     }
 
     @Test
@@ -134,5 +140,44 @@ class ChatMemoryServiceTest {
         assertEquals("User question", turns.get(0).getText());
         assertEquals("assistant", turns.get(1).getRole());
         assertEquals("Assistant answer", turns.get(1).getText());
+    }
+
+    @Test
+    @DisplayName("Should keep message history and turn history aligned under concurrent writes")
+    void shouldKeepHistoryAndTurnsAlignedUnderConcurrency() throws InterruptedException {
+        String sessionId = "concurrent-session";
+        int workerCount = 40;
+        ExecutorService workerPool = Executors.newFixedThreadPool(workerCount);
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch completionSignal = new CountDownLatch(workerCount);
+
+        for (int workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+            final int messageIndex = workerIndex;
+            workerPool.submit(() -> {
+                try {
+                    startSignal.await();
+                    chatMemoryService.addUser(sessionId, "message-" + messageIndex);
+                } catch (InterruptedException interruption) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    completionSignal.countDown();
+                }
+            });
+        }
+
+        startSignal.countDown();
+        boolean completed = completionSignal.await(10, TimeUnit.SECONDS);
+        workerPool.shutdownNow();
+        assertTrue(completed, "Concurrent writes did not complete within timeout");
+
+        List<Message> history = chatMemoryService.getHistory(sessionId);
+        var turns = chatMemoryService.getTurns(sessionId);
+        assertEquals(workerCount, history.size());
+        assertEquals(workerCount, turns.size());
+        for (int messageIndex = 0; messageIndex < workerCount; messageIndex++) {
+            String historyText = ((UserMessage) history.get(messageIndex)).getText();
+            String turnText = turns.get(messageIndex).getText();
+            assertEquals(historyText, turnText);
+        }
     }
 }

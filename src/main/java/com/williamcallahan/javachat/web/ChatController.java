@@ -310,11 +310,15 @@ public class ChatController extends BaseController {
         if (sessionId == null || sessionId.isEmpty()) {
             return ResponseEntity.badRequest().body(new SessionValidationResponse("", 0, false, SESSION_ID_REQUIRED));
         }
+        boolean sessionRecognized = chatMemory.hasSession(sessionId);
+        if (!sessionRecognized) {
+            return ResponseEntity.ok(new SessionValidationResponse(sessionId, 0, false, "Session not found on server"));
+        }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
         boolean exists = turnCount > 0;
-        return ResponseEntity.ok(new SessionValidationResponse(
-                sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
+        String validationMessage = exists ? "Session found" : "Session found but empty";
+        return ResponseEntity.ok(new SessionValidationResponse(sessionId, turnCount, exists, validationMessage));
     }
 
     /**
