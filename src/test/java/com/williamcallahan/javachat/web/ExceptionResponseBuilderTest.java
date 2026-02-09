@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -30,5 +31,19 @@ class ExceptionResponseBuilderTest {
         assertTrue(details.contains("httpStatus=400"), details);
         assertTrue(details.contains("body=problem"), details);
         assertTrue(details.contains("headers="), details);
+    }
+
+    @Test
+    void describeException_handlesNullStatusTextWithoutThrowing() {
+        HttpHeaders headers = new HttpHeaders();
+        HttpClientErrorException exception = HttpClientErrorException.create(
+                HttpStatus.BAD_REQUEST,
+                null,
+                headers,
+                "problem".getBytes(StandardCharsets.UTF_8),
+                StandardCharsets.UTF_8);
+
+        ExceptionResponseBuilder builder = new ExceptionResponseBuilder();
+        assertDoesNotThrow(() -> builder.describeException(exception));
     }
 }
