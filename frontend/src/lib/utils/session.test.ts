@@ -1,7 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { generateSessionId } from './session'
 
 describe('generateSessionId', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-09T12:00:00.000Z'))
+  })
+
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
@@ -9,8 +14,6 @@ describe('generateSessionId', () => {
   })
 
   it('uses crypto.randomUUID when available', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-09T12:00:00.000Z'))
     vi.stubGlobal('crypto', {
       randomUUID: () => 'uuid-test-value',
     } as unknown as Crypto)
@@ -20,8 +23,6 @@ describe('generateSessionId', () => {
   })
 
   it('uses crypto.getRandomValues when randomUUID is unavailable', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-09T12:00:00.000Z'))
     vi.stubGlobal('crypto', {
       getRandomValues: (randomBytes: Uint8Array) => {
         randomBytes.fill(15)
@@ -37,8 +38,6 @@ describe('generateSessionId', () => {
   })
 
   it('falls back to padded Math.random output when crypto is unavailable', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-09T12:00:00.000Z'))
     vi.stubGlobal('crypto', undefined)
     vi.spyOn(Math, 'random').mockReturnValue(0)
 
