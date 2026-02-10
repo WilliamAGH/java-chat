@@ -1,9 +1,28 @@
 import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
-export default defineConfig({
-  plugins: [svelte()],
-  // Serve from root
+const SIMPLE_ANALYTICS_CDN = 'https://scripts.simpleanalyticscdn.com'
+
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    svelte(),
+    {
+      name: 'simple-analytics',
+      transformIndexHtml() {
+        const scriptFile = mode === 'development' ? 'latest.dev.js' : 'latest.js'
+        return [
+          {
+            tag: 'script',
+            attrs: {
+              async: true,
+              src: `${SIMPLE_ANALYTICS_CDN}/${scriptFile}`,
+            },
+            injectTo: 'head',
+          },
+        ]
+      },
+    },
+  ],
   base: '/',
   server: {
     port: 5173,
@@ -37,4 +56,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
