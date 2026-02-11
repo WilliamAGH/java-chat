@@ -80,12 +80,12 @@ public class OpenGraphImageRenderer {
     }
 
     /**
-     * Returns the pre-rendered OG image as PNG bytes.
+     * Returns a defensive copy of the pre-rendered OG image as PNG bytes.
      *
      * @return PNG-encoded byte array of the 1200x630 image
      */
     public byte[] openGraphPngBytes() {
-        return openGraphPngBytes;
+        return openGraphPngBytes.clone();
     }
 
     private byte[] renderOpenGraphImage(BufferedImage logoSource) throws IOException {
