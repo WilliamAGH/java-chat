@@ -1,8 +1,9 @@
 package com.williamcallahan.javachat.web;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -27,8 +28,10 @@ class OpenGraphImageRendererTest {
             "OG image width must be " + OpenGraphImageRenderer.OG_IMAGE_WIDTH;
     private static final String OG_IMAGE_HEIGHT_ASSERTION_MESSAGE =
             "OG image height must be " + OpenGraphImageRenderer.OG_IMAGE_HEIGHT;
-    private static final String OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE =
-            "Renderer must return the same cached byte array instance";
+    private static final String OG_IMAGE_DEFENSIVE_COPY_ASSERTION_MESSAGE =
+            "Renderer must return a defensive copy, not the internal array";
+    private static final String OG_IMAGE_CONTENT_EQUALITY_ASSERTION_MESSAGE =
+            "Repeated calls must return identical content";
 
     @Autowired
     OpenGraphImageRenderer renderer;
@@ -48,10 +51,11 @@ class OpenGraphImageRendererTest {
     }
 
     @Test
-    void returns_same_cached_bytes_on_repeated_calls() {
+    void returns_defensive_copy_with_identical_content_on_repeated_calls() {
         byte[] firstCall = renderer.openGraphPngBytes();
         byte[] secondCall = renderer.openGraphPngBytes();
 
-        assertSame(firstCall, secondCall, OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE);
+        assertNotSame(firstCall, secondCall, OG_IMAGE_DEFENSIVE_COPY_ASSERTION_MESSAGE);
+        assertArrayEquals(firstCall, secondCall, OG_IMAGE_CONTENT_EQUALITY_ASSERTION_MESSAGE);
     }
 }
