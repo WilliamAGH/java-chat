@@ -95,7 +95,7 @@ public class ExternalServiceHealth {
     @PostConstruct
     public void init() {
         // Initialize service statuses
-        serviceStatuses.put(SERVICE_QDRANT, new ServiceStatus(SERVICE_QDRANT));
+        serviceStatuses.put(SERVICE_QDRANT, new ServiceStatus());
 
         // Connectivity-only check during bean initialization to avoid racing collection provisioning.
         checkQdrantConnectivity();
@@ -125,6 +125,9 @@ public class ExternalServiceHealth {
     /**
      * Checks whether a service is currently healthy and available for use.
      *
+     * <p>This is a pure query — it does not trigger any side effects. Use
+     * {@link #triggerRetryIfDue(String)} to schedule a retry when the backoff has elapsed.
+     *
      * @param serviceName logical service name (for example, {@link #SERVICE_QDRANT})
      * @return true when the service is healthy or unknown, false when in backoff
      */
@@ -133,20 +136,24 @@ public class ExternalServiceHealth {
         if (status == null) {
             return true; // Unknown services are assumed healthy
         }
+        return status.isHealthy.get();
+    }
 
-        // If the service is healthy, return true
-        if (status.isHealthy.get()) {
-            return true;
+    /**
+     * Triggers a health check retry if the backoff period has elapsed for an unhealthy service.
+     *
+     * <p>No-op when the service is healthy, unknown, or still within its backoff window.
+     *
+     * @param serviceName logical service name (for example, {@link #SERVICE_QDRANT})
+     */
+    public void triggerRetryIfDue(String serviceName) {
+        ServiceStatus status = serviceStatuses.get(serviceName);
+        if (status == null || status.isHealthy.get()) {
+            return;
         }
-
-        // If unhealthy, check if we should retry based on backoff
-        if (status.shouldRetryNow(Instant.now())) {
-            if (SERVICE_QDRANT.equals(serviceName)) {
-                checkQdrantHealth();
-            }
+        if (status.shouldRetryNow(Instant.now()) && SERVICE_QDRANT.equals(serviceName)) {
+            checkQdrantHealth();
         }
-
-        return false;
     }
 
     /**
@@ -197,7 +204,7 @@ public class ExternalServiceHealth {
             checkQdrantHealth();
             return;
         }
-        isHealthy(SERVICE_QDRANT);
+        triggerRetryIfDue(SERVICE_QDRANT);
     }
 
     private void checkQdrantConnectivity() {
@@ -395,9 +402,7 @@ public class ExternalServiceHealth {
         volatile Instant lastCheck = Instant.now();
         volatile Duration currentBackoff = INITIAL_CHECK_INTERVAL;
 
-        ServiceStatus(String name) {
-            // Name parameter kept for future use if needed
-        }
+        ServiceStatus() {}
 
         void markHealthy() {
             isHealthy.set(true);
