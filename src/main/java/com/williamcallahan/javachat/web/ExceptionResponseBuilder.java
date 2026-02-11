@@ -4,6 +4,7 @@ import com.openai.errors.OpenAIServiceException;
 import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.domain.errors.ApiSuccessResponse;
+import java.util.Objects;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -57,12 +58,10 @@ public class ExceptionResponseBuilder {
      * Builds a detailed error description suitable for API responses or UI diagnostics.
      *
      * @param exception the exception to describe
-     * @return detailed description, or null when no exception is provided
+     * @return detailed description including class name, message, and protocol-specific details
      */
     public String describeException(Exception exception) {
-        if (exception == null) {
-            return null;
-        }
+        Objects.requireNonNull(exception, "exception must not be null");
         StringBuilder details = new StringBuilder();
         details.append(exception.getClass().getSimpleName());
         String message = exception.getMessage();
