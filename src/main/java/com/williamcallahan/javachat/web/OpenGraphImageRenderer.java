@@ -8,6 +8,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import javax.imageio.ImageIO;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,12 @@ public class OpenGraphImageRenderer {
     static final int OG_IMAGE_WIDTH = 1200;
     static final int OG_IMAGE_HEIGHT = 630;
     static final String OG_IMAGE_CONTENT_TYPE = "image/png";
+    static final String OG_IMAGE_ENCODING_FORMAT = "png";
+    static final String OG_LOGO_RESOURCE_PATH = "classpath:/branding/javachat_brace_cup_star_1024.png";
+    private static final String OG_RENDER_FAILURE_MESSAGE_PREFIX =
+            "Failed to render Open Graph image from logo resource: ";
+    private static final String OG_UNREADABLE_LOGO_MESSAGE_PREFIX = "Logo resource is not a readable image: ";
+    private static final String OG_PNG_WRITER_MISSING_MESSAGE = "No ImageIO writer available for PNG format";
 
     /** Exact background color from the favicon icon for seamless blending. */
     private static final Color FAVICON_BLUE_BACKGROUND = new Color(0x25, 0x26, 0x3C);
@@ -67,15 +74,16 @@ public class OpenGraphImageRenderer {
      *
      * @param logoResource the high-resolution logo PNG from classpath
      */
-    public OpenGraphImageRenderer(
-            @Value("classpath:/branding/javachat_brace_cup_star_1024.png") Resource logoResource) {
-        try {
-            BufferedImage logoSource = ImageIO.read(logoResource.getInputStream());
+    public OpenGraphImageRenderer(@Value(OG_LOGO_RESOURCE_PATH) Resource logoResource) {
+        try (InputStream logoStream = logoResource.getInputStream()) {
+            BufferedImage logoSource = ImageIO.read(logoStream);
+            if (logoSource == null) {
+                throw new IOException(OG_UNREADABLE_LOGO_MESSAGE_PREFIX + logoResource.getDescription());
+            }
             this.openGraphPngBytes = renderOpenGraphImage(logoSource);
         } catch (IOException logoLoadException) {
             throw new UncheckedIOException(
-                    "Failed to render Open Graph image from logo resource: " + logoResource.getDescription(),
-                    logoLoadException);
+                    OG_RENDER_FAILURE_MESSAGE_PREFIX + logoResource.getDescription(), logoLoadException);
         }
     }
 
@@ -153,7 +161,10 @@ public class OpenGraphImageRenderer {
 
     private byte[] encodePng(BufferedImage canvas) throws IOException {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        ImageIO.write(canvas, "png", outputStream);
+        boolean imageWritten = ImageIO.write(canvas, OG_IMAGE_ENCODING_FORMAT, outputStream);
+        if (!imageWritten) {
+            throw new IOException(OG_PNG_WRITER_MISSING_MESSAGE);
+        }
         return outputStream.toByteArray();
     }
 }
