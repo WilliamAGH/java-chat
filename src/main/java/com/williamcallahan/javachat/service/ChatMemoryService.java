@@ -46,7 +46,7 @@ public class ChatMemoryService {
     public void addUser(String sessionId, String text) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
         SessionConversation sessionConversation =
-                sessionConversations.computeIfAbsent(sessionId, missingSessionId -> new SessionConversation());
+                sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
         sessionConversation.addUserMessage(text);
     }
 
@@ -59,7 +59,7 @@ public class ChatMemoryService {
     public void addAssistant(String sessionId, String text) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
         SessionConversation sessionConversation =
-                sessionConversations.computeIfAbsent(sessionId, missingSessionId -> new SessionConversation());
+                sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
         sessionConversation.addAssistantMessage(text);
     }
 
