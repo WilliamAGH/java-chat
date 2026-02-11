@@ -16,8 +16,18 @@ import org.springframework.test.context.TestPropertySource;
  * Verifies that the OG image renderer produces a valid 1200x630 PNG.
  */
 @SpringBootTest(classes = OpenGraphImageRenderer.class)
-@TestPropertySource(properties = "spring.main.banner-mode=off")
+@TestPropertySource(properties = OpenGraphImageRendererTest.SPRING_MAIN_BANNER_MODE_OFF_PROPERTY)
 class OpenGraphImageRendererTest {
+    private static final String SPRING_MAIN_BANNER_MODE_OFF_PROPERTY = "spring.main.banner-mode=off";
+    private static final int OG_IMAGE_WIDTH_PX = 1200;
+    private static final int OG_IMAGE_HEIGHT_PX = 630;
+    private static final String OG_IMAGE_BYTES_NOT_NULL_ASSERTION_MESSAGE = "Rendered PNG bytes must not be null";
+    private static final String OG_IMAGE_BYTES_NOT_EMPTY_ASSERTION_MESSAGE = "Rendered PNG must not be empty";
+    private static final String OG_IMAGE_DECODE_ASSERTION_MESSAGE = "Bytes must decode to a valid image";
+    private static final String OG_IMAGE_WIDTH_ASSERTION_MESSAGE = "OG image width must be 1200";
+    private static final String OG_IMAGE_HEIGHT_ASSERTION_MESSAGE = "OG image height must be 630";
+    private static final String OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE =
+            "Renderer must return the same cached byte array instance";
 
     @Autowired
     OpenGraphImageRenderer renderer;
@@ -26,13 +36,13 @@ class OpenGraphImageRendererTest {
     void renders_valid_png_with_correct_dimensions() throws Exception {
         byte[] pngBytes = renderer.openGraphPngBytes();
 
-        assertNotNull(pngBytes, "Rendered PNG bytes must not be null");
-        assertTrue(pngBytes.length > 0, "Rendered PNG must not be empty");
+        assertNotNull(pngBytes, OG_IMAGE_BYTES_NOT_NULL_ASSERTION_MESSAGE);
+        assertTrue(pngBytes.length > 0, OG_IMAGE_BYTES_NOT_EMPTY_ASSERTION_MESSAGE);
 
         BufferedImage decodedImage = ImageIO.read(new ByteArrayInputStream(pngBytes));
-        assertNotNull(decodedImage, "Bytes must decode to a valid image");
-        assertEquals(1200, decodedImage.getWidth(), "OG image width must be 1200");
-        assertEquals(630, decodedImage.getHeight(), "OG image height must be 630");
+        assertNotNull(decodedImage, OG_IMAGE_DECODE_ASSERTION_MESSAGE);
+        assertEquals(OG_IMAGE_WIDTH_PX, decodedImage.getWidth(), OG_IMAGE_WIDTH_ASSERTION_MESSAGE);
+        assertEquals(OG_IMAGE_HEIGHT_PX, decodedImage.getHeight(), OG_IMAGE_HEIGHT_ASSERTION_MESSAGE);
     }
 
     @Test
@@ -40,6 +50,6 @@ class OpenGraphImageRendererTest {
         byte[] firstCall = renderer.openGraphPngBytes();
         byte[] secondCall = renderer.openGraphPngBytes();
 
-        assertTrue(firstCall == secondCall, "Renderer must return the same cached byte array instance");
+        assertTrue(firstCall == secondCall, OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE);
     }
 }
