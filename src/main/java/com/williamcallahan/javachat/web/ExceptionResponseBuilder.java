@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Component
 public class ExceptionResponseBuilder {
+    private static final String EXCEPTION_REQUIRED_MESSAGE = "exception must not be null";
 
     /**
      * Builds a standardized error response with status and message.
@@ -59,9 +60,10 @@ public class ExceptionResponseBuilder {
      *
      * @param exception the exception to describe
      * @return detailed description including class name, message, and protocol-specific details
+     * @throws NullPointerException when exception is null
      */
     public String describeException(Exception exception) {
-        Objects.requireNonNull(exception, "exception must not be null");
+        Objects.requireNonNull(exception, EXCEPTION_REQUIRED_MESSAGE);
         StringBuilder details = new StringBuilder();
         details.append(exception.getClass().getSimpleName());
         String message = exception.getMessage();
