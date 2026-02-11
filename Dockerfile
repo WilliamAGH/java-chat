@@ -39,9 +39,9 @@ COPY build.gradle.kts settings.gradle.kts gradle.properties ./
 COPY config/pmd/ config/pmd/
 COPY config/spotbugs/ config/spotbugs/
 
-# 3. Download dependencies with cache mount (quiet to avoid verbose tree)
+# 3. Download dependencies with cache mount (redirect to /dev/null to avoid massive logs)
 RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew dependencies --no-daemon -q
+    ./gradlew dependencies --no-daemon > /dev/null 2>&1 || true
 
 # 4. Copy source code (excluding static assets which come from frontend build)
 COPY src ./src/
