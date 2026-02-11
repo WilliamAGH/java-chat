@@ -221,19 +221,19 @@ public class ExternalServiceHealth {
                     .retrieve()
                     .toBodilessEntity()
                     .timeout(HEALTH_CHECK_TIMEOUT)
-                    .doOnSuccess(ignored -> {
-                        log.info("[HEALTH] Qdrant connectivity check succeeded");
-                        status.markHealthy();
-                    })
-                    .doOnError(error -> {
-                        status.markUnhealthy();
-                        log.warn(
-                                "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
-                                error.getClass().getSimpleName(),
-                                error.getMessage(),
-                                formatDuration(status.currentBackoff));
-                    })
-                    .subscribe();
+                    .subscribe(
+                            ignoredResponse -> {
+                                log.info("[HEALTH] Qdrant connectivity check succeeded");
+                                status.markHealthy();
+                            },
+                            healthCheckFailure -> {
+                                status.markUnhealthy();
+                                log.warn(
+                                        "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
+                                        healthCheckFailure.getClass().getSimpleName(),
+                                        healthCheckFailure.getMessage(),
+                                        formatDuration(status.currentBackoff));
+                            });
         } catch (RuntimeException connectivityException) {
             status.markUnhealthy();
             log.warn(
@@ -276,22 +276,31 @@ public class ExternalServiceHealth {
                         .then());
             }
 
+            if (checks.isEmpty()) {
+                status.markUnhealthy();
+                log.warn("[HEALTH] Qdrant health check skipped: configured collections are blank");
+                return;
+            }
+
             Mono.whenDelayError(checks)
                     .timeout(HEALTH_CHECK_TIMEOUT)
-                    .doOnSuccess(ignored -> {
-                        status.markHealthy();
-                        log.info(
-                                "[HEALTH] Qdrant health check succeeded (all {} collections present)",
-                                qdrantCollections.size());
-                    })
-                    .doOnError(error -> {
-                        status.markUnhealthy();
-                        log.warn(
-                                "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
-                                error.getClass().getSimpleName(),
-                                formatDuration(status.currentBackoff));
-                    })
-                    .subscribe();
+                    .subscribe(
+                            ignoredResponse -> {
+                                // Mono<Void> has no onNext payload.
+                            },
+                            healthCheckFailure -> {
+                                status.markUnhealthy();
+                                log.warn(
+                                        "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
+                                        healthCheckFailure.getClass().getSimpleName(),
+                                        formatDuration(status.currentBackoff));
+                            },
+                            () -> {
+                                status.markHealthy();
+                                log.info(
+                                        "[HEALTH] Qdrant health check succeeded (all {} collections present)",
+                                        checks.size());
+                            });
         } catch (RuntimeException healthCheckException) {
             status.markUnhealthy();
             log.warn(
