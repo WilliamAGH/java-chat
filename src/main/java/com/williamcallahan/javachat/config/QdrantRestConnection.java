@@ -103,7 +103,7 @@ public class QdrantRestConnection {
      * @param grpcPort the configured gRPC port
      * @return the corresponding REST port
      */
-    static int mapGrpcPortToRestPort(int grpcPort) {
+    public static int mapGrpcPortToRestPort(int grpcPort) {
         if (grpcPort == QDRANT_GRPC_PORT) {
             return QDRANT_REST_PORT;
         }
