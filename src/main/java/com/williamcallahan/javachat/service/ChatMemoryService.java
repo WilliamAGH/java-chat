@@ -2,7 +2,6 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.model.ChatTurn;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,10 +22,7 @@ public class ChatMemoryService {
 
     private static final String REQUIRE_SESSION_ID = "sessionId";
 
-    // Use synchronizedList wrapper to ensure thread-safe list operations.
-    // ConcurrentHashMap only protects map operations, not the contained lists.
-    private final ConcurrentMap<String, List<Message>> sessionToMessages = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, List<ChatTurn>> sessionToTurns = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, SessionConversation> sessionConversations = new ConcurrentHashMap<>();
 
     /**
      * Returns a thread-safe snapshot of the history for the given session.
@@ -34,20 +30,11 @@ public class ChatMemoryService {
      */
     public List<Message> getHistory(String sessionId) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        List<Message> history =
-                sessionToMessages.computeIfAbsent(sessionId, _ -> Collections.synchronizedList(new ArrayList<>()));
-        // Return a snapshot to avoid ConcurrentModificationException during iteration
-        synchronized (history) {
-            return new ArrayList<>(history);
+        SessionConversation sessionConversation = sessionConversations.get(sessionId);
+        if (sessionConversation == null) {
+            return List.of();
         }
-    }
-
-    /**
-     * Returns the internal synchronized list for direct modification.
-     * Use with care - prefer addUser/addAssistant for adding messages.
-     */
-    List<Message> getHistoryInternal(String sessionId) {
-        return sessionToMessages.computeIfAbsent(sessionId, _ -> Collections.synchronizedList(new ArrayList<>()));
+        return sessionConversation.historySnapshot();
     }
 
     /**
@@ -58,8 +45,9 @@ public class ChatMemoryService {
      */
     public void addUser(String sessionId, String text) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        getHistoryInternal(sessionId).add(new UserMessage(text));
-        getTurnsInternal(sessionId).add(new ChatTurn("user", text));
+        SessionConversation sessionConversation =
+                sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
+        sessionConversation.addUserMessage(text);
     }
 
     /**
@@ -70,8 +58,9 @@ public class ChatMemoryService {
      */
     public void addAssistant(String sessionId, String text) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        getHistoryInternal(sessionId).add(new AssistantMessage(text));
-        getTurnsInternal(sessionId).add(new ChatTurn("assistant", text));
+        SessionConversation sessionConversation =
+                sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
+        sessionConversation.addAssistantMessage(text);
     }
 
     /**
@@ -81,8 +70,7 @@ public class ChatMemoryService {
      */
     public void clear(String sessionId) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        sessionToMessages.remove(sessionId);
-        sessionToTurns.remove(sessionId);
+        sessionConversations.remove(sessionId);
     }
 
     /**
@@ -90,18 +78,22 @@ public class ChatMemoryService {
      */
     public List<ChatTurn> getTurns(String sessionId) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        List<ChatTurn> turns =
-                sessionToTurns.computeIfAbsent(sessionId, _ -> Collections.synchronizedList(new ArrayList<>()));
-        synchronized (turns) {
-            return new ArrayList<>(turns);
+        SessionConversation sessionConversation = sessionConversations.get(sessionId);
+        if (sessionConversation == null) {
+            return List.of();
         }
+        return sessionConversation.turnSnapshot();
     }
 
     /**
-     * Returns the internal synchronized list for direct modification.
+     * Returns true when the server currently recognizes the given session identifier.
+     *
+     * @param sessionId session identifier
+     * @return true when the session has been created in memory
      */
-    List<ChatTurn> getTurnsInternal(String sessionId) {
-        return sessionToTurns.computeIfAbsent(sessionId, _ -> Collections.synchronizedList(new ArrayList<>()));
+    public boolean hasSession(String sessionId) {
+        Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
+        return sessionConversations.containsKey(sessionId);
     }
 
     // TODO: Persist chat history embeddings to Qdrant for long-term memory (future feature)
@@ -114,4 +106,30 @@ public class ChatMemoryService {
     // - Embedding strategy for chat turns (user messages + AI responses)
     // - Semantic similarity search for relevant historical context
     // - Privacy and data retention compliance
+
+    /**
+     * Holds per-session conversation state and synchronizes updates across message and turn views.
+     */
+    private static final class SessionConversation {
+        private final List<Message> historyMessages = new ArrayList<>();
+        private final List<ChatTurn> turnHistory = new ArrayList<>();
+
+        synchronized void addUserMessage(String text) {
+            historyMessages.add(new UserMessage(text));
+            turnHistory.add(new ChatTurn("user", text));
+        }
+
+        synchronized void addAssistantMessage(String text) {
+            historyMessages.add(new AssistantMessage(text));
+            turnHistory.add(new ChatTurn("assistant", text));
+        }
+
+        synchronized List<Message> historySnapshot() {
+            return List.copyOf(historyMessages);
+        }
+
+        synchronized List<ChatTurn> turnSnapshot() {
+            return List.copyOf(turnHistory);
+        }
+    }
 }

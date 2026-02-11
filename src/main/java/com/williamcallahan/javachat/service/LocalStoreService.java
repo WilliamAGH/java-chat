@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +35,9 @@ public class LocalStoreService {
     private static final String FILE_MARKER_EXTENSION = ".marker";
     private static final String FILE_MARKER_HASH_PREFIX = "hash=";
     private static final String FILE_MARKER_FINGERPRINT_PREFIX = "fingerprint=";
+    private static final String HASH_MARKER_INGESTED_FLAG = "1";
+    private static final String HASH_MARKER_TITLE_PREFIX = "titleB64=";
+    private static final String HASH_MARKER_PACKAGE_PREFIX = "packageB64=";
 
     private final String snapshotDirConfig;
     private final String parsedDirConfig;
@@ -102,21 +106,74 @@ public class LocalStoreService {
      * Returns true when an ingest marker exists for the given chunk hash.
      */
     public boolean isHashIngested(String hash) {
-        Path marker = indexDir.resolve(hash);
-        return Files.exists(marker);
+        return Files.exists(hashMarkerPath(hash));
+    }
+
+    /**
+     * Returns true when the stored metadata for an ingested chunk hash differs from the current metadata.
+     *
+     * <p>Older markers may not contain metadata fields. In that case this method returns true so callers
+     * can perform a one-time metadata refresh and backfill marker metadata.</p>
+     *
+     * @param hash chunk hash marker key
+     * @param title current document title
+     * @param packageName current package name
+     * @return true when metadata has changed since the chunk was marked ingested
+     */
+    public boolean hasHashMetadataChanged(String hash, String title, String packageName) {
+        Path markerPath = hashMarkerPath(hash);
+        if (!Files.exists(markerPath)) {
+            return false;
+        }
+        try {
+            HashMarkerMetadata storedMetadata = readHashMarkerMetadata(markerPath);
+            String normalizedTitle = normalizeHashMetadataText(title);
+            String normalizedPackageName = normalizeHashMetadataText(packageName);
+            return !normalizedTitle.equals(storedMetadata.title())
+                    || !normalizedPackageName.equals(storedMetadata.packageName());
+        } catch (IOException markerReadFailure) {
+            throw new IllegalStateException(
+                    "Failed to read hash ingestion marker for hash: " + hash, markerReadFailure);
+        }
     }
 
     /**
      * Writes an ingest marker for the given chunk hash when not already present.
      */
     public void markHashIngested(String hash) throws IOException {
-        Path marker = indexDir.resolve(hash);
-        if (!Files.exists(marker)) {
-            Files.writeString(marker, "1", StandardCharsets.UTF_8);
+        markHashIngested(hash, "", "");
+    }
+
+    /**
+     * Writes or updates an ingest marker for the given chunk hash and associated metadata.
+     *
+     * <p>When a marker already exists and metadata changed, this method updates the marker payload so
+     * future dedup checks can detect metadata drift accurately.</p>
+     *
+     * @param hash chunk hash marker key
+     * @param title document title associated with the ingested chunk
+     * @param packageName package name associated with the ingested chunk
+     * @throws IOException if marker write fails
+     */
+    public void markHashIngested(String hash, String title, String packageName) throws IOException {
+        Path markerPath = hashMarkerPath(hash);
+        String normalizedTitle = normalizeHashMetadataText(title);
+        String normalizedPackageName = normalizeHashMetadataText(packageName);
+        String markerPayload = buildHashMarkerPayload(normalizedTitle, normalizedPackageName);
+
+        if (!Files.exists(markerPath)) {
+            Files.writeString(markerPath, markerPayload, StandardCharsets.UTF_8);
             // Update progress after successful ingest
             if (progressTracker != null) {
                 progressTracker.markChunkIndexed();
             }
+            return;
+        }
+
+        HashMarkerMetadata storedMetadata = readHashMarkerMetadata(markerPath);
+        if (!normalizedTitle.equals(storedMetadata.title())
+                || !normalizedPackageName.equals(storedMetadata.packageName())) {
+            Files.writeString(markerPath, markerPayload, StandardCharsets.UTF_8);
         }
     }
 
@@ -158,6 +215,10 @@ public class LocalStoreService {
 
     private Path fileMarkerPath(String url) {
         return indexDir.resolve(FILE_MARKER_PREFIX + safeName(url) + FILE_MARKER_EXTENSION);
+    }
+
+    private Path hashMarkerPath(String hash) {
+        return indexDir.resolve(hash);
     }
 
     /**
@@ -361,6 +422,66 @@ public class LocalStoreService {
             }
         }
         return payload.toString();
+    }
+
+    private String buildHashMarkerPayload(String title, String packageName) {
+        String encodedTitle = Base64.getEncoder().encodeToString(title.getBytes(StandardCharsets.UTF_8));
+        String encodedPackageName = Base64.getEncoder().encodeToString(packageName.getBytes(StandardCharsets.UTF_8));
+        StringBuilder markerPayload = new StringBuilder();
+        markerPayload.append(HASH_MARKER_INGESTED_FLAG).append('\n');
+        markerPayload.append(HASH_MARKER_TITLE_PREFIX).append(encodedTitle).append('\n');
+        markerPayload
+                .append(HASH_MARKER_PACKAGE_PREFIX)
+                .append(encodedPackageName)
+                .append('\n');
+        return markerPayload.toString();
+    }
+
+    private HashMarkerMetadata readHashMarkerMetadata(Path markerPath) throws IOException {
+        String markerPayload = Files.readString(markerPath, StandardCharsets.UTF_8);
+        String resolvedTitle = "";
+        String resolvedPackageName = "";
+        for (String markerLine : markerPayload.split("\n")) {
+            String trimmedMarkerLine = markerLine == null ? "" : markerLine.trim();
+            if (trimmedMarkerLine.startsWith(HASH_MARKER_TITLE_PREFIX)) {
+                String encodedTitle = trimmedMarkerLine
+                        .substring(HASH_MARKER_TITLE_PREFIX.length())
+                        .trim();
+                resolvedTitle = decodeHashMetadataField(encodedTitle);
+            } else if (trimmedMarkerLine.startsWith(HASH_MARKER_PACKAGE_PREFIX)) {
+                String encodedPackageName = trimmedMarkerLine
+                        .substring(HASH_MARKER_PACKAGE_PREFIX.length())
+                        .trim();
+                resolvedPackageName = decodeHashMetadataField(encodedPackageName);
+            }
+        }
+        return new HashMarkerMetadata(resolvedTitle, resolvedPackageName);
+    }
+
+    private String decodeHashMetadataField(String encodedMetadataField) throws IOException {
+        if (encodedMetadataField == null || encodedMetadataField.isBlank()) {
+            return "";
+        }
+        try {
+            byte[] decodedBytes = Base64.getDecoder().decode(encodedMetadataField);
+            return new String(decodedBytes, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException invalidBase64Exception) {
+            throw new IOException("Invalid hash marker metadata encoding", invalidBase64Exception);
+        }
+    }
+
+    private String normalizeHashMetadataText(String metadataText) {
+        if (metadataText == null) {
+            return "";
+        }
+        return metadataText.trim();
+    }
+
+    private record HashMarkerMetadata(String title, String packageName) {
+        private HashMarkerMetadata {
+            title = title == null ? "" : title;
+            packageName = packageName == null ? "" : packageName;
+        }
     }
 
     /**

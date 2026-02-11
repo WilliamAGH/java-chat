@@ -91,6 +91,7 @@ public class RateLimitState {
 
         state.rateLimitedUntil = resetTime;
         int failures = state.consecutiveFailures.incrementAndGet();
+        state.totalFailures.incrementAndGet();
         state.lastFailure = Instant.now();
 
         // Implement exponential backoff for repeated failures
@@ -140,7 +141,6 @@ public class RateLimitState {
         // Clear rate limit if it has expired
         if (state.rateLimitedUntil != null && Instant.now().isAfter(state.rateLimitedUntil)) {
             state.rateLimitedUntil = null;
-            state.consecutiveFailures.set(0);
             safeSaveState();
         }
 

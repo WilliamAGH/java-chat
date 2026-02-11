@@ -38,7 +38,17 @@ public class ChunkProcessingService {
         this.chunker = Objects.requireNonNull(chunker, "chunker");
         this.hasher = Objects.requireNonNull(hasher, "hasher");
         this.documentFactory = Objects.requireNonNull(documentFactory, "documentFactory");
-        this.hashIngestionLookup = requiredLocalStore::isHashIngested;
+        this.hashIngestionLookup = new HashIngestionLookup() {
+            @Override
+            public boolean isHashIngested(String hash) {
+                return requiredLocalStore.isHashIngested(hash);
+            }
+
+            @Override
+            public boolean hasMetadataChanged(String hash, String title, String packageName) {
+                return requiredLocalStore.hasHashMetadataChanged(hash, title, packageName);
+            }
+        };
         this.chunkTextStore = requiredLocalStore::saveChunkText;
         this.pdfExtractor = Objects.requireNonNull(pdfExtractor, "pdfExtractor");
     }
@@ -71,7 +81,8 @@ public class ChunkProcessingService {
             allChunkHashes.add(hash);
 
             // Skip if already processed (deduplication)
-            if (hashIngestionLookup.isHashIngested(hash)) {
+            boolean hashAlreadyIngested = hashIngestionLookup.isHashIngested(hash);
+            if (hashAlreadyIngested && !hashIngestionLookup.hasMetadataChanged(hash, title, packageName)) {
                 skipped++;
                 continue;
             }
@@ -172,10 +183,11 @@ public class ChunkProcessingService {
                 totalChunks++;
                 String hash = hasher.generateChunkHash(url, globalIndex, chunkText);
                 allChunkHashes.add(hash);
-                if (!hashIngestionLookup.isHashIngested(hash)) {
-                    Document doc = documentFactory.createDocumentWithPages(
+                boolean hashAlreadyIngested = hashIngestionLookup.isHashIngested(hash);
+                if (!hashAlreadyIngested || hashIngestionLookup.hasMetadataChanged(hash, title, packageName)) {
+                    Document pageDocument = documentFactory.createDocumentWithPages(
                             chunkText, url, title, globalIndex, packageName, hash, pageIndex + 1, pageIndex + 1);
-                    pageDocuments.add(doc);
+                    pageDocuments.add(pageDocument);
                     chunkTextStore.saveChunkText(url, globalIndex, chunkText, hash);
                 } else {
                     skipped++;
@@ -266,12 +278,16 @@ public class ChunkProcessingService {
     /**
      * Reads whether a chunk hash has already been indexed.
      */
-    @FunctionalInterface
     private interface HashIngestionLookup {
         /**
          * Returns true when the chunk hash already has an ingest marker.
          */
         boolean isHashIngested(String hash);
+
+        /**
+         * Returns true when stored metadata for an ingested hash differs from current metadata.
+         */
+        boolean hasMetadataChanged(String hash, String title, String packageName);
     }
 
     /**

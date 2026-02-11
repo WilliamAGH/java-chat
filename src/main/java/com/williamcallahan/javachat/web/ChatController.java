@@ -45,6 +45,9 @@ public class ChatController extends BaseController {
     private static final Logger PIPELINE_LOG = LoggerFactory.getLogger("PIPELINE");
     private static final AtomicLong REQUEST_SEQUENCE = new AtomicLong();
     private static final String SESSION_ID_REQUIRED = "Session ID is required";
+    private static final String SESSION_NOT_FOUND_MESSAGE = "Session not found on server";
+    private static final String SESSION_FOUND_MESSAGE = "Session found";
+    private static final String SESSION_FOUND_EMPTY_MESSAGE = "Session found but empty";
     private static final String PIPELINE_LOG_SEPARATOR = "============================================";
 
     private final ChatService chatService;
@@ -310,11 +313,15 @@ public class ChatController extends BaseController {
         if (sessionId == null || sessionId.isEmpty()) {
             return ResponseEntity.badRequest().body(new SessionValidationResponse("", 0, false, SESSION_ID_REQUIRED));
         }
+        boolean sessionRecognized = chatMemory.hasSession(sessionId);
+        if (!sessionRecognized) {
+            return ResponseEntity.ok(new SessionValidationResponse(sessionId, 0, false, SESSION_NOT_FOUND_MESSAGE));
+        }
         var turns = chatMemory.getTurns(sessionId);
         int turnCount = turns.size();
         boolean exists = turnCount > 0;
-        return ResponseEntity.ok(new SessionValidationResponse(
-                sessionId, turnCount, exists, exists ? "Session found" : "Session not found on server"));
+        String validationMessage = exists ? SESSION_FOUND_MESSAGE : SESSION_FOUND_EMPTY_MESSAGE;
+        return ResponseEntity.ok(new SessionValidationResponse(sessionId, turnCount, exists, validationMessage));
     }
 
     /**

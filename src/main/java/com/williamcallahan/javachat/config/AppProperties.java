@@ -476,7 +476,7 @@ public class AppProperties {
 
     /** Embedding vector configuration. */
     public static class Embeddings {
-        private int dimensions = 1536;
+        private int dimensions = 4096;
 
         public int getDimensions() {
             return dimensions;
