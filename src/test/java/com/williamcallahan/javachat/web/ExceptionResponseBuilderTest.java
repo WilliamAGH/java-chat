@@ -34,16 +34,17 @@ class ExceptionResponseBuilderTest {
     }
 
     @Test
-    void describeException_handlesNullStatusTextWithoutThrowing() {
+    void describeException_handlesBlankStatusTextWithoutThrowing() {
         HttpHeaders headers = new HttpHeaders();
         HttpClientErrorException exception = HttpClientErrorException.create(
                 HttpStatus.BAD_REQUEST,
-                null,
+                "",
                 headers,
                 "problem".getBytes(StandardCharsets.UTF_8),
                 StandardCharsets.UTF_8);
 
         ExceptionResponseBuilder builder = new ExceptionResponseBuilder();
-        assertDoesNotThrow(() -> builder.describeException(exception));
+        String details = assertDoesNotThrow(() -> builder.describeException(exception));
+        assertTrue(details.contains("httpStatus=400"), details);
     }
 }
