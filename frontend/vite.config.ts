@@ -21,7 +21,8 @@ function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
     return []
   }
 
-  const noScriptImageUrl = `${SIMPLE_ANALYTICS_QUEUE_ORIGIN}/noscript.gif`
+  const noScriptImageUrl =
+    `${SIMPLE_ANALYTICS_QUEUE_ORIGIN}/noscript.gif?hostname=${encodeURIComponent(SIMPLE_ANALYTICS_HOSTNAME)}`
 
   return [
     {
