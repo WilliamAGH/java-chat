@@ -33,8 +33,12 @@ class OpenGraphImageRendererTest {
     private static final String OG_IMAGE_CONTENT_EQUALITY_ASSERTION_MESSAGE =
             "Repeated calls must return identical content";
 
+    private final OpenGraphImageRenderer renderer;
+
     @Autowired
-    OpenGraphImageRenderer renderer;
+    OpenGraphImageRendererTest(OpenGraphImageRenderer renderer) {
+        this.renderer = renderer;
+    }
 
     @Test
     void renders_valid_png_with_correct_dimensions() throws Exception {
