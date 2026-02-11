@@ -30,11 +30,11 @@ class OpenGraphImageControllerTest {
     private static final String CACHE_CONTROL_HEADER_NAME = "Cache-Control";
     private static final String CACHE_CONTROL_PUBLIC_TOKEN = "public";
     private static final String CACHE_CONTROL_MAX_AGE_TOKEN = "max-age=86400";
-    private static final int OG_IMAGE_WIDTH_PX = 1200;
-    private static final int OG_IMAGE_HEIGHT_PX = 630;
     private static final String OG_IMAGE_DECODE_ASSERTION_MESSAGE = "Response must contain a decodable image";
-    private static final String OG_IMAGE_WIDTH_ASSERTION_MESSAGE = "OG image width must be 1200";
-    private static final String OG_IMAGE_HEIGHT_ASSERTION_MESSAGE = "OG image height must be 630";
+    private static final String OG_IMAGE_WIDTH_ASSERTION_MESSAGE =
+            "OG image width must be " + OpenGraphImageRenderer.OG_IMAGE_WIDTH;
+    private static final String OG_IMAGE_HEIGHT_ASSERTION_MESSAGE =
+            "OG image height must be " + OpenGraphImageRenderer.OG_IMAGE_HEIGHT;
 
     @Autowired
     MockMvc mvc;
@@ -61,7 +61,8 @@ class OpenGraphImageControllerTest {
         BufferedImage decodedImage = ImageIO.read(new ByteArrayInputStream(pngBytes));
 
         assertNotNull(decodedImage, OG_IMAGE_DECODE_ASSERTION_MESSAGE);
-        assertEquals(OG_IMAGE_WIDTH_PX, decodedImage.getWidth(), OG_IMAGE_WIDTH_ASSERTION_MESSAGE);
-        assertEquals(OG_IMAGE_HEIGHT_PX, decodedImage.getHeight(), OG_IMAGE_HEIGHT_ASSERTION_MESSAGE);
+        assertEquals(OpenGraphImageRenderer.OG_IMAGE_WIDTH, decodedImage.getWidth(), OG_IMAGE_WIDTH_ASSERTION_MESSAGE);
+        assertEquals(
+                OpenGraphImageRenderer.OG_IMAGE_HEIGHT, decodedImage.getHeight(), OG_IMAGE_HEIGHT_ASSERTION_MESSAGE);
     }
 }
