@@ -44,6 +44,8 @@ public class OpenGraphImageRenderer {
     private static final int TAGLINE_LINE_SPACING = 48;
 
     private static final int TEXT_LEFT_MARGIN = 80;
+    private static final int TITLE_TOP_MARGIN = 170;
+    private static final int TITLE_TAGLINE_SPACING = 30;
     private static final int LOGO_RIGHT_MARGIN = 80;
 
     /**
@@ -126,14 +128,14 @@ public class OpenGraphImageRenderer {
         graphics.setColor(TITLE_COLOR);
 
         FontMetrics titleMetrics = graphics.getFontMetrics();
-        int titleBaseline = 170 + titleMetrics.getAscent();
+        int titleBaseline = TITLE_TOP_MARGIN + titleMetrics.getAscent();
         graphics.drawString(TITLE_TEXT, TEXT_LEFT_MARGIN, titleBaseline);
 
         Font taglineFont = new Font(Font.SANS_SERIF, Font.PLAIN, TAGLINE_FONT_SIZE);
         graphics.setFont(taglineFont);
         graphics.setColor(TAGLINE_COLOR);
 
-        int taglineBaseline = titleBaseline + 30;
+        int taglineBaseline = titleBaseline + TITLE_TAGLINE_SPACING;
         for (String taglineLine : TAGLINE_LINES) {
             taglineBaseline += TAGLINE_LINE_SPACING;
             graphics.drawString(taglineLine, TEXT_LEFT_MARGIN, taglineBaseline);
