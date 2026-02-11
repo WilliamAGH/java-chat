@@ -186,9 +186,9 @@ class ExternalServiceHealthTest {
     private Object newServiceStatus() throws ReflectiveOperationException {
         Class<?> serviceStatusClass =
                 Class.forName("com.williamcallahan.javachat.service.ExternalServiceHealth$ServiceStatus");
-        Constructor<?> constructor = serviceStatusClass.getDeclaredConstructor(String.class);
+        Constructor<?> constructor = serviceStatusClass.getDeclaredConstructor();
         constructor.setAccessible(true);
-        return constructor.newInstance(ExternalServiceHealth.SERVICE_QDRANT);
+        return constructor.newInstance();
     }
 
     private AtomicInteger readConsecutiveFailures(Object serviceStatus) throws ReflectiveOperationException {
