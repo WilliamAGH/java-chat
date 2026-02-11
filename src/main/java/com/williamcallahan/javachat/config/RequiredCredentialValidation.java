@@ -28,8 +28,7 @@ public class RequiredCredentialValidation {
     private static final String MISSING_QDRANT_API_KEY_MESSAGE = "Qdrant TLS is enabled but "
             + "spring.ai.vectorstore.qdrant.api-key is not set. "
             + "Set SPRING_AI_VECTORSTORE_QDRANT_API_KEY or QDRANT_API_KEY for authenticated access.";
-    private static final String REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE =
-            "Required credential validation passed";
+    private static final String REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE = "Required credential validation passed";
 
     private final String githubToken;
 
