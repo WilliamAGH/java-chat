@@ -19,6 +19,11 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
+    private static final String MISSING_LLM_API_KEY_MESSAGE =
+            "No LLM API key configured. Set GITHUB_TOKEN or OPENAI_API_KEY environment variable.";
+    private static final String MISSING_QDRANT_API_KEY_MESSAGE = "Qdrant TLS is enabled but "
+            + "spring.ai.vectorstore.qdrant.api-key is not set. "
+            + "Set SPRING_AI_VECTORSTORE_QDRANT_API_KEY or QDRANT_API_KEY for authenticated access.";
 
     @Value("${GITHUB_TOKEN:}")
     private String githubToken;
@@ -29,7 +34,7 @@ public class RequiredCredentialValidation {
     @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
     private boolean qdrantTlsEnabled;
 
-    @Value("${QDRANT_API_KEY:}")
+    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
     private String qdrantApiKey;
 
     /**
@@ -44,13 +49,11 @@ public class RequiredCredentialValidation {
         boolean openaiKeyPresent = openaiApiKey != null && !openaiApiKey.isBlank();
 
         if (!githubTokenPresent && !openaiKeyPresent) {
-            throw new IllegalStateException(
-                    "No LLM API key configured. Set GITHUB_TOKEN or OPENAI_API_KEY environment variable.");
+            throw new IllegalStateException(MISSING_LLM_API_KEY_MESSAGE);
         }
 
         if (qdrantTlsEnabled && (qdrantApiKey == null || qdrantApiKey.isBlank())) {
-            throw new IllegalStateException("Qdrant TLS is enabled but QDRANT_API_KEY is not set. "
-                    + "Cloud Qdrant requires an API key for authenticated access.");
+            throw new IllegalStateException(MISSING_QDRANT_API_KEY_MESSAGE);
         }
 
         log.info("Required credential validation passed");
