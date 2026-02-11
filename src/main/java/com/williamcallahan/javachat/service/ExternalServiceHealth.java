@@ -207,7 +207,7 @@ public class ExternalServiceHealth {
             String qdrantApiKey = qdrantRestConnection.apiKey();
             var requestSpec = webClient.get().uri(connectivityUrl);
             if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-                requestSpec = requestSpec.header("api-key", qdrantApiKey);
+                requestSpec = requestSpec.header(QdrantRestConnection.API_KEY_HEADER, qdrantApiKey);
             }
 
             requestSpec
@@ -261,7 +261,7 @@ public class ExternalServiceHealth {
                 String collectionUrl = base + "/collections/" + collection;
                 var requestSpec = webClient.get().uri(collectionUrl);
                 if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-                    requestSpec = requestSpec.header("api-key", qdrantApiKey);
+                    requestSpec = requestSpec.header(QdrantRestConnection.API_KEY_HEADER, qdrantApiKey);
                 }
                 checks.add(requestSpec
                         .retrieve()
