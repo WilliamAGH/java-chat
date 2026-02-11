@@ -221,17 +221,23 @@ public class ExternalServiceHealth {
                     .retrieve()
                     .toBodilessEntity()
                     .timeout(HEALTH_CHECK_TIMEOUT)
-                    .subscribe(ignored -> status.markHealthy(), error -> {
+                    .doOnSuccess(ignored -> {
+                        log.info("[HEALTH] Qdrant connectivity check succeeded");
+                        status.markHealthy();
+                    })
+                    .doOnError(error -> {
                         status.markUnhealthy();
                         log.warn(
-                                "Qdrant connectivity check failed (exception type: {}) - Will retry in {}",
+                                "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
                                 error.getClass().getSimpleName(),
+                                error.getMessage(),
                                 formatDuration(status.currentBackoff));
-                    });
+                    })
+                    .subscribe();
         } catch (RuntimeException connectivityException) {
             status.markUnhealthy();
             log.warn(
-                    "Qdrant connectivity check failed before subscription (exception type: {}) - Will retry in {}",
+                    "[HEALTH] Qdrant connectivity check failed before subscription (exception type: {}) - Will retry in {}",
                     connectivityException.getClass().getSimpleName(),
                     formatDuration(status.currentBackoff),
                     connectivityException);
@@ -247,7 +253,7 @@ public class ExternalServiceHealth {
 
         if (qdrantCollections.isEmpty()) {
             status.markUnhealthy();
-            log.warn("Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
+            log.warn("[HEALTH] Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
             return;
         }
 
@@ -272,22 +278,24 @@ public class ExternalServiceHealth {
 
             Mono.whenDelayError(checks)
                     .timeout(HEALTH_CHECK_TIMEOUT)
-                    .subscribe(
-                            ignored -> {
-                                status.markHealthy();
-                                log.debug("Qdrant health check succeeded (all collections present)");
-                            },
-                            error -> {
-                                status.markUnhealthy();
-                                log.warn(
-                                        "Qdrant health check failed (exception type: {}) - Will retry in {}",
-                                        error.getClass().getSimpleName(),
-                                        formatDuration(status.currentBackoff));
-                            });
+                    .doOnSuccess(ignored -> {
+                        status.markHealthy();
+                        log.info(
+                                "[HEALTH] Qdrant health check succeeded (all {} collections present)",
+                                qdrantCollections.size());
+                    })
+                    .doOnError(error -> {
+                        status.markUnhealthy();
+                        log.warn(
+                                "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
+                                error.getClass().getSimpleName(),
+                                formatDuration(status.currentBackoff));
+                    })
+                    .subscribe();
         } catch (RuntimeException healthCheckException) {
             status.markUnhealthy();
             log.warn(
-                    "Qdrant health check failed before subscription (exception type: {}) - Will retry in {}",
+                    "[HEALTH] Qdrant health check failed before subscription (exception type: {}) - Will retry in {}",
                     healthCheckException.getClass().getSimpleName(),
                     formatDuration(status.currentBackoff),
                     healthCheckException);
