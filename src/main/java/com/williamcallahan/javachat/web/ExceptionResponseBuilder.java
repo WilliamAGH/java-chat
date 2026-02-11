@@ -4,6 +4,7 @@ import com.openai.errors.OpenAIServiceException;
 import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.domain.errors.ApiSuccessResponse;
+import java.util.Objects;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Component
 public class ExceptionResponseBuilder {
+    private static final String EXCEPTION_REQUIRED_MESSAGE = "exception must not be null";
 
     /**
      * Builds a standardized error response with status and message.
@@ -57,12 +59,11 @@ public class ExceptionResponseBuilder {
      * Builds a detailed error description suitable for API responses or UI diagnostics.
      *
      * @param exception the exception to describe
-     * @return detailed description, or null when no exception is provided
+     * @return detailed description including class name, message, and protocol-specific details
+     * @throws NullPointerException when exception is null
      */
     public String describeException(Exception exception) {
-        if (exception == null) {
-            return null;
-        }
+        Objects.requireNonNull(exception, EXCEPTION_REQUIRED_MESSAGE);
         StringBuilder details = new StringBuilder();
         details.append(exception.getClass().getSimpleName());
         String message = exception.getMessage();
@@ -88,11 +89,11 @@ public class ExceptionResponseBuilder {
     private void appendRestClientDetails(StringBuilder details, RestClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (statusText != null && !statusText.isBlank()) {
+        if (!statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
-        if (responseBody != null && !responseBody.isBlank()) {
+        if (!responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
         HttpHeaders headers =
@@ -106,15 +107,15 @@ public class ExceptionResponseBuilder {
     private void appendWebClientDetails(StringBuilder details, WebClientResponseException exception) {
         details.append(" [httpStatus=").append(exception.getStatusCode().value());
         String statusText = exception.getStatusText();
-        if (statusText != null && !statusText.isBlank()) {
+        if (!statusText.isBlank()) {
             details.append(" ").append(statusText);
         }
         String responseBody = exception.getResponseBodyAsString();
-        if (responseBody != null && !responseBody.isBlank()) {
+        if (!responseBody.isBlank()) {
             details.append(", body=").append(responseBody);
         }
         HttpHeaders headers = exception.getHeaders();
-        if (headers != null && !headers.isEmpty()) {
+        if (!headers.isEmpty()) {
             details.append(", headers=").append(headers);
         }
         details.append("]");
@@ -123,15 +124,12 @@ public class ExceptionResponseBuilder {
     private void appendOpenAiDetails(StringBuilder details, OpenAIServiceException exception) {
         details.append(" [httpStatus=").append(exception.statusCode());
         var headers = exception.headers();
-        if (headers != null && !headers.isEmpty()) {
+        if (!headers.isEmpty()) {
             details.append(", headers=").append(headers);
         }
-        var bodyJson = exception.body();
-        if (bodyJson != null) {
-            String body = bodyJson.toString();
-            if (!body.isBlank()) {
-                details.append(", body=").append(body);
-            }
+        String body = exception.body().toString();
+        if (!body.isBlank()) {
+            details.append(", body=").append(body);
         }
         exception.code().ifPresent(code -> details.append(", code=").append(code));
         exception.param().ifPresent(param -> details.append(", param=").append(param));

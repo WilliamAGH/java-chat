@@ -153,7 +153,7 @@ class ChatMemoryServiceTest {
 
         for (int workerIndex = 0; workerIndex < workerCount; workerIndex++) {
             final int messageIndex = workerIndex;
-            workerPool.submit(() -> {
+            workerPool.execute(() -> {
                 try {
                     startSignal.await();
                     chatMemoryService.addUser(sessionId, "message-" + messageIndex);

@@ -29,7 +29,7 @@ class RateLimitStateTest {
     }
 
     @Test
-    void isAvailable_doesNotResetConsecutiveFailuresWhenWindowExpires() throws Exception {
+    void isAvailable_doesNotResetConsecutiveFailuresWhenWindowExpires() throws ReflectiveOperationException {
         Instant expiredResetTime = Instant.now().minus(Duration.ofSeconds(5));
         rateLimitState.recordRateLimit(PROVIDER_NAME, expiredResetTime, "1m");
 
@@ -41,14 +41,14 @@ class RateLimitStateTest {
     }
 
     @Test
-    void recordRateLimit_incrementsTotalFailuresCounter() throws Exception {
+    void recordRateLimit_incrementsTotalFailuresCounter() throws ReflectiveOperationException {
         rateLimitState.recordRateLimit(PROVIDER_NAME, null, "1m");
 
         RateLimitState.ProviderState providerState = providerState(PROVIDER_NAME);
         assertEquals(1, providerState.getTotalFailures());
     }
 
-    private RateLimitState.ProviderState providerState(String providerName) throws Exception {
+    private RateLimitState.ProviderState providerState(String providerName) throws ReflectiveOperationException {
         Field providerStatesField = RateLimitState.class.getDeclaredField("providerStates");
         providerStatesField.setAccessible(true);
         Object providerStatesRaw = providerStatesField.get(rateLimitState);

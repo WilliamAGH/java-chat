@@ -13,37 +13,46 @@ import org.springframework.web.client.HttpClientErrorException;
  * Verifies exception descriptions include HTTP details when available.
  */
 class ExceptionResponseBuilderTest {
+    private static final String TEST_HEADER_NAME = "X-Test";
+    private static final String TEST_HEADER_VALUE = "1";
+    private static final String HTTP_STATUS_TEXT_BAD_REQUEST = "Bad Request";
+    private static final String HTTP_STATUS_TEXT_BLANK = "";
+    private static final String RESPONSE_BODY_PROBLEM = "problem";
+    private static final String EXPECTED_HTTP_STATUS_TOKEN = "httpStatus=400";
+    private static final String EXPECTED_BODY_TOKEN = "body=problem";
+    private static final String EXPECTED_HEADERS_TOKEN = "headers=";
 
     @Test
     void describeException_includesHttpStatusAndBody() {
         HttpHeaders headers = new HttpHeaders();
-        headers.add("X-Test", "1");
+        headers.add(TEST_HEADER_NAME, TEST_HEADER_VALUE);
         HttpClientErrorException exception = HttpClientErrorException.create(
                 HttpStatus.BAD_REQUEST,
-                "Bad Request",
+                HTTP_STATUS_TEXT_BAD_REQUEST,
                 headers,
-                "problem".getBytes(StandardCharsets.UTF_8),
+                RESPONSE_BODY_PROBLEM.getBytes(StandardCharsets.UTF_8),
                 StandardCharsets.UTF_8);
 
         ExceptionResponseBuilder builder = new ExceptionResponseBuilder();
         String details = builder.describeException(exception);
 
-        assertTrue(details.contains("httpStatus=400"), details);
-        assertTrue(details.contains("body=problem"), details);
-        assertTrue(details.contains("headers="), details);
+        assertTrue(details.contains(EXPECTED_HTTP_STATUS_TOKEN), details);
+        assertTrue(details.contains(EXPECTED_BODY_TOKEN), details);
+        assertTrue(details.contains(EXPECTED_HEADERS_TOKEN), details);
     }
 
     @Test
-    void describeException_handlesNullStatusTextWithoutThrowing() {
+    void describeException_handlesBlankStatusTextWithoutThrowing() {
         HttpHeaders headers = new HttpHeaders();
         HttpClientErrorException exception = HttpClientErrorException.create(
                 HttpStatus.BAD_REQUEST,
-                null,
+                HTTP_STATUS_TEXT_BLANK,
                 headers,
-                "problem".getBytes(StandardCharsets.UTF_8),
+                RESPONSE_BODY_PROBLEM.getBytes(StandardCharsets.UTF_8),
                 StandardCharsets.UTF_8);
 
         ExceptionResponseBuilder builder = new ExceptionResponseBuilder();
-        assertDoesNotThrow(() -> builder.describeException(exception));
+        String details = assertDoesNotThrow(() -> builder.describeException(exception));
+        assertTrue(details.contains(EXPECTED_HTTP_STATUS_TOKEN), details);
     }
 }

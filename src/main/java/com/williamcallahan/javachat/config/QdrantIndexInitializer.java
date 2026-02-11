@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +14,6 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.event.EventListener;
@@ -47,11 +45,6 @@ public class QdrantIndexInitializer {
     private static final int CONNECT_TIMEOUT_SECONDS = 15;
     private static final int READ_TIMEOUT_SECONDS = 30;
 
-    private static final int QDRANT_REST_PORT = 6333;
-    private static final int QDRANT_GRPC_PORT = 6334;
-    private static final int DOCKER_GRPC_PORT = 8086;
-    private static final int DOCKER_REST_PORT = 8087;
-
     private static final String SCHEMA_TYPE_KEYWORD = "keyword";
     private static final String SCHEMA_TYPE_INTEGER = "integer";
 
@@ -75,19 +68,7 @@ public class QdrantIndexInitializer {
             new PayloadIndexSpec("commitHash", SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec("license", SCHEMA_TYPE_KEYWORD));
 
-    @Value("${spring.ai.vectorstore.qdrant.host}")
-    private String host;
-
-    // Note: 6334 is gRPC; REST is 6333. We keep this for gRPC config but compute REST URL separately.
-    @Value("${spring.ai.vectorstore.qdrant.port:6334}")
-    private int port;
-
-    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
-    private boolean useTls;
-
-    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
-    private String apiKey;
-
+    private final QdrantRestConnection qdrantRestConnection;
     private final AppProperties appProperties;
     private final RestTemplate restTemplate;
     private final EmbeddingClient embeddingClient;
@@ -96,16 +77,19 @@ public class QdrantIndexInitializer {
     /**
      * Creates the initializer with strict startup validation of Qdrant collections and indexes.
      *
+     * @param qdrantRestConnection shared Qdrant REST connection details
      * @param appProperties application configuration for collection and vector names
      * @param restTemplateBuilder Spring-managed builder for REST calls to Qdrant
      * @param embeddingClient embedding client used to resolve expected vector dimensions
      * @param objectMapper JSON mapper used to build Qdrant request payloads
      */
     public QdrantIndexInitializer(
+            QdrantRestConnection qdrantRestConnection,
             AppProperties appProperties,
             RestTemplateBuilder restTemplateBuilder,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper) {
+        this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -165,7 +149,7 @@ public class QdrantIndexInitializer {
     private boolean collectionExists(String collection, HttpHeaders headers) {
         String path = "/collections/" + collection;
         boolean observedNotFound = false;
-        for (String base : restBaseUrls()) {
+        for (String base : qdrantRestConnection.candidateRestBaseUrls()) {
             String url = base + path;
             try {
                 restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
@@ -213,7 +197,7 @@ public class QdrantIndexInitializer {
         String path = "/collections/" + collection;
         RestClientResponseException lastHttp = null;
         RuntimeException lastRuntime = null;
-        for (String base : restBaseUrls()) {
+        for (String base : qdrantRestConnection.candidateRestBaseUrls()) {
             String url = base + path;
             try {
                 ResponseEntity<String> response = restTemplate.exchange(
@@ -277,7 +261,7 @@ public class QdrantIndexInitializer {
 
         RestClientResponseException lastHttp = null;
         RuntimeException lastRuntime = null;
-        for (String base : restBaseUrls()) {
+        for (String base : qdrantRestConnection.candidateRestBaseUrls()) {
             String url = base + path;
             try {
                 ResponseEntity<JsonNode> response =
@@ -426,7 +410,7 @@ public class QdrantIndexInitializer {
 
         RestClientResponseException lastHttp = null;
         RuntimeException lastRuntime = null;
-        for (String base : restBaseUrls()) {
+        for (String base : qdrantRestConnection.candidateRestBaseUrls()) {
             String url = base + path;
             try {
                 ResponseEntity<String> response =
@@ -462,26 +446,11 @@ public class QdrantIndexInitializer {
     private HttpHeaders jsonHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (apiKey != null && !apiKey.isBlank()) {
-            headers.set("api-key", apiKey);
+        String qdrantApiKey = qdrantRestConnection.apiKey();
+        if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+            headers.set(QdrantRestConnection.API_KEY_HEADER, qdrantApiKey);
         }
         return headers;
-    }
-
-    private List<String> restBaseUrls() {
-        List<String> bases = new ArrayList<>();
-        if (useTls) {
-            bases.add("https://" + host); // Cloud REST via 443
-        } else {
-            bases.add("http://" + host + ":" + QDRANT_REST_PORT);
-            if (port == QDRANT_GRPC_PORT) {
-                bases.add("http://" + host + ":" + QDRANT_GRPC_PORT);
-            } else if (port == DOCKER_GRPC_PORT) {
-                bases.add("http://" + host + ":" + DOCKER_REST_PORT);
-            }
-            bases.add("http://" + host + ":" + port);
-        }
-        return bases;
     }
 
     private record PayloadIndexRequest(

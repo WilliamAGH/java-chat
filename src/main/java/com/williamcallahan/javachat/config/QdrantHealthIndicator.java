@@ -41,7 +41,7 @@ public class QdrantHealthIndicator implements HealthIndicator {
     @Override
     public Health health() {
         // Trigger retry checks when unhealthy and backoff has elapsed.
-        externalServiceHealth.isHealthy(ExternalServiceHealth.SERVICE_QDRANT);
+        externalServiceHealth.triggerRetryIfDue(ExternalServiceHealth.SERVICE_QDRANT);
 
         ExternalServiceHealth.HealthSnapshot healthSnapshot =
                 externalServiceHealth.getHealthSnapshot(ExternalServiceHealth.SERVICE_QDRANT);

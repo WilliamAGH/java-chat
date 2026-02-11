@@ -29,7 +29,7 @@ class QdrantHealthIndicatorTest {
 
         Health health = qdrantHealthIndicator.health();
 
-        verify(externalServiceHealth, times(1)).isHealthy(ExternalServiceHealth.SERVICE_QDRANT);
+        verify(externalServiceHealth, times(1)).triggerRetryIfDue(ExternalServiceHealth.SERVICE_QDRANT);
         assertEquals(Status.DOWN, health.getStatus());
     }
 }
