@@ -19,23 +19,36 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
+    private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
+    private static final String OPENAI_API_KEY_PROPERTY = "${OPENAI_API_KEY:}";
+    private static final String QDRANT_USE_TLS_PROPERTY = "${spring.ai.vectorstore.qdrant.use-tls:false}";
+    private static final String QDRANT_API_KEY_PROPERTY = "${spring.ai.vectorstore.qdrant.api-key:}";
     private static final String MISSING_LLM_API_KEY_MESSAGE =
             "No LLM API key configured. Set GITHUB_TOKEN or OPENAI_API_KEY environment variable.";
     private static final String MISSING_QDRANT_API_KEY_MESSAGE = "Qdrant TLS is enabled but "
             + "spring.ai.vectorstore.qdrant.api-key is not set. "
             + "Set SPRING_AI_VECTORSTORE_QDRANT_API_KEY or QDRANT_API_KEY for authenticated access.";
+    private static final String REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE =
+            "Required credential validation passed";
 
-    @Value("${GITHUB_TOKEN:}")
-    private String githubToken;
+    private final String githubToken;
 
-    @Value("${OPENAI_API_KEY:}")
-    private String openaiApiKey;
+    private final String openaiApiKey;
 
-    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
-    private boolean qdrantTlsEnabled;
+    private final boolean qdrantTlsEnabled;
 
-    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
-    private String qdrantApiKey;
+    private final String qdrantApiKey;
+
+    RequiredCredentialValidation(
+            @Value(GITHUB_TOKEN_PROPERTY) String githubToken,
+            @Value(OPENAI_API_KEY_PROPERTY) String openaiApiKey,
+            @Value(QDRANT_USE_TLS_PROPERTY) boolean qdrantTlsEnabled,
+            @Value(QDRANT_API_KEY_PROPERTY) String qdrantApiKey) {
+        this.githubToken = githubToken;
+        this.openaiApiKey = openaiApiKey;
+        this.qdrantTlsEnabled = qdrantTlsEnabled;
+        this.qdrantApiKey = qdrantApiKey;
+    }
 
     /**
      * Validates required credentials and halts startup if critical keys are missing.
@@ -56,6 +69,6 @@ public class RequiredCredentialValidation {
             throw new IllegalStateException(MISSING_QDRANT_API_KEY_MESSAGE);
         }
 
-        log.info("Required credential validation passed");
+        log.info(REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE);
     }
 }

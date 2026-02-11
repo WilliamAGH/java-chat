@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Field;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -54,21 +53,6 @@ class RequiredCredentialValidationTest {
 
     private RequiredCredentialValidation createValidation(
             String githubToken, String openaiApiKey, boolean qdrantTlsEnabled, String qdrantApiKey) {
-        RequiredCredentialValidation validation = new RequiredCredentialValidation();
-        setField(validation, "githubToken", githubToken);
-        setField(validation, "openaiApiKey", openaiApiKey);
-        setField(validation, "qdrantTlsEnabled", qdrantTlsEnabled);
-        setField(validation, "qdrantApiKey", qdrantApiKey);
-        return validation;
-    }
-
-    private void setField(Object target, String fieldName, Object fieldValue) {
-        try {
-            Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(target, fieldValue);
-        } catch (ReflectiveOperationException reflectionFailure) {
-            throw new AssertionError("Failed to set field " + fieldName, reflectionFailure);
-        }
+        return new RequiredCredentialValidation(githubToken, openaiApiKey, qdrantTlsEnabled, qdrantApiKey);
     }
 }
