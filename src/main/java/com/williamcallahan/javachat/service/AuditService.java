@@ -192,7 +192,7 @@ public class AuditService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         String qdrantApiKey = qdrantRestConnection.apiKey();
         if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-            headers.set("api-key", qdrantApiKey);
+            headers.set(QdrantRestConnection.API_KEY_HEADER, qdrantApiKey);
         }
 
         QdrantScrollFilter scrollFilter =
