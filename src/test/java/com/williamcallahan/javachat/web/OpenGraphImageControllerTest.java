@@ -26,29 +26,42 @@ import org.springframework.test.web.servlet.MvcResult;
 @Import({OpenGraphImageRenderer.class, com.williamcallahan.javachat.config.AppProperties.class})
 @WithMockUser
 class OpenGraphImageControllerTest {
+    private static final String OG_IMAGE_PATH = "/og-image.png";
+    private static final String CACHE_CONTROL_HEADER_NAME = "Cache-Control";
+    private static final String CACHE_CONTROL_PUBLIC_TOKEN = "public";
+    private static final String CACHE_CONTROL_MAX_AGE_TOKEN = "max-age=86400";
+    private static final int OG_IMAGE_WIDTH_PX = 1200;
+    private static final int OG_IMAGE_HEIGHT_PX = 630;
+    private static final String OG_IMAGE_DECODE_ASSERTION_MESSAGE = "Response must contain a decodable image";
+    private static final String OG_IMAGE_WIDTH_ASSERTION_MESSAGE = "OG image width must be 1200";
+    private static final String OG_IMAGE_HEIGHT_ASSERTION_MESSAGE = "OG image height must be 630";
 
     @Autowired
     MockMvc mvc;
 
     @Test
     void serves_og_image_with_correct_content_type_and_cache_headers() throws Exception {
-        mvc.perform(get("/og-image.png"))
+        mvc.perform(get(OG_IMAGE_PATH))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.IMAGE_PNG))
-                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("max-age=86400")))
-                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("public")));
+                .andExpect(header().string(
+                                CACHE_CONTROL_HEADER_NAME,
+                                org.hamcrest.Matchers.containsString(CACHE_CONTROL_MAX_AGE_TOKEN)))
+                .andExpect(header().string(
+                                CACHE_CONTROL_HEADER_NAME,
+                                org.hamcrest.Matchers.containsString(CACHE_CONTROL_PUBLIC_TOKEN)));
     }
 
     @Test
     void serves_og_image_with_correct_dimensions() throws Exception {
         MvcResult mvcOutcome =
-                mvc.perform(get("/og-image.png")).andExpect(status().isOk()).andReturn();
+                mvc.perform(get(OG_IMAGE_PATH)).andExpect(status().isOk()).andReturn();
 
         byte[] pngBytes = mvcOutcome.getResponse().getContentAsByteArray();
         BufferedImage decodedImage = ImageIO.read(new ByteArrayInputStream(pngBytes));
 
-        assertNotNull(decodedImage, "Response must contain a decodable image");
-        assertEquals(1200, decodedImage.getWidth(), "OG image width must be 1200");
-        assertEquals(630, decodedImage.getHeight(), "OG image height must be 630");
+        assertNotNull(decodedImage, OG_IMAGE_DECODE_ASSERTION_MESSAGE);
+        assertEquals(OG_IMAGE_WIDTH_PX, decodedImage.getWidth(), OG_IMAGE_WIDTH_ASSERTION_MESSAGE);
+        assertEquals(OG_IMAGE_HEIGHT_PX, decodedImage.getHeight(), OG_IMAGE_HEIGHT_ASSERTION_MESSAGE);
     }
 }
