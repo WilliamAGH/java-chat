@@ -16,31 +16,37 @@ import org.springframework.http.ResponseEntity;
  */
 class ChatControllerSessionValidationTest {
 
+    private static final String UNKNOWN_SESSION_ID = "unknown-session-id";
+    private static final String RECOGNIZED_SESSION_ID = "recognized-session-id";
+    private static final String STORED_MESSAGE_TEXT = "Stored message";
+    private static final String SESSION_NOT_FOUND_MESSAGE = "Session not found on server";
+    private static final String SESSION_FOUND_MESSAGE = "Session found";
+    private static final String SESSION_ID_REQUIRED_MESSAGE = "Session ID is required";
+
     @Test
     void validateSession_doesNotCreateUnknownSessionAndReportsRecognizedSessionHistory() {
         ChatMemoryService chatMemoryService = new ChatMemoryService();
         ChatController chatController = new ChatController(
                 null, chatMemoryService, null, null, null, new ExceptionResponseBuilder(), new AppProperties());
-        String unknownSessionId = "unknown-session-id";
 
-        assertFalse(chatMemoryService.hasSession(unknownSessionId));
+        assertFalse(chatMemoryService.hasSession(UNKNOWN_SESSION_ID));
 
-        ResponseEntity<SessionValidationResponse> unknownSessionResponse =
-                chatController.validateSession(unknownSessionId);
-        assertEquals(HttpStatus.OK, unknownSessionResponse.getStatusCode());
-        SessionValidationResponse unknownSessionBody = unknownSessionResponse.getBody();
+        ResponseEntity<SessionValidationResponse> unknownSessionEntity =
+                chatController.validateSession(UNKNOWN_SESSION_ID);
+        assertEquals(HttpStatus.OK, unknownSessionEntity.getStatusCode());
+        SessionValidationResponse unknownSessionBody = unknownSessionEntity.getBody();
         assertNotNull(unknownSessionBody);
         assertFalse(unknownSessionBody.exists());
-        assertEquals("Session not found on server", unknownSessionBody.message());
-        assertFalse(chatMemoryService.hasSession(unknownSessionId));
+        assertEquals(SESSION_NOT_FOUND_MESSAGE, unknownSessionBody.message());
+        assertFalse(chatMemoryService.hasSession(UNKNOWN_SESSION_ID));
 
-        chatMemoryService.addUser("recognized-session-id", "Stored message");
-        ResponseEntity<SessionValidationResponse> recognizedSessionResponse =
-                chatController.validateSession("recognized-session-id");
-        SessionValidationResponse recognizedSessionBody = recognizedSessionResponse.getBody();
+        chatMemoryService.addUser(RECOGNIZED_SESSION_ID, STORED_MESSAGE_TEXT);
+        ResponseEntity<SessionValidationResponse> recognizedSessionEntity =
+                chatController.validateSession(RECOGNIZED_SESSION_ID);
+        SessionValidationResponse recognizedSessionBody = recognizedSessionEntity.getBody();
         assertNotNull(recognizedSessionBody);
         assertTrue(recognizedSessionBody.exists());
-        assertEquals("Session found", recognizedSessionBody.message());
+        assertEquals(SESSION_FOUND_MESSAGE, recognizedSessionBody.message());
     }
 
     @Test
@@ -49,11 +55,11 @@ class ChatControllerSessionValidationTest {
         ChatController chatController = new ChatController(
                 null, chatMemoryService, null, null, null, new ExceptionResponseBuilder(), new AppProperties());
 
-        ResponseEntity<SessionValidationResponse> response = chatController.validateSession("");
-        SessionValidationResponse body = response.getBody();
-        assertNotNull(body);
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertFalse(body.exists());
-        assertEquals("Session ID is required", body.message());
+        ResponseEntity<SessionValidationResponse> blankSessionEntity = chatController.validateSession("");
+        SessionValidationResponse blankSessionBody = blankSessionEntity.getBody();
+        assertNotNull(blankSessionBody);
+        assertEquals(HttpStatus.BAD_REQUEST, blankSessionEntity.getStatusCode());
+        assertFalse(blankSessionBody.exists());
+        assertEquals(SESSION_ID_REQUIRED_MESSAGE, blankSessionBody.message());
     }
 }
