@@ -4,23 +4,29 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 const SIMPLE_ANALYTICS_QUEUE_ORIGIN = 'https://queue.simpleanalyticscdn.com'
 const SIMPLE_ANALYTICS_HOSTNAME = 'javachat.ai'
 const SIMPLE_ANALYTICS_SCRIPT_URL = 'https://scripts.simpleanalyticscdn.com/latest.js'
+const SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT = `;(function () {
+  if (globalThis.location.hostname !== '${SIMPLE_ANALYTICS_HOSTNAME}') {
+    return
+  }
+
+  var analyticsScript = document.createElement('script')
+  analyticsScript.async = true
+  analyticsScript.src = '${SIMPLE_ANALYTICS_SCRIPT_URL}'
+  analyticsScript.setAttribute('data-hostname', '${SIMPLE_ANALYTICS_HOSTNAME}')
+  document.head.appendChild(analyticsScript)
+})()`
 
 function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
-  if (mode === 'development') {
+  if (mode !== 'production') {
     return []
   }
 
-  const noScriptImageUrl =
-    `${SIMPLE_ANALYTICS_QUEUE_ORIGIN}/noscript.gif?hostname=${encodeURIComponent(SIMPLE_ANALYTICS_HOSTNAME)}`
+  const noScriptImageUrl = `${SIMPLE_ANALYTICS_QUEUE_ORIGIN}/noscript.gif`
 
   return [
     {
       tag: 'script',
-      attrs: {
-        async: true,
-        src: SIMPLE_ANALYTICS_SCRIPT_URL,
-        'data-hostname': SIMPLE_ANALYTICS_HOSTNAME,
-      },
+      children: SIMPLE_ANALYTICS_RUNTIME_GUARD_SCRIPT,
       injectTo: 'body',
     },
     {
