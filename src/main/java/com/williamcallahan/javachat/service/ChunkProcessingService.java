@@ -185,9 +185,9 @@ public class ChunkProcessingService {
                 allChunkHashes.add(hash);
                 boolean hashAlreadyIngested = hashIngestionLookup.isHashIngested(hash);
                 if (!hashAlreadyIngested || hashIngestionLookup.hasMetadataChanged(hash, title, packageName)) {
-                    Document doc = documentFactory.createDocumentWithPages(
+                    Document pageDocument = documentFactory.createDocumentWithPages(
                             chunkText, url, title, globalIndex, packageName, hash, pageIndex + 1, pageIndex + 1);
-                    pageDocuments.add(doc);
+                    pageDocuments.add(pageDocument);
                     chunkTextStore.saveChunkText(url, globalIndex, chunkText, hash);
                 } else {
                     skipped++;
