@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -51,6 +52,6 @@ class OpenGraphImageRendererTest {
         byte[] firstCall = renderer.openGraphPngBytes();
         byte[] secondCall = renderer.openGraphPngBytes();
 
-        assertTrue(firstCall == secondCall, OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE);
+        assertSame(firstCall, secondCall, OG_IMAGE_CACHED_REFERENCE_ASSERTION_MESSAGE);
     }
 }
