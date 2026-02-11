@@ -2,7 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.GradientPaint;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component;
  * Renders a branded 1200x630 Open Graph image for social media previews.
  *
  * <p>The image is rendered once at startup using the high-resolution logo from classpath resources.
- * The result is cached as a byte array since the image is deterministic and never changes at runtime.
+ * The background uses the exact favicon navy blue (#25263C) so the logo's transparent rounded
+ * corners blend seamlessly. The result is cached as a byte array since the image is deterministic
+ * and never changes at runtime.
  */
 @Component
 public class OpenGraphImageRenderer {
@@ -25,21 +27,32 @@ public class OpenGraphImageRenderer {
     static final int OG_IMAGE_WIDTH = 1200;
     static final int OG_IMAGE_HEIGHT = 630;
     static final String OG_IMAGE_CONTENT_TYPE = "image/png";
-    private static final int LOGO_SIZE = 380;
 
-    private static final Color DARK_BACKGROUND = new Color(0x1a, 0x1a, 0x18);
-    private static final Color WARM_ACCENT = new Color(0x3a, 0x30, 0x18);
+    /** Exact background color from the favicon icon for seamless blending. */
+    private static final Color FAVICON_BLUE_BACKGROUND = new Color(0x25, 0x26, 0x3C);
+
     private static final Color TITLE_COLOR = Color.WHITE;
-    private static final Color MUTED_TAGLINE = new Color(0x99, 0x99, 0x88);
+    private static final Color TAGLINE_COLOR = new Color(0xB8, 0xB9, 0xCC);
 
-    private static final String TITLE_TEXT = "Java Chat";
-    private static final int TITLE_FONT_SIZE = 72;
-    private static final String TAGLINE_TEXT = "AI-Powered Java Learning With Citations";
-    private static final int TAGLINE_FONT_SIZE = 26;
+    private static final String TITLE_TEXT = "JavaChat.ai";
+    private static final int TITLE_FONT_SIZE = 82;
+
+    private static final String[] TAGLINE_LINES = {
+        "Learn programming and chat", "directly with libraries, SDKs,", "and GitHub repositories"
+    };
+    private static final int TAGLINE_FONT_SIZE = 34;
+    private static final int TAGLINE_LINE_SPACING = 48;
+
     private static final int TEXT_LEFT_MARGIN = 80;
-    private static final int LOGO_RIGHT_MARGIN = 100;
-    private static final int TITLE_BASELINE_OFFSET = 10;
-    private static final int TAGLINE_VERTICAL_GAP = 20;
+    private static final int LOGO_RIGHT_MARGIN = 80;
+
+    /**
+     * Pixels to crop from each edge of the 1024px source to fully remove the rounded-rectangle
+     * border and its semi-transparent white fringe pixels that create a visible outline.
+     */
+    private static final int LOGO_CROP_INSET = 110;
+
+    private static final int LOGO_DISPLAY_HEIGHT = 340;
 
     private final byte[] openGraphPngBytes;
 
@@ -49,8 +62,7 @@ public class OpenGraphImageRenderer {
      * @param logoResource the high-resolution logo PNG from classpath
      * @throws IOException if the logo cannot be read or the image cannot be encoded
      */
-    public OpenGraphImageRenderer(
-            @Value("classpath:/static/assets/javachat_brace_cup_star_1024.png") Resource logoResource)
+    public OpenGraphImageRenderer(@Value("classpath:/branding/javachat_brace_cup_star_1024.png") Resource logoResource)
             throws IOException {
         BufferedImage logoSource = ImageIO.read(logoResource.getInputStream());
         this.openGraphPngBytes = renderOpenGraphImage(logoSource);
@@ -89,16 +101,23 @@ public class OpenGraphImageRenderer {
     }
 
     private void drawBackground(Graphics2D graphics) {
-        GradientPaint backgroundGradient =
-                new GradientPaint(0, 0, DARK_BACKGROUND, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, WARM_ACCENT);
-        graphics.setPaint(backgroundGradient);
+        graphics.setColor(FAVICON_BLUE_BACKGROUND);
         graphics.fillRect(0, 0, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT);
     }
 
     private void drawLogo(Graphics2D graphics, BufferedImage logoSource) {
-        int logoX = OG_IMAGE_WIDTH - LOGO_SIZE - LOGO_RIGHT_MARGIN;
-        int logoY = (OG_IMAGE_HEIGHT - LOGO_SIZE) / 2;
-        graphics.drawImage(logoSource, logoX, logoY, LOGO_SIZE, LOGO_SIZE, null);
+        BufferedImage croppedLogo = logoSource.getSubimage(
+                LOGO_CROP_INSET,
+                LOGO_CROP_INSET,
+                logoSource.getWidth() - 2 * LOGO_CROP_INSET,
+                logoSource.getHeight() - 2 * LOGO_CROP_INSET);
+
+        double scale = (double) LOGO_DISPLAY_HEIGHT / croppedLogo.getHeight();
+        int displayWidth = (int) (croppedLogo.getWidth() * scale);
+
+        int logoX = OG_IMAGE_WIDTH - displayWidth - LOGO_RIGHT_MARGIN;
+        int logoY = (OG_IMAGE_HEIGHT - LOGO_DISPLAY_HEIGHT) / 2;
+        graphics.drawImage(croppedLogo, logoX, logoY, displayWidth, LOGO_DISPLAY_HEIGHT, null);
     }
 
     private void drawText(Graphics2D graphics) {
@@ -106,16 +125,19 @@ public class OpenGraphImageRenderer {
         graphics.setFont(titleFont);
         graphics.setColor(TITLE_COLOR);
 
-        int textVerticalCenter = OG_IMAGE_HEIGHT / 2;
-        int titleBaseline = textVerticalCenter - TITLE_BASELINE_OFFSET;
+        FontMetrics titleMetrics = graphics.getFontMetrics();
+        int titleBaseline = 170 + titleMetrics.getAscent();
         graphics.drawString(TITLE_TEXT, TEXT_LEFT_MARGIN, titleBaseline);
 
         Font taglineFont = new Font(Font.SANS_SERIF, Font.PLAIN, TAGLINE_FONT_SIZE);
         graphics.setFont(taglineFont);
-        graphics.setColor(MUTED_TAGLINE);
+        graphics.setColor(TAGLINE_COLOR);
 
-        int taglineBaseline = titleBaseline + TAGLINE_FONT_SIZE + TAGLINE_VERTICAL_GAP;
-        graphics.drawString(TAGLINE_TEXT, TEXT_LEFT_MARGIN, taglineBaseline);
+        int taglineBaseline = titleBaseline + 30;
+        for (String taglineLine : TAGLINE_LINES) {
+            taglineBaseline += TAGLINE_LINE_SPACING;
+            graphics.drawString(taglineLine, TEXT_LEFT_MARGIN, taglineBaseline);
+        }
     }
 
     private byte[] encodePng(BufferedImage canvas) throws IOException {
