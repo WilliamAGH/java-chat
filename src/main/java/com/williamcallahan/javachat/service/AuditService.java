@@ -316,17 +316,14 @@ public class AuditService {
      * Builds the Qdrant REST API base URL with correct port mapping.
      *
      * <p>The configured port is typically the gRPC port (6334 default, 8086 docker).
-     * REST API runs on a different port (6333 default, 8087 docker, or 443 for cloud TLS).
+     * REST API runs on a different port (6333 default, 8087 docker). The mapped port
+     * is always included, even under TLS, because Qdrant Cloud exposes REST on 6333.
      *
      * @return base URL for Qdrant REST API calls
      */
     private String buildQdrantRestBaseUrl() {
-        if (useTls) {
-            // Cloud deployment: REST via HTTPS on port 443 (gateway handles routing)
-            return "https://" + host;
-        }
-        // Local deployment: map gRPC port to REST port, or use as-is if not a known gRPC port
+        String scheme = useTls ? "https" : "http";
         int restPort = GRPC_TO_REST_PORT.getOrDefault(port, port);
-        return "http://" + host + ":" + restPort;
+        return scheme + "://" + host + ":" + restPort;
     }
 }

@@ -471,7 +471,8 @@ public class QdrantIndexInitializer {
     private List<String> restBaseUrls() {
         List<String> bases = new ArrayList<>();
         if (useTls) {
-            bases.add("https://" + host); // Cloud REST via 443
+            int tlsRestPort = mapGrpcToRestPort(port);
+            bases.add("https://" + host + ":" + tlsRestPort);
         } else {
             bases.add("http://" + host + ":" + QDRANT_REST_PORT);
             if (port == QDRANT_GRPC_PORT) {
@@ -482,6 +483,21 @@ public class QdrantIndexInitializer {
             bases.add("http://" + host + ":" + port);
         }
         return bases;
+    }
+
+    /**
+     * Maps a gRPC port to the corresponding Qdrant REST port.
+     *
+     * @param grpcPort the configured gRPC port
+     * @return the corresponding REST port, or the input unchanged if not a known gRPC port
+     */
+    private int mapGrpcToRestPort(int grpcPort) {
+        if (grpcPort == QDRANT_GRPC_PORT) {
+            return QDRANT_REST_PORT;
+        } else if (grpcPort == DOCKER_GRPC_PORT) {
+            return DOCKER_REST_PORT;
+        }
+        return grpcPort;
     }
 
     private record PayloadIndexRequest(

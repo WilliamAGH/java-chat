@@ -295,11 +295,9 @@ public class ExternalServiceHealth {
     }
 
     private String buildQdrantRestBaseUrl() {
-        if (qdrantSsl) {
-            return "https://" + qdrantHost;
-        }
+        String scheme = qdrantSsl ? "https" : "http";
         int restPort = mapGrpcPortToRestPort(qdrantPort);
-        return "http://" + qdrantHost + ":" + restPort;
+        return scheme + "://" + qdrantHost + ":" + restPort;
     }
 
     /**

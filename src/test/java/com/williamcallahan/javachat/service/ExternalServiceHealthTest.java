@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class ExternalServiceHealthTest {
 
     @Test
-    void serviceStatus_marksUnhealthyWithoutDurationOverflow() throws Exception {
+    void serviceStatus_marksUnhealthyWithoutDurationOverflow() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         AtomicInteger consecutiveFailures = readConsecutiveFailures(serviceStatus);
         consecutiveFailures.set(62);
@@ -32,7 +32,7 @@ class ExternalServiceHealthTest {
     }
 
     @Test
-    void serviceStatus_allowsOnlyOneConcurrentCheckUntilCompletion() throws Exception {
+    void serviceStatus_allowsOnlyOneConcurrentCheckUntilCompletion() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
         tryStartCheckMethod.setAccessible(true);
@@ -54,7 +54,7 @@ class ExternalServiceHealthTest {
     }
 
     @Test
-    void shouldRetryNow_returnsFalseWhenCheckInProgress() throws Exception {
+    void shouldRetryNow_returnsFalseWhenCheckInProgress() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
         tryStartCheckMethod.setAccessible(true);
@@ -69,7 +69,7 @@ class ExternalServiceHealthTest {
     }
 
     @Test
-    void shouldRetryNow_returnsFalseBeforeBackoffElapses() throws Exception {
+    void shouldRetryNow_returnsFalseBeforeBackoffElapses() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
         markUnhealthyMethod.setAccessible(true);
@@ -84,7 +84,7 @@ class ExternalServiceHealthTest {
     }
 
     @Test
-    void shouldRetryNow_returnsTrueAfterBackoffElapses() throws Exception {
+    void shouldRetryNow_returnsTrueAfterBackoffElapses() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
         markUnhealthyMethod.setAccessible(true);
@@ -99,7 +99,7 @@ class ExternalServiceHealthTest {
     }
 
     @Test
-    void computeBackoffDuration_doublesExponentiallyUntilCap() throws Exception {
+    void computeBackoffDuration_doublesExponentiallyUntilCap() throws ReflectiveOperationException {
         Object serviceStatus = newServiceStatus();
         Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
         markUnhealthyMethod.setAccessible(true);
@@ -122,7 +122,68 @@ class ExternalServiceHealthTest {
         assertEquals(Duration.ofMinutes(16), readCurrentBackoff(serviceStatus));
     }
 
-    private Object newServiceStatus() throws Exception {
+    @Test
+    void buildQdrantRestBaseUrl_withTlsAndDefaultPort_includesHttpsAndMappedPort() throws ReflectiveOperationException {
+        ExternalServiceHealth health = newExternalServiceHealth("cloud.qdrant.io", 6334, true);
+        String restBaseUrl = invokeBuildQdrantRestBaseUrl(health);
+        assertEquals("https://cloud.qdrant.io:6333", restBaseUrl);
+    }
+
+    @Test
+    void buildQdrantRestBaseUrl_withoutTls_includesHttpAndMappedPort() throws ReflectiveOperationException {
+        ExternalServiceHealth health = newExternalServiceHealth("localhost", 6334, false);
+        String restBaseUrl = invokeBuildQdrantRestBaseUrl(health);
+        assertEquals("http://localhost:6333", restBaseUrl);
+    }
+
+    @Test
+    void buildQdrantRestBaseUrl_withDockerPort_mapsToDockerRestPort() throws ReflectiveOperationException {
+        ExternalServiceHealth health = newExternalServiceHealth("localhost", 8086, false);
+        String restBaseUrl = invokeBuildQdrantRestBaseUrl(health);
+        assertEquals("http://localhost:8087", restBaseUrl);
+    }
+
+    @Test
+    void buildQdrantRestBaseUrl_withTlsAndDockerPort_mapsToDockerRestPort() throws ReflectiveOperationException {
+        ExternalServiceHealth health = newExternalServiceHealth("cloud.qdrant.io", 8086, true);
+        String restBaseUrl = invokeBuildQdrantRestBaseUrl(health);
+        assertEquals("https://cloud.qdrant.io:8087", restBaseUrl);
+    }
+
+    private ExternalServiceHealth newExternalServiceHealth(String host, int port, boolean ssl)
+            throws ReflectiveOperationException {
+        // Use a minimal constructor — WebClient.Builder and AppProperties are needed
+        // but buildQdrantRestBaseUrl only reads injected @Value fields, so we set them via reflection.
+        var builder = org.springframework.web.reactive.function.client.WebClient.builder();
+        var appProperties = new com.williamcallahan.javachat.config.AppProperties();
+        var collections = new com.williamcallahan.javachat.config.AppProperties.QdrantCollections();
+        collections.setBooks("books");
+        collections.setDocs("docs");
+        collections.setArticles("articles");
+        collections.setPdfs("pdfs");
+        var qdrant = appProperties.getQdrant();
+        qdrant.setCollections(collections);
+
+        ExternalServiceHealth health = new ExternalServiceHealth(builder, appProperties);
+        setField(health, "qdrantHost", host);
+        setField(health, "qdrantPort", port);
+        setField(health, "qdrantSsl", ssl);
+        return health;
+    }
+
+    private String invokeBuildQdrantRestBaseUrl(ExternalServiceHealth health) throws ReflectiveOperationException {
+        Method method = ExternalServiceHealth.class.getDeclaredMethod("buildQdrantRestBaseUrl");
+        method.setAccessible(true);
+        return (String) method.invoke(health);
+    }
+
+    private void setField(Object target, String fieldName, Object fieldValue) throws ReflectiveOperationException {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, fieldValue);
+    }
+
+    private Object newServiceStatus() throws ReflectiveOperationException {
         Class<?> serviceStatusClass =
                 Class.forName("com.williamcallahan.javachat.service.ExternalServiceHealth$ServiceStatus");
         Constructor<?> constructor = serviceStatusClass.getDeclaredConstructor(String.class);
@@ -130,13 +191,13 @@ class ExternalServiceHealthTest {
         return constructor.newInstance(ExternalServiceHealth.SERVICE_QDRANT);
     }
 
-    private AtomicInteger readConsecutiveFailures(Object serviceStatus) throws Exception {
+    private AtomicInteger readConsecutiveFailures(Object serviceStatus) throws ReflectiveOperationException {
         Field consecutiveFailuresField = serviceStatus.getClass().getDeclaredField("consecutiveFailures");
         consecutiveFailuresField.setAccessible(true);
         return (AtomicInteger) consecutiveFailuresField.get(serviceStatus);
     }
 
-    private Duration readCurrentBackoff(Object serviceStatus) throws Exception {
+    private Duration readCurrentBackoff(Object serviceStatus) throws ReflectiveOperationException {
         Field currentBackoffField = serviceStatus.getClass().getDeclaredField("currentBackoff");
         currentBackoffField.setAccessible(true);
         return (Duration) currentBackoffField.get(serviceStatus);
