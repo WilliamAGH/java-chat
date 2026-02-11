@@ -1,7 +1,44 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type HtmlTagDescriptor } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
-const SIMPLE_ANALYTICS_CDN = 'https://scripts.simpleanalyticscdn.com'
+const SIMPLE_ANALYTICS_QUEUE_ORIGIN = 'https://queue.simpleanalyticscdn.com'
+const SIMPLE_ANALYTICS_HOSTNAME = 'javachat.ai'
+const SIMPLE_ANALYTICS_SCRIPT_URL = 'https://scripts.simpleanalyticscdn.com/latest.js'
+
+function buildSimpleAnalyticsTags(mode: string): HtmlTagDescriptor[] {
+  if (mode === 'development') {
+    return []
+  }
+
+  const noScriptImageUrl =
+    `${SIMPLE_ANALYTICS_QUEUE_ORIGIN}/noscript.gif?hostname=${encodeURIComponent(SIMPLE_ANALYTICS_HOSTNAME)}`
+
+  return [
+    {
+      tag: 'script',
+      attrs: {
+        async: true,
+        src: SIMPLE_ANALYTICS_SCRIPT_URL,
+        'data-hostname': SIMPLE_ANALYTICS_HOSTNAME,
+      },
+      injectTo: 'body',
+    },
+    {
+      tag: 'noscript',
+      children: [
+        {
+          tag: 'img',
+          attrs: {
+            src: noScriptImageUrl,
+            alt: '',
+            referrerpolicy: 'no-referrer-when-downgrade',
+          },
+        },
+      ],
+      injectTo: 'body',
+    },
+  ]
+}
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -9,17 +46,7 @@ export default defineConfig(({ mode }) => ({
     {
       name: 'simple-analytics',
       transformIndexHtml() {
-        const scriptFile = mode === 'development' ? 'latest.dev.js' : 'latest.js'
-        return [
-          {
-            tag: 'script',
-            attrs: {
-              async: true,
-              src: `${SIMPLE_ANALYTICS_CDN}/${scriptFile}`,
-            },
-            injectTo: 'head',
-          },
-        ]
+        return buildSimpleAnalyticsTags(mode)
       },
     },
   ],
