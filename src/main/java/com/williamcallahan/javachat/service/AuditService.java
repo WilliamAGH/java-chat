@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantRestConnection;
 import com.williamcallahan.javachat.model.AuditReport;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,7 +24,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -38,34 +38,12 @@ import org.springframework.web.client.RestTemplate;
 public class AuditService {
     private static final Logger log = LoggerFactory.getLogger(AuditService.class);
 
-    /**
-     * Maps Qdrant gRPC ports to their corresponding REST API ports.
-     *
-     * <p>Spring AI configures the gRPC port (6334 default, 8086 in docker-compose),
-     * but scroll/REST operations require the REST port (6333 default, 8087 in docker).
-     */
-    private static final Map<Integer, Integer> GRPC_TO_REST_PORT = Map.of(
-            6334, 6333, // Qdrant default: gRPC -> REST
-            8086, 8087 // Docker compose mapping: gRPC -> REST
-            );
-
+    private final QdrantRestConnection qdrantRestConnection;
     private final Function<String, String> safeNameResolver;
     private final Supplier<Path> parsedDirSupplier;
     private final ContentHasher hasher;
     private final RestTemplate restTemplate;
     private final List<String> collectionNames;
-
-    @Value("${spring.ai.vectorstore.qdrant.host}")
-    private String host;
-
-    @Value("${spring.ai.vectorstore.qdrant.port:6334}")
-    private int port;
-
-    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
-    private boolean useTls;
-
-    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
-    private String apiKey;
 
     /**
      * Creates an audit service that compares locally parsed chunks against the vector store state.
@@ -73,13 +51,16 @@ public class AuditService {
      * @param localStore local snapshot and chunk storage
      * @param hasher content hashing helper
      * @param restTemplateBuilder Spring-managed builder for creating RestTemplate instances
+     * @param qdrantRestConnection shared Qdrant REST connection details
      * @param appProperties application configuration for collection names
      */
     public AuditService(
             LocalStoreService localStore,
             ContentHasher hasher,
             RestTemplateBuilder restTemplateBuilder,
+            QdrantRestConnection qdrantRestConnection,
             AppProperties appProperties) {
+        this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
         AppProperties.QdrantCollections configuredCollections =
@@ -204,15 +185,14 @@ public class AuditService {
     private List<String> fetchQdrantHashesFromCollection(String url, String collectionName) {
         List<String> hashes = new ArrayList<>();
 
-        // Build REST base URL with correct port mapping
-        // Note: spring.ai.vectorstore.qdrant.port is typically gRPC (6334); REST runs on 6333
-        String base = buildQdrantRestBaseUrl();
+        String base = qdrantRestConnection.restBaseUrl();
         String endpoint = base + "/collections/" + collectionName + "/points/scroll";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (apiKey != null && !apiKey.isBlank()) {
-            headers.set("api-key", apiKey);
+        String qdrantApiKey = qdrantRestConnection.apiKey();
+        if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+            headers.set("api-key", qdrantApiKey);
         }
 
         QdrantScrollFilter scrollFilter =
@@ -311,19 +291,4 @@ public class AuditService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record QdrantScrollPayload(@JsonProperty("hash") String hash) {}
-
-    /**
-     * Builds the Qdrant REST API base URL with correct port mapping.
-     *
-     * <p>The configured port is typically the gRPC port (6334 default, 8086 docker).
-     * REST API runs on a different port (6333 default, 8087 docker). The mapped port
-     * is always included, even under TLS, because Qdrant Cloud exposes REST on 6333.
-     *
-     * @return base URL for Qdrant REST API calls
-     */
-    private String buildQdrantRestBaseUrl() {
-        String scheme = useTls ? "https" : "http";
-        int restPort = GRPC_TO_REST_PORT.getOrDefault(port, port);
-        return scheme + "://" + host + ":" + restPort;
-    }
 }
