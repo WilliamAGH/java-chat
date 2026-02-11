@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service.ingestion;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
+import com.williamcallahan.javachat.service.DocumentFactory;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
@@ -370,22 +371,14 @@ public class LocalDocsFileIngestionProcessor {
             if (hashMetadata == null) {
                 continue;
             }
-            String title = metadataText(doc, "title");
-            String packageName = metadataText(doc, "package");
+            String title = DocumentFactory.metadataText(doc, "title");
+            String packageName = DocumentFactory.metadataText(doc, "package");
             try {
                 localStore.markHashIngested(hashMetadata.toString(), title, packageName);
             } catch (IOException markHashException) {
                 throw new IllegalStateException("Failed to mark hash as ingested: " + hashMetadata, markHashException);
             }
         }
-    }
-
-    private String metadataText(Document document, String metadataKey) {
-        Object metadataRaw = document.getMetadata().get(metadataKey);
-        if (metadataRaw == null) {
-            return "";
-        }
-        return metadataRaw.toString();
     }
 
     private void markFileIngested(

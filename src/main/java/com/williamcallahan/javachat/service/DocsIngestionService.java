@@ -157,22 +157,14 @@ public class DocsIngestionService {
             if (hashMetadata == null) {
                 continue;
             }
-            String title = metadataText(doc, "title");
-            String packageName = metadataText(doc, "package");
+            String title = DocumentFactory.metadataText(doc, "title");
+            String packageName = DocumentFactory.metadataText(doc, "package");
             try {
                 localStore.markHashIngested(hashMetadata.toString(), title, packageName);
             } catch (IOException markHashException) {
                 throw new IllegalStateException("Failed to mark hash as ingested: " + hashMetadata, markHashException);
             }
         }
-    }
-
-    private String metadataText(org.springframework.ai.document.Document document, String metadataKey) {
-        Object metadataRaw = document.getMetadata().get(metadataKey);
-        if (metadataRaw == null) {
-            return "";
-        }
-        return metadataRaw.toString();
     }
 
     static CrawlPageSnapshot prepareCrawlPageSnapshot(String url, String rawHtml) {

@@ -112,6 +112,21 @@ public class DocumentFactory {
         return doc;
     }
 
+    /**
+     * Extracts a metadata value as a string, returning empty string when absent.
+     *
+     * @param document the document to read metadata from
+     * @param metadataKey the metadata key to look up
+     * @return the metadata value as a string, or empty string when the key is absent or null
+     */
+    public static String metadataText(org.springframework.ai.document.Document document, String metadataKey) {
+        Object metadataRaw = document.getMetadata().get(metadataKey);
+        if (metadataRaw == null) {
+            return "";
+        }
+        return metadataRaw.toString();
+    }
+
     private org.springframework.ai.document.Document createDocumentWithOptionalId(String text, String hash) {
         if (hash == null || hash.isBlank()) {
             return new org.springframework.ai.document.Document(text);
