@@ -8,6 +8,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import javax.imageio.ImageIO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -61,13 +62,21 @@ public class OpenGraphImageRenderer {
     /**
      * Loads the logo and renders the OG image at construction time.
      *
+     * <p>Fails fast with an unchecked exception if the logo resource cannot be read or the
+     * image cannot be encoded, since the application cannot serve valid social previews without it.
+     *
      * @param logoResource the high-resolution logo PNG from classpath
-     * @throws IOException if the logo cannot be read or the image cannot be encoded
      */
-    public OpenGraphImageRenderer(@Value("classpath:/branding/javachat_brace_cup_star_1024.png") Resource logoResource)
-            throws IOException {
-        BufferedImage logoSource = ImageIO.read(logoResource.getInputStream());
-        this.openGraphPngBytes = renderOpenGraphImage(logoSource);
+    public OpenGraphImageRenderer(
+            @Value("classpath:/branding/javachat_brace_cup_star_1024.png") Resource logoResource) {
+        try {
+            BufferedImage logoSource = ImageIO.read(logoResource.getInputStream());
+            this.openGraphPngBytes = renderOpenGraphImage(logoSource);
+        } catch (IOException logoLoadException) {
+            throw new UncheckedIOException(
+                    "Failed to render Open Graph image from logo resource: " + logoResource.getDescription(),
+                    logoLoadException);
+        }
     }
 
     /**
