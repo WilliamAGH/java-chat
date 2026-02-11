@@ -170,6 +170,10 @@
         <Bug pattern="CRLF_INJECTION_LOGS"/>
         <Class name="com.williamcallahan.javachat.web.GuidedLearningController"/>
     </Match>
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+        <Class name="com.williamcallahan.javachat.service.ExternalServiceHealth"/>
+    </Match>
 
     <!--
         Ingestion service bundles intentionally aggregate Spring-managed collaborators so processors
