@@ -108,9 +108,17 @@ public class ExternalServiceHealth {
      *
      * <p>Hybrid collections may be created on {@link ApplicationReadyEvent}; this avoids false negatives
      * during early startup while still enforcing collection presence after initialization.</p>
+     *
+     * <p>The initial connectivity check from {@link #init()} may still be in-flight (reactive subscribe
+     * is non-blocking). Resetting the service status forces an immediate full collection check regardless
+     * of whether the connectivity probe has completed.</p>
      */
     @EventListener(ApplicationReadyEvent.class)
     public void verifyQdrantCollectionsAfterStartup() {
+        ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
+        if (status != null) {
+            status.reset();
+        }
         checkQdrantHealth();
     }
 
@@ -133,9 +141,8 @@ public class ExternalServiceHealth {
 
         // If unhealthy, check if we should retry based on backoff
         if (status.shouldRetryNow(Instant.now())) {
-            // Time to retry - trigger async health check
             if (SERVICE_QDRANT.equals(serviceName)) {
-                checkQdrantHealthAsync();
+                checkQdrantHealth();
             }
         }
 
@@ -193,10 +200,6 @@ public class ExternalServiceHealth {
         isHealthy(SERVICE_QDRANT);
     }
 
-    private void checkQdrantHealthAsync() {
-        checkQdrantHealth();
-    }
-
     private void checkQdrantConnectivity() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
@@ -204,21 +207,21 @@ public class ExternalServiceHealth {
             return;
         }
 
-        String base = buildQdrantRestBaseUrl();
-        String connectivityPath = qdrantSsl ? "/collections" : "/health";
-        String url = base + connectivityPath;
-
-        var requestSpec = webClient.get().uri(url);
-        if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-            requestSpec = requestSpec.header("api-key", qdrantApiKey);
-        }
-
         try {
+            String base = buildQdrantRestBaseUrl();
+            String connectivityPath = qdrantSsl ? "/collections" : "/health";
+            String connectivityUrl = base + connectivityPath;
+
+            var requestSpec = webClient.get().uri(connectivityUrl);
+            if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+                requestSpec = requestSpec.header("api-key", qdrantApiKey);
+            }
+
             requestSpec
                     .retrieve()
                     .toBodilessEntity()
                     .timeout(HEALTH_CHECK_TIMEOUT)
-                    .subscribe(response -> status.markHealthy(), error -> {
+                    .subscribe(ignored -> status.markHealthy(), error -> {
                         status.markUnhealthy();
                         log.warn(
                                 "Qdrant connectivity check failed (exception type: {}) - Will retry in {}",
@@ -248,25 +251,25 @@ public class ExternalServiceHealth {
             return;
         }
 
-        String base = buildQdrantRestBaseUrl();
-        List<Mono<Void>> checks = new ArrayList<>(qdrantCollections.size());
-        for (String collection : qdrantCollections) {
-            if (collection == null || collection.isBlank()) {
-                continue;
-            }
-            String url = base + "/collections/" + collection;
-            var requestSpec = webClient.get().uri(url);
-            if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
-                requestSpec = requestSpec.header("api-key", qdrantApiKey);
-            }
-            checks.add(requestSpec
-                    .retrieve()
-                    .toBodilessEntity()
-                    .timeout(HEALTH_CHECK_TIMEOUT)
-                    .then());
-        }
-
         try {
+            String base = buildQdrantRestBaseUrl();
+            List<Mono<Void>> checks = new ArrayList<>(qdrantCollections.size());
+            for (String collection : qdrantCollections) {
+                if (collection == null || collection.isBlank()) {
+                    continue;
+                }
+                String collectionUrl = base + "/collections/" + collection;
+                var requestSpec = webClient.get().uri(collectionUrl);
+                if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
+                    requestSpec = requestSpec.header("api-key", qdrantApiKey);
+                }
+                checks.add(requestSpec
+                        .retrieve()
+                        .toBodilessEntity()
+                        .timeout(HEALTH_CHECK_TIMEOUT)
+                        .then());
+            }
+
             Mono.whenDelayError(checks)
                     .timeout(HEALTH_CHECK_TIMEOUT)
                     .subscribe(
