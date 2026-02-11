@@ -41,6 +41,11 @@ class SeoControllerTest {
 
         assertEquals("Java Chat - AI-Powered Java Learning With Citations", htmlDocument.title());
         assertMetaContent(htmlDocument, "property", "og:url", "https://example.com");
+        assertMetaContent(htmlDocument, "property", "og:image", "https://example.com/og-image.png");
+        assertMetaContent(htmlDocument, "property", "og:image:width", "1200");
+        assertMetaContent(htmlDocument, "property", "og:image:height", "630");
+        assertMetaContent(htmlDocument, "property", "og:image:type", "image/png");
+        assertMetaContent(htmlDocument, "name", "twitter:card", "summary_large_image");
     }
 
     @Test

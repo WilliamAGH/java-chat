@@ -1,10 +1,12 @@
 package com.williamcallahan.javachat.web;
 
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -45,7 +47,7 @@ public class SeoController {
     }
 
     private void initMetadata() {
-        String defaultImage = "/mstile-310x310.png";
+        String defaultImage = "/og-image.png";
 
         PageMetadata base = new PageMetadata(
                 "Java Chat - AI-Powered Java Learning With Citations",
@@ -111,8 +113,12 @@ public class SeoController {
         setMeta(doc, "property", "og:description", metadata.description);
         setMeta(doc, "property", "og:url", fullUrl);
         setMeta(doc, "property", "og:image", imageUrl);
+        setMeta(doc, "property", "og:image:width", String.valueOf(OpenGraphImageRenderer.OG_IMAGE_WIDTH));
+        setMeta(doc, "property", "og:image:height", String.valueOf(OpenGraphImageRenderer.OG_IMAGE_HEIGHT));
+        setMeta(doc, "property", "og:image:type", OpenGraphImageRenderer.OG_IMAGE_CONTENT_TYPE);
 
         // Twitter
+        setMeta(doc, "name", "twitter:card", "summary_large_image");
         setMeta(doc, "name", "twitter:title", metadata.title);
         setMeta(doc, "name", "twitter:description", metadata.description);
         setMeta(doc, "name", "twitter:image", imageUrl);
@@ -134,6 +140,8 @@ public class SeoController {
     }
 
     private void updateJsonLd(Document doc, String fullUrl, String description) {
+        Objects.requireNonNull(fullUrl, "fullUrl must not be null for JSON-LD");
+        Objects.requireNonNull(description, "description must not be null for JSON-LD");
         Element jsonLd = doc.getElementById("java-chat-structured-data");
         if (jsonLd != null) {
             String json = """
@@ -170,8 +178,8 @@ public class SeoController {
     }
 
     private String escapeJson(String input) {
-        if (input == null) return "";
-        return input.replace("\"", "\\\"");
+        Objects.requireNonNull(input, "input must not be null");
+        return new String(JsonStringEncoder.getInstance().quoteAsString(input));
     }
 
     private record PageMetadata(String title, String description, String imagePath) {}
