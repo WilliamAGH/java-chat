@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantRestConnection;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,7 +15,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,29 +41,9 @@ public class ExternalServiceHealth {
     private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
 
     private final WebClient webClient;
+    private final QdrantRestConnection qdrantRestConnection;
     private final List<String> qdrantCollections;
     private final Map<String, ServiceStatus> serviceStatuses = new ConcurrentHashMap<>();
-
-    /** Qdrant gRPC default port. */
-    private static final int QDRANT_GRPC_PORT = 6334;
-    /** Qdrant REST default port. */
-    private static final int QDRANT_REST_PORT = 6333;
-    /** Docker compose gRPC port mapping in this repo. */
-    private static final int DOCKER_GRPC_PORT = 8086;
-    /** Docker compose REST port mapping in this repo. */
-    private static final int DOCKER_REST_PORT = 8087;
-
-    @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
-    private String qdrantHost;
-
-    @Value("${spring.ai.vectorstore.qdrant.port:6334}")
-    private int qdrantPort;
-
-    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
-    private boolean qdrantSsl;
-
-    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
-    private String qdrantApiKey;
 
     // Health check intervals
     private static final Duration INITIAL_CHECK_INTERVAL = Duration.ofMinutes(1);
@@ -77,11 +57,16 @@ public class ExternalServiceHealth {
      * Creates the health monitor with a WebClient for outbound checks.
      *
      * @param webClientBuilder WebClient builder for outbound checks
+     * @param qdrantRestConnection shared Qdrant REST connection details
      * @param appProperties application configuration for Qdrant collection names
      */
-    public ExternalServiceHealth(WebClient.Builder webClientBuilder, AppProperties appProperties) {
+    public ExternalServiceHealth(
+            WebClient.Builder webClientBuilder,
+            QdrantRestConnection qdrantRestConnection,
+            AppProperties appProperties) {
         this.webClient =
                 Objects.requireNonNull(webClientBuilder, "webClientBuilder").build();
+        this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
         AppProperties.QdrantCollections collections =
                 requiredAppProperties.getQdrant().getCollections();
@@ -215,10 +200,11 @@ public class ExternalServiceHealth {
         }
 
         try {
-            String base = buildQdrantRestBaseUrl();
-            String connectivityPath = qdrantSsl ? "/collections" : "/health";
+            String base = qdrantRestConnection.restBaseUrl();
+            String connectivityPath = qdrantRestConnection.useTls() ? "/collections" : "/health";
             String connectivityUrl = base + connectivityPath;
 
+            String qdrantApiKey = qdrantRestConnection.apiKey();
             var requestSpec = webClient.get().uri(connectivityUrl);
             if (qdrantApiKey != null && !qdrantApiKey.isBlank()) {
                 requestSpec = requestSpec.header("api-key", qdrantApiKey);
@@ -265,7 +251,8 @@ public class ExternalServiceHealth {
         }
 
         try {
-            String base = buildQdrantRestBaseUrl();
+            String base = qdrantRestConnection.restBaseUrl();
+            String qdrantApiKey = qdrantRestConnection.apiKey();
             List<Mono<Void>> checks = new ArrayList<>(qdrantCollections.size());
             for (String collection : qdrantCollections) {
                 if (collection == null || collection.isBlank()) {
@@ -318,12 +305,6 @@ public class ExternalServiceHealth {
         }
     }
 
-    private String buildQdrantRestBaseUrl() {
-        String scheme = qdrantSsl ? "https" : "http";
-        int restPort = mapGrpcPortToRestPort(qdrantPort);
-        return scheme + "://" + qdrantHost + ":" + restPort;
-    }
-
     /**
      * Forces a health check for a specific service.
      *
@@ -371,25 +352,6 @@ public class ExternalServiceHealth {
         } else {
             return String.format("%dm", minutes);
         }
-    }
-
-    /**
-     * Maps gRPC port to corresponding REST port for Qdrant.
-     *
-     * <p>Qdrant exposes gRPC on one port and REST on another. The configured port
-     * is typically gRPC; this method returns the corresponding REST port.
-     *
-     * @param grpcPort the configured gRPC port
-     * @return the corresponding REST port
-     */
-    private int mapGrpcPortToRestPort(int grpcPort) {
-        if (grpcPort == QDRANT_GRPC_PORT) {
-            return QDRANT_REST_PORT; // 6334 -> 6333
-        } else if (grpcPort == DOCKER_GRPC_PORT) {
-            return DOCKER_REST_PORT; // 8086 -> 8087
-        }
-        // Assume caller configured the REST port directly
-        return grpcPort;
     }
 
     /**
