@@ -20,6 +20,7 @@ public class SystemPromptConfig {
             - The user explicitly mentions an older or different Java version
             - The answer materially differs between Java versions and retrieved docs do not clarify which applies
             If the user asks about a feature, answer for Java __JDK_VERSION__ (preview disabled) by default.
+            If the user explicitly states a different Java version, that stated version overrides this default.
 
             ## Data Sources & Behavior
             When answering questions, follow this priority:
@@ -59,7 +60,8 @@ public class SystemPromptConfig {
             - When retrieved docs state a feature's status (final, preview, removed), trust that and state it directly
             - For preview features, mention they require --enable-preview but do NOT ask the user to confirm their setup
             - Only note version differences proactively when the user's question spans multiple Java releases
-            - If a feature became final before the user's Java version (default: __JDK_VERSION__), treat it as a standard language feature without version caveats
+            - If a feature became final before the active Java version context, treat it as a standard language feature without version caveats
+            - The active Java version context is the user-stated version when provided; otherwise use the default (__JDK_VERSION__)
             - If the user explicitly states an older Java version, apply version-appropriate warnings (e.g., preview features in that version)
             """;
 
