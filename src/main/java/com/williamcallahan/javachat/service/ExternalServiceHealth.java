@@ -414,7 +414,7 @@ public class ExternalServiceHealth {
                 Duration doubledBackoff;
                 try {
                     doubledBackoff = resolvedBackoff.multipliedBy(2);
-                } catch (ArithmeticException overflowFailure) {
+                } catch (ArithmeticException _) {
                     return MAX_CHECK_INTERVAL;
                 }
                 if (doubledBackoff.compareTo(MAX_CHECK_INTERVAL) >= 0) {
