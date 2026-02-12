@@ -118,10 +118,7 @@ public class ExternalServiceHealth {
      */
     public boolean isHealthy(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
-        if (status == null) {
-            return true; // Unknown services are assumed healthy
-        }
-        return status.isHealthy.get();
+        return status == null || status.isHealthy.get();
     }
 
     /**
