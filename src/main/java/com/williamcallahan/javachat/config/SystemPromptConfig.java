@@ -59,7 +59,8 @@ public class SystemPromptConfig {
             - When retrieved docs state a feature's status (final, preview, removed), trust that and state it directly
             - For preview features, mention they require --enable-preview but do NOT ask the user to confirm their setup
             - Only note version differences proactively when the user's question spans multiple Java releases
-            - If a feature became final before Java __JDK_VERSION__, treat it as a standard language feature without version caveats
+            - If a feature became final before the user's Java version (default: __JDK_VERSION__), treat it as a standard language feature without version caveats
+            - If the user explicitly states an older Java version, apply version-appropriate warnings (e.g., preview features in that version)
             """;
 
     @Value("${DOCS_JDK_VERSION:25}")
