@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test lint lint-ast format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo update-github-repos full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo update-github-repos full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -20,9 +20,11 @@ test: ## Run tests (loads .env if present)
 	@$(call load_env); \
 	  $(GRADLEW) test
 
-lint: lint-ast ## Run static analysis (Java: SpotBugs + PMD + ast-grep, Frontend: svelte-check)
+lint: lint-ast lint-frontend ## Run static analysis (Java + Frontend)
 	$(GRADLEW) spotbugsMain pmdMain
-	cd frontend && npm run check
+
+lint-frontend: ## Run frontend linting (oxlint + ast-grep + svelte-check)
+	cd frontend && npm run lint && npm run check
 
 lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@$(call require_cmd,ast-grep,brew install ast-grep)

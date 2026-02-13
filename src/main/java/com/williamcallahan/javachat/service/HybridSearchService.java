@@ -138,7 +138,7 @@ public class HybridSearchService {
         HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
 
         Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
-                new LinkedHashMap<>(collectionNames.size());
+                LinkedHashMap.newLinkedHashMap(collectionNames.size());
         for (String collection : collectionNames) {
             QueryPoints queryRequest = Objects.requireNonNull(
                     buildHybridQueryRequest(collection, encodedQuery, queryConfig, topK), "QueryPoints");

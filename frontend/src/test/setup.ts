@@ -16,6 +16,7 @@ Object.defineProperty(window, 'matchMedia', {
 })
 
 // jsdom doesn't implement scrollTo on elements; components use it for chat auto-scroll.
+// oxlint-disable-next-line no-extend-native -- jsdom polyfill, not production code
 Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
   writable: true,
   value: () => {}

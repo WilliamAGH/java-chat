@@ -3,5 +3,9 @@
 
 # Commands to run before each push
 [[pre-push]]
+name = "lint"
+run = "make lint"
+
+[[pre-push]]
 name = "build-and-test"
 run = "make build && make test"

@@ -118,10 +118,7 @@ public class ExternalServiceHealth {
      */
     public boolean isHealthy(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
-        if (status == null) {
-            return true; // Unknown services are assumed healthy
-        }
-        return status.isHealthy.get();
+        return status == null || status.isHealthy.get();
     }
 
     /**
@@ -417,7 +414,7 @@ public class ExternalServiceHealth {
                 Duration doubledBackoff;
                 try {
                     doubledBackoff = resolvedBackoff.multipliedBy(2);
-                } catch (ArithmeticException overflowFailure) {
+                } catch (ArithmeticException _) {
                     return MAX_CHECK_INTERVAL;
                 }
                 if (doubledBackoff.compareTo(MAX_CHECK_INTERVAL) >= 0) {

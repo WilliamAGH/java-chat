@@ -1,0 +1,74 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "react",
+    "react-hooks",
+    "nextjs",
+    "import",
+    "jsx-a11y",
+    "promise",
+    "vitest"
+  ],
+  "jsPlugins": [
+    {
+      "name": "zod",
+      "specifier": "../node_modules/eslint-plugin-zod/dist/index.cjs"
+    }
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2023": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn",
+    "style": "off",
+    "pedantic": "off"
+  },
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "no-await-in-loop": "off",
+    "import/no-unassigned-import": ["error", {
+      "allow": ["**/*.css", "@testing-library/**"]
+    }],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unsafe-type-assertion": "warn",
+    "typescript/no-floating-promises": "warn",
+    "zod/no-any-schema": "error",
+    "zod/no-optional-and-default-together": "error",
+    "zod/no-throw-in-refine": "error",
+    "zod/no-empty-custom-schema": "error",
+    "zod/no-number-schema-with-int": "error",
+    "zod/consistent-import-source": ["warn", { "sources": ["zod/v4"] }],
+    "zod/require-error-message": "warn",
+    "zod/prefer-enum-over-literal-union": "warn",
+    "zod/require-schema-suffix": "warn",
+    "zod/prefer-meta": "warn",
+    "zod/array-style": "warn",
+    "zod/consistent-import": ["warn", { "syntax": "named" }]
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{test,spec}.{js,jsx,ts,tsx}", "src/test/**/*.{js,jsx,ts,tsx}"],
+      "env": {
+        "vitest": true
+      },
+      "rules": {
+        "zod/require-schema-suffix": "off",
+        "zod/require-error-message": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    "public/**",
+    "**/*.svelte",
+    "**/*.d.ts"
+  ]
+}
