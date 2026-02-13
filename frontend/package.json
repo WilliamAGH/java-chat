@@ -14,11 +14,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "pnpm lint:ox && pnpm lint:ox:typeaware && pnpm lint:es",
-    "lint:ox": "oxlint -c oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
-    "lint:ox:typeaware": "oxlint -c oxlintrc.json --type-aware .",
-    "lint:es": "eslint .",
-    "lint:fix": "oxlint --fix && eslint --fix",
+    "lint": "pnpm lint:ox && pnpm lint:ox:typeaware && pnpm lint:sg",
+    "lint:sg": "ast-grep scan -c config/sgconfig.yml && echo 'No naming violations found'",
+    "lint:ox": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
+    "lint:ox:typeaware": "oxlint -c config/oxlintrc.json --type-aware .",
+    "lint:fix": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin --fix .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "validate": "pnpm format:check && pnpm lint && pnpm check"
@@ -29,9 +29,7 @@
     "@testing-library/svelte": "^5.3.1",
     "@tsconfig/svelte": "^5.0.4",
     "@vitest/coverage-v8": "^4.0.18",
-    "@typescript-eslint/eslint-plugin": "8.40.0",
-    "@typescript-eslint/parser": "8.40.0",
-    "eslint": "9.33.0",
+    "eslint-plugin-zod": "^3.1.0",
     "jsdom": "^27.4.0",
     "lint-staged": "^15.2.10",
     "oxfmt": "^0.27.0",
@@ -53,7 +51,7 @@
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
       "oxfmt --write",
-      "oxlint -c oxlintrc.json --type-aware"
+      "oxlint -c config/oxlintrc.json --type-aware"
     ]
   }
 }
