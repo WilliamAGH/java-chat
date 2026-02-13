@@ -73,8 +73,7 @@ describe('isNearBottom', () => {
 
 describe('scrollToBottom', () => {
   it('does nothing when container is null', async () => {
-    // Should not throw
-    await scrollToBottom(null, true)
+    await expect(scrollToBottom(null, true)).resolves.toBeUndefined()
   })
 
   it('does nothing when shouldScroll is false', async () => {
