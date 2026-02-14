@@ -297,12 +297,10 @@ public class AppProperties {
             }
 
             String trimmedSiteId = siteId.trim();
-            for (int characterIndex = 0; characterIndex < trimmedSiteId.length(); characterIndex++) {
-                char character = trimmedSiteId.charAt(characterIndex);
-                if (character < '0' || character > '9') {
-                    throw new IllegalArgumentException(
-                            "app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
-                }
+            boolean allDigits = trimmedSiteId.chars().allMatch(Character::isDigit);
+            if (!allDigits) {
+                throw new IllegalArgumentException(
+                        "app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
             }
 
             parsedSiteId = Long.parseLong(trimmedSiteId);
