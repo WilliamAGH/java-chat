@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * Verifies SEO HTML responses include expected metadata.
  */
 @WebMvcTest(controllers = SeoController.class)
-@Import({SiteUrlResolver.class, com.williamcallahan.javachat.config.AppProperties.class})
+@Import({SiteUrlResolver.class, ClickyAnalyticsInjector.class, com.williamcallahan.javachat.config.AppProperties.class})
 @TestPropertySource(properties = "app.public-base-url=https://example.com")
 @WithMockUser
 class SeoControllerTest {
