@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -30,19 +32,27 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("permitAll()")
 public class SeoController {
 
+    private static final Logger log = LoggerFactory.getLogger(SeoController.class);
+
     private final Resource indexHtml;
     private final SiteUrlResolver siteUrlResolver;
+    private final ClickyAnalyticsInjector clickyAnalyticsInjector;
     private final Map<String, PageMetadata> metadataMap = new ConcurrentHashMap<>();
 
     // Cache the parsed document to avoid re-reading files, but clone it per request to modify
     private Document cachedIndexDocument;
 
     /**
-     * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
+     * Creates the SEO controller using the built SPA index.html template, a base URL resolver,
+     * and an analytics injector for Clicky script management.
      */
-    public SeoController(@Value("classpath:/static/index.html") Resource indexHtml, SiteUrlResolver siteUrlResolver) {
+    public SeoController(
+            @Value("classpath:/static/index.html") Resource indexHtml,
+            SiteUrlResolver siteUrlResolver,
+            ClickyAnalyticsInjector clickyAnalyticsInjector) {
         this.indexHtml = indexHtml;
         this.siteUrlResolver = siteUrlResolver;
+        this.clickyAnalyticsInjector = Objects.requireNonNull(clickyAnalyticsInjector, "clickyAnalyticsInjector");
         initMetadata();
     }
 
@@ -91,6 +101,7 @@ public class SeoController {
             return ResponseEntity.ok(doc.html());
 
         } catch (IOException contentLoadException) {
+            log.error("Failed to load SPA index.html from classpath", contentLoadException);
             return ResponseEntity.internalServerError().body("Error loading content");
         }
     }
@@ -128,6 +139,9 @@ public class SeoController {
 
         // Structured Data (JSON-LD)
         updateJsonLd(doc, fullUrl, metadata.description);
+
+        // Analytics
+        clickyAnalyticsInjector.applyTo(doc);
     }
 
     private void updateCanonicalLink(Document doc, String fullUrl) {

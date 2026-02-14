@@ -1,69 +1,73 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, fireEvent } from '@testing-library/svelte'
-import { tick } from 'svelte'
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, fireEvent } from "@testing-library/svelte";
+import { tick } from "svelte";
 
-const streamChatMock = vi.fn()
+const streamChatMock = vi.fn();
 
-vi.mock('../services/chat', async () => {
-  const actualChatService = await vi.importActual<typeof import('../services/chat')>('../services/chat')
+vi.mock("../services/chat", async () => {
+  const actualChatService =
+    await vi.importActual<typeof import("../services/chat")>("../services/chat");
   return {
     ...actualChatService,
-    streamChat: streamChatMock
-  }
-})
+    streamChat: streamChatMock,
+  };
+});
 
 async function renderChatView() {
-  const ChatViewComponent = (await import('./ChatView.svelte')).default
-  return render(ChatViewComponent)
+  const ChatViewComponent = (await import("./ChatView.svelte")).default;
+  return render(ChatViewComponent);
 }
 
-describe('ChatView streaming stability', () => {
+describe("ChatView streaming stability", () => {
   beforeEach(() => {
-    streamChatMock.mockReset()
-  })
+    streamChatMock.mockReset();
+  });
 
-  it('keeps the assistant message DOM node stable when the stream completes', async () => {
+  it("keeps the assistant message DOM node stable when the stream completes", async () => {
     let completeStream: () => void = () => {
-      throw new Error('Expected stream completion callback to be set')
-    }
+      throw new Error("Expected stream completion callback to be set");
+    };
 
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
-      options?.onStatus?.({ message: 'Searching', details: 'Loading sources' })
+      options?.onStatus?.({ message: "Searching", details: "Loading sources" });
 
-      await Promise.resolve()
-      onChunk('Hello')
+      await Promise.resolve();
+      onChunk("Hello");
 
-      await Promise.resolve()
-      options?.onCitations?.([{ url: 'https://example.com', title: 'Example' }])
+      await Promise.resolve();
+      options?.onCitations?.([{ url: "https://example.com", title: "Example" }]);
 
       return new Promise<void>((resolve) => {
-        completeStream = resolve
-      })
-    })
+        completeStream = resolve;
+      });
+    });
 
-    const { getByLabelText, getByRole, container, findByText } = await renderChatView()
+    const { getByLabelText, getByRole, container, findByText } = await renderChatView();
 
-    const inputElement = getByLabelText('Message input') as HTMLTextAreaElement
-    await fireEvent.input(inputElement, { target: { value: 'Hi' } })
+    const inputElement = getByLabelText("Message input");
+    if (!(inputElement instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+    await fireEvent.input(inputElement, { target: { value: "Hi" } });
 
-    const sendButton = getByRole('button', { name: 'Send message' })
-    await fireEvent.click(sendButton)
+    const sendButton = getByRole("button", { name: "Send message" });
+    await fireEvent.click(sendButton);
 
-    const assistantTextElement = await findByText('Hello')
-    await tick()
+    const assistantTextElement = await findByText("Hello");
+    await tick();
 
-    const assistantMessageElement = assistantTextElement.closest('.message.assistant')
-    expect(assistantMessageElement).not.toBeNull()
+    const assistantMessageElement = assistantTextElement.closest(".message.assistant");
+    expect(assistantMessageElement).not.toBeNull();
 
-    expect(container.querySelector('.message.assistant .cursor.visible')).not.toBeNull()
+    expect(container.querySelector(".message.assistant .cursor.visible")).not.toBeNull();
 
-    completeStream()
-    await tick()
+    completeStream();
+    await tick();
 
-    const assistantTextElementAfter = await findByText('Hello')
-    const assistantMessageElementAfter = assistantTextElementAfter.closest('.message.assistant')
+    const assistantTextElementAfter = await findByText("Hello");
+    const assistantMessageElementAfter = assistantTextElementAfter.closest(".message.assistant");
 
-    expect(assistantMessageElementAfter).toBe(assistantMessageElement)
-    expect(container.querySelector('.message.assistant .cursor.visible')).toBeNull()
-  })
-})
+    expect(assistantMessageElementAfter).toBe(assistantMessageElement);
+    expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
+  });
+});

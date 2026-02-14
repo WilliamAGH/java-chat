@@ -13,21 +13,21 @@ import {
   type StreamError,
   type Citation,
   type GuidedLesson,
-  type LessonContentResponse
-} from '../validation/schemas'
-import { validateFetchJson } from '../validation/validate'
-import { fetchCitationsByEndpoint, type CitationFetchResult } from './chat'
-import { streamWithRetry } from './streamRecovery'
+  type LessonContentResponse,
+} from "../validation/schemas";
+import { validateFetchJson } from "../validation/validate";
+import { fetchCitationsByEndpoint, type CitationFetchResult } from "./chat";
+import { streamWithRetry } from "./streamRecovery";
 
-export type { StreamStatus, GuidedLesson, LessonContentResponse }
+export type { StreamStatus, GuidedLesson, LessonContentResponse };
 
 /** Callbacks for guided chat streaming with explicit error handling. */
 export interface GuidedStreamCallbacks {
-  onChunk: (chunk: string) => void
-  onStatus?: (status: StreamStatus) => void
-  onError?: (error: StreamError) => void
-  onCitations?: (citations: Citation[]) => void
-  signal?: AbortSignal
+  onChunk: (chunk: string) => void;
+  onStatus?: (status: StreamStatus) => void;
+  onError?: (error: StreamError) => void;
+  onCitations?: (citations: Citation[]) => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -37,14 +37,18 @@ export interface GuidedStreamCallbacks {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchTOC(): Promise<GuidedLesson[]> {
-  const tocResponse = await fetch('/api/guided/toc')
-  const tocValidation = await validateFetchJson(tocResponse, GuidedTOCSchema, 'fetchTOC [/api/guided/toc]')
+  const tocResponse = await fetch("/api/guided/toc");
+  const tocValidation = await validateFetchJson(
+    tocResponse,
+    GuidedTOCSchema,
+    "fetchTOC [/api/guided/toc]",
+  );
 
   if (!tocValidation.success) {
-    throw new Error(`Failed to fetch TOC: ${tocValidation.error}`)
+    throw new Error(`Failed to fetch TOC: ${tocValidation.error}`);
   }
 
-  return tocValidation.validated
+  return tocValidation.validated;
 }
 
 /**
@@ -54,18 +58,18 @@ export async function fetchTOC(): Promise<GuidedLesson[]> {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchLesson(slug: string): Promise<GuidedLesson> {
-  const lessonResponse = await fetch(`/api/guided/lesson?slug=${encodeURIComponent(slug)}`)
+  const lessonResponse = await fetch(`/api/guided/lesson?slug=${encodeURIComponent(slug)}`);
   const lessonValidation = await validateFetchJson(
     lessonResponse,
     GuidedLessonSchema,
-    `fetchLesson [slug=${slug}]`
-  )
+    `fetchLesson [slug=${slug}]`,
+  );
 
   if (!lessonValidation.success) {
-    throw new Error(`Failed to fetch lesson: ${lessonValidation.error}`)
+    throw new Error(`Failed to fetch lesson: ${lessonValidation.error}`);
   }
 
-  return lessonValidation.validated
+  return lessonValidation.validated;
 }
 
 /**
@@ -75,18 +79,18 @@ export async function fetchLesson(slug: string): Promise<GuidedLesson> {
  * @throws Error if fetch fails or validation fails
  */
 export async function fetchLessonContent(slug: string): Promise<LessonContentResponse> {
-  const lessonContentResponse = await fetch(`/api/guided/content?slug=${encodeURIComponent(slug)}`)
+  const lessonContentResponse = await fetch(`/api/guided/content?slug=${encodeURIComponent(slug)}`);
   const contentValidation = await validateFetchJson(
     lessonContentResponse,
     LessonContentResponseSchema,
-    `fetchLessonContent [slug=${slug}]`
-  )
+    `fetchLessonContent [slug=${slug}]`,
+  );
 
   if (!contentValidation.success) {
-    throw new Error(`Failed to fetch lesson content: ${contentValidation.error}`)
+    throw new Error(`Failed to fetch lesson content: ${contentValidation.error}`);
   }
 
-  return contentValidation.validated
+  return contentValidation.validated;
 }
 
 /**
@@ -96,8 +100,8 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
 export async function fetchGuidedLessonCitations(slug: string): Promise<CitationFetchResult> {
   return fetchCitationsByEndpoint(
     `/api/guided/citations?slug=${encodeURIComponent(slug)}`,
-    `fetchGuidedLessonCitations [slug=${slug}]`
-  )
+    `fetchGuidedLessonCitations [slug=${slug}]`,
+  );
 }
 
 /**
@@ -109,18 +113,18 @@ export async function streamGuidedChat(
   sessionId: string,
   slug: string,
   message: string,
-  callbacks: GuidedStreamCallbacks
+  callbacks: GuidedStreamCallbacks,
 ): Promise<void> {
   return streamWithRetry(
-    '/api/guided/stream',
+    "/api/guided/stream",
     { sessionId, slug, latest: message },
     {
       onChunk: callbacks.onChunk,
       onStatus: callbacks.onStatus,
       onError: callbacks.onError,
       onCitations: callbacks.onCitations,
-      signal: callbacks.signal
+      signal: callbacks.signal,
     },
-    'guided.ts'
-  )
+    "guided.ts",
+  );
 }

@@ -5,20 +5,20 @@
  * chat and guided chat rendering paths.
  */
 
-type MessageContext = 'chat' | 'guided'
+type MessageContext = "chat" | "guided";
 
-let sequenceNumber = 0
+let sequenceNumber = 0;
 
 function nextSequenceNumber(): number {
-  sequenceNumber = (sequenceNumber + 1) % 1_000_000
-  return sequenceNumber
+  sequenceNumber = (sequenceNumber + 1) % 1_000_000;
+  return sequenceNumber;
 }
 
 function createRandomSuffix(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
   }
-  return Math.random().toString(36).slice(2, 12)
+  return Math.random().toString(36).slice(2, 12);
 }
 
 /**
@@ -29,9 +29,8 @@ function createRandomSuffix(): string {
  * @returns A stable unique message identifier
  */
 export function createChatMessageId(context: MessageContext, sessionId: string): string {
-  const timestampMs = Date.now()
-  const sequence = nextSequenceNumber()
-  const randomSuffix = createRandomSuffix()
-  return `msg-${context}-${sessionId}-${timestampMs}-${sequence}-${randomSuffix}`
+  const timestampMs = Date.now();
+  const sequence = nextSequenceNumber();
+  const randomSuffix = createRandomSuffix();
+  return `msg-${context}-${sessionId}-${timestampMs}-${sequence}-${randomSuffix}`;
 }
-
