@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.web;
 
-import com.williamcallahan.javachat.config.AppProperties;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
+import com.williamcallahan.javachat.config.AppProperties;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -51,7 +51,8 @@ public class SeoController {
             AppProperties appProperties) {
         this.indexHtml = indexHtml;
         this.siteUrlResolver = siteUrlResolver;
-        AppProperties.Clicky clicky = Objects.requireNonNull(appProperties, "appProperties").getClicky();
+        AppProperties.Clicky clicky =
+                Objects.requireNonNull(appProperties, "appProperties").getClicky();
         this.clickyEnabled = clicky.isEnabled();
         this.clickySiteId = clicky.getParsedSiteId();
         initMetadata();

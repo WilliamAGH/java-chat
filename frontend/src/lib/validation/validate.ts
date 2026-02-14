@@ -8,7 +8,7 @@
  * @see {@link docs/type-safety-zod-validation.md} for validation patterns
  */
 
-import { z } from 'zod/v4'
+import { z } from "zod/v4";
 
 // =============================================================================
 // Result Types (Discriminated Unions)
@@ -16,18 +16,18 @@ import { z } from 'zod/v4'
 
 /** Success result with validated data. */
 interface ValidationSuccess<T> {
-  success: true
-  validated: T
+  success: true;
+  validated: T;
 }
 
 /** Failure result with Zod error. */
 interface ValidationFailure {
-  success: false
-  error: z.ZodError
+  success: false;
+  error: z.ZodError;
 }
 
 /** Discriminated union - never null, always explicit success/failure. */
-export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
+export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure;
 
 // =============================================================================
 // Error Logging
@@ -45,38 +45,39 @@ export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
  */
 export function logZodFailure(context: string, error: unknown, rawInput?: unknown): void {
   const inputKeys =
-    typeof rawInput === 'object' && rawInput !== null ? Object.keys(rawInput).slice(0, 20) : []
+    typeof rawInput === "object" && rawInput !== null ? Object.keys(rawInput).slice(0, 20) : [];
 
   if (error instanceof z.ZodError) {
     const issueSummaries = error.issues.slice(0, 10).map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join('.') : '(root)'
+      const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
 
       // Zod v4: 'input' contains the failing value, 'received' for type errors
-      const inputValue = 'input' in issue ? issue.input : undefined
-      const receivedValue = 'received' in issue ? issue.received : undefined
-      const actualValue = receivedValue ?? inputValue
+      const inputValue = "input" in issue ? issue.input : undefined;
+      const receivedValue = "received" in issue ? issue.received : undefined;
+      const actualValue = receivedValue ?? inputValue;
 
-      const received = actualValue !== undefined ? ` (received: ${JSON.stringify(actualValue)})` : ''
-      const expected = 'expected' in issue ? ` (expected: ${issue.expected})` : ''
+      const received =
+        actualValue !== undefined ? ` (received: ${JSON.stringify(actualValue)})` : "";
+      const expected = "expected" in issue ? ` (expected: ${issue.expected})` : "";
 
-      return `  - ${path}: ${issue.message}${expected}${received}`
-    })
+      return `  - ${path}: ${issue.message}${expected}${received}`;
+    });
 
     // Log as readable string - NOT collapsed object
     console.error(
       `[Zod] ${context} validation failed\n` +
-        `Issues:\n${issueSummaries.join('\n')}\n` +
-        `Payload keys: ${inputKeys.join(', ')}`
-    )
+        `Issues:\n${issueSummaries.join("\n")}\n` +
+        `Payload keys: ${inputKeys.join(", ")}`,
+    );
 
     // Full details for deep debugging
     console.error(`[Zod] ${context} - full details:`, {
       prettifiedError: z.prettifyError(error),
       issues: error.issues,
-      rawInput
-    })
+      rawInput,
+    });
   } else {
-    console.error(`[Zod] ${context} validation failed (non-ZodError):`, error)
+    console.error(`[Zod] ${context} validation failed (non-ZodError):`, error);
   }
 }
 
@@ -98,16 +99,16 @@ export function logZodFailure(context: string, error: unknown, rawInput?: unknow
 export function validateWithSchema<T>(
   schema: z.ZodType<T>,
   rawInput: unknown,
-  recordId: string
+  recordId: string,
 ): ValidationResult<T> {
-  const result = schema.safeParse(rawInput)
+  const result = schema.safeParse(rawInput);
 
   if (!result.success) {
-    logZodFailure(`validateWithSchema [${recordId}]`, result.error, rawInput)
-    return { success: false, error: result.error }
+    logZodFailure(`validateWithSchema [${recordId}]`, result.error, rawInput);
+    return { success: false, error: result.error };
   }
 
-  return { success: true, validated: result.data }
+  return { success: true, validated: result.data };
 }
 
 /**
@@ -124,30 +125,30 @@ export function validateWithSchema<T>(
 export async function validateFetchJson<T>(
   response: Response,
   schema: z.ZodType<T>,
-  recordId: string
+  recordId: string,
 ): Promise<{ success: true; validated: T } | { success: false; error: string }> {
   if (!response.ok) {
-    const errorMessage = `HTTP ${response.status}: ${response.statusText}`
-    console.error(`[Fetch] ${recordId} failed: ${errorMessage}`)
-    return { success: false, error: errorMessage }
+    const errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+    console.error(`[Fetch] ${recordId} failed: ${errorMessage}`);
+    return { success: false, error: errorMessage };
   }
 
-  let fetchedJson: unknown
+  let fetchedJson: unknown;
   try {
-    fetchedJson = await response.json()
+    fetchedJson = await response.json();
   } catch (parseError) {
-    const errorMessage = `JSON parse failed: ${parseError instanceof Error ? parseError.message : String(parseError)}`
-    console.error(`[Fetch] ${recordId} ${errorMessage}`)
-    return { success: false, error: errorMessage }
+    const errorMessage = `JSON parse failed: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
+    console.error(`[Fetch] ${recordId} ${errorMessage}`);
+    return { success: false, error: errorMessage };
   }
 
-  const validationResult = validateWithSchema(schema, fetchedJson, recordId)
+  const validationResult = validateWithSchema(schema, fetchedJson, recordId);
 
   if (!validationResult.success) {
-    return { success: false, error: `Validation failed for ${recordId}` }
+    return { success: false, error: `Validation failed for ${recordId}` };
   }
 
-  return { success: true, validated: validationResult.validated }
+  return { success: true, validated: validationResult.validated };
 }
 
 /**
@@ -156,5 +157,5 @@ export async function validateFetchJson<T>(
  * Use this instead of unsafe `as Record<string, unknown>` casts.
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -87,9 +87,7 @@ describe("csrf helpers", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    const retriedHeaders = new Headers(
-      (fetchMock.mock.calls[2][1] as RequestInit).headers ?? undefined,
-    );
+    const retriedHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers ?? undefined);
     expect(retriedHeaders.get(CSRF_HEADER_NAME)).toBe("fresh-token");
   });
 

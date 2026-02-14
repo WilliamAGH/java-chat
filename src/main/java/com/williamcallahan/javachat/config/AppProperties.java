@@ -300,7 +300,8 @@ public class AppProperties {
             for (int characterIndex = 0; characterIndex < trimmedSiteId.length(); characterIndex++) {
                 char character = trimmedSiteId.charAt(characterIndex);
                 if (character < '0' || character > '9') {
-                    throw new IllegalArgumentException("app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
+                    throw new IllegalArgumentException(
+                            "app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
                 }
             }
 

@@ -49,7 +49,7 @@
  * ```
  */
 
-import { tick } from 'svelte'
+import { tick } from "svelte";
 
 /** Configuration options for scroll indicator behavior. */
 export interface ScrollAnchorOptions {
@@ -58,19 +58,19 @@ export interface ScrollAnchorOptions {
    * When user scrolls past this percentage, the indicator hides.
    * @default 0.95 (95% - user is within 5% of bottom)
    */
-  nearBottomThreshold?: number
+  nearBottomThreshold?: number;
 
   /**
    * Delay before showing the new content indicator (in milliseconds).
    * Prevents flicker for brief scroll-aways.
    * @default 150
    */
-  indicatorDelayMs?: number
+  indicatorDelayMs?: number;
 }
 
 /** Default configuration values. */
-const DEFAULT_NEAR_BOTTOM_THRESHOLD = 0.95
-const DEFAULT_INDICATOR_DELAY_MS = 150
+const DEFAULT_NEAR_BOTTOM_THRESHOLD = 0.95;
+const DEFAULT_INDICATOR_DELAY_MS = 150;
 
 /**
  * Creates a reactive scroll indicator for chat containers.
@@ -80,33 +80,33 @@ const DEFAULT_INDICATOR_DELAY_MS = 150
  * only the "new content" indicator and manual jump-to-bottom are provided.
  */
 export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
-  const nearBottomThreshold = options.nearBottomThreshold ?? DEFAULT_NEAR_BOTTOM_THRESHOLD
-  const indicatorDelayMs = options.indicatorDelayMs ?? DEFAULT_INDICATOR_DELAY_MS
+  const nearBottomThreshold = options.nearBottomThreshold ?? DEFAULT_NEAR_BOTTOM_THRESHOLD;
+  const indicatorDelayMs = options.indicatorDelayMs ?? DEFAULT_INDICATOR_DELAY_MS;
 
   // Internal state
-  let container: HTMLElement | null = null
-  let indicatorTimeoutId: ReturnType<typeof setTimeout> | null = null
+  let container: HTMLElement | null = null;
+  let indicatorTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   // Reactive state (Svelte 5 runes)
-  let unseenCount = $state(0)
-  let showIndicator = $state(false)
+  let unseenCount = $state(0);
+  let showIndicator = $state(false);
 
   /**
    * Checks if the container is scrolled near the bottom.
    * Uses percentage-based threshold (default 95%).
    */
   function isNearBottom(): boolean {
-    if (!container) return true
-    const { scrollTop, scrollHeight, clientHeight } = container
+    if (!container) return true;
+    const { scrollTop, scrollHeight, clientHeight } = container;
 
     // Handle edge case: content fits without scrolling
-    if (scrollHeight <= clientHeight) return true
+    if (scrollHeight <= clientHeight) return true;
 
     // Calculate scroll percentage (0 = top, 1 = bottom)
-    const maxScroll = scrollHeight - clientHeight
-    const scrollPercentage = scrollTop / maxScroll
+    const maxScroll = scrollHeight - clientHeight;
+    const scrollPercentage = scrollTop / maxScroll;
 
-    return scrollPercentage >= nearBottomThreshold
+    return scrollPercentage >= nearBottomThreshold;
   }
 
   /**
@@ -114,17 +114,17 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
    */
   function updateIndicatorVisibility(): void {
     if (indicatorTimeoutId) {
-      clearTimeout(indicatorTimeoutId)
-      indicatorTimeoutId = null
+      clearTimeout(indicatorTimeoutId);
+      indicatorTimeoutId = null;
     }
 
     if (unseenCount > 0 && !isNearBottom()) {
       // Delay showing indicator to prevent flicker
       indicatorTimeoutId = setTimeout(() => {
-        showIndicator = true
-      }, indicatorDelayMs)
+        showIndicator = true;
+      }, indicatorDelayMs);
     } else {
-      showIndicator = false
+      showIndicator = false;
     }
   }
 
@@ -133,12 +133,12 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
    * Internal helper that doesn't rely on `this` binding.
    */
   function clearIndicatorStateInternal(): void {
-    unseenCount = 0
-    showIndicator = false
+    unseenCount = 0;
+    showIndicator = false;
 
     if (indicatorTimeoutId) {
-      clearTimeout(indicatorTimeoutId)
-      indicatorTimeoutId = null
+      clearTimeout(indicatorTimeoutId);
+      indicatorTimeoutId = null;
     }
   }
 
@@ -146,15 +146,15 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
    * Performs the actual scroll-to-bottom with motion preferences.
    */
   async function performScroll(): Promise<void> {
-    await tick()
-    if (!container) return
+    await tick();
+    if (!container) return;
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     container.scrollTo({
       top: container.scrollHeight,
-      behavior: prefersReducedMotion ? 'auto' : 'smooth'
-    })
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+    });
   }
 
   return {
@@ -164,12 +164,12 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
 
     /** Number of content updates since user was not at bottom. */
     get unseenCount(): number {
-      return unseenCount
+      return unseenCount;
     },
 
     /** Whether to show the "new content" indicator. */
     get showIndicator(): boolean {
-      return showIndicator
+      return showIndicator;
     },
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Call this when the container is mounted or changes.
      */
     attach(element: HTMLElement | null): void {
-      container = element
+      container = element;
     },
 
     /**
@@ -190,8 +190,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      */
     cleanup(): void {
       if (indicatorTimeoutId) {
-        clearTimeout(indicatorTimeoutId)
-        indicatorTimeoutId = null
+        clearTimeout(indicatorTimeoutId);
+        indicatorTimeoutId = null;
       }
     },
 
@@ -207,16 +207,16 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * - Hides indicator
      */
     onUserScroll(): void {
-      if (!container) return
+      if (!container) return;
 
       if (isNearBottom()) {
         // User reached near-bottom, clear indicator
-        unseenCount = 0
-        showIndicator = false
+        unseenCount = 0;
+        showIndicator = false;
 
         if (indicatorTimeoutId) {
-          clearTimeout(indicatorTimeoutId)
-          indicatorTimeoutId = null
+          clearTimeout(indicatorTimeoutId);
+          indicatorTimeoutId = null;
         }
       }
     },
@@ -230,8 +230,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      */
     onNewMessageStarted(): void {
       if (!isNearBottom()) {
-        unseenCount++
-        updateIndicatorVisibility()
+        unseenCount++;
+        updateIndicatorVisibility();
       }
     },
 
@@ -246,7 +246,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
       if (!isNearBottom()) {
         // User is scrolled up - update visibility but don't increment count
         // (count is incremented once per message via onNewMessageStarted)
-        updateIndicatorVisibility()
+        updateIndicatorVisibility();
       }
       // User at bottom - no need for indicator
     },
@@ -256,7 +256,7 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * Public API that delegates to internal helper.
      */
     clearIndicatorState(): void {
-      clearIndicatorStateInternal()
+      clearIndicatorStateInternal();
     },
 
     /**
@@ -267,8 +267,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * - Simply scrolls once and clears the indicator
      */
     async scrollOnce(): Promise<void> {
-      clearIndicatorStateInternal()
-      await performScroll()
+      clearIndicatorStateInternal();
+      await performScroll();
     },
 
     /**
@@ -279,18 +279,18 @@ export function createScrollAnchor(options: ScrollAnchorOptions = {}) {
      * issues when passed as a callback prop.
      */
     async jumpToBottom(): Promise<void> {
-      clearIndicatorStateInternal()
-      await performScroll()
+      clearIndicatorStateInternal();
+      await performScroll();
     },
 
     /**
      * Resets all state. Use when clearing chat or switching contexts.
      */
     reset(): void {
-      clearIndicatorStateInternal()
-    }
-  }
+      clearIndicatorStateInternal();
+    },
+  };
 }
 
 /** Type for the scroll anchor instance. */
-export type ScrollAnchor = ReturnType<typeof createScrollAnchor>
+export type ScrollAnchor = ReturnType<typeof createScrollAnchor>;
