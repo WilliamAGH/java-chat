@@ -30,9 +30,13 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("permitAll()")
 public class SeoController {
 
+    private static final String CLICKY_SCRIPT_URL = "https://static.getclicky.com/js";
+
     private final Resource indexHtml;
     private final SiteUrlResolver siteUrlResolver;
     private final Map<String, PageMetadata> metadataMap = new ConcurrentHashMap<>();
+    private final boolean clickyEnabled;
+    private final long clickySiteId;
 
     // Cache the parsed document to avoid re-reading files, but clone it per request to modify
     private Document cachedIndexDocument;
@@ -40,9 +44,15 @@ public class SeoController {
     /**
      * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
      */
-    public SeoController(@Value("classpath:/static/index.html") Resource indexHtml, SiteUrlResolver siteUrlResolver) {
+    public SeoController(
+            @Value("classpath:/static/index.html") Resource indexHtml,
+            SiteUrlResolver siteUrlResolver,
+            @Value("${app.clicky.enabled:false}") boolean clickyEnabled,
+            @Value("${app.clicky.site-id:}") String clickySiteId) {
         this.indexHtml = indexHtml;
         this.siteUrlResolver = siteUrlResolver;
+        this.clickyEnabled = clickyEnabled;
+        this.clickySiteId = clickyEnabled ? parseClickySiteId(clickySiteId) : -1L;
         initMetadata();
     }
 
@@ -128,6 +138,49 @@ public class SeoController {
 
         // Structured Data (JSON-LD)
         updateJsonLd(doc, fullUrl, metadata.description);
+
+        // Analytics
+        updateClickyAnalytics(doc);
+    }
+
+    private void updateClickyAnalytics(Document doc) {
+        Element existingClickyLoader = doc.head().selectFirst("script[src=\"" + CLICKY_SCRIPT_URL + "\"]");
+        if (!clickyEnabled) {
+            if (existingClickyLoader != null) {
+                existingClickyLoader.remove();
+            }
+            doc.head().select("script").forEach(scriptTag -> {
+                String scriptBody = scriptTag.html();
+                if (scriptBody != null && scriptBody.contains("clicky_site_ids")) {
+                    scriptTag.remove();
+                }
+            });
+            return;
+        }
+
+        if (existingClickyLoader != null) {
+            return;
+        }
+
+        String initializer = "var clicky_site_ids = clicky_site_ids || []; clicky_site_ids.push(" + clickySiteId + ");";
+        doc.head().appendElement("script").text(initializer);
+        doc.head().appendElement("script").attr("async", "").attr("src", CLICKY_SCRIPT_URL);
+    }
+
+    private static long parseClickySiteId(String rawSiteId) {
+        if (rawSiteId == null || rawSiteId.isBlank()) {
+            throw new IllegalStateException("Clicky is enabled but app.clicky.site-id is blank.");
+        }
+
+        String trimmedSiteId = rawSiteId.trim();
+        for (int characterIndex = 0; characterIndex < trimmedSiteId.length(); characterIndex++) {
+            char character = trimmedSiteId.charAt(characterIndex);
+            if (character < '0' || character > '9') {
+                throw new IllegalStateException("app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
+            }
+        }
+
+        return Long.parseLong(trimmedSiteId);
     }
 
     private void updateCanonicalLink(Document doc, String fullUrl) {
