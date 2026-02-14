@@ -18,6 +18,7 @@ alwaysApply: true
 - [GT1a-l] Git, history safety, hooks/signing, lock files, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
 - [ID1a-d] Idiomatic Patterns & Defaults
+- [EV1a-f] Secrets and Env Vars (no secrets in properties; OpenAI/Qdrant via .env/env)
 - [RC1a-f] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
 - [FS1a-k] File Creation & Clean Architecture (search first, strict types, single responsibility)
 - [TY1a-d] Type Safety (strict generics, no raw types, no unchecked casts)
@@ -69,6 +70,17 @@ alwaysApply: true
 - [ID1b] **Custom Justification**: Custom implementations require a compelling reason. If you can't justify it, use the standard way.
 - [ID1c] **No Reinventing**: Do not build custom utilities for things the platform already does (e.g., use standard `Optional`, `Stream`, Spring `RestTemplate`/`WebClient`).
 - [ID1d] **Dependencies**: Make careful use of dependencies. Do not make assumptions—use the correct idiomatic behavior to avoid boilerplate.
+
+## [EV1] Secrets and Env Vars
+
+- [EV1a] **No Secrets In Properties/YAML**: Secrets are PROHIBITED in `.properties` and `.yml/.yaml` (including examples). Do not add secret-looking keys with blank defaults to property files.
+- [EV1b] **Secrets Source Of Truth**: Secrets MUST be provided via `.env` (local) and environment variables (deployment). Deployment uses Coolify containers with BuildKit secrets; keep secrets out of tracked config.
+- [EV1c] **Non-Secret Defaults In Properties**: All non-secret defaults and environment-specific overrides MUST live in Spring property files (`src/main/resources/application*.properties`) and Spring profiles.
+- [EV1d] **Allowed `.env`/Env Vars For External Services**: OpenAI/GitHub Models and Qdrant connectivity MUST come from `.env`/environment variables:
+  - LLM (model/base-url/api-key): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `GITHUB_TOKEN`, `GITHUB_MODELS_BASE_URL`, `GITHUB_MODELS_CHAT_MODEL`
+  - Qdrant (host/ports/tls/api-key): `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_REST_PORT`, `QDRANT_SSL`, `QDRANT_API_KEY`
+- [EV1e] **No New Env Var Settings**: Do not introduce any additional env-var-driven settings without explicit written approval.
+- [EV1f] **Dotenv Handling**: `.env` loading MUST remain supported for local development and scripts. Do not add dotenv libraries into the Java runtime; load env vars at the process level (Makefile/scripts/Coolify).
 
 ## [RC1] Root Cause Resolution — No Fallbacks
 
@@ -183,13 +195,13 @@ alwaysApply: true
 - [TL1b] **Docker**: `docker compose up -d` for Qdrant vector store.
 - [TL1c] **Ingest**: `curl -X POST http://localhost:8080/api/ingest ...`.
 - [TL1d] **Stream**: `curl -N http://localhost:8080/api/chat/stream ...`.
-- [TL1e] **Secrets**: `.env` for secrets (`GITHUB_TOKEN`, `QDRANT_URL`); never commit secrets.
+- [TL1e] **Secrets**: Never commit secrets. Secrets MUST live in `.env` (local) and environment variables (deployment). Secrets are PROHIBITED in `.properties`/`.yml` files.
 
 ## [LM1] LLM & Streaming
 
 - [LM1a] **Settings**: Do not change any LLM settings without explicit written approval.
 - [LM1b] **No Fallback**: Do not auto-fallback or regress models across providers; surface error to user.
-- [LM1c] **Config**: Use values from environment variables and `application.properties` exactly as configured.
+- [LM1c] **Config**: OpenAI/GitHub Models model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
 - [LM1d] **Behavior**: Allowed: logging diagnostics. Not allowed: silently changing LLM behavior.
 - [LM1e] **Streaming**: TTFB < 200ms, streaming start < 500ms.
 - [LM1f] **Events**: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
