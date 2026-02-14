@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.web;
 
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
-import com.williamcallahan.javachat.config.AppProperties;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -35,32 +34,25 @@ public class SeoController {
 
     private static final Logger log = LoggerFactory.getLogger(SeoController.class);
 
-    private static final String CLICKY_SCRIPT_URL = "https://static.getclicky.com/js";
-    private static final String CLICKY_INITIALIZER_TEMPLATE =
-            "var clicky_site_ids = clicky_site_ids || []; clicky_site_ids.push(%d);";
-
     private final Resource indexHtml;
     private final SiteUrlResolver siteUrlResolver;
+    private final ClickyAnalyticsInjector clickyAnalyticsInjector;
     private final Map<String, PageMetadata> metadataMap = new ConcurrentHashMap<>();
-    private final boolean clickyEnabled;
-    private final long clickySiteId;
 
     // Cache the parsed document to avoid re-reading files, but clone it per request to modify
     private Document cachedIndexDocument;
 
     /**
-     * Creates the SEO controller using the built SPA index.html template and a base URL resolver.
+     * Creates the SEO controller using the built SPA index.html template, a base URL resolver,
+     * and an analytics injector for Clicky script management.
      */
     public SeoController(
             @Value("classpath:/static/index.html") Resource indexHtml,
             SiteUrlResolver siteUrlResolver,
-            AppProperties appProperties) {
+            ClickyAnalyticsInjector clickyAnalyticsInjector) {
         this.indexHtml = indexHtml;
         this.siteUrlResolver = siteUrlResolver;
-        AppProperties.Clicky clicky =
-                Objects.requireNonNull(appProperties, "appProperties").getClicky();
-        this.clickyEnabled = clicky.isEnabled();
-        this.clickySiteId = clicky.getParsedSiteId();
+        this.clickyAnalyticsInjector = Objects.requireNonNull(clickyAnalyticsInjector, "clickyAnalyticsInjector");
         initMetadata();
     }
 
@@ -149,31 +141,7 @@ public class SeoController {
         updateJsonLd(doc, fullUrl, metadata.description);
 
         // Analytics
-        updateClickyAnalytics(doc);
-    }
-
-    private void updateClickyAnalytics(Document doc) {
-        Element existingClickyLoader = doc.head().selectFirst("script[src=\"" + CLICKY_SCRIPT_URL + "\"]");
-        if (!clickyEnabled) {
-            if (existingClickyLoader != null) {
-                existingClickyLoader.remove();
-            }
-            doc.head().select("script").forEach(scriptTag -> {
-                String scriptBody = scriptTag.html();
-                if (scriptBody != null && scriptBody.contains("clicky_site_ids")) {
-                    scriptTag.remove();
-                }
-            });
-            return;
-        }
-
-        if (existingClickyLoader != null) {
-            return;
-        }
-
-        String initializer = String.format(CLICKY_INITIALIZER_TEMPLATE, clickySiteId);
-        doc.head().appendElement("script").text(initializer);
-        doc.head().appendElement("script").attr("async", "").attr("src", CLICKY_SCRIPT_URL);
+        clickyAnalyticsInjector.applyTo(doc);
     }
 
     private void updateCanonicalLink(Document doc, String fullUrl) {
