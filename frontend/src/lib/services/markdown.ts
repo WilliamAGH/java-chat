@@ -323,7 +323,7 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
         async: false,
         gfm: true,
         breaks: false // Preserve fence detection accuracy
-      }) as string
+      })
 
       return `<div class="inline-enrichment ${enrichmentToken.kind}" data-enrichment-type="${enrichmentToken.kind}">
 <div class="inline-enrichment-header">${meta.icon}<span>${meta.title}</span></div>
@@ -375,7 +375,7 @@ export function parseMarkdown(content: string): string {
   }
 
   try {
-    const rawHtml = marked.parse(normalizedContent, { async: false }) as string
+    const rawHtml = marked.parse(normalizedContent, { async: false })
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },

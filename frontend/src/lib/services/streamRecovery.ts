@@ -239,7 +239,32 @@ function describeStreamFailure(streamFailure: unknown, streamErrorEvent: StreamE
       diagnosticTokens.push(streamFailure.details)
     }
   } else if (streamFailure !== null && streamFailure !== undefined) {
-    diagnosticTokens.push(String(streamFailure))
+    diagnosticTokens.push(formatUnknownDiagnostic(streamFailure))
   }
   return diagnosticTokens.join(' ').trim()
+}
+
+function formatUnknownDiagnostic(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (typeof value === 'bigint') {
+    return value.toString()
+  }
+  if (typeof value === 'symbol') {
+    return value.description ?? 'Symbol'
+  }
+  if (typeof value === 'function') {
+    return value.name ? `[function ${value.name}]` : '[function]'
+  }
+
+  try {
+    const json = JSON.stringify(value)
+    return json === undefined ? '' : json
+  } catch {
+    return Object.prototype.toString.call(value)
+  }
 }
