@@ -35,6 +35,7 @@ public class AppProperties {
     private static final String QDRANT_KEY = "app.qdrant";
     private static final String CORS_KEY = "app.cors";
     private static final String PUBLIC_BASE_URL_KEY = "app.public-base-url";
+    private static final String CLICKY_KEY = "app.clicky";
     private static final String EMBEDDINGS_KEY = "app.embeddings";
     private static final String LLM_KEY = "app.llm";
     private static final String GUIDED_LEARNING_KEY = "app.guided-learning";
@@ -57,6 +58,7 @@ public class AppProperties {
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
     private GuidedLearning guidedLearning = new GuidedLearning();
+    private Clicky clicky = new Clicky();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
     /**
@@ -81,6 +83,7 @@ public class AppProperties {
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
         requireConfiguredSection(guidedLearning, GUIDED_LEARNING_KEY).validateConfiguration();
+        requireConfiguredSection(clicky, CLICKY_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
 
@@ -100,6 +103,14 @@ public class AppProperties {
      */
     public void setPublicBaseUrl(final String publicBaseUrl) {
         this.publicBaseUrl = publicBaseUrl;
+    }
+
+    public Clicky getClicky() {
+        return clicky;
+    }
+
+    public void setClicky(Clicky clicky) {
+        this.clicky = requireConfiguredSection(clicky, CLICKY_KEY);
     }
 
     public GuidedLearning getGuidedLearning() {
@@ -247,6 +258,55 @@ public class AppProperties {
             throw new IllegalArgumentException(String.format(Locale.ROOT, NULL_SECT_FMT, sectionKey));
         }
         return section;
+    }
+
+    /** Clicky analytics configuration. */
+    public static class Clicky {
+        private boolean enabled = false;
+        private String siteId = "";
+        private long parsedSiteId = -1L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getSiteId() {
+            return siteId;
+        }
+
+        public void setSiteId(String siteId) {
+            this.siteId = siteId;
+        }
+
+        public long getParsedSiteId() {
+            return parsedSiteId;
+        }
+
+        Clicky validateConfiguration() {
+            if (!enabled) {
+                parsedSiteId = -1L;
+                return this;
+            }
+
+            if (siteId == null || siteId.isBlank()) {
+                throw new IllegalArgumentException("app.clicky.site-id must not be blank when app.clicky.enabled=true");
+            }
+
+            String trimmedSiteId = siteId.trim();
+            for (int characterIndex = 0; characterIndex < trimmedSiteId.length(); characterIndex++) {
+                char character = trimmedSiteId.charAt(characterIndex);
+                if (character < '0' || character > '9') {
+                    throw new IllegalArgumentException("app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
+                }
+            }
+
+            parsedSiteId = Long.parseLong(trimmedSiteId);
+            return this;
+        }
     }
 
     /** Qdrant vector store settings. */

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.config.AppProperties;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,12 +48,12 @@ public class SeoController {
     public SeoController(
             @Value("classpath:/static/index.html") Resource indexHtml,
             SiteUrlResolver siteUrlResolver,
-            @Value("${app.clicky.enabled:false}") boolean clickyEnabled,
-            @Value("${app.clicky.site-id:}") String clickySiteId) {
+            AppProperties appProperties) {
         this.indexHtml = indexHtml;
         this.siteUrlResolver = siteUrlResolver;
-        this.clickyEnabled = clickyEnabled;
-        this.clickySiteId = clickyEnabled ? parseClickySiteId(clickySiteId) : -1L;
+        AppProperties.Clicky clicky = Objects.requireNonNull(appProperties, "appProperties").getClicky();
+        this.clickyEnabled = clicky.isEnabled();
+        this.clickySiteId = clicky.getParsedSiteId();
         initMetadata();
     }
 
@@ -165,22 +166,6 @@ public class SeoController {
         String initializer = "var clicky_site_ids = clicky_site_ids || []; clicky_site_ids.push(" + clickySiteId + ");";
         doc.head().appendElement("script").text(initializer);
         doc.head().appendElement("script").attr("async", "").attr("src", CLICKY_SCRIPT_URL);
-    }
-
-    private static long parseClickySiteId(String rawSiteId) {
-        if (rawSiteId == null || rawSiteId.isBlank()) {
-            throw new IllegalStateException("Clicky is enabled but app.clicky.site-id is blank.");
-        }
-
-        String trimmedSiteId = rawSiteId.trim();
-        for (int characterIndex = 0; characterIndex < trimmedSiteId.length(); characterIndex++) {
-            char character = trimmedSiteId.charAt(characterIndex);
-            if (character < '0' || character > '9') {
-                throw new IllegalStateException("app.clicky.site-id must contain digits only, got: " + trimmedSiteId);
-            }
-        }
-
-        return Long.parseLong(trimmedSiteId);
     }
 
     private void updateCanonicalLink(Document doc, String fullUrl) {
