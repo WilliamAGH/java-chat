@@ -12,6 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -31,7 +33,11 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("permitAll()")
 public class SeoController {
 
+    private static final Logger log = LoggerFactory.getLogger(SeoController.class);
+
     private static final String CLICKY_SCRIPT_URL = "https://static.getclicky.com/js";
+    private static final String CLICKY_INITIALIZER_TEMPLATE =
+            "var clicky_site_ids = clicky_site_ids || []; clicky_site_ids.push(%d);";
 
     private final Resource indexHtml;
     private final SiteUrlResolver siteUrlResolver;
@@ -103,6 +109,7 @@ public class SeoController {
             return ResponseEntity.ok(doc.html());
 
         } catch (IOException contentLoadException) {
+            log.error("Failed to load SPA index.html from classpath", contentLoadException);
             return ResponseEntity.internalServerError().body("Error loading content");
         }
     }
@@ -164,7 +171,7 @@ public class SeoController {
             return;
         }
 
-        String initializer = "var clicky_site_ids = clicky_site_ids || []; clicky_site_ids.push(" + clickySiteId + ");";
+        String initializer = String.format(CLICKY_INITIALIZER_TEMPLATE, clickySiteId);
         doc.head().appendElement("script").text(initializer);
         doc.head().appendElement("script").attr("async", "").attr("src", CLICKY_SCRIPT_URL);
     }
