@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
-    "dompurify": "^3.3.1",
+    "dompurify": "^3.4.0",
     "highlight.js": "^11.10.0",
     "marked": "^15.0.0",
     "zod": "^3.25.76"
