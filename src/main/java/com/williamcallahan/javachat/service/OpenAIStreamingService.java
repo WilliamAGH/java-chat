@@ -168,7 +168,6 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature) {
-        String truncatedPrompt = requestFactory.truncatePromptForCompletion(prompt);
         return Mono.<String>defer(() -> {
                     List<OpenAiProviderCandidate> availableProviders =
                             providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
@@ -185,7 +184,7 @@ public class OpenAIStreamingService {
                         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
 
                         ResponseCreateParams requestParameters =
-                                requestFactory.buildCompletionRequest(truncatedPrompt, temperature, activeProvider);
+                                requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
                         try {
                             log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
                             RequestOptions requestOptions = RequestOptions.builder()
