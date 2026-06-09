@@ -54,16 +54,17 @@ export function tryParseJson(content: string, source: string): unknown {
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
     return null;
   }
+  let parsedJson: unknown = null;
   try {
-    return JSON.parse(trimmed);
+    parsedJson = JSON.parse(trimmed);
   } catch (parseError) {
     // Log for debugging but don't throw - allows graceful fallback to raw text
     console.warn(`[${source}] JSON parse failed for content that looked like JSON:`, {
       preview: trimmed.slice(0, 100),
       error: parseError instanceof Error ? parseError.message : String(parseError),
     });
-    return null;
   }
+  return parsedJson;
 }
 
 /**
