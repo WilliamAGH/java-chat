@@ -1,2 +1,6 @@
 ruleDirs:
   - ../rules/ast-grep
+languageGlobs:
+  tsx:
+    - "**/*.tsx"
+    - "**/*.ts"

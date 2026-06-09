@@ -34,9 +34,13 @@ lint-ast: ## Run ast-grep rules for Java naming and type safety
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
 
-hooks: ## Install git hooks via prek
-	@$(call require_cmd,prek,https://prek.j178.dev/)
-	prek install --install-hooks -c config/prek.toml
+hooks: ## Install git hooks via lefthook
+	@if command -v lefthook >/dev/null 2>&1; then \
+		lefthook install -f; \
+	else \
+		echo "lefthook not found — install with: brew install lefthook"; \
+		echo "Skipping hook installation; commits/pushes will proceed without gates."; \
+	fi
 
 run: build ## Run the packaged jar (loads .env if present)
 	@$(call load_env); \

@@ -63,20 +63,15 @@ java -version
 make build
 ```
 
-#### Git Hooks (prek)
+#### Git Hooks (lefthook)
 
-This repo uses a `pre-commit` configuration compatible with [prek](https://prek.j178.dev/) to catch
-formatting and frontend issues before commits. The Java hook auto-formats with Spotless, so commits
-may update files. Hooks are local, so each developer installs once:
-
-```bash
-prek install --install-hooks
-```
-
-Or use the Makefile helper:
+This repo uses [lefthook](https://github.com/evilmartians/lefthook) for git hook management.
+Config lives at `.config/lefthook.yml`. Pre-push hooks run lint and build+test gates.
+Hooks are local, so each developer installs once:
 
 ```bash
-make hooks
+brew install lefthook   # one-time
+make hooks              # installs hook shims into .git/hooks/
 ```
 
 ### CI/CD (GitHub Actions)
