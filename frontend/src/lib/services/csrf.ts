@@ -35,13 +35,12 @@ function readCookie(cookieName: string): string | null {
   if (!tokenText) {
     return null;
   }
-  let decodedToken: string | null = null;
   try {
-    decodedToken = decodeURIComponent(tokenText);
+    return decodeURIComponent(tokenText);
   } catch {
     console.warn(`[csrf] Cookie ${cookieName} has malformed percent-encoding; ignoring token`);
   }
-  return decodedToken;
+  return null;
 }
 
 export function csrfHeader(): Record<string, string> {
@@ -61,15 +60,11 @@ async function readApiErrorResponse(
     return null;
   }
 
-  let payload: unknown = null;
-  let parsedPayload = false;
-  try {
-    payload = await response.json();
-    parsedPayload = true;
-  } catch (parseError) {
+  const payload: unknown = await response.json().catch((parseError: unknown) => {
     console.error(`[${source}] Failed to parse CSRF error payload:`, parseError);
-  }
-  if (!parsedPayload) {
+    return undefined;
+  });
+  if (payload === undefined) {
     return null;
   }
 
@@ -126,16 +121,12 @@ export async function refreshCsrfToken(): Promise<boolean> {
     return refreshPromise;
   }
 
-  refreshPromise = (async () => {
-    let refreshSucceeded = false;
-    try {
-      const response = await fetch(CSRF_REFRESH_ENDPOINT, { method: "GET", cache: "no-store" });
-      refreshSucceeded = response.ok;
-    } catch (refreshError) {
+  refreshPromise = fetch(CSRF_REFRESH_ENDPOINT, { method: "GET", cache: "no-store" })
+    .then((response) => response.ok)
+    .catch((refreshError: unknown) => {
       console.warn("[csrf] Failed to refresh CSRF token:", refreshError);
-    }
-    return refreshSucceeded;
-  })();
+      return false;
+    });
 
   try {
     return await refreshPromise;
