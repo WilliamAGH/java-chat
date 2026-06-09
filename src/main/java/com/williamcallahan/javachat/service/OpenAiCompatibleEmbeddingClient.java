@@ -59,6 +59,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         OpenAIClient client = OpenAIOkHttpClient.builder()
                 .apiKey(requireConfiguredApiKey(apiKey))
                 .baseUrl(normalizeSdkBaseUrl(baseUrl))
+                // Embedding traffic is ingestion/backfill-dominated, so it is classed
+                // as the LLM gateway's "batch" tier. The current sf7-direct endpoint
+                // ignores the header; it becomes load-bearing if this client is ever
+                // pointed at the gateway queue (api.llm-gateway.iocloudhost.net).
+                .putHeader("X-Tier", "batch")
                 .build();
         return new OpenAiCompatibleEmbeddingClient(client, requireConfiguredModel(modelName), dimensionsHint);
     }
