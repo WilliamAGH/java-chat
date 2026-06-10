@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -9,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +27,7 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -99,5 +102,29 @@ class GuidedSseCitationEventTest {
         assertTrue(
                 aggregated.contains("https://example.com"),
                 "Citation payload should include the citation URL. Response was:\n" + aggregated);
+    }
+
+    @Test
+    void guidedContentStreamEmitsSseErrorWhenLessonGenerationFails() throws Exception {
+        given(guidedLearningService.getCachedLessonMarkdown(anyString())).willReturn(Optional.empty());
+        given(guidedLearningService.streamLessonContent(anyString()))
+                .willReturn(Flux.error(new IllegalStateException("Reranking request failed")));
+
+        var asyncResult = mockMvc.perform(get("/api/guided/content/stream").param("slug", "intro"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        String aggregated = mockMvc.perform(asyncDispatch(asyncResult))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertTrue(
+                aggregated.contains("event:" + EVENT_ERROR) || aggregated.contains("event: " + EVENT_ERROR),
+                "SSE stream should include an error event. Response was:\n" + aggregated);
+        assertTrue(
+                aggregated.contains("Lesson content stream failed"),
+                "Error payload should identify lesson content stream failure. Response was:\n" + aggregated);
     }
 }

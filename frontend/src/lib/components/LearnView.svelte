@@ -1,8 +1,8 @@
 <script lang="ts">
     import {
         fetchTOC,
-        fetchLessonContent,
         fetchGuidedLessonCitations,
+        streamLessonContent,
         streamGuidedChat,
         type GuidedLesson,
     } from "../services/guided";
@@ -105,6 +105,8 @@
 
     let guidedChatAbortController: AbortController | null = null;
     let guidedChatStreamVersion = 0;
+    let lessonContentAbortController: AbortController | null = null;
+    let lessonContentStreamVersion = 0;
 
     /**
      * Gets or creates a session ID for a specific lesson.
@@ -127,6 +129,14 @@
         }
         streaming.reset();
         activeStreamingMessageId = null;
+    }
+
+    function cancelInFlightLessonContentStream(): void {
+        lessonContentStreamVersion++;
+        if (lessonContentAbortController) {
+            lessonContentAbortController.abort();
+            lessonContentAbortController = null;
+        }
     }
 
     // Rendered lesson content - SSR-safe parsing without DOM operations
@@ -158,6 +168,10 @@
 
     async function selectLesson(lesson: GuidedLesson): Promise<void> {
         const targetSlug = lesson.slug;
+        cancelInFlightLessonContentStream();
+        const activeLessonContentStreamVersion = lessonContentStreamVersion;
+        lessonContentAbortController = new AbortController();
+        const lessonContentAbortSignal = lessonContentAbortController.signal;
 
         // Save current chat history before switching lessons
         if (selectedLesson && messages.length > 0) {
@@ -178,10 +192,41 @@
         messages = chatHistoryByLesson.get(lesson.slug) ?? [];
 
         try {
-            const response = await fetchLessonContent(lesson.slug);
-            // Guard against stale response if user switched lessons
+            let hasReceivedLessonChunk = false;
+            await streamLessonContent(lesson.slug, {
+                signal: lessonContentAbortSignal,
+                onChunk: (lessonChunk) => {
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+                    lessonMarkdown += lessonChunk;
+                    if (!hasReceivedLessonChunk) {
+                        hasReceivedLessonChunk = true;
+                        loadingLesson = false;
+                    }
+                },
+                onError: (streamError) => {
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+                    lessonError = streamError.message;
+                },
+            });
+
             if (selectedLesson?.slug !== targetSlug) return;
-            lessonMarkdown = response.markdown;
+            if (
+                lessonContentStreamVersion !== activeLessonContentStreamVersion
+            )
+                return;
+            if (lessonContentAbortSignal.aborted) return;
 
             // Fetch citations for the lesson topic (Think Java-only, with explicit error tracking)
             fetchGuidedLessonCitations(lesson.slug)
@@ -219,14 +264,25 @@
                 });
         } catch (error) {
             if (selectedLesson?.slug !== targetSlug) return;
+            if (
+                lessonContentStreamVersion !== activeLessonContentStreamVersion
+            )
+                return;
+            if (lessonContentAbortSignal.aborted) return;
             lessonError =
                 error instanceof Error
                     ? error.message
                     : "Failed to load lesson";
             lessonMarkdown = "";
         } finally {
-            if (selectedLesson?.slug === targetSlug) {
+            if (
+                selectedLesson?.slug === targetSlug &&
+                lessonContentStreamVersion === activeLessonContentStreamVersion
+            ) {
                 loadingLesson = false;
+            }
+            if (lessonContentStreamVersion === activeLessonContentStreamVersion) {
+                lessonContentAbortController = null;
             }
         }
     }
@@ -239,6 +295,7 @@
 
         // Cancel any in-flight stream
         cancelInFlightGuidedChatStream();
+        cancelInFlightLessonContentStream();
         isChatDrawerOpen = false;
         selectedLesson = null;
         lessonMarkdown = "";
@@ -514,7 +571,7 @@
                     </div>
                 {:else}
                     <div class="lessons-grid">
-                        {#each lessons as lesson, index}
+                        {#each lessons as lesson, index (lesson.slug)}
                             <button
                                 type="button"
                                 class="lesson-card"

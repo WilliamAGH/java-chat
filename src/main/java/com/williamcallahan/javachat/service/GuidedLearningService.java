@@ -234,42 +234,44 @@ public class GuidedLearningService {
      * Produces markdown with headings, paragraphs, lists, and an example code block.
      */
     public Flux<String> streamLessonContent(String slug) {
-        // Curated lessons override AI generation for slugs where the model produces unreliable formatting.
-        Optional<String> curatedMarkdown = loadCuratedLessonMarkdown(slug);
-        if (curatedMarkdown.isPresent()) {
-            return Flux.just(curatedMarkdown.get());
-        }
+        return Flux.defer(() -> {
+            // Curated lessons override AI generation for slugs where the model produces unreliable formatting.
+            Optional<String> curatedMarkdown = loadCuratedLessonMarkdown(slug);
+            if (curatedMarkdown.isPresent()) {
+                return Flux.just(curatedMarkdown.get());
+            }
 
-        Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
-        String title = lessonOptional.map(GuidedLesson::getTitle).orElse(slug);
-        String query = lessonOptional.map(this::buildLessonQuery).orElse(slug);
+            Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
+            String title = lessonOptional.map(GuidedLesson::getTitle).orElse(slug);
+            String query = lessonOptional.map(this::buildLessonQuery).orElse(slug);
 
-        // Retrieve Think Java-only context
-        List<Document> retrievedDocuments = retrievalService.retrieve(query);
-        List<Document> bookDocuments = filterToBook(retrievedDocuments);
+            // Retrieve Think Java-only context
+            List<Document> retrievedDocuments = retrievalService.retrieve(query);
+            List<Document> bookDocuments = filterToBook(retrievedDocuments);
 
-        // Guidance: produce a clean, layered markdown lesson body
-        String guidance = String.join(
-                " ",
-                "Create a concise, beautifully formatted Java lesson using markdown only.",
-                "Do NOT include any heading at the top; the UI provides the title.",
-                "Then 1-2 short paragraphs that define and motivate the topic.",
-                "Add a bullet list of 3-5 key points or rules.",
-                "Include one short Java example in a fenced ```java code block with comments.",
-                "Add a small numbered list (1-3 steps) when it helps understanding.",
-                "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately.",
-                "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
-                "Do NOT include a conclusion section; keep it compact and practical.",
-                "If context is insufficient, state what is missing briefly.");
+            // Guidance: produce a clean, layered markdown lesson body
+            String guidance = String.join(
+                    " ",
+                    "Create a concise, beautifully formatted Java lesson using markdown only.",
+                    "Do NOT include any heading at the top; the UI provides the title.",
+                    "Then 1-2 short paragraphs that define and motivate the topic.",
+                    "Add a bullet list of 3-5 key points or rules.",
+                    "Include one short Java example in a fenced ```java code block with comments.",
+                    "Add a small numbered list (1-3 steps) when it helps understanding.",
+                    "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately.",
+                    "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
+                    "Do NOT include a conclusion section; keep it compact and practical.",
+                    "If context is insufficient, state what is missing briefly.");
 
-        // We pass a synthetic latestUserMessage that instructs the model to write the lesson
-        String latestUserMessage = "Write the lesson for: " + title + "\nFocus on: " + query;
-        List<Message> emptyHistory = List.of();
-        StringBuilder lessonMarkdownBuilder = new StringBuilder();
-        return chatService
-                .streamAnswerWithContext(emptyHistory, latestUserMessage, bookDocuments, guidance)
-                .doOnNext(lessonMarkdownBuilder::append)
-                .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
+            // We pass a synthetic latestUserMessage that instructs the model to write the lesson
+            String latestUserMessage = "Write the lesson for: " + title + "\nFocus on: " + query;
+            List<Message> emptyHistory = List.of();
+            StringBuilder lessonMarkdownBuilder = new StringBuilder();
+            return chatService
+                    .streamAnswerWithContext(emptyHistory, latestUserMessage, bookDocuments, guidance)
+                    .doOnNext(lessonMarkdownBuilder::append)
+                    .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
+        });
     }
 
     // ===== In-memory cache for lesson markdown =====

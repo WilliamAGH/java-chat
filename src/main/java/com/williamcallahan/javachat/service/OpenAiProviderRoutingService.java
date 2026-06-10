@@ -75,8 +75,9 @@ public class OpenAiProviderRoutingService {
             OpenAIClient primaryClient, OpenAIClient secondaryClient) {
         List<OpenAiProviderCandidate> orderedCandidates = orderedProviderCandidates(primaryClient, secondaryClient);
         List<OpenAiProviderCandidate> availableCandidates = new ArrayList<>(orderedCandidates.size());
+        boolean hasAlternateProvider = orderedCandidates.size() > 1;
         for (OpenAiProviderCandidate providerCandidate : orderedCandidates) {
-            if (isProviderCandidateAvailable(providerCandidate)) {
+            if (isProviderCandidateAvailable(providerCandidate, hasAlternateProvider)) {
                 availableCandidates.add(providerCandidate);
             }
         }
@@ -236,9 +237,10 @@ public class OpenAiProviderRoutingService {
         };
     }
 
-    private boolean isProviderCandidateAvailable(OpenAiProviderCandidate providerCandidate) {
+    private boolean isProviderCandidateAvailable(
+            OpenAiProviderCandidate providerCandidate, boolean hasAlternateProvider) {
         RateLimitService.ApiProvider provider = providerCandidate.provider();
-        if (provider == configuredPrimaryProvider() && isPrimaryInBackoff()) {
+        if (provider == configuredPrimaryProvider() && isPrimaryInBackoff() && hasAlternateProvider) {
             log.warn("Primary provider unavailable (backoff active, providerId={})", provider.ordinal());
             return false;
         }

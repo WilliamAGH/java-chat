@@ -1,18 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { streamSseMock } = vi.hoisted(() => {
-  return { streamSseMock: vi.fn() };
+const { streamSseMock, streamSseGetMock } = vi.hoisted(() => {
+  return { streamSseMock: vi.fn(), streamSseGetMock: vi.fn() };
 });
 
 vi.mock("./sse", () => {
-  return { streamSse: streamSseMock };
+  return { streamSse: streamSseMock, streamSseGet: streamSseGetMock };
 });
 
-import { streamGuidedChat } from "./guided";
+import { streamGuidedChat, streamLessonContent } from "./guided";
 
 describe("streamGuidedChat recovery", () => {
   beforeEach(() => {
     streamSseMock.mockReset();
+    streamSseGetMock.mockReset();
   });
 
   it("retries once for recoverable invalid stream errors before any chunk", async () => {
@@ -110,5 +111,35 @@ describe("streamGuidedChat recovery", () => {
         retryable: false,
       }),
     );
+  });
+
+  it("streams lesson content from the guided content stream endpoint", async () => {
+    streamSseGetMock.mockImplementationOnce(async (_url, callbacks) => {
+      callbacks.onText("# Lesson");
+    });
+
+    const onChunk = vi.fn();
+    const onStatus = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamLessonContent("intro", {
+        onChunk,
+        onStatus,
+        onError,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(streamSseGetMock).toHaveBeenCalledWith(
+      "/api/guided/content/stream?slug=intro",
+      expect.objectContaining({
+        onText: expect.any(Function),
+        onStatus,
+        onError,
+      }),
+      "guided.lesson-content.ts",
+      { signal: undefined },
+    );
+    expect(onChunk).toHaveBeenCalledWith("# Lesson");
   });
 });
