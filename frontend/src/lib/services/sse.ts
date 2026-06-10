@@ -174,6 +174,39 @@ export async function streamSse(
     throw fetchError;
   }
 
+  await consumeSseResponse(response, callbacks, source, abortSignal);
+}
+
+/**
+ * Streams SSE responses from a GET endpoint with the same parser used for POST streams.
+ */
+export async function streamSseGet(
+  url: string,
+  callbacks: SseCallbacks,
+  source: string,
+  options: StreamSseRequestOptions = {},
+): Promise<void> {
+  const abortSignal = options.signal;
+  let response: Response;
+
+  try {
+    response = await fetch(url, { method: "GET", signal: abortSignal });
+  } catch (fetchError) {
+    if (abortSignal?.aborted || isAbortError(fetchError)) {
+      return;
+    }
+    throw fetchError;
+  }
+
+  await consumeSseResponse(response, callbacks, source, abortSignal);
+}
+
+async function consumeSseResponse(
+  response: Response,
+  callbacks: SseCallbacks,
+  source: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
   if (!response.ok) {
     const apiMessage = await extractApiErrorMessage(response, `streamSse:${source}`);
     const errorMessage =

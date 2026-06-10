@@ -3,7 +3,7 @@ import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
 
 const fetchTocMock = vi.fn();
-const fetchLessonContentMock = vi.fn();
+const streamLessonContentMock = vi.fn();
 const fetchGuidedLessonCitationsMock = vi.fn();
 const streamGuidedChatMock = vi.fn();
 
@@ -13,7 +13,7 @@ vi.mock("../services/guided", async () => {
   return {
     ...actualGuidedService,
     fetchTOC: fetchTocMock,
-    fetchLessonContent: fetchLessonContentMock,
+    streamLessonContent: streamLessonContentMock,
     fetchGuidedLessonCitations: fetchGuidedLessonCitationsMock,
     streamGuidedChat: streamGuidedChatMock,
   };
@@ -27,7 +27,7 @@ async function renderLearnView() {
 describe("LearnView guided chat streaming stability", () => {
   beforeEach(() => {
     fetchTocMock.mockReset();
-    fetchLessonContentMock.mockReset();
+    streamLessonContentMock.mockReset();
     fetchGuidedLessonCitationsMock.mockReset();
     streamGuidedChatMock.mockReset();
   });
@@ -41,7 +41,9 @@ describe("LearnView guided chat streaming stability", () => {
       { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
     ]);
 
-    fetchLessonContentMock.mockResolvedValue({ markdown: "# Lesson", cached: false });
+    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
+      callbacks.onChunk("# Lesson");
+    });
     fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
 
     let completeStream: () => void = () => {
@@ -107,7 +109,9 @@ describe("LearnView guided chat streaming stability", () => {
       { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
     ]);
 
-    fetchLessonContentMock.mockResolvedValue({ markdown: "# Lesson", cached: false });
+    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
+      callbacks.onChunk("# Lesson");
+    });
     fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
 
     const fetchMock = vi.fn().mockResolvedValue({

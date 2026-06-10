@@ -118,88 +118,95 @@ public class ChatController extends BaseController {
 
         chatMemory.addUser(sessionId, userQuery);
 
-        // Build structured prompt for intelligent truncation
-        // Pass model hint to optimize RAG for token-constrained models
-        ChatService.StructuredPromptOutcome promptOutcome = chatService.buildStructuredPromptWithContextOutcome(
-                history, userQuery, ModelConfiguration.DEFAULT_MODEL);
+        return Flux.defer(() -> {
+                    // Build structured prompt for intelligent truncation
+                    // Pass model hint to optimize RAG for token-constrained models
+                    ChatService.StructuredPromptOutcome promptOutcome =
+                            chatService.buildStructuredPromptWithContextOutcome(
+                                    history, userQuery, ModelConfiguration.DEFAULT_MODEL);
 
-        // Use OpenAI streaming only (legacy fallback removed)
-        if (openAIStreamingService.isAvailable()) {
-            StringBuilder fullResponse = new StringBuilder();
-            AtomicInteger chunkCount = new AtomicInteger(0);
-            PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
+                    // Use OpenAI streaming only (legacy fallback removed)
+                    if (openAIStreamingService.isAvailable()) {
+                        StringBuilder fullResponse = new StringBuilder();
+                        AtomicInteger chunkCount = new AtomicInteger(0);
+                        PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
-            // Emit citations inline at stream end - compute before streaming starts
-            // Citation conversion failures are surfaced to UI via status event
-            RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(promptOutcome.documents());
-            final List<Citation> finalCitations = citationOutcome.citations();
-            final String finalCitationWarning = citationOutcome.failedConversionCount() > 0
-                    ? "Some citations could not be loaded (" + citationOutcome.failedConversionCount() + " failed)"
-                    : null;
+                        // Emit citations inline at stream end - compute before streaming starts
+                        // Citation conversion failures are surfaced to UI via status event
+                        RetrievalService.CitationOutcome citationOutcome =
+                                retrievalService.toCitations(promptOutcome.documents());
+                        final List<Citation> finalCitations = citationOutcome.citations();
+                        final String finalCitationWarning = citationOutcome.failedConversionCount() > 0
+                                ? "Some citations could not be loaded (" + citationOutcome.failedConversionCount()
+                                        + " failed)"
+                                : null;
 
-            // Stream with provider transparency - surfaces which LLM is responding
-            return openAIStreamingService
-                    .streamResponse(
-                            promptOutcome.structuredPrompt(),
-                            appProperties.getLlm().getTemperature())
-                    .flatMapMany(streamingResult -> {
-                        // Provider event first - surfaces which LLM is handling this request
-                        ServerSentEvent<String> providerEvent =
-                                sseSupport.providerEvent(streamingResult.providerDisplayName());
+                        // Stream with provider transparency - surfaces which LLM is responding
+                        return openAIStreamingService
+                                .streamResponse(
+                                        promptOutcome.structuredPrompt(),
+                                        appProperties.getLlm().getTemperature())
+                                .flatMapMany(streamingResult -> {
+                                    // Provider event first - surfaces which LLM is handling this request
+                                    ServerSentEvent<String> providerEvent =
+                                            sseSupport.providerEvent(streamingResult.providerDisplayName());
 
-                        // Stream with structure-aware truncation - preserves semantic boundaries
-                        Flux<String> dataStream = sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
-                            fullResponse.append(chunk);
-                            chunkCount.incrementAndGet();
-                        });
+                                    // Stream with structure-aware truncation - preserves semantic boundaries
+                                    Flux<String> dataStream =
+                                            sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
+                                                fullResponse.append(chunk);
+                                                chunkCount.incrementAndGet();
+                                            });
 
-                        // Heartbeats terminate when data stream completes (success or error)
-                        Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+                                    // Heartbeats terminate when data stream completes (success or error)
+                                    Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
 
-                        // Combine retrieval notices with citation warning if present
-                        Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
-                                .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-                        statusEvents =
-                                statusEvents.concatWith(sseSupport.citationWarningStatusFlux(finalCitationWarning));
+                                    // Combine retrieval notices with citation warning if present
+                                    Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(
+                                                    promptOutcome.notices())
+                                            .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
+                                    statusEvents = statusEvents.concatWith(
+                                            sseSupport.citationWarningStatusFlux(finalCitationWarning));
 
-                        Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
-                                sseSupport.streamingNoticeEvents(streamingResult.notices());
+                                    Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                            sseSupport.streamingNoticeEvents(streamingResult.notices());
 
-                        // Wrap chunks in JSON to preserve whitespace
-                        Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+                                    // Wrap chunks in JSON to preserve whitespace
+                                    Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
-                        Flux<ServerSentEvent<String>> citationEvent =
-                                Flux.just(sseSupport.citationEvent(finalCitations));
+                                    Flux<ServerSentEvent<String>> citationEvent =
+                                            Flux.just(sseSupport.citationEvent(finalCitations));
 
-                        return Flux.concat(
-                                Flux.just(providerEvent),
-                                statusEvents,
-                                Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
-                                citationEvent);
-                    })
-                    .doOnComplete(() -> {
-                        chatMemory.addAssistant(sessionId, fullResponse.toString());
-                        PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
-                    })
-                    .onErrorResume(error -> {
-                        String errorDetail = buildUserFacingErrorMessage(error);
-                        String diagnostics =
-                                error instanceof Exception exception ? describeException(exception) : error.toString();
-                        PIPELINE_LOG.error(
-                                "[{}] STREAMING ERROR (sessionId={}, exceptionType={})",
-                                requestToken,
-                                sessionId,
-                                error.getClass().getSimpleName(),
-                                error);
-                        boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-                        return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
-                    });
+                                    return Flux.concat(
+                                            Flux.just(providerEvent),
+                                            statusEvents,
+                                            Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                                            citationEvent);
+                                })
+                                .doOnComplete(() -> {
+                                    chatMemory.addAssistant(sessionId, fullResponse.toString());
+                                    PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
+                                });
+                    }
 
-        } else {
-            // Service unavailable - send structured error event so client can handle appropriately
-            PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-            return sseSupport.sseError("Streaming service unavailable", "OpenAI streaming service is not ready");
-        }
+                    // Service unavailable - send structured error event so client can handle appropriately
+                    PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
+                    return sseSupport.sseError(
+                            "Streaming service unavailable", "OpenAI streaming service is not ready");
+                })
+                .onErrorResume(error -> {
+                    String errorDetail = buildUserFacingErrorMessage(error);
+                    String diagnostics =
+                            error instanceof Exception exception ? describeException(exception) : error.toString();
+                    PIPELINE_LOG.error(
+                            "[{}] STREAMING ERROR (sessionId={}, exceptionType={})",
+                            requestToken,
+                            sessionId,
+                            error.getClass().getSimpleName(),
+                            error);
+                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                    return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
+                });
     }
 
     /**

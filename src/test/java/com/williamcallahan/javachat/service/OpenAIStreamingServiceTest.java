@@ -1,15 +1,19 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.openai.client.OpenAIClient;
 import com.openai.core.http.Headers;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 
@@ -96,5 +100,45 @@ class OpenAIStreamingServiceTest {
         NotFoundException notFoundException =
                 NotFoundException.builder().headers(headers).build();
         assertTrue(streamingService.isRecoverableStreamingFailure(notFoundException));
+    }
+
+    @Test
+    void primaryBackoffDoesNotHideOnlyConfiguredProvider() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(rateLimitService, 600, "openai");
+        OpenAIClient openAiClient = mock(OpenAIClient.class);
+
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
+
+        List<OpenAiProviderCandidate> availableProviders =
+                routingService.selectAvailableProviderCandidates(null, openAiClient);
+
+        assertEquals(1, availableProviders.size());
+        assertEquals(
+                RateLimitService.ApiProvider.OPENAI, availableProviders.get(0).provider());
+    }
+
+    @Test
+    void primaryBackoffUsesConfiguredAlternateProviderWhenAvailable() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(rateLimitService, 600, "openai");
+        OpenAIClient openAiClient = mock(OpenAIClient.class);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
+
+        List<OpenAiProviderCandidate> availableProviders =
+                routingService.selectAvailableProviderCandidates(githubModelsClient, openAiClient);
+
+        assertEquals(1, availableProviders.size());
+        assertEquals(
+                RateLimitService.ApiProvider.GITHUB_MODELS,
+                availableProviders.get(0).provider());
     }
 }

@@ -125,15 +125,33 @@ public class GuidedLearningController extends BaseController {
      * This endpoint is designed for dynamically loading lesson text into the UI.
      *
      * @param slug The unique identifier for the lesson.
-     * @return A {@link Flux} of strings sending the markdown content as SSE data events.
+     * @param response servlet response used to disable proxy buffering.
+     * @return A {@link Flux} of SSE text events carrying lesson markdown chunks.
      */
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> streamLesson(@RequestParam("slug") String slug) {
-        // If cached, emit immediately as a single-frame stream with proper SSE formatting
-        return guidedService
-                .getCachedLessonMarkdown(slug)
-                .map(cachedMarkdown -> Flux.just(cachedMarkdown.replace("\r", "")))
-                .orElseGet(() -> guidedService.streamLessonContent(slug));
+    public Flux<ServerSentEvent<String>> streamLesson(@RequestParam("slug") String slug, HttpServletResponse response) {
+        sseSupport.configureStreamingHeaders(response);
+        return Flux.defer(() -> {
+                    // If cached, emit immediately as a single-frame stream with proper SSE formatting
+                    Flux<String> lessonContentStream = guidedService
+                            .getCachedLessonMarkdown(slug)
+                            .map(cachedMarkdown -> Flux.just(cachedMarkdown.replace("\r", "")))
+                            .orElseGet(() -> guidedService.streamLessonContent(slug));
+                    Flux<String> dataStream = sseSupport.prepareDataStream(lessonContentStream, ignoredChunk -> {});
+                    return Flux.merge(dataStream.map(sseSupport::textEvent), sseSupport.heartbeats(dataStream));
+                })
+                .onErrorResume(error -> {
+                    log.error(
+                            "Guided lesson content stream error (lessonSlug={}, exceptionType={})",
+                            slug,
+                            error.getClass().getSimpleName(),
+                            error);
+                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+                    return sseSupport.streamErrorEvent(
+                            "Lesson content stream failed",
+                            "The lesson content stream encountered an error. Please try again.",
+                            retryable);
+                });
     }
 
     /**
@@ -221,57 +239,63 @@ public class GuidedLearningController extends BaseController {
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
         List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
         chatMemory.addUser(sessionId, userQuery);
-        StringBuilder fullResponse = new StringBuilder();
+        return Flux.defer(() -> {
+                    StringBuilder fullResponse = new StringBuilder();
 
-        GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
-                guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
+                    GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
+                            guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-        // Compute citations before streaming starts - page-anchor failures surfaced to UI via status event
-        List<Citation> computedCitations;
-        String citationWarning;
-        try {
-            computedCitations = guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
-            citationWarning = null;
-        } catch (RuntimeException citationEnhancementFailure) {
-            log.warn(
-                    "PDF page-anchor enhancement failed; returning base citations (exceptionType={})",
-                    citationEnhancementFailure.getClass().getSimpleName());
-            computedCitations = retrievalService
-                    .toCitations(promptOutcome.bookContextDocuments())
-                    .citations();
-            citationWarning = "PDF page-anchor enhancement failed; using base citations without page anchors";
-        }
-        final List<Citation> finalCitations = computedCitations;
-        final String finalCitationWarning = citationWarning;
+                    // Compute citations before streaming starts - page-anchor failures surfaced to UI via status event
+                    List<Citation> computedCitations;
+                    String citationWarning;
+                    try {
+                        computedCitations =
+                                guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
+                        citationWarning = null;
+                    } catch (RuntimeException citationEnhancementFailure) {
+                        log.warn(
+                                "PDF page-anchor enhancement failed; returning base citations (exceptionType={})",
+                                citationEnhancementFailure.getClass().getSimpleName());
+                        computedCitations = retrievalService
+                                .toCitations(promptOutcome.bookContextDocuments())
+                                .citations();
+                        citationWarning =
+                                "PDF page-anchor enhancement failed; using base citations without page anchors";
+                    }
+                    final List<Citation> finalCitations = computedCitations;
+                    final String finalCitationWarning = citationWarning;
 
-        // Stream with provider transparency - surfaces which LLM is responding
-        return openAIStreamingService
-                .streamResponse(
-                        promptOutcome.structuredPrompt(), appProperties.getLlm().getTemperature())
-                .flatMapMany(streamingResult -> {
-                    // Provider event first - surfaces which LLM is handling this request
-                    ServerSentEvent<String> providerEvent =
-                            sseSupport.providerEvent(streamingResult.providerDisplayName());
+                    // Stream with provider transparency - surfaces which LLM is responding
+                    return openAIStreamingService
+                            .streamResponse(
+                                    promptOutcome.structuredPrompt(),
+                                    appProperties.getLlm().getTemperature())
+                            .flatMapMany(streamingResult -> {
+                                // Provider event first - surfaces which LLM is handling this request
+                                ServerSentEvent<String> providerEvent =
+                                        sseSupport.providerEvent(streamingResult.providerDisplayName());
 
-                    Flux<String> dataStream =
-                            sseSupport.prepareDataStream(streamingResult.textChunks(), fullResponse::append);
+                                Flux<String> dataStream = sseSupport.prepareDataStream(
+                                        streamingResult.textChunks(), fullResponse::append);
 
-                    Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
-                    Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
-                    Flux<ServerSentEvent<String>> citationEvent = Flux.just(sseSupport.citationEvent(finalCitations));
+                                Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
+                                Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
+                                Flux<ServerSentEvent<String>> citationEvent =
+                                        Flux.just(sseSupport.citationEvent(finalCitations));
 
-                    Flux<ServerSentEvent<String>> statusEvents =
-                            sseSupport.citationWarningStatusFlux(finalCitationWarning);
-                    Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
-                            sseSupport.streamingNoticeEvents(streamingResult.notices());
+                                Flux<ServerSentEvent<String>> statusEvents =
+                                        sseSupport.citationWarningStatusFlux(finalCitationWarning);
+                                Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                        sseSupport.streamingNoticeEvents(streamingResult.notices());
 
-                    return Flux.concat(
-                            Flux.just(providerEvent),
-                            statusEvents,
-                            Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
-                            citationEvent);
+                                return Flux.concat(
+                                        Flux.just(providerEvent),
+                                        statusEvents,
+                                        Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                                        citationEvent);
+                            })
+                            .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
                 })
-                .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()))
                 .onErrorResume(error -> {
                     log.error(
                             "Guided streaming error (sessionId={}, lessonSlug={}, exceptionType={})",

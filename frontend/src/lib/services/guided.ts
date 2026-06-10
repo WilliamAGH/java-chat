@@ -17,6 +17,7 @@ import {
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { fetchCitationsByEndpoint, type CitationFetchResult } from "./chat";
+import { streamSseGet } from "./sse";
 import { streamWithRetry } from "./streamRecovery";
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse };
@@ -27,6 +28,14 @@ export interface GuidedStreamCallbacks {
   onStatus?: (status: StreamStatus) => void;
   onError?: (error: StreamError) => void;
   onCitations?: (citations: Citation[]) => void;
+  signal?: AbortSignal;
+}
+
+/** Callbacks for streaming guided lesson markdown. */
+export interface GuidedLessonContentCallbacks {
+  onChunk: (chunk: string) => void;
+  onStatus?: (status: StreamStatus) => void;
+  onError?: (error: StreamError) => void;
   signal?: AbortSignal;
 }
 
@@ -101,6 +110,26 @@ export async function fetchGuidedLessonCitations(slug: string): Promise<Citation
   return fetchCitationsByEndpoint(
     `/api/guided/citations?slug=${encodeURIComponent(slug)}`,
     `fetchGuidedLessonCitations [slug=${slug}]`,
+  );
+}
+
+/**
+ * Stream lesson markdown for a guided lesson slug.
+ * Uses the same SSE parser as chat so server-side dependency failures arrive as structured stream errors.
+ */
+export async function streamLessonContent(
+  slug: string,
+  callbacks: GuidedLessonContentCallbacks,
+): Promise<void> {
+  return streamSseGet(
+    `/api/guided/content/stream?slug=${encodeURIComponent(slug)}`,
+    {
+      onText: callbacks.onChunk,
+      onStatus: callbacks.onStatus,
+      onError: callbacks.onError,
+    },
+    "guided.lesson-content.ts",
+    { signal: callbacks.signal },
   );
 }
 
