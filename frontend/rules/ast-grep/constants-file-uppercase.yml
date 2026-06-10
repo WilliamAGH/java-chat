@@ -1,11 +1,10 @@
-# [NAM1] Constants files must use UPPER_SNAKE_CASE
+# [ND1e] Constants files must use UPPER_SNAKE_CASE
 # Files named *constants* signal module-level constants.
-# @see back-end/docs/api-contracts/universal-type-name-contracts.md#constants
 
 id: constants-file-uppercase
 language: tsx
 severity: warning
-message: "[NAM1] Use UPPER_SNAKE_CASE in constants files. Fix: maxRetries → MAX_RETRIES | Docs: back-end/docs/api-contracts/universal-type-name-contracts.md#constants"
+message: "[ND1e] Use UPPER_SNAKE_CASE in constants files. Fix: maxRetries → MAX_RETRIES | See AGENTS.md [ND1e]"
 
 rule:
   pattern: export const $NAME = $VAL
