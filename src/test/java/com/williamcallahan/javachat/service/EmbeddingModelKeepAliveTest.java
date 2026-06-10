@@ -18,8 +18,7 @@ class EmbeddingModelKeepAliveTest {
 
         new EmbeddingModelKeepAlive(recordingEmbeddingClient).keepEmbeddingModelWarm();
 
-        // warmUp() routes through embed(List) by default, so one probe = one embed call
-        assertEquals(1, recordingEmbeddingClient.embedInvocationCount);
+        assertEquals(1, recordingEmbeddingClient.warmUpInvocationCount);
     }
 
     @Test
@@ -30,12 +29,16 @@ class EmbeddingModelKeepAliveTest {
     }
 
     private static final class RecordingEmbeddingClient implements EmbeddingClient {
-        private int embedInvocationCount;
+        private int warmUpInvocationCount;
 
         @Override
         public List<float[]> embed(List<String> texts) {
-            embedInvocationCount++;
-            return List.of(new float[] {0.0f});
+            throw new AssertionError("keep-alive probes must not call embed(List)");
+        }
+
+        @Override
+        public void warmUp() {
+            warmUpInvocationCount++;
         }
 
         @Override
@@ -47,6 +50,11 @@ class EmbeddingModelKeepAliveTest {
     private static final class UnavailableEmbeddingClient implements EmbeddingClient {
         @Override
         public List<float[]> embed(List<String> texts) {
+            throw new EmbeddingServiceUnavailableException("provider offline for test");
+        }
+
+        @Override
+        public void warmUp() {
             throw new EmbeddingServiceUnavailableException("provider offline for test");
         }
 
