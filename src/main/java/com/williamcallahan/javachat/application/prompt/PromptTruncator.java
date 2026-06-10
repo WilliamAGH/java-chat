@@ -28,7 +28,7 @@ public class PromptTruncator {
 
     private static final Logger log = LoggerFactory.getLogger(PromptTruncator.class);
 
-    /** Truncation notice for GPT-5 family models with 8K input limit. */
+    /** Truncation notice for GPT-5 via GitHub Models (8K input tier). */
     private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
 
     /** Truncation notice for other models with larger limits. */
@@ -43,10 +43,10 @@ public class PromptTruncator {
      *
      * @param prompt the structured prompt to truncate
      * @param maxTokens maximum allowed tokens
-     * @param isGpt5Family true if targeting GPT-5 family models (affects notice text)
+     * @param isGitHubModelsGpt5 true if targeting GPT-5 via GitHub Models (affects notice text)
      * @return truncation result with the fitted prompt and truncation metadata
      */
-    public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens, boolean isGpt5Family) {
+    public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens, boolean isGitHubModelsGpt5) {
         int reservedTokens =
                 prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
 
@@ -59,7 +59,7 @@ public class PromptTruncator {
             // Return prompt with only system and query - no room for context or history
             StructuredPrompt minimalPrompt =
                     new StructuredPrompt(prompt.system(), List.of(), List.of(), prompt.currentQuery());
-            return new TruncatedPrompt(minimalPrompt, true, isGpt5Family);
+            return new TruncatedPrompt(minimalPrompt, true, isGitHubModelsGpt5);
         }
 
         int available = maxTokens - reservedTokens;
@@ -98,7 +98,7 @@ public class PromptTruncator {
                     maxTokens);
         }
 
-        return new TruncatedPrompt(truncated, wasTruncated, isGpt5Family);
+        return new TruncatedPrompt(truncated, wasTruncated, isGitHubModelsGpt5);
     }
 
     /**
@@ -183,9 +183,9 @@ public class PromptTruncator {
      *
      * @param prompt the truncated structured prompt
      * @param wasTruncated true if any segments were removed
-     * @param isGpt5Family true if targeting GPT-5 family models
+     * @param isGitHubModelsGpt5 true if targeting GPT-5 via GitHub Models
      */
-    public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGpt5Family) {
+    public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGitHubModelsGpt5) {
         /**
          * Renders the prompt to a string, prepending truncation notice if needed.
          *
@@ -195,7 +195,7 @@ public class PromptTruncator {
             if (!wasTruncated) {
                 return prompt.render();
             }
-            String notice = isGpt5Family ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
+            String notice = isGitHubModelsGpt5 ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
             return notice + prompt.render();
         }
 

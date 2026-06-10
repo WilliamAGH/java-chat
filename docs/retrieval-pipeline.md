@@ -245,16 +245,18 @@ When the quality message contains "less relevant" or "keyword search", an additi
 
 ### Token budgets
 
-Token budgets are determined by `OpenAIStreamingService` based on the active model:
+Token budgets are determined by `OpenAiRequestFactory` based on the provider and model:
 
-| Model family | Token budget | Constant |
+| Provider + Model | Token budget | Constant |
 |---|---|---|
-| GPT-5.x | 7,000 | `MAX_TOKENS_GPT5_INPUT` (`OpenAIStreamingService.java:54`) |
-| All others | 100,000 | `MAX_TOKENS_DEFAULT_INPUT` (`OpenAIStreamingService.java:57`) |
+| GitHub Models GPT-5 | 7,000 | `MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT` (`OpenAiRequestFactory.java:41`) |
+| All others | 100,000 | `MAX_TOKENS_DEFAULT_INPUT` (`OpenAiRequestFactory.java:44`) |
+
+The 7,000-token cap applies only to GPT-5 served via GitHub Models (which has an 8K input tier). GPT-5 family models served via OpenAI direct or the LLM gateway accept far larger inputs and use the 100K default.
 
 Token estimation uses a conservative `(text.length() / 4) + 1` approximation (~4 characters per token for English text).
 
-For token-constrained models (GPT-5.x), RAG retrieval is also reduced upstream: max 3 documents (`RAG_LIMIT_CONSTRAINED`) with max 600 tokens each (`RAG_TOKEN_LIMIT_CONSTRAINED`), defined in `ModelConfiguration.java`.
+For token-constrained models (GPT-5 via GitHub Models), RAG retrieval is also reduced upstream: max 3 documents (`RAG_LIMIT_CONSTRAINED`) with max 600 tokens each (`RAG_TOKEN_LIMIT_CONSTRAINED`), defined in `ModelConfiguration.java`.
 
 ---
 
