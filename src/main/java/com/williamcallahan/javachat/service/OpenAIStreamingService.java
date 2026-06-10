@@ -179,6 +179,25 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature) {
+        return complete(prompt, temperature, null);
+    }
+
+    /**
+     * Sends a non-streaming completion request with an explicit output budget.
+     *
+     * @param prompt completion prompt
+     * @param temperature response temperature
+     * @param maximumOutputTokens maximum output tokens needed by this caller
+     * @return completion text from the first successful provider attempt
+     */
+    public Mono<String> complete(String prompt, double temperature, int maximumOutputTokens) {
+        if (maximumOutputTokens <= 0) {
+            return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
+        }
+        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens));
+    }
+
+    private Mono<String> complete(String prompt, double temperature, Integer maximumOutputTokens) {
         return Mono.<String>defer(() -> {
                     List<OpenAiProviderCandidate> availableProviders =
                             providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
@@ -195,7 +214,7 @@ public class OpenAIStreamingService {
                         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
 
                         ResponseCreateParams requestParameters =
-                                requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
+                                buildCompletionRequest(prompt, temperature, activeProvider, maximumOutputTokens);
                         try {
                             log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
                             RequestOptions requestOptions = RequestOptions.builder()
@@ -234,6 +253,17 @@ public class OpenAIStreamingService {
                     return Mono.error(new IllegalStateException("No provider attempt was executed for completion"));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private ResponseCreateParams buildCompletionRequest(
+            String prompt,
+            double temperature,
+            RateLimitService.ApiProvider activeProvider,
+            Integer maximumOutputTokens) {
+        if (maximumOutputTokens == null) {
+            return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
+        }
+        return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider, maximumOutputTokens);
     }
 
     /**

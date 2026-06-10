@@ -50,6 +50,17 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void buildCompletionRequestAppliesCallerOutputBudget() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "qwen3.6:onprem", "openai/gpt-5", "");
+
+        ResponseCreateParams responseCreateParams = requestFactory.buildCompletionRequest(
+                "Rank these documents", 0.0, RateLimitService.ApiProvider.OPENAI, 128);
+
+        assertEquals(128L, responseCreateParams.maxOutputTokens().orElseThrow());
+    }
+
+    @Test
     void buildCompletionRequestKeepsPromptWithinSelectedOpenAiModelLimit() {
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-4o", "openai/gpt-5", "");
