@@ -12,9 +12,17 @@ plugins {
 val spotbugsToolVersion = "4.9.8"
 val pmdToolVersion = "7.20.0"
 val palantirVersion = "2.85.0"
+val sourceCommitEnvironmentVariable = "SOURCE_COMMIT"
+val missingSourceCommit = "unknown"
+val sourceCommit = providers.environmentVariable(sourceCommitEnvironmentVariable).orElse(missingSourceCommit)
 
 springBoot {
     mainClass.set("com.williamcallahan.javachat.JavaChatApplication")
+    buildInfo {
+        properties {
+            additional.put("commit", sourceCommit)
+        }
+    }
 }
 
 group = "com.williamcallahan"
