@@ -40,9 +40,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
     private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
 
-    private final OpenAIClient client;
+    private final OpenAIClient liveEmbeddingClient;
+    private final OpenAIClient batchEmbeddingClient;
     private final String modelName;
     private final int dimensionsHint;
+    private final boolean closeBatchEmbeddingClient;
 
     /**
      * Creates an OpenAI-compatible embedding client backed by a remote REST API endpoint.
@@ -56,61 +58,76 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     public static OpenAiCompatibleEmbeddingClient create(
             String baseUrl, String apiKey, String modelName, int dimensionsHint) {
         validateDimensions(dimensionsHint);
-        OpenAIClient client = OpenAIOkHttpClient.builder()
-                .apiKey(requireConfiguredApiKey(apiKey))
-                .baseUrl(normalizeSdkBaseUrl(baseUrl))
-                // Embedding traffic is ingestion/backfill-dominated, so it is classed
-                // as the LLM gateway's "batch" tier. The current sf7-direct endpoint
-                // ignores the header; it becomes load-bearing if this client is ever
-                // pointed at the gateway queue (api.llm-gateway.iocloudhost.net).
-                .putHeader("X-Tier", "batch")
-                .build();
-        return new OpenAiCompatibleEmbeddingClient(client, requireConfiguredModel(modelName), dimensionsHint);
+        String configuredApiKey = requireConfiguredApiKey(apiKey);
+        String normalizedBaseUrl = normalizeSdkBaseUrl(baseUrl);
+        OpenAIClient liveEmbeddingClient = createTieredClient(configuredApiKey, normalizedBaseUrl, LlmGatewayTier.LIVE);
+        OpenAIClient batchEmbeddingClient =
+                createTieredClient(configuredApiKey, normalizedBaseUrl, LlmGatewayTier.BATCH);
+        return new OpenAiCompatibleEmbeddingClient(
+                liveEmbeddingClient, batchEmbeddingClient, requireConfiguredModel(modelName), dimensionsHint);
     }
 
     static OpenAiCompatibleEmbeddingClient create(OpenAIClient client, String modelName, int dimensionsHint) {
         validateDimensions(dimensionsHint);
+        OpenAIClient embeddingClient = Objects.requireNonNull(client, "client");
         return new OpenAiCompatibleEmbeddingClient(
-                Objects.requireNonNull(client, "client"), requireConfiguredModel(modelName), dimensionsHint);
+                embeddingClient, embeddingClient, requireConfiguredModel(modelName), dimensionsHint, false);
     }
 
-    OpenAiCompatibleEmbeddingClient(OpenAIClient client, String modelName, int dimensionsHint) {
-        this.client = client;
+    OpenAiCompatibleEmbeddingClient(
+            OpenAIClient liveEmbeddingClient, OpenAIClient batchEmbeddingClient, String modelName, int dimensionsHint) {
+        this(liveEmbeddingClient, batchEmbeddingClient, modelName, dimensionsHint, true);
+    }
+
+    private OpenAiCompatibleEmbeddingClient(
+            OpenAIClient liveEmbeddingClient,
+            OpenAIClient batchEmbeddingClient,
+            String modelName,
+            int dimensionsHint,
+            boolean closeBatchEmbeddingClient) {
+        this.liveEmbeddingClient = Objects.requireNonNull(liveEmbeddingClient, "liveEmbeddingClient");
+        this.batchEmbeddingClient = Objects.requireNonNull(batchEmbeddingClient, "batchEmbeddingClient");
         this.modelName = modelName;
         this.dimensionsHint = dimensionsHint;
+        this.closeBatchEmbeddingClient = closeBatchEmbeddingClient;
     }
 
     @Override
-    public List<float[]> embed(List<String> texts) {
+    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(requestTier, "requestTier");
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
-        return createEmbeddings(texts);
+        return createEmbeddings(texts, requestTier);
     }
 
     @Override
     public void warmUp() {
-        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT));
+        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH);
     }
 
-    private List<float[]> createEmbeddings(List<String> texts) {
+    private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier) {
         EmbeddingCreateParams.Builder embeddingRequestBuilder =
                 EmbeddingCreateParams.builder().model(modelName).inputOfArrayOfStrings(texts);
         if (supportsDimensionOverride(modelName)) {
             embeddingRequestBuilder.dimensions((long) dimensionsHint);
         }
-        EmbeddingCreateParams params = embeddingRequestBuilder.build();
+        EmbeddingCreateParams embeddingRequest = embeddingRequestBuilder.build();
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(embeddingTimeout()).build();
-        return executeWithRetry(params, requestOptions, texts.size());
+        return executeWithRetry(clientFor(requestTier), embeddingRequest, requestOptions, texts.size());
     }
 
     private List<float[]> executeWithRetry(
-            EmbeddingCreateParams params, RequestOptions requestOptions, int expectedCount) {
+            OpenAIClient requestClient,
+            EmbeddingCreateParams embeddingRequest,
+            RequestOptions requestOptions,
+            int expectedCount) {
         long retryBackoffMillis = INITIAL_RETRY_BACKOFF_MILLIS;
         for (int attemptNumber = 1; attemptNumber <= MAX_EMBED_ATTEMPTS; attemptNumber++) {
             try {
-                CreateEmbeddingResponse embeddingResponse = client.embeddings().create(params, requestOptions);
+                CreateEmbeddingResponse embeddingResponse =
+                        requestClient.embeddings().create(embeddingRequest, requestOptions);
                 return parseResponse(embeddingResponse, expectedCount);
             } catch (OpenAIServiceException exception) {
                 retryBackoffMillis = handleServiceError(exception, attemptNumber, retryBackoffMillis);
@@ -372,7 +389,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
      */
     @Override
     public void close() {
-        client.close();
+        liveEmbeddingClient.close();
+        if (closeBatchEmbeddingClient) {
+            batchEmbeddingClient.close();
+        }
     }
 
     private static String requireConfiguredApiKey(String apiKey) {
@@ -391,6 +411,21 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
 
     private static String normalizeSdkBaseUrl(String baseUrl) {
         return OpenAiSdkUrlNormalizer.normalize(baseUrl);
+    }
+
+    private static OpenAIClient createTieredClient(String apiKey, String baseUrl, LlmGatewayTier requestTier) {
+        return OpenAIOkHttpClient.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier.requestHeader())
+                .build();
+    }
+
+    private OpenAIClient clientFor(LlmGatewayTier requestTier) {
+        return switch (requestTier) {
+            case LIVE -> liveEmbeddingClient;
+            case BATCH -> batchEmbeddingClient;
+        };
     }
 
     private static void validateDimensions(int dimensionsHint) {

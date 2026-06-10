@@ -10,6 +10,8 @@ import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -176,30 +178,16 @@ public class OpenAiProviderRoutingService {
     }
 
     boolean shouldBackoffPrimary(Throwable throwable) {
-        if (isRateLimit(throwable)) {
-            return true;
+        if (isCallerCancellation(throwable)) {
+            return false;
         }
-        if (throwable instanceof OpenAIIoException) {
-            return true;
-        }
-        if (throwable instanceof InterruptedException) {
-            Thread.currentThread().interrupt();
-            return true;
-        }
-        if (throwable instanceof UnauthorizedException || throwable instanceof PermissionDeniedException) {
-            return true;
-        }
-        if (throwable instanceof InternalServerException) {
-            return true;
-        }
-        if (throwable instanceof NotFoundException) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            return serviceException.statusCode() >= HTTP_INTERNAL_SERVER_ERROR;
-        }
-        String message = throwable.getMessage();
-        return message != null && AsciiTextNormalizer.toLowerAscii(message).contains("sleep interrupted");
+        return isRateLimit(throwable)
+                || throwable instanceof OpenAIIoException
+                || throwable instanceof UnauthorizedException
+                || throwable instanceof PermissionDeniedException
+                || throwable instanceof InternalServerException
+                || throwable instanceof NotFoundException
+                || isServerError(throwable);
     }
 
     private List<OpenAiProviderCandidate> orderedProviderCandidates(
@@ -273,6 +261,32 @@ public class OpenAiProviderRoutingService {
         return throwable instanceof RateLimitException
                 || (throwable instanceof OpenAIServiceException serviceException
                         && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS);
+    }
+
+    private boolean isServerError(Throwable throwable) {
+        return throwable instanceof OpenAIServiceException serviceException
+                && serviceException.statusCode() >= HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    private boolean isCallerCancellation(Throwable throwable) {
+        Throwable cancellationCandidate = throwable;
+        while (cancellationCandidate != null) {
+            if (cancellationCandidate instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
+            if (cancellationCandidate instanceof InterruptedIOException
+                    && !(cancellationCandidate instanceof SocketTimeoutException)) {
+                return true;
+            }
+            String cancellationMessage = cancellationCandidate.getMessage();
+            if (cancellationMessage != null
+                    && AsciiTextNormalizer.toLowerAscii(cancellationMessage).contains("sleep interrupted")) {
+                return true;
+            }
+            cancellationCandidate = cancellationCandidate.getCause();
+        }
+        return false;
     }
 
     private boolean isPrimaryInBackoff() {

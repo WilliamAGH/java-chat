@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 public class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
-    private static final int MAX_COMPLETION_TOKENS = 4000;
+    private static final int GPT5_COMPLETION_OUTPUT_TOKEN_BUDGET = 4000;
 
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
@@ -117,10 +117,32 @@ public class OpenAiRequestFactory {
      */
     public ResponseCreateParams buildCompletionRequest(
             String prompt, double temperature, RateLimitService.ApiProvider provider) {
+        return buildCompletionRequest(prompt, temperature, provider, null);
+    }
+
+    /**
+     * Builds completion request parameters with an explicit output budget.
+     *
+     * @param prompt completion prompt
+     * @param temperature response temperature
+     * @param provider provider chosen for this request attempt
+     * @param maximumOutputTokens maximum output tokens needed by this caller
+     * @return request payload ready for SDK execution
+     */
+    public ResponseCreateParams buildCompletionRequest(
+            String prompt, double temperature, RateLimitService.ApiProvider provider, int maximumOutputTokens) {
+        if (maximumOutputTokens <= 0) {
+            throw new IllegalArgumentException("maximumOutputTokens must be positive");
+        }
+        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens));
+    }
+
+    private ResponseCreateParams buildCompletionRequest(
+            String prompt, double temperature, RateLimitService.ApiProvider provider, Integer maximumOutputTokens) {
         boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
         String modelId = normalizedModelId(useGitHubModels);
         String truncatedPrompt = truncatePromptForCompletion(prompt, modelId, useGitHubModels);
-        return buildResponseParams(truncatedPrompt, temperature, modelId);
+        return buildResponseParams(truncatedPrompt, temperature, modelId, maximumOutputTokens);
     }
 
     private String truncatePromptForCompletion(String prompt, String modelId, boolean useGitHubModels) {
@@ -145,6 +167,11 @@ public class OpenAiRequestFactory {
     }
 
     private ResponseCreateParams buildResponseParams(String prompt, double temperature, String normalizedModelId) {
+        return buildResponseParams(prompt, temperature, normalizedModelId, null);
+    }
+
+    private ResponseCreateParams buildResponseParams(
+            String prompt, double temperature, String normalizedModelId, Integer maximumOutputTokens) {
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel =
                 gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
@@ -152,8 +179,13 @@ public class OpenAiRequestFactory {
         ResponseCreateParams.Builder builder =
                 ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
 
+        if (maximumOutputTokens != null) {
+            builder.maxOutputTokens(maximumOutputTokens.longValue());
+        } else if (gpt5Family) {
+            builder.maxOutputTokens((long) GPT5_COMPLETION_OUTPUT_TOKEN_BUDGET);
+        }
+
         if (gpt5Family) {
-            builder.maxOutputTokens((long) MAX_COMPLETION_TOKENS);
             log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
 
             resolveReasoningEffort()

@@ -47,7 +47,7 @@ class HybridSearchServiceTest {
     void appliesServerFilterToQueryAndPrefetchWithConfiguredRrfK() {
         appProperties.getQdrant().setRrfK(77);
 
-        when(embeddingClient.embed("Java 25 streams")).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(embeddingClient.embed("Java 25 streams", LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
         when(sparseEncoder.encode("Java 25 streams"))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L, 3L), List.of(2.0f, 1.0f)));
 
@@ -112,7 +112,7 @@ class HybridSearchServiceTest {
     }
 
     private void stubPartialFailureQueryResponses(String queryText) {
-        when(embeddingClient.embed(queryText)).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
+        when(embeddingClient.embed(queryText, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.5f, 0.1f, 0.4f});
         when(sparseEncoder.encode(queryText))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L), List.of(1.0f)));
 

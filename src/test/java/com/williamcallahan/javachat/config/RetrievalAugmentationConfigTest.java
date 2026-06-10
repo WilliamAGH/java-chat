@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
@@ -16,6 +17,7 @@ class RetrievalAugmentationConfigTest {
         RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
 
         assertDoesNotThrow(config::validateConfiguration);
+        assertEquals(Duration.ofSeconds(30), config.getRerankerTimeout());
     }
 
     @Test

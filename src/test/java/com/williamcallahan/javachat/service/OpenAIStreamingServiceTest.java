@@ -13,6 +13,7 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import java.io.InterruptedIOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
@@ -45,6 +46,15 @@ class OpenAIStreamingServiceTest {
     void shouldBackoffPrimaryTreatsSdkIoAsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         assertTrue(routingService.shouldBackoffPrimary(new OpenAIIoException("io")));
+    }
+
+    @Test
+    void shouldBackoffPrimaryIgnoresCallerCancellationWrappedBySdkIo() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        InterruptedIOException interruptedRequest = new InterruptedIOException("request interrupted by caller timeout");
+        OpenAIIoException cancelledCompletion = new OpenAIIoException("Request failed", interruptedRequest);
+
+        assertFalse(routingService.shouldBackoffPrimary(cancelledCompletion));
     }
 
     @Test

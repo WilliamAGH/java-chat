@@ -32,6 +32,9 @@ public class RerankerService {
     /** Maximum character length of document text included in the rerank prompt. */
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
 
+    /** Output budget for the small JSON ordering the reranker requires. */
+    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 128;
+
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
     private final Duration rerankerTimeout;
@@ -100,7 +103,7 @@ public class RerankerService {
 
         try {
             return openAIStreamingService
-                    .complete(prompt, 0.0)
+                    .complete(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET)
                     .timeout(rerankerTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
@@ -121,7 +124,8 @@ public class RerankerService {
         prompt.append("Consider Java-specific context, version relevance, and learning value.\n");
         prompt.append("Prefer official documentation over blogs or third-party sources.\n");
         prompt.append("Prefer stable release documentation over early-access or preview content.\n");
-        prompt.append("Return JSON: {\"order\":[indices...]} with 0-based indices.\n\n");
+        prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices.\n");
+        prompt.append("Do not include markdown, prose, or explanations.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
 
         for (int docIndex = 0; docIndex < documents.size(); docIndex++) {

@@ -67,6 +67,7 @@ src/main/resources/static/assets/
 ### Local scratchpad ###
 tmp/
 bin/
+dogfood-output/
 
 ### Build artifacts (root level) ###
 BOOT-INF/

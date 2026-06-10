@@ -14,23 +14,26 @@ public interface EmbeddingClient {
      * Produces one dense embedding vector per input text, preserving input order.
      *
      * @param texts input texts
+     * @param requestTier gateway capacity tier for this embedding request
      * @return embedding vectors in the same order as {@code texts}
      */
-    List<float[]> embed(List<String> texts);
+    List<float[]> embed(List<String> texts, LlmGatewayTier requestTier);
 
     /**
      * Produces a dense embedding vector for a single text.
      *
      * @param text input text
+     * @param requestTier gateway capacity tier for this embedding request
      * @return embedding vector
      */
-    default float[] embed(String text) {
+    default float[] embed(String text, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(requestTier, "requestTier");
         String safeText = Objects.requireNonNullElse(text, "");
-        List<float[]> vectors = embed(List.of(safeText));
-        if (vectors.isEmpty()) {
+        List<float[]> embeddingVectors = embed(List.of(safeText), requestTier);
+        if (embeddingVectors.isEmpty()) {
             throw new EmbeddingServiceUnavailableException("Embedding response was empty");
         }
-        return vectors.get(0);
+        return embeddingVectors.get(0);
     }
 
     /**
@@ -44,7 +47,7 @@ public interface EmbeddingClient {
      * Issues a minimal embedding request so the provider keeps its model resident.
      *
      * <p>Implementations must call their provider-specific request path directly instead
-     * of delegating to {@link #embed(List)}. The RAG pipeline logging aspect advises
+     * of delegating to {@link #embed(List, LlmGatewayTier)}. The RAG pipeline logging aspect advises
      * public {@code embed} executions, so routing scheduled probes around that method
      * keeps "STEP 1" pipeline logs scoped to real requests.</p>
      *

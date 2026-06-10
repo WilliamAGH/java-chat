@@ -128,7 +128,7 @@ public class HybridSearchService {
             return new SearchOutcome(List.of(), List.of());
         }
 
-        float[] denseVector = queryEncoding.embeddingClient().embed(query);
+        float[] denseVector = queryEncoding.embeddingClient().embed(query, LlmGatewayTier.LIVE);
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(query);
         Optional<Filter> retrievalFilter = queryEncoding.constraintBuilder().buildFilter(retrievalConstraint);

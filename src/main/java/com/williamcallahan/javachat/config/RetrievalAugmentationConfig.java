@@ -14,7 +14,7 @@ public class RetrievalAugmentationConfig {
     private static final int OVERLAP_DEF = 150;
     private static final int CITE_DEF = 3;
     private static final double MMR_LAMBDA_DEF = 0.5d;
-    private static final Duration RERANK_TIMEOUT_DEF = Duration.ofSeconds(12);
+    private static final Duration RERANK_TIMEOUT_DEF = Duration.ofSeconds(30);
     private static final int MIN_POSITIVE = 1;
     private static final int MIN_NON_NEG = 0;
     private static final double MMR_MIN = 0.0d;
