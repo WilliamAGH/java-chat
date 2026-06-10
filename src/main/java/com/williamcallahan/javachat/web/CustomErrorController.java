@@ -88,7 +88,7 @@ public class CustomErrorController implements ErrorController {
         }
 
         // Determine if this is an API request or a page request
-        boolean isApiRequest = uri.startsWith("/api/");
+        boolean isApiRequest = uri.equals("/api") || uri.startsWith("/api/");
 
         if (isApiRequest) {
             // Return JSON error response for API requests
