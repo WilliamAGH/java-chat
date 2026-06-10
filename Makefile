@@ -35,12 +35,8 @@ format: ## Apply Java formatting (Palantir via Spotless)
 	$(GRADLEW) spotlessApply
 
 hooks: ## Install git hooks via lefthook
-	@if command -v lefthook >/dev/null 2>&1; then \
-		lefthook install -f; \
-	else \
-		echo "lefthook not found — install with: brew install lefthook"; \
-		echo "Skipping hook installation; commits/pushes will proceed without gates."; \
-	fi
+	@$(call require_cmd,lefthook,brew install lefthook)
+	lefthook install -f
 
 run: build ## Run the packaged jar (loads .env if present)
 	@$(call load_env); \
