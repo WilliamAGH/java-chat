@@ -32,8 +32,13 @@ public class OpenAiRequestFactory {
     private static final String DEFAULT_OPENAI_MODEL = "gpt-5.2";
     private static final String DEFAULT_GITHUB_MODELS_MODEL = "openai/gpt-5";
 
-    /** Safe token budget for GPT-5.2 input (8K limit). */
-    private static final int MAX_TOKENS_GPT5_INPUT = 7000;
+    /**
+     * Safe token budget under GitHub Models' 8K input tier for its GPT-5 catalog entry.
+     * The constraint belongs to that provider tier, not the GPT-5 family: the same family
+     * served by OpenAI direct or the LLM gateway accepts far larger inputs and uses
+     * {@link #MAX_TOKENS_DEFAULT_INPUT}.
+     */
+    private static final int MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT = 7000;
 
     /** Generous token budget for high-context models. */
     private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
@@ -84,11 +89,11 @@ public class OpenAiRequestFactory {
             StructuredPrompt structuredPrompt, double temperature, RateLimitService.ApiProvider provider) {
         boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
         String modelId = normalizedModelId(useGitHubModels);
-        boolean gpt5Family = isGpt5Family(modelId);
-        int tokenLimit = gpt5Family ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
+        boolean githubModelsGpt5Constrained = useGitHubModels && isGpt5Family(modelId);
+        int tokenLimit = githubModelsGpt5Constrained ? MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
 
         PromptTruncator.TruncatedPrompt truncatedPrompt =
-                promptTruncator.truncate(structuredPrompt, tokenLimit, gpt5Family);
+                promptTruncator.truncate(structuredPrompt, tokenLimit, githubModelsGpt5Constrained);
         if (truncatedPrompt.wasTruncated()) {
             log.info(
                     "[LLM] Prompt truncated for streaming (providerId={}, model={}, contextDocs={}, conversationTurns={})",
@@ -114,32 +119,25 @@ public class OpenAiRequestFactory {
             String prompt, double temperature, RateLimitService.ApiProvider provider) {
         boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
         String modelId = normalizedModelId(useGitHubModels);
-        return buildResponseParams(prompt, temperature, modelId);
+        String truncatedPrompt = truncatePromptForCompletion(prompt, modelId, useGitHubModels);
+        return buildResponseParams(truncatedPrompt, temperature, modelId);
     }
 
-    /**
-     * Truncates completion prompts to conservative model-safe token limits.
-     *
-     * @param prompt full completion prompt
-     * @return original prompt when no truncation is required, otherwise a notice-prefixed prompt
-     */
-    public String truncatePromptForCompletion(String prompt) {
+    private String truncatePromptForCompletion(String prompt, String modelId, boolean useGitHubModels) {
         if (prompt == null || prompt.isEmpty()) {
             return prompt;
         }
 
-        String openaiModelId = normalizedModelId(false);
-        String githubModelId = normalizedModelId(true);
-        boolean gpt5Family = isGpt5Family(openaiModelId) || isGpt5Family(githubModelId);
-        boolean reasoningModel = gpt5Family
-                || canonicalModelName(openaiModelId).startsWith("o")
-                || canonicalModelName(githubModelId).startsWith("o");
-
-        int tokenLimit = reasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
+        // The 7K cap accommodates GitHub Models' 8K input tier for its GPT-5 entry.
+        // GPT-5 family on OpenAI direct/the gateway and o-series reasoning models
+        // accept >=128K input tokens, so both take the default cap (PR #49 review
+        // finding; gateway gpt-5.4 over-truncation).
+        boolean githubModelsGpt5Constrained = useGitHubModels && isGpt5Family(modelId);
+        int tokenLimit = githubModelsGpt5Constrained ? MAX_TOKENS_GITHUB_MODELS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
         String truncatedPrompt = chunker.keepLastTokens(prompt, tokenLimit);
 
         if (truncatedPrompt.length() < prompt.length()) {
-            String truncationNotice = gpt5Family ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
+            String truncationNotice = githubModelsGpt5Constrained ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
             return truncationNotice + truncatedPrompt;
         }
 

@@ -88,7 +88,7 @@ public class CustomErrorController implements ErrorController {
         }
 
         // Determine if this is an API request or a page request
-        boolean isApiRequest = uri.startsWith("/api/");
+        boolean isApiRequest = uri.equals("/api") || uri.startsWith("/api/");
 
         if (isApiRequest) {
             // Return JSON error response for API requests
@@ -133,6 +133,10 @@ public class CustomErrorController implements ErrorController {
             resolvedStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         }
         modelAndView.setViewName(resolveErrorViewName(resolvedStatus));
+        // Carry the real status onto the forwarded error view: without this the
+        // forward renders with 200, so a missing hashed asset returns 200 text/html
+        // and browsers raise a strict-MIME module error instead of a clean 404.
+        modelAndView.setStatus(resolvedStatus);
 
         return modelAndView;
     }

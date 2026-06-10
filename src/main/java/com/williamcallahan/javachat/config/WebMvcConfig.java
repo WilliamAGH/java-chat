@@ -68,10 +68,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
         // SPA fallback: forward non-file routes to index.html
         // This allows client-side routing to work with direct URL access
         // Pattern [^\\.]*  matches path segments without dots (excludes static assets)
+        // The (?!api$) guard keeps the /api namespace out of the SPA fallback so an
+        // unknown API path reaches CustomErrorController's JSON branch as a real 404
+        // instead of answering 200 with the index.html shell.
         // Explicitly define depth levels as PathPatternParser forbids /**/{regex}
         registry.addViewController("/").setViewName("forward:/index.html");
-        registry.addViewController("/{path:[^\\.]*}").setViewName("forward:/index.html");
-        registry.addViewController("/*/{path:[^\\.]*}").setViewName("forward:/index.html");
-        registry.addViewController("/*/*/{path:[^\\.]*}").setViewName("forward:/index.html");
+        registry.addViewController("/{spaRoot:(?!api$)[^\\.]*}").setViewName("forward:/index.html");
+        registry.addViewController("/{spaRoot:(?!api$)[^\\.]*}/{spaPath:[^\\.]*}")
+                .setViewName("forward:/index.html");
+        registry.addViewController("/{spaRoot:(?!api$)[^\\.]*}/*/{spaPath:[^\\.]*}")
+                .setViewName("forward:/index.html");
     }
 }

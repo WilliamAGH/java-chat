@@ -48,4 +48,54 @@ class OpenAiRequestFactoryTest {
         assertTrue(responseCreateParams.maxOutputTokens().isEmpty());
         assertEquals(0.25, responseCreateParams.temperature().orElseThrow(), 0.000_001);
     }
+
+    @Test
+    void buildCompletionRequestKeepsPromptWithinSelectedOpenAiModelLimit() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-4o", "openai/gpt-5", "");
+        String prompt = "context ".repeat(8_000);
+
+        ResponseCreateParams responseCreateParams =
+                requestFactory.buildCompletionRequest(prompt, 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(prompt, responseCreateParams.input().orElseThrow().asText());
+    }
+
+    @Test
+    void buildCompletionRequestDoesNotApplyGitHubModelsCapToOpenAiGpt5Family() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", "openai/gpt-5", "");
+        String prompt = "context ".repeat(8_000);
+
+        ResponseCreateParams responseCreateParams =
+                requestFactory.buildCompletionRequest(prompt, 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(prompt, responseCreateParams.input().orElseThrow().asText());
+    }
+
+    @Test
+    void buildCompletionRequestDoesNotApplyGpt5LimitToOSeriesModels() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "o3-mini", "openai/gpt-5", "");
+        String prompt = "context ".repeat(8_000);
+
+        ResponseCreateParams responseCreateParams =
+                requestFactory.buildCompletionRequest(prompt, 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(prompt, responseCreateParams.input().orElseThrow().asText());
+    }
+
+    @Test
+    void buildCompletionRequestTruncatesPromptForSelectedGitHubModelsLimit() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-4o", "gpt-5", "");
+        String prompt = "context ".repeat(8_000);
+
+        ResponseCreateParams responseCreateParams =
+                requestFactory.buildCompletionRequest(prompt, 0.4, RateLimitService.ApiProvider.GITHUB_MODELS);
+
+        String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
+        assertTrue(truncatedPrompt.startsWith("[Context truncated due to GPT-5 8K input limit]"));
+        assertTrue(truncatedPrompt.length() < prompt.length());
+    }
 }
