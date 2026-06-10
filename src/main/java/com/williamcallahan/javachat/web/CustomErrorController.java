@@ -133,6 +133,10 @@ public class CustomErrorController implements ErrorController {
             resolvedStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         }
         modelAndView.setViewName(resolveErrorViewName(resolvedStatus));
+        // Carry the real status onto the forwarded error view: without this the
+        // forward renders with 200, so a missing hashed asset returns 200 text/html
+        // and browsers raise a strict-MIME module error instead of a clean 404.
+        modelAndView.setStatus(resolvedStatus);
 
         return modelAndView;
     }
