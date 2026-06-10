@@ -18,6 +18,7 @@ class EmbeddingModelKeepAliveTest {
 
         new EmbeddingModelKeepAlive(recordingEmbeddingClient).keepEmbeddingModelWarm();
 
+        // warmUp() routes through embed(List) by default, so one probe = one embed call
         assertEquals(1, recordingEmbeddingClient.embedInvocationCount);
     }
 

@@ -37,4 +37,19 @@ public interface EmbeddingClient {
      * @return embedding vector dimensions
      */
     int dimensions();
+
+    /**
+     * Issues a minimal embedding request so the provider keeps its model resident.
+     *
+     * <p>Distinct from {@link #embed(List)} so scheduled warm-up probes are not
+     * advised by the RAG pipeline logging aspect (which matches {@code embed}
+     * executions): the internal call below is a self-invocation on the target
+     * and bypasses the Spring AOP proxy, keeping "STEP 1" pipeline logs scoped
+     * to real requests.</p>
+     *
+     * @throws EmbeddingServiceUnavailableException when the provider cannot serve the probe
+     */
+    default void warmUp() {
+        embed(List.of("embedding model warm-up probe"));
+    }
 }
