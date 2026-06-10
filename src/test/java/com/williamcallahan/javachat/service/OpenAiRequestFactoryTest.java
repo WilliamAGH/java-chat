@@ -62,6 +62,18 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void buildCompletionRequestDoesNotApplyGitHubModelsCapToOpenAiGpt5Family() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", "openai/gpt-5", "");
+        String prompt = "context ".repeat(8_000);
+
+        ResponseCreateParams responseCreateParams =
+                requestFactory.buildCompletionRequest(prompt, 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(prompt, responseCreateParams.input().orElseThrow().asText());
+    }
+
+    @Test
     void buildCompletionRequestDoesNotApplyGpt5LimitToOSeriesModels() {
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "o3-mini", "openai/gpt-5", "");
