@@ -56,7 +56,7 @@ final class EmbeddingBatchEmbedder {
 
         List<float[]> batchEmbeddings;
         try {
-            batchEmbeddings = embeddingClient.embed(textBatch);
+            batchEmbeddings = embeddingClient.embed(textBatch, LlmGatewayTier.BATCH);
         } catch (EmbeddingServiceUnavailableException embeddingFailure) {
             String firstBatchUrl = extractDocumentUrl(documentBatch.getFirst(), batchStartIndex);
             String lastBatchUrl = extractDocumentUrl(documentBatch.getLast(), batchEndIndex - 1);

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.openai.client.OpenAIClient;
@@ -53,7 +54,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
-            List<float[]> vectors = clientAdapter.embed(List.of("a", "b"));
+            List<float[]> vectors = clientAdapter.embed(List.of("a", "b"), LlmGatewayTier.LIVE);
 
             assertEquals(2, vectors.size());
             assertEquals(0.25f, vectors.get(0)[0]);
@@ -88,8 +89,9 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
-            EmbeddingServiceUnavailableException thrownException =
-                    assertThrows(EmbeddingServiceUnavailableException.class, () -> clientAdapter.embed(List.of("a")));
+            EmbeddingServiceUnavailableException thrownException = assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("a"), LlmGatewayTier.LIVE));
             assertTrue(thrownException.getMessage().contains("dimension mismatch"));
             verify(embeddingService, times(1)).create(any(), any(RequestOptions.class));
         }
@@ -131,7 +133,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
-            List<float[]> vectors = clientAdapter.embed(List.of("single"));
+            List<float[]> vectors = clientAdapter.embed(List.of("single"), LlmGatewayTier.LIVE);
 
             assertEquals(1, vectors.size());
             assertEquals(0.7f, vectors.get(0)[0]);
@@ -161,7 +163,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 client, "text-embedding-3-small", EXPECTED_EMBEDDING_DIMENSION)) {
-            clientAdapter.embed(List.of("dimension check"));
+            clientAdapter.embed(List.of("dimension check"), LlmGatewayTier.LIVE);
 
             ArgumentCaptor<EmbeddingCreateParams> requestCaptor = ArgumentCaptor.forClass(EmbeddingCreateParams.class);
             verify(embeddingService).create(requestCaptor.capture(), any(RequestOptions.class));
@@ -193,11 +195,46 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
-            clientAdapter.embed(List.of("dimension check"));
+            clientAdapter.embed(List.of("dimension check"), LlmGatewayTier.LIVE);
 
             ArgumentCaptor<EmbeddingCreateParams> requestCaptor = ArgumentCaptor.forClass(EmbeddingCreateParams.class);
             verify(embeddingService).create(requestCaptor.capture(), any(RequestOptions.class));
             assertTrue(requestCaptor.getValue().dimensions().isEmpty());
+        }
+    }
+
+    @Test
+    void routesEmbeddingRequestsToTierSpecificSdkClients() {
+        OpenAIClient liveClient = mock(OpenAIClient.class);
+        OpenAIClient batchClient = mock(OpenAIClient.class);
+        EmbeddingService liveEmbeddingService = mock(EmbeddingService.class);
+        EmbeddingService batchEmbeddingService = mock(EmbeddingService.class);
+
+        when(liveClient.embeddings()).thenReturn(liveEmbeddingService);
+        when(batchClient.embeddings()).thenReturn(batchEmbeddingService);
+
+        CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
+                .model("text-embedding-qwen3-embedding-8b")
+                .usage(CreateEmbeddingResponse.Usage.builder()
+                        .promptTokens(1L)
+                        .totalTokens(1L)
+                        .build())
+                .data(List.of(com.openai.models.embeddings.Embedding.builder()
+                        .index(0L)
+                        .embedding(List.of(0.4f, 0.6f))
+                        .build()))
+                .build();
+        when(liveEmbeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
+        when(batchEmbeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
+
+        try (OpenAiCompatibleEmbeddingClient clientAdapter = new OpenAiCompatibleEmbeddingClient(
+                liveClient, batchClient, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+            clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE);
+            verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
+            verifyNoInteractions(batchEmbeddingService);
+
+            clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH);
+            verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
         }
     }
 }

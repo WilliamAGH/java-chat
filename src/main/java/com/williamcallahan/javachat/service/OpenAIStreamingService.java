@@ -42,7 +42,6 @@ public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
 
     private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
-    private static final String LLM_GATEWAY_TIER_LIVE = "production-z";
     private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK =
             SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
     private static final String STREAM_STAGE_STREAM = SseConstants.STATUS_STAGE_STREAM;
@@ -338,7 +337,7 @@ public class OpenAIStreamingService {
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(OpenAiSdkUrlNormalizer.normalize(baseUrl))
-                .putHeader("X-Tier", resolvedLlmGatewayTier())
+                .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, resolvedLlmGatewayTier())
                 // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
                 // Retries cause InterruptedException when Reactor cancels a sleeping retry.
                 .maxRetries(0)
@@ -346,7 +345,9 @@ public class OpenAIStreamingService {
     }
 
     private String resolvedLlmGatewayTier() {
-        return llmGatewayTier == null || llmGatewayTier.isBlank() ? LLM_GATEWAY_TIER_LIVE : llmGatewayTier.trim();
+        return llmGatewayTier == null || llmGatewayTier.isBlank()
+                ? LlmGatewayTier.LIVE.requestHeader()
+                : llmGatewayTier.trim();
     }
 
     private void closeClientSafely(OpenAIClient client, String clientName) {

@@ -28,12 +28,15 @@ class EmbeddingModelKeepAliveTest {
         assertDoesNotThrow(keepAlive::keepEmbeddingModelWarm);
     }
 
+    /**
+     * Records scheduled warm-up calls without allowing pipeline embedding calls.
+     */
     private static final class RecordingEmbeddingClient implements EmbeddingClient {
         private int warmUpInvocationCount;
 
         @Override
-        public List<float[]> embed(List<String> texts) {
-            throw new AssertionError("keep-alive probes must not call embed(List)");
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+            throw new AssertionError("keep-alive probes must not call embed(List, LlmGatewayTier)");
         }
 
         @Override
@@ -47,9 +50,12 @@ class EmbeddingModelKeepAliveTest {
         }
     }
 
+    /**
+     * Simulates a provider that is unavailable during scheduled warm-up.
+     */
     private static final class UnavailableEmbeddingClient implements EmbeddingClient {
         @Override
-        public List<float[]> embed(List<String> texts) {
+        public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
             throw new EmbeddingServiceUnavailableException("provider offline for test");
         }
 

@@ -57,7 +57,8 @@ class LocalEmbeddingClientTest {
         try {
             LocalEmbeddingClient localEmbeddingClient =
                     new LocalEmbeddingClient(baseUrl, "local-model", 3, 2, new RestTemplateBuilder());
-            List<float[]> embeddingVectors = localEmbeddingClient.embed(List.of("alpha", "beta", "gamma"));
+            List<float[]> embeddingVectors =
+                    localEmbeddingClient.embed(List.of("alpha", "beta", "gamma"), LlmGatewayTier.LIVE);
 
             assertEquals(2, requestCounter.get());
             assertEquals(List.of(2, 1), observedBatchSizes);
@@ -89,7 +90,8 @@ class LocalEmbeddingClientTest {
             LocalEmbeddingClient localEmbeddingClient =
                     new LocalEmbeddingClient(baseUrl, "local-model", 3, 8, new RestTemplateBuilder());
             EmbeddingServiceUnavailableException thrownException = assertThrows(
-                    EmbeddingServiceUnavailableException.class, () -> localEmbeddingClient.embed(List.of("alpha")));
+                    EmbeddingServiceUnavailableException.class,
+                    () -> localEmbeddingClient.embed(List.of("alpha"), LlmGatewayTier.LIVE));
             assertTrue(thrownException.getMessage().contains("dimension mismatch"));
         } finally {
             httpServer.stop(0);

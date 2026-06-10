@@ -66,7 +66,8 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
     }
 
     @Override
-    public List<float[]> embed(List<String> texts) {
+    public List<float[]> embed(List<String> texts, LlmGatewayTier requestTier) {
+        Objects.requireNonNull(requestTier, "requestTier");
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
