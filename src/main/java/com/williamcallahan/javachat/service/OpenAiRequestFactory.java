@@ -114,7 +114,8 @@ public class OpenAiRequestFactory {
             String prompt, double temperature, RateLimitService.ApiProvider provider) {
         boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
         String modelId = normalizedModelId(useGitHubModels);
-        return buildResponseParams(prompt, temperature, modelId);
+        String truncatedPrompt = truncatePromptForCompletion(prompt, modelId);
+        return buildResponseParams(truncatedPrompt, temperature, modelId);
     }
 
     /**
@@ -124,16 +125,29 @@ public class OpenAiRequestFactory {
      * @return original prompt when no truncation is required, otherwise a notice-prefixed prompt
      */
     public String truncatePromptForCompletion(String prompt) {
+        return truncatePromptForCompletion(prompt, RateLimitService.ApiProvider.OPENAI);
+    }
+
+    /**
+     * Truncates completion prompts to token limits for the selected provider's model.
+     *
+     * @param prompt full completion prompt
+     * @param provider provider chosen for this request attempt
+     * @return original prompt when no truncation is required, otherwise a notice-prefixed prompt
+     */
+    public String truncatePromptForCompletion(String prompt, RateLimitService.ApiProvider provider) {
+        boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
+        String modelId = normalizedModelId(useGitHubModels);
+        return truncatePromptForCompletion(prompt, modelId);
+    }
+
+    private String truncatePromptForCompletion(String prompt, String modelId) {
         if (prompt == null || prompt.isEmpty()) {
             return prompt;
         }
 
-        String openaiModelId = normalizedModelId(false);
-        String githubModelId = normalizedModelId(true);
-        boolean gpt5Family = isGpt5Family(openaiModelId) || isGpt5Family(githubModelId);
-        boolean reasoningModel = gpt5Family
-                || canonicalModelName(openaiModelId).startsWith("o")
-                || canonicalModelName(githubModelId).startsWith("o");
+        boolean gpt5Family = isGpt5Family(modelId);
+        boolean reasoningModel = gpt5Family || canonicalModelName(modelId).startsWith("o");
 
         int tokenLimit = reasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
         String truncatedPrompt = chunker.keepLastTokens(prompt, tokenLimit);
