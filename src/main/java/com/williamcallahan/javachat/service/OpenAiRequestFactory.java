@@ -118,29 +118,6 @@ public class OpenAiRequestFactory {
         return buildResponseParams(truncatedPrompt, temperature, modelId);
     }
 
-    /**
-     * Truncates completion prompts to conservative model-safe token limits.
-     *
-     * @param prompt full completion prompt
-     * @return original prompt when no truncation is required, otherwise a notice-prefixed prompt
-     */
-    public String truncatePromptForCompletion(String prompt) {
-        return truncatePromptForCompletion(prompt, RateLimitService.ApiProvider.OPENAI);
-    }
-
-    /**
-     * Truncates completion prompts to token limits for the selected provider's model.
-     *
-     * @param prompt full completion prompt
-     * @param provider provider chosen for this request attempt
-     * @return original prompt when no truncation is required, otherwise a notice-prefixed prompt
-     */
-    public String truncatePromptForCompletion(String prompt, RateLimitService.ApiProvider provider) {
-        boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
-        String modelId = normalizedModelId(useGitHubModels);
-        return truncatePromptForCompletion(prompt, modelId);
-    }
-
     private String truncatePromptForCompletion(String prompt, String modelId) {
         if (prompt == null || prompt.isEmpty()) {
             return prompt;
