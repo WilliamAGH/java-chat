@@ -1,11 +1,10 @@
-# [NAM1] Ban I-prefix on interfaces
-# Hungarian notation is an anti-pattern.
-# @see back-end/docs/api-contracts/universal-type-name-contracts.md#banned-patterns
+# [ND1f] Ban I-prefix on interfaces
+# Hungarian notation is an anti-pattern; type names declare their domain role.
 
 id: ban-i-prefix-interface
 language: tsx
 severity: error
-message: "[NAM1] I-prefix banned. Fix: IUser → User | Docs: back-end/docs/api-contracts/universal-type-name-contracts.md#banned-patterns"
+message: "[ND1f] I-prefix banned. Fix: IUser → User | See AGENTS.md [ND1f]"
 
 rule:
   kind: interface_declaration
