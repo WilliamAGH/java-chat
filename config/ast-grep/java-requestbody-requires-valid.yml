@@ -2,23 +2,36 @@
 # External JSON payloads must be validated before entering domain logic.
 # Spring Boot validates request bodies only when @Valid is present.
 #
-# Safe: @Valid @RequestBody EntityRequest body
+# Safe: @Valid @RequestBody EntityRequest body (either annotation order)
 # Unsafe: @RequestBody EntityRequest body (no validation)
 #
-# @see docs/api-contracts/universal-type-name-contracts.md
+# Matches on the formal_parameter node so annotation order is irrelevant;
+# stopBy: end is required because parameter annotations sit under a nested
+# modifiers node, outside the default direct-children search of `has`.
 
 id: java-requestbody-requires-valid
 language: java
 severity: warning
-message: "[TY1] @RequestBody without @Valid. Fix: add @Valid annotation for input validation | Docs: docs/api-contracts/jackson-deserialization.md"
+message: "[TY1] @RequestBody without @Valid. Fix: add @Valid annotation for input validation | See AGENTS.md [TY1]"
 
 rule:
-  pattern: '@RequestBody $TYPE $VAR'
+  kind: formal_parameter
+  has:
+    stopBy: end
+    regex: '@RequestBody'
+    any:
+      - kind: marker_annotation
+      - kind: annotation
   not:
-    inside:
-      pattern: '@Valid @RequestBody $TYPE $VAR'
+    has:
+      stopBy: end
+      regex: '@(jakarta\.validation\.)?Valid(ated)?\b'
+      any:
+        - kind: marker_annotation
+        - kind: annotation
 
 files:
+  - "src/main/java/**/web/**/*.java"
   - "src/main/java/**/adapters/in/web/**/*.java"
   - "src/main/java/**/controller/**/*.java"
 
