@@ -24,6 +24,8 @@ rule:
     stopBy: end
 
 files:
+  - "src/main/java/**/web/*.java"
+  - "src/main/java/**/adapters/in/web/**/*.java"
   - "src/main/java/**/controller/*.java"
 
 ignores:
