@@ -7,6 +7,8 @@ import java.util.Objects;
  * Defines the application's embedding port independent from Spring AI abstractions.
  */
 public interface EmbeddingClient {
+    /** Minimal provider input used by keep-alive probes. */
+    String EMBEDDING_WARM_UP_PROBE_TEXT = "embedding model warm-up probe";
 
     /**
      * Produces one dense embedding vector per input text, preserving input order.
@@ -37,4 +39,16 @@ public interface EmbeddingClient {
      * @return embedding vector dimensions
      */
     int dimensions();
+
+    /**
+     * Issues a minimal embedding request so the provider keeps its model resident.
+     *
+     * <p>Implementations must call their provider-specific request path directly instead
+     * of delegating to {@link #embed(List)}. The RAG pipeline logging aspect advises
+     * public {@code embed} executions, so routing scheduled probes around that method
+     * keeps "STEP 1" pipeline logs scoped to real requests.</p>
+     *
+     * @throws EmbeddingServiceUnavailableException when the provider cannot serve the probe
+     */
+    void warmUp();
 }

@@ -85,6 +85,15 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
+        return createEmbeddings(texts);
+    }
+
+    @Override
+    public void warmUp() {
+        createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT));
+    }
+
+    private List<float[]> createEmbeddings(List<String> texts) {
         EmbeddingCreateParams.Builder embeddingRequestBuilder =
                 EmbeddingCreateParams.builder().model(modelName).inputOfArrayOfStrings(texts);
         if (supportsDimensionOverride(modelName)) {

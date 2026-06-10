@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.service;
 
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -31,7 +30,7 @@ public class EmbeddingModelKeepAlive {
     /** Probe latency above this means the model was cold and a reload just happened. */
     private static final long COLD_MODEL_WARN_THRESHOLD_MILLIS = 5_000L;
 
-    private static final List<String> KEEP_ALIVE_PROBE_TEXTS = List.of("embedding keep-alive probe");
+    private static final long NANOS_PER_MILLISECOND = 1_000_000L;
 
     private final EmbeddingClient embeddingClient;
 
@@ -49,17 +48,19 @@ public class EmbeddingModelKeepAlive {
      * and the next tick retries. Unexpected runtime failures propagate to the scheduler's
      * error handler rather than being swallowed here.</p>
      */
-    @Scheduled(initialDelay = STARTUP_WARMUP_DELAY_MILLIS, fixedDelay = KEEP_ALIVE_INTERVAL_MILLIS)
+    // fixedRate keeps probe *starts* on the cadence: with fixedDelay a slow cold
+    // start would push the next probe past the provider's idle-unload TTL.
+    @Scheduled(initialDelay = STARTUP_WARMUP_DELAY_MILLIS, fixedRate = KEEP_ALIVE_INTERVAL_MILLIS)
     public void keepEmbeddingModelWarm() {
-        long probeStartMillis = System.currentTimeMillis();
+        long probeStartNanos = System.nanoTime();
         try {
-            embeddingClient.embed(KEEP_ALIVE_PROBE_TEXTS);
+            embeddingClient.warmUp();
         } catch (EmbeddingServiceUnavailableException exception) {
             log.warn(
                     "[EMBEDDING] Keep-alive probe failed; the next chat request may pay a model cold start", exception);
             return;
         }
-        long probeDurationMillis = System.currentTimeMillis() - probeStartMillis;
+        long probeDurationMillis = (System.nanoTime() - probeStartNanos) / NANOS_PER_MILLISECOND;
         if (probeDurationMillis > COLD_MODEL_WARN_THRESHOLD_MILLIS) {
             log.warn(
                     "[EMBEDDING] Keep-alive probe took {}ms — embedding model was cold and has been reloaded",

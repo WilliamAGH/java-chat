@@ -24,6 +24,7 @@
         role="tab"
         class="nav-tab"
         class:active={currentView === 'chat'}
+        aria-label="Chat"
         aria-selected={currentView === 'chat'}
         onclick={() => currentView = 'chat'}
       >
@@ -38,6 +39,7 @@
         role="tab"
         class="nav-tab"
         class:active={currentView === 'learn'}
+        aria-label="Learn"
         aria-selected={currentView === 'learn'}
         onclick={() => currentView = 'learn'}
       >

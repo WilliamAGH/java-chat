@@ -19,6 +19,16 @@
   let { citations, visible = true, panelId }: Props = $props()
 
   let isExpanded = $state(false)
+  let citationListElement = $state<HTMLUListElement | null>(null)
+
+  // The trigger usually sits at the very bottom of a scrollable container
+  // (chat messages, lesson panel, mobile drawer). The list expands downward,
+  // so without this the new content renders below the fold and stays hidden.
+  $effect(() => {
+    if (isExpanded && citationListElement) {
+      citationListElement.scrollIntoView({ block: 'nearest' })
+    }
+  })
 
   /**
    * Simple hash for deterministic ID generation from citation content.
@@ -75,7 +85,7 @@
     </button>
 
     {#if isExpanded}
-      <ul id={citationListId} class="citation-list" role="list">
+      <ul id={citationListId} class="citation-list" role="list" bind:this={citationListElement}>
         {#each uniqueCitations as citation (citation.url)}
           {@const citationType = getCitationType(citation.url)}
           {@const displaySource = getDisplaySource(citation.url)}
@@ -201,6 +211,9 @@
     flex-direction: column;
     gap: var(--citation-list-gap);
     animation: slide-down var(--citation-transition-normal) ease-out;
+    /* Clearance for scrollIntoView: must exceed the slide-down translateY(-4px)
+       start offset, since the scroll happens while the entry animation runs. */
+    scroll-margin-bottom: var(--space-3, 12px);
   }
 
   @keyframes slide-down {

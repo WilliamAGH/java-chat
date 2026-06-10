@@ -70,6 +70,15 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
+        return fetchValidatedEmbeddings(texts);
+    }
+
+    @Override
+    public void warmUp() {
+        fetchValidatedEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT));
+    }
+
+    private List<float[]> fetchValidatedEmbeddings(List<String> texts) {
         try {
             return callEmbeddingApi(texts);
         } catch (org.springframework.web.client.RestClientResponseException apiException) {

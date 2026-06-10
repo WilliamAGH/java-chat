@@ -27,6 +27,7 @@ RUN npm run build
 # BACKEND BUILD STAGE
 # ================================
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jdk AS builder
+ARG SOURCE_COMMIT=unknown
 WORKDIR /app
 
 # 1. Gradle wrapper (rarely changes)
@@ -51,13 +52,14 @@ COPY --from=frontend-builder /app/src/main/resources/static ./src/main/resources
 
 # 6. Build application with cache mount
 RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew clean build -x test --no-daemon && \
+    SOURCE_COMMIT="${SOURCE_COMMIT}" ./gradlew clean build -x test --no-daemon && \
     cp $(ls build/libs/*.jar | grep -v '\-plain\.jar' | head -n 1) build/app.jar
 
 # ================================
 # RUNTIME STAGE
 # ================================
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
+ARG SOURCE_COMMIT=unknown
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -79,6 +81,7 @@ ENV APP_KILL_ON_CONFLICT=false
 ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
 ENV DOCS_PARSED_DIR=/app/data/parsed
 ENV DOCS_INDEX_DIR=/app/data/index
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 
 # 5. Application JAR (changes every build) - LAST for optimal caching
 COPY --from=builder /app/build/app.jar app.jar
