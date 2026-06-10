@@ -43,7 +43,7 @@ public class OpenAiRequestFactory {
     /** Generous token budget for high-context models. */
     private static final int MAX_TOKENS_DEFAULT_INPUT = 100_000;
 
-    /** Truncation notice for GPT-5 family models with 8K input limit. */
+    /** Truncation notice for GPT-5 via GitHub Models (8K input tier). */
     private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
 
     /** Truncation notice for other models with larger limits. */

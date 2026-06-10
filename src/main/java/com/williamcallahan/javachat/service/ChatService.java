@@ -136,7 +136,7 @@ public class ChatService {
     public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
             List<Message> history, String latestUserMessage, String modelHint) {
 
-        // Use reduced RAG for token-constrained models (GPT-5.x family)
+        // Use reduced RAG for token-constrained models (GPT-5 via GitHub Models)
         RetrievalService.RetrievalOutcome retrievalOutcome;
         if (ModelConfiguration.isTokenConstrained(modelHint)) {
             retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
