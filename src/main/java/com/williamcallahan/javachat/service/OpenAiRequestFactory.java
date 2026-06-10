@@ -124,9 +124,11 @@ public class OpenAiRequestFactory {
         }
 
         boolean gpt5Family = isGpt5Family(modelId);
-        boolean reasoningModel = gpt5Family || canonicalModelName(modelId).startsWith("o");
 
-        int tokenLimit = reasoningModel ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
+        // The 7K cap accommodates GPT-5's 8K input tier on GitHub Models. o-series
+        // reasoning models accept >=128K input tokens, so they take the default cap;
+        // the GPT-5 limit must not leak to them (PR #49 review finding).
+        int tokenLimit = gpt5Family ? MAX_TOKENS_GPT5_INPUT : MAX_TOKENS_DEFAULT_INPUT;
         String truncatedPrompt = chunker.keepLastTokens(prompt, tokenLimit);
 
         if (truncatedPrompt.length() < prompt.length()) {
