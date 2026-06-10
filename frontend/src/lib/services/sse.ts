@@ -62,8 +62,8 @@ export function tryParseJson(content: string, source: string): unknown {
       preview: trimmed.slice(0, 100),
       error: parseError instanceof Error ? parseError.message : String(parseError),
     });
-    return null;
   }
+  return null;
 }
 
 /**

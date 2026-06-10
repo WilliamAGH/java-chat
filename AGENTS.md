@@ -41,10 +41,11 @@ alwaysApply: true
   - No trusting memory—verify every import/API/config against current docs.
 - [ZA1e] **Mandatory Research**: You MUST research dependency questions and correct usage. Never use legacy or `@deprecated` usage from dependencies. Ensure correct usage by reviewing related code directly in `node_modules` or Gradle caches and using online tool calls.
 - [ZA1f] **Dependency Search**: To search `node_modules` efficiently with `ast-grep`, target specific packages: `ast-grep run --pattern '...' frontend/node_modules/<package>`. Do NOT scan the entire `node_modules` folder.
+- [ZA1g] No empty confirmations ("You're right", "Absolutely") before investigation; verify then cite evidence
 
 ## [GT1] Git, History, Hooks, Lock Files
 
-- [GT1a] Never bypass pre-commit hooks or commit signing.
+- [GT1a] Never bypass pre-commit hooks or commit signing. Hooks are managed by lefthook (`brew install lefthook`, then `make hooks`).
 - [GT1b] If hooks fail, fix the environment; do not force the commit.
 - [GT1c] Read-only git commands (e.g., `git status`, `git diff`, `git log`, `git show`) never require permission. Any git command that writes to the working tree, index, or history requires explicit permission.
 - [GT1d] Commit message standards: one logical change per commit; describe the change and purpose; no tooling/AI references; no `Co-authored-by` or AI attribution.
@@ -56,6 +57,7 @@ alwaysApply: true
 - [GT1j] Git commands that write to the working tree, index, or history require elevated permissions; never run without escalation.
 - [GT1k] **Do Not Block On Baseline Diffs**: If `git status` already shows modified files when you start, assume those changes are intentional and continue the requested task without stopping to ask about them. Avoid touching unrelated files.
 - [GT1l] **Stop Only On Concurrent Drift**: Only stop and ask for direction if a file changes unexpectedly *during your work* in a way that conflicts with edits you are actively making (e.g., a file you are editing changes on disk between reads/writes). Otherwise, proceed and keep changes scoped.
+- [GT1m] **Repository-Local Writes Only**: NEVER commit or push to this repository from a temporary clone, alternate checkout/worktree, or any other directory copy of the same repo. All git writes must be executed from this exact working tree.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -63,6 +65,19 @@ alwaysApply: true
 - [CC1b] **DRY (Don't Repeat Yourself)**: Avoid redundant code. Reuse code where appropriate and consistent with clean code principles.
 - [CC1c] **YAGNI (You Aren't Gonna Need It)**: Do not build features or abstractions "just in case". Implement only what is required for the current task.
 - [CC1d] **Clean Architecture**: Dependencies point inward. Domain logic has zero framework imports.
+- [CC1e] **Tracer bullet**: Build one tiny end-to-end slice through all layers first; validate it works; then expand — never build horizontal layers in isolation.
+- [CC1f] **KISS**: Simplest solution that works; achieve by removing, not adding; use platform/framework defaults unless deviation is proven necessary
+
+## [SS1] Single Semantic Owner (Mandatory)
+
+- [SS1a] **One Owner**: For any governed concept, exactly one file/module may define its field inventory, names, allowed keys, dependency graph, or behavior selection.
+- [SS1b] **No Mirrors**: Tests, fixtures, docs, examples, generators, web models, frontend models, and schemas are NOT exempt; they must bind/import/project the canonical owner instead of restating it.
+- [SS1c] **Projection Rule**: Every non-canonical location may only project the canonical owner with identical governed names. Renaming governed fields in projections is prohibited.
+- [SS1d] **No Aliases**: Plural/singular variants, compatibility aliases, label identifiers, alternate display-name identifiers, and convenience transport names for a governed concept are prohibited.
+- [SS1e] **Canonical-Key Parity**: Catalog-backed request/query/schema fields MUST use the exact canonical key name. Transport aliases and convenience plurals are prohibited.
+- [SS1f] **Stop-Work Trigger**: If an implementation requires listing the same governed fields/keys/rules in a second place, stop and redesign before editing.
+- [SS1g] **No Positional-Null Sludge**: Constructor/factory calls with repeated placeholder nulls or low-legibility optional argument trains are prohibited; use named factories/builders, parameter objects, or bind/import the canonical owner.
+- [SS1h] **Whole-List Smell**: If a file "knows the whole list" of a governed concept and it is not the canonical owner, the design is presumed wrong and must be reduced or removed.
 
 ## [ID1] Idiomatic Patterns & Defaults
 
@@ -93,6 +108,7 @@ alwaysApply: true
   - Returning "best effort" results after a dependency failure (LLM, embeddings, vector store, database, filesystem).
   - Catching and logging an exception while continuing as if the operation succeeded.
   - Adding a secondary retrieval/indexing path that runs only when the primary path fails.
+- [RC1g] BANNED slop indirection: no `*Adapter`, `*Transformer`, `*Normalizer`, `*Bridge`, `*Converter`, `*Mapper`, `*Compatibility`, `*Transition` modules that exist solely to reshape data between equivalent types; fix the type mismatch at source (architectural adapters at genuine boundaries per [AR1] are fine)
 
 ## [FS1] File Creation & Clean Architecture
 
@@ -168,6 +184,8 @@ alwaysApply: true
 - [VR1a] **Build**: `make build` or `./gradlew build`; expect success.
 - [VR1b] **Tests**: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
 - [VR1c] **Runtime**: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
+- [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
+- [VR1e] **Contract Cleanup Handoff**: Name the canonical owner, list each duplicate owner removed, prove that tests/fixtures now bind or import the canonical owner, and explicitly call out any remaining duplicate owner as a blocker.
 
 ## [JD1] Javadoc Standards
 

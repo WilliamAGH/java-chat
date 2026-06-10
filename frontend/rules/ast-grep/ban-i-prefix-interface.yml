@@ -1,23 +1,21 @@
-# [NM2] No Hungarian notation on interfaces
-# Interface names must not use the "I" prefix convention.
-# See clean-code skill [NM2]: "No encodings: no Hungarian, no prefixes"
+# [ND1f] Ban I-prefix on interfaces
+# Hungarian notation is an anti-pattern; type names declare their domain role.
 
 id: ban-i-prefix-interface
-language: typescript
-severity: warning
-message: |
-  [NM2] Interface name uses banned "I" prefix (Hungarian notation).
-  Drop the prefix and use the domain name directly.
-
-  Bad:  interface IStreamEvent { ... }
-  Good: interface StreamEvent { ... }
+language: tsx
+severity: error
+message: "[ND1f] I-prefix banned. Fix: IUser → User | See AGENTS.md [ND1f]"
 
 rule:
   kind: interface_declaration
   has:
-    field: name
-    regex: "^I[A-Z]"
+    kind: type_identifier
+    regex: ^I[A-Z][a-zA-Z0-9]*$
 
 files:
   - "src/**/*.ts"
   - "src/**/*.tsx"
+
+ignores:
+  - "node_modules/**"
+  - "**/*.d.ts"

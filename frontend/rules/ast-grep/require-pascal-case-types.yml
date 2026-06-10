@@ -3,7 +3,7 @@
 # See CLAUDE.md [ND1f]: "class and record names declare their domain role"
 
 id: require-pascal-case-types
-language: typescript
+language: tsx
 severity: warning
 message: |
   [ND1f] Type name must be PascalCase (start with uppercase letter).

@@ -76,6 +76,17 @@ public class OpenAIStreamingService {
     private long streamingReadTimeoutSeconds;
 
     /**
+     * LLM-gateway priority class sent as the {@code X-Tier} header on live chat
+     * turns. The gateway queue treats untagged requests as {@code default}
+     * (priority 5, zero reserved slots), which can starve live traffic behind
+     * batch jobs; {@code production-z} is java-chat's recognized live tier.
+     * Background/batch callers must use {@code batch} instead. Harmless on
+     * non-gateway upstreams (OpenAI direct, GitHub Models), which ignore it.
+     */
+    @Value("${LLM_GATEWAY_TIER:production-z}")
+    private String llmGatewayTier;
+
+    /**
      * Creates a streaming service with explicit dependencies for routing and payload construction.
      *
      * @param rateLimitService provider rate-limit state tracker
@@ -327,6 +338,7 @@ public class OpenAIStreamingService {
         return OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(OpenAiSdkUrlNormalizer.normalize(baseUrl))
+                .putHeader("X-Tier", llmGatewayTier)
                 // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
                 // Retries cause InterruptedException when Reactor cancels a sleeping retry.
                 .maxRetries(0)

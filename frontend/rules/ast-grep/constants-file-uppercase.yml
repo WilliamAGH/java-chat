@@ -1,0 +1,19 @@
+# [ND1e] Constants files must use UPPER_SNAKE_CASE
+# Files named *constants* signal module-level constants.
+
+id: constants-file-uppercase
+language: tsx
+severity: warning
+message: "[ND1e] Use UPPER_SNAKE_CASE in constants files. Fix: maxRetries → MAX_RETRIES | See AGENTS.md [ND1e]"
+
+rule:
+  pattern: export const $NAME = $VAL
+  has:
+    kind: identifier
+    regex: ^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$
+
+files:
+  - "src/**/constants.ts"
+  - "src/**/constants/*.ts"
+  - "src/**/*Constants.ts"
+  - "src/**/*constants.ts"

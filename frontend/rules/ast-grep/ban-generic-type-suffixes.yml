@@ -3,7 +3,7 @@
 # See CLAUDE.md [ND1f]: "No *Data, *Info, *Object, *Item, *Wrapper, *Holder, *Container"
 
 id: ban-generic-type-suffixes
-language: typescript
+language: tsx
 severity: warning
 message: |
   [ND1f] Type name uses a banned generic suffix.
