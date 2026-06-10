@@ -22,6 +22,13 @@ Object.defineProperty(HTMLElement.prototype, "scrollTo", {
   value: () => {},
 });
 
+// jsdom doesn't implement scrollIntoView; CitationPanel uses it to reveal the expanded list.
+// oxlint-disable-next-line no-extend-native -- jsdom polyfill, not production code
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  writable: true,
+  value: () => {},
+});
+
 // requestAnimationFrame is used for post-update DOM adjustments; provide a safe fallback.
 if (typeof window.requestAnimationFrame !== "function") {
   window.requestAnimationFrame = (callback: FrameRequestCallback) =>
