@@ -156,4 +156,4 @@ Common variables (see `app.rag.*` defaults in `application.properties`):
 - `RAG_TOP_K`
 - `RAG_RETURN_K`
 - `RAG_CITATIONS_K`
-- `RAG_RERANKER_TIMEOUT` (default `12s`) — timeout budget for LLM reranking calls
+- `RAG_RERANKER_TIMEOUT` (default `30s`) — timeout budget for LLM reranking calls
