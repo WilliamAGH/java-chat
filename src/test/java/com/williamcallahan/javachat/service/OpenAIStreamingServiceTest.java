@@ -58,6 +58,28 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
+    void callerCancellationKeepsConfiguredPrimaryProviderEligible() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(rateLimitService, 600, "openai");
+        OpenAIClient openAiClient = mock(OpenAIClient.class);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        InterruptedIOException interruptedRequest = new InterruptedIOException("request interrupted by caller timeout");
+        OpenAIIoException cancelledCompletion = new OpenAIIoException("Request failed", interruptedRequest);
+
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, cancelledCompletion);
+
+        List<OpenAiProviderCandidate> availableProviders =
+                routingService.selectAvailableProviderCandidates(githubModelsClient, openAiClient);
+        assertEquals(2, availableProviders.size());
+        assertEquals(
+                RateLimitService.ApiProvider.OPENAI, availableProviders.get(0).provider());
+    }
+
+    @Test
     void shouldBackoffPrimaryTreats401AsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();

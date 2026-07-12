@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Persistent rate limit state manager that survives application restarts.
- * Tracks actual rate limit windows and implements intelligent backoff.
+ * Tracks provider-declared rate limit windows and request outcomes.
  */
 @Component
 public class RateLimitState {
@@ -76,7 +76,7 @@ public class RateLimitState {
     }
 
     /**
-     * Record a rate limit hit with proper backoff calculation
+     * Records a rate limit hit using the provider-declared reset time.
      */
     public void recordRateLimit(String provider, Instant resetTime, String rateLimitWindow) {
         ProviderState state = providerStates.computeIfAbsent(provider, providerKey -> new ProviderState());
@@ -90,26 +90,9 @@ public class RateLimitState {
         }
 
         state.rateLimitedUntil = resetTime;
-        int failures = state.consecutiveFailures.incrementAndGet();
+        state.consecutiveFailures.incrementAndGet();
         state.totalFailures.incrementAndGet();
         state.lastFailure = Instant.now();
-
-        // Implement exponential backoff for repeated failures
-        if (failures > 1) {
-            Duration additionalBackoff = Duration.ofHours((long) Math.pow(2, failures - 1));
-            Duration maxBackoff = Duration.ofDays(7); // Never back off more than a week
-
-            if (additionalBackoff.compareTo(maxBackoff) > 0) {
-                additionalBackoff = maxBackoff;
-            }
-
-            state.rateLimitedUntil = state.rateLimitedUntil.plus(additionalBackoff);
-            log.warn(
-                    "[{}] Consecutive failures (count={}). Extended backoff until {}",
-                    sanitizeLogValue(provider),
-                    failures,
-                    state.rateLimitedUntil);
-        }
 
         safeSaveState();
         log.info("[{}] Rate limited until {}", sanitizeLogValue(provider), state.rateLimitedUntil);

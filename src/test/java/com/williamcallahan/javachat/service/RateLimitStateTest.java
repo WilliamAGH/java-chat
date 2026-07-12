@@ -48,6 +48,18 @@ class RateLimitStateTest {
         assertEquals(1, providerState.getTotalFailures());
     }
 
+    @Test
+    void recordRateLimit_preservesProviderResetTimeAcrossRepeatedFailures() throws ReflectiveOperationException {
+        Instant providerResetTime = Instant.now().plus(Duration.ofMinutes(1));
+
+        rateLimitState.recordRateLimit(PROVIDER_NAME, providerResetTime, "1m");
+        rateLimitState.recordRateLimit(PROVIDER_NAME, providerResetTime, "1m");
+
+        RateLimitState.ProviderState providerState = providerState(PROVIDER_NAME);
+        assertEquals(providerResetTime, providerState.getRateLimitedUntil());
+        assertEquals(2, providerState.getConsecutiveFailures());
+    }
+
     private RateLimitState.ProviderState providerState(String providerName) throws ReflectiveOperationException {
         Field providerStatesField = RateLimitState.class.getDeclaredField("providerStates");
         providerStatesField.setAccessible(true);

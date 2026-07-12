@@ -143,7 +143,7 @@ final class RateLimitHeaderParser {
             return epochResetInstant;
         }
 
-        long candidateSeconds = minPositive(
+        long candidateSeconds = maxPositive(
                 firstHeaderValue(headers, "x-ratelimit-reset-requests")
                         .map(this::parseDurationSeconds)
                         .orElse(0L),
@@ -151,12 +151,6 @@ final class RateLimitHeaderParser {
                         .map(this::parseDurationSeconds)
                         .orElse(0L),
                 firstHeaderValue(headers, "x-ratelimit-reset")
-                        .map(this::parseDurationSeconds)
-                        .orElse(0L),
-                firstHeaderValue(headers, "X-RateLimit-Reset-Requests")
-                        .map(this::parseDurationSeconds)
-                        .orElse(0L),
-                firstHeaderValue(headers, "X-RateLimit-Reset-Tokens")
                         .map(this::parseDurationSeconds)
                         .orElse(0L));
         if (candidateSeconds > 0) {
@@ -221,17 +215,14 @@ final class RateLimitHeaderParser {
         return Optional.ofNullable(headerValues.get(0));
     }
 
-    private long minPositive(long... candidates) {
-        long min = 0;
+    private long maxPositive(long... candidates) {
+        long maximumPositiveCandidate = 0;
         for (long candidate : candidates) {
-            if (candidate <= 0) {
-                continue;
-            }
-            if (min == 0 || candidate < min) {
-                min = candidate;
+            if (candidate > maximumPositiveCandidate) {
+                maximumPositiveCandidate = candidate;
             }
         }
-        return min;
+        return maximumPositiveCandidate;
     }
 
     private boolean isDigits(String candidate) {
