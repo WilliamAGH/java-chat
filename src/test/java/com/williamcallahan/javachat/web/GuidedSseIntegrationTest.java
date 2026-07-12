@@ -11,6 +11,7 @@ import java.util.Objects;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Answers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,7 +31,7 @@ class GuidedSseIntegrationTest {
     @Autowired
     WebTestClient webTestClient;
 
-    @MockitoBean
+    @MockitoBean(answers = Answers.RETURNS_MOCKS)
     EmbeddingClient embeddingClient;
 
     @MockitoBean
