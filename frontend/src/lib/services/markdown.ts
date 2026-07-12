@@ -318,11 +318,13 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 
       const closeIndex = findEnrichmentClose(src, contentStart);
       if (closeIndex === -1) {
+        const contentEnd =
+          src.endsWith("}") && !src.endsWith(ENRICHMENT_CLOSE) ? src.length - 1 : src.length;
         return {
           type: "enrichment",
-          raw: src.slice(0, contentStart),
+          raw: src,
           kind: opening.kind,
-          content: "",
+          content: src.slice(contentStart, contentEnd).trim(),
           resolved: false,
         };
       }
@@ -344,7 +346,12 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
       }
 
       if (token.resolved !== true) {
-        return "";
+        const unresolvedContent = typeof token.content === "string" ? token.content : "";
+        return marked.parse(normalizeMarkdownForStreaming(unresolvedContent), {
+          async: false,
+          gfm: true,
+          breaks: false,
+        });
       }
 
       const kind = typeof token.kind === "string" ? token.kind : "";

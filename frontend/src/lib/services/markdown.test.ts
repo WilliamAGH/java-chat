@@ -65,6 +65,15 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).not.toContain("{{");
   });
 
+  it("hides an incomplete enrichment close while preserving streamed prose", () => {
+    const markdown = "{{background: Records automate all of this.}";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("Records automate all of this.");
+    expect(renderedHtml).not.toContain("this.}");
+    expect(renderedHtml).not.toContain("{{background:");
+  });
+
   it("recovers a valid nested marker from an unbalanced outer marker", () => {
     const markdown = "{{hint: Start with the invariant. {{warning: Never ignore exceptions.}}";
     const renderedHtml = parseMarkdown(markdown);
