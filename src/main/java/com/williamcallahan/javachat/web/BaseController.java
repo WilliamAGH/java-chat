@@ -22,13 +22,13 @@ public abstract class BaseController {
     /**
      * Handles service exceptions with standardized error responses.
      *
-     * @param e The exception that occurred
+     * @param serviceException exception raised while performing the operation
      * @param operation Description of the operation that failed
      * @return Standardized error response
      */
-    protected ResponseEntity<ApiResponse> handleServiceException(Exception e, String operation) {
+    protected ResponseEntity<ApiResponse> handleServiceException(Exception serviceException, String operation) {
         return exceptionBuilder.buildErrorResponse(
-                HttpStatus.INTERNAL_SERVER_ERROR, "Failed to " + operation + ": " + e.getMessage(), e);
+                HttpStatus.INTERNAL_SERVER_ERROR, "Failed to " + operation, serviceException);
     }
 
     /**

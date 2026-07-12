@@ -1,10 +1,14 @@
 package com.williamcallahan.javachat.web;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ch.qos.logback.classic.Level;
@@ -81,6 +85,29 @@ class CustomErrorControllerTest {
         assertEquals(Level.WARN, event.getLevel());
         assertTrue(event.getFormattedMessage().contains("status=404 source=dispatcherServlet method=GET"));
         assertTrue(event.getFormattedMessage().contains("uri=/api/unknown host=localhost"));
+    }
+
+    @Test
+    void does_not_expose_servlet_error_message_for_api_requests() throws Exception {
+        String servletSecret = "OPENAI_API_KEY=secret-value";
+
+        mvc.perform(errorRequest(HttpStatus.BAD_REQUEST, "/api/chat")
+                        .requestAttr(RequestDispatcher.ERROR_MESSAGE, servletSecret))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value("error"))
+                .andExpect(jsonPath("$.message").value(HttpStatus.BAD_REQUEST.getReasonPhrase()))
+                .andExpect(content().string(not(containsString(servletSecret))));
+    }
+
+    @Test
+    void returns_stable_api_error_when_servlet_throwable_is_not_an_exception() throws Exception {
+        AssertionError nonExceptionFailure = new AssertionError("fatal servlet failure");
+
+        mvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/api/chat")
+                        .requestAttr(RequestDispatcher.ERROR_EXCEPTION, nonExceptionFailure))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value("error"))
+                .andExpect(jsonPath("$.message").value(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()));
     }
 
     @Test
