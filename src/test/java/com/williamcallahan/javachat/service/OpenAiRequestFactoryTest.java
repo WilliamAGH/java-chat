@@ -61,6 +61,19 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void buildJsonCompletionRequestDeclaresJsonObjectOutput() {
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gemma-4-26b-a4b", "openai/gpt-5", "");
+
+        ResponseCreateParams responseCreateParams = requestFactory.buildJsonCompletionRequest(
+                "Rank these documents", 0.0, RateLimitService.ApiProvider.OPENAI, 128);
+
+        assertTrue(
+                responseCreateParams.text().orElseThrow().format().orElseThrow().isJsonObject());
+        assertEquals(128L, responseCreateParams.maxOutputTokens().orElseThrow());
+    }
+
+    @Test
     void buildCompletionRequestKeepsPromptWithinSelectedOpenAiModelLimit() {
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-4o", "openai/gpt-5", "");

@@ -103,7 +103,7 @@ public class RerankerService {
 
         try {
             return openAIStreamingService
-                    .complete(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET)
+                    .completeJsonObject(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET)
                     .timeout(rerankerTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))

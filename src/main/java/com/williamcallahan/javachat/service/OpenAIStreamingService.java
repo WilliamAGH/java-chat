@@ -179,7 +179,7 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature) {
-        return complete(prompt, temperature, null);
+        return complete(prompt, temperature, null, false);
     }
 
     /**
@@ -194,10 +194,26 @@ public class OpenAIStreamingService {
         if (maximumOutputTokens <= 0) {
             return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
         }
-        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens));
+        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens), false);
     }
 
-    private Mono<String> complete(String prompt, double temperature, Integer maximumOutputTokens) {
+    /**
+     * Sends a non-streaming completion request that requires a JSON object response.
+     *
+     * @param prompt completion prompt
+     * @param temperature response temperature
+     * @param maximumOutputTokens maximum output tokens needed by this caller
+     * @return completion text from the first provider honoring the JSON contract
+     */
+    public Mono<String> completeJsonObject(String prompt, double temperature, int maximumOutputTokens) {
+        if (maximumOutputTokens <= 0) {
+            return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
+        }
+        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens), true);
+    }
+
+    private Mono<String> complete(
+            String prompt, double temperature, Integer maximumOutputTokens, boolean requireJsonObject) {
         return Mono.<String>defer(() -> {
                     List<OpenAiProviderCandidate> availableProviders =
                             providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
@@ -213,8 +229,8 @@ public class OpenAIStreamingService {
                         OpenAiProviderCandidate providerCandidate = availableProviders.get(providerIndex);
                         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
 
-                        ResponseCreateParams requestParameters =
-                                buildCompletionRequest(prompt, temperature, activeProvider, maximumOutputTokens);
+                        ResponseCreateParams requestParameters = buildCompletionRequest(
+                                prompt, temperature, activeProvider, maximumOutputTokens, requireJsonObject);
                         try {
                             log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
                             RequestOptions requestOptions = RequestOptions.builder()
@@ -259,7 +275,12 @@ public class OpenAIStreamingService {
             String prompt,
             double temperature,
             RateLimitService.ApiProvider activeProvider,
-            Integer maximumOutputTokens) {
+            Integer maximumOutputTokens,
+            boolean requireJsonObject) {
+        if (requireJsonObject) {
+            return requestFactory.buildJsonCompletionRequest(
+                    prompt, temperature, activeProvider, maximumOutputTokens.intValue());
+        }
         if (maximumOutputTokens == null) {
             return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
         }

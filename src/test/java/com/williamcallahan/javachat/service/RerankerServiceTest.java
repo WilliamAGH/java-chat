@@ -39,7 +39,8 @@ class RerankerServiceTest {
     void rerankUsesBoundedCompletionBudget() {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.isAvailable()).thenReturn(true);
-        when(streamingService.complete(anyString(), eq(0.0), anyInt())).thenReturn(Mono.just("{\"order\":[1,0]}"));
+        when(streamingService.completeJsonObject(anyString(), eq(0.0), anyInt()))
+                .thenReturn(Mono.just("{\"order\":[1,0]}"));
 
         RerankerService rerankerService =
                 new RerankerService(streamingService, new ObjectMapper(), new AppProperties());
@@ -48,7 +49,7 @@ class RerankerServiceTest {
         List<Document> rankedDocuments = rerankerService.rerank("query", sourceDocuments, 2);
 
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(streamingService).complete(anyString(), eq(0.0), outputBudgetCaptor.capture());
+        verify(streamingService).completeJsonObject(anyString(), eq(0.0), outputBudgetCaptor.capture());
         verify(streamingService, never()).complete(anyString(), eq(0.0));
         assertEquals(128, outputBudgetCaptor.getValue());
         assertEquals(sourceDocuments.get(1), rankedDocuments.get(0));
