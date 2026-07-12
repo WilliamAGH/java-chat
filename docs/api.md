@@ -43,7 +43,7 @@ curl -N -H "Content-Type: application/json" \
 - GET `/api/guided/lesson?slug=...`
 - GET `/api/guided/citations?slug=...`
 - GET `/api/guided/enrich?slug=...`
-- GET `/api/guided/content/stream?slug=...` (SSE, raw markdown)
+- GET `/api/guided/content/stream?slug=...` (SSE `text` events, JSON-wrapped chunks)
 - GET `/api/guided/content?slug=...` (JSON)
 - GET `/api/guided/content/html?slug=...` (HTML)
 - POST `/api/guided/stream` (SSE; request includes `sessionId`, `slug`, `latest`)
