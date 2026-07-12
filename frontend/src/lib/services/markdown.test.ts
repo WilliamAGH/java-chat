@@ -45,6 +45,43 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).not.toContain("<p>}</p>");
   });
 
+  it("removes a stray close before the next valid enrichment marker", () => {
+    const markdown = "The explanation is complete. } {{example: Use try-with-resources.}}";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("The explanation is complete.");
+    expect(renderedHtml).toContain('data-enrichment-type="example"');
+    expect(renderedHtml).not.toContain("complete. }");
+    expect(renderedHtml).not.toContain("} {{example:");
+  });
+
+  it("preserves prose from a truncated final enrichment without leaking its marker", () => {
+    const markdown =
+      "Close the resource.\n\n{{warning: This also applies when an exception is thrown.";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("Close the resource.");
+    expect(renderedHtml).toContain("This also applies when an exception is thrown.");
+    expect(renderedHtml).not.toContain("{{");
+  });
+
+  it("recovers a valid nested marker from an unbalanced outer marker", () => {
+    const markdown = "{{hint: Start with the invariant. {{warning: Never ignore exceptions.}}";
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("Start with the invariant.");
+    expect(renderedHtml).toContain('data-enrichment-type="warning"');
+    expect(renderedHtml).not.toContain("{{");
+  });
+
+  it("preserves marker-like text and ordinary braces inside fenced code", () => {
+    const markdown = '```java\nString template = "{{warning: literal";\nif (ready) { run(); }\n```';
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("{{warning: literal");
+    expect(renderedHtml).toContain("if (ready) { run(); }");
+  });
+
   it("normalizes attached fenced code blocks with trailing prose", () => {
     const markdown = "Here's an example:```java\nint x = 10 % 3;\n```The result is 1.";
     const renderedHtml = parseMarkdown(markdown);

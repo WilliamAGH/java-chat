@@ -33,7 +33,10 @@ interface EnrichmentToken extends Tokens.Generic {
   raw: string;
   kind: string;
   content: string;
+  resolved: boolean;
 }
+
+type EnrichmentOpening = { kind: string; length: number };
 
 /** Pattern matching code fence delimiters (3+ backticks or tildes at line start). */
 const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/;
@@ -206,6 +209,34 @@ function hasBalancedCodeFences(content: string): boolean {
 /** Enrichment close marker. */
 const ENRICHMENT_CLOSE = "}}";
 
+function readEnrichmentOpening(src: string, index: number): EnrichmentOpening | null {
+  for (const kind of Object.keys(ENRICHMENT_KINDS)) {
+    const opening = `{{${kind}:`;
+    if (src.startsWith(opening, index)) {
+      return { kind, length: opening.length };
+    }
+  }
+  return null;
+}
+
+function findEnrichmentStart(src: string): number {
+  let openingIndex = -1;
+  for (const kind of Object.keys(ENRICHMENT_KINDS)) {
+    const candidateIndex = src.indexOf(`{{${kind}:`);
+    if (candidateIndex >= 0 && (openingIndex < 0 || candidateIndex < openingIndex)) {
+      openingIndex = candidateIndex;
+    }
+  }
+
+  let precedingIndex = openingIndex - 1;
+  while (precedingIndex >= 0 && " \t\r\n".includes(src[precedingIndex])) {
+    precedingIndex--;
+  }
+  return src[precedingIndex] === "}" && src[precedingIndex - 1] !== "}"
+    ? precedingIndex
+    : openingIndex;
+}
+
 /**
  * Resolves the close marker position for a run of closing braces.
  * For runs like "}}}", this picks the final "}}" so a trailing content "}" is preserved.
@@ -221,10 +252,7 @@ function resolveCloseIndexFromBraceRun(src: string, runStart: number): number {
   return runStart + (runLength - ENRICHMENT_CLOSE.length);
 }
 
-/**
- * Finds the closing }} for an enrichment marker, skipping }} inside code fences.
- * Scans character-by-character, tracking fence state at line boundaries.
- */
+/** Finds the closing }} while rejecting unresolved nesting and fenced-code braces. */
 function findEnrichmentClose(src: string, startIndex: number): number {
   let inFence = false;
   let fenceChar = "";
@@ -250,7 +278,10 @@ function findEnrichmentClose(src: string, startIndex: number): number {
       }
     }
 
-    // Check for closing marker only outside fences
+    if (!inFence && readEnrichmentOpening(src, cursor)) {
+      return -1;
+    }
+
     if (!inFence && src[cursor] === "}") {
       const closeIndex = resolveCloseIndexFromBraceRun(src, cursor);
       if (closeIndex >= 0) {
@@ -271,38 +302,49 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
     name: "enrichment",
     level: "block",
     start(src: string) {
-      return src.indexOf("{{");
+      return findEnrichmentStart(src);
     },
     tokenizer(src: string): EnrichmentToken | undefined {
-      // Match opening {{kind: pattern
-      const openingRule = /^\{\{(hint|warning|background|example|reminder):/;
-      const openingMatch = openingRule.exec(src);
-      if (!openingMatch) {
+      if (src[0] === "}") {
+        return { type: "enrichment", raw: "}", kind: "", content: "", resolved: false };
+      }
+
+      const opening = readEnrichmentOpening(src, 0);
+      if (!opening) {
         return undefined;
       }
 
-      const kind = openingMatch[1].toLowerCase();
-      const contentStart = openingMatch[0].length;
+      const contentStart = opening.length;
 
-      // Find closing }} that's not inside a code fence
       const closeIndex = findEnrichmentClose(src, contentStart);
       if (closeIndex === -1) {
-        return undefined;
+        return {
+          type: "enrichment",
+          raw: src.slice(0, contentStart),
+          kind: opening.kind,
+          content: "",
+          resolved: false,
+        };
       }
 
       const content = src.slice(contentStart, closeIndex);
-      const raw = src.slice(0, closeIndex + 2);
+      const raw = src.slice(0, closeIndex + ENRICHMENT_CLOSE.length);
 
       return {
         type: "enrichment",
         raw,
-        kind,
+        kind: opening.kind,
         content: content.trim(),
+        resolved: true,
       };
     },
     renderer(token: Tokens.Generic): string {
       if (token.type !== "enrichment") {
         return token.raw;
+      }
+
+      if (token.resolved !== true) {
+        return "";
       }
 
       const kind = typeof token.kind === "string" ? token.kind : "";
