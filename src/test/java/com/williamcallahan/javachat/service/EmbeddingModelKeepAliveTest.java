@@ -63,6 +63,20 @@ class EmbeddingModelKeepAliveTest {
     }
 
     @Test
+    void deferredProbePreservesLastCompletedHealthObservation() {
+        SequencedEmbeddingClient embeddingClient =
+                new SequencedEmbeddingClient(ProbeOutcome.SUCCESS, ProbeOutcome.DEFERRED);
+        EmbeddingModelKeepAlive keepAlive = new EmbeddingModelKeepAlive(embeddingClient, new SequencedNanoTime(100, 5));
+
+        keepAlive.keepEmbeddingModelWarm();
+        keepAlive.keepEmbeddingModelWarm();
+
+        assertEquals(2, embeddingClient.warmUpInvocationCount);
+        assertEquals(Status.UP, keepAlive.health().getStatus());
+        assertEquals(100L, keepAlive.health().getDetails().get("lastProbeDurationMs"));
+    }
+
+    @Test
     void repeatedSlowProbesWarnOnceAndRecoveryIsRecorded() {
         SequencedEmbeddingClient embeddingClient = new SequencedEmbeddingClient(
                 ProbeOutcome.SUCCESS, ProbeOutcome.SUCCESS, ProbeOutcome.SUCCESS, ProbeOutcome.SUCCESS);
@@ -130,6 +144,7 @@ class EmbeddingModelKeepAliveTest {
     /** Controls the provider outcome returned by a test probe. */
     private enum ProbeOutcome {
         SUCCESS,
+        DEFERRED,
         UNAVAILABLE,
         UNEXPECTED
     }
@@ -158,6 +173,7 @@ class EmbeddingModelKeepAliveTest {
             warmUpInvocationCount++;
             switch (probeOutcome.remove()) {
                 case SUCCESS -> {}
+                case DEFERRED -> throw new OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException();
                 case UNAVAILABLE -> throw new EmbeddingServiceUnavailableException("provider offline for test");
                 case UNEXPECTED -> throw new IllegalStateException("unexpected provider defect");
             }
