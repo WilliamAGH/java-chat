@@ -8,8 +8,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
@@ -41,6 +43,28 @@ class SseSupportTest {
         assertEquals(expectedContent, firstSubscriberContent, "First subscriber should receive full stream content");
         assertEquals(expectedContent, secondSubscriberContent, "Second subscriber should receive full stream content");
         assertEquals(expectedContent, consumedContent, "Chunk consumer should observe full stream content");
+    }
+
+    @Test
+    void cancellingTextAndHeartbeatStreamCancelsUpstream() {
+        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        AtomicInteger upstreamSubscriptionCount = new AtomicInteger();
+        AtomicInteger upstreamCancellationCount = new AtomicInteger();
+        Flux<String> upstreamStream = Flux.<String>never()
+                .doOnSubscribe(ignoredSubscription -> upstreamSubscriptionCount.incrementAndGet())
+                .doOnCancel(upstreamCancellationCount::incrementAndGet);
+        Flux<String> preparedStream = sseSupport.prepareDataStream(upstreamStream, ignoredChunk -> {});
+        Flux<ServerSentEvent<String>> sseEventStream =
+                Flux.merge(preparedStream.map(sseSupport::textEvent), sseSupport.heartbeats(preparedStream));
+
+        Disposable clientSubscription = sseEventStream.subscribe();
+
+        assertEquals(1, upstreamSubscriptionCount.get(), "Text and heartbeat subscribers should share one upstream");
+        assertEquals(0, upstreamCancellationCount.get(), "Active client should keep the upstream connected");
+
+        clientSubscription.dispose();
+
+        assertEquals(1, upstreamCancellationCount.get(), "Client cancellation should cancel the shared upstream");
     }
 
     @Test

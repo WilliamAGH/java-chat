@@ -34,6 +34,7 @@ import org.springframework.ai.document.Document;
  * Verifies incremental GitHub source ingestion behavior for changed and unchanged files.
  */
 class SourceCodeFileIngestionProcessorTest {
+    private static final String TARGET_COLLECTION_NAME = "target-collection";
 
     @Test
     void changedFilePrunesAndForcesReindex(@TempDir Path tempDirectory) throws IOException {
@@ -59,7 +60,7 @@ class SourceCodeFileIngestionProcessorTest {
         GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
                 repositoryRoot.toString(),
                 GitHubRepositoryIdentity.of("openai", "java-chat"),
-                "github-openai-java-chat",
+                TARGET_COLLECTION_NAME,
                 "main",
                 "abcdef123456",
                 "MIT",
@@ -86,21 +87,85 @@ class SourceCodeFileIngestionProcessorTest {
 
         doNothing()
                 .when(hybridVectorService)
-                .upsertToCollection(eq("github-openai-java-chat"), eq(List.of(indexedDocument)));
+                .upsertToCollection(eq(TARGET_COLLECTION_NAME), eq(List.of(indexedDocument)));
         doNothing().when(localStoreService).markHashIngested("newhash");
         doNothing()
                 .when(localStoreService)
                 .markFileIngested(eq(sourceUrl), anyLong(), anyLong(), eq("new-fingerprint"), eq(List.of("newhash")));
 
-        SourceFileProcessingResult processingResult = ingestionProcessor.process(
-                repositoryRoot, sourceFilePath, repositoryMetadata, "github-openai-java-chat");
+        SourceFileProcessingResult processingResult =
+                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
 
         assertTrue(processingResult.outcome().processed());
         assertEquals(sourceUrl, processingResult.fileUrl());
         verify(ingestedFilePruneService)
-                .pruneCollectionFileStrict("github-openai-java-chat", sourceUrl, previousFileRecord);
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, sourceUrl, previousFileRecord);
         verify(chunkProcessingService)
                 .processAndStoreChunksForce(anyString(), eq(sourceUrl), eq("Main.java"), anyString());
+        verify(chunkProcessingService, never())
+                .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void unchangedFileWithMissingPointCoverageForcesReindex(@TempDir Path tempDirectory) throws IOException {
+        ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
+        HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
+        LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
+        ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
+        IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
+
+        SourceCodeFileIngestionProcessor ingestionProcessor = new SourceCodeFileIngestionProcessor(
+                chunkProcessingService,
+                hybridVectorService,
+                localStoreService,
+                progressTracker,
+                ingestedFilePruneService);
+
+        Path repositoryRoot = tempDirectory.resolve("repository");
+        Path sourceDirectory = repositoryRoot.resolve("src");
+        Files.createDirectories(sourceDirectory);
+        Path sourceFilePath = sourceDirectory.resolve("Main.java");
+        Files.writeString(sourceFilePath, "package demo; class Main {}", StandardCharsets.UTF_8);
+
+        GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
+                repositoryRoot.toString(),
+                GitHubRepositoryIdentity.of("openai", "java-chat"),
+                TARGET_COLLECTION_NAME,
+                "main",
+                "abcdef123456",
+                "MIT",
+                "Example repository");
+
+        String sourceUrl = "https://github.com/openai/java-chat/blob/main/src/Main.java";
+        long fileSizeBytes = Files.size(sourceFilePath);
+        long lastModifiedMillis = Files.getLastModifiedTime(sourceFilePath).toMillis();
+        LocalStoreService.FileIngestionRecord previousFileRecord = new LocalStoreService.FileIngestionRecord(
+                fileSizeBytes, lastModifiedMillis, "same-fingerprint", List.of("existing-hash"));
+
+        when(localStoreService.computeFileContentFingerprint(sourceFilePath)).thenReturn("same-fingerprint");
+        when(localStoreService.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
+        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
+                .thenReturn(0L);
+        when(progressTracker.formatPercent()).thenReturn("100%");
+
+        Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
+        indexedDocument.getMetadata().put("hash", "existing-hash");
+        ChunkProcessingService.ChunkProcessingOutcome chunkProcessingOutcome =
+                new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("existing-hash"), 1, 0);
+        when(chunkProcessingService.processAndStoreChunksForce(
+                        anyString(), eq(sourceUrl), eq("Main.java"), anyString()))
+                .thenReturn(chunkProcessingOutcome);
+
+        SourceFileProcessingResult processingResult =
+                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
+
+        assertTrue(processingResult.outcome().processed());
+        verify(ingestedFilePruneService)
+                .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, sourceUrl, previousFileRecord);
+        verify(chunkProcessingService)
+                .processAndStoreChunksForce(anyString(), eq(sourceUrl), eq("Main.java"), anyString());
+        verify(hybridVectorService).upsertToCollection(TARGET_COLLECTION_NAME, List.of(indexedDocument));
         verify(chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
     }
@@ -129,7 +194,7 @@ class SourceCodeFileIngestionProcessorTest {
         GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
                 repositoryRoot.toString(),
                 GitHubRepositoryIdentity.of("openai", "java-chat"),
-                "github-openai-java-chat",
+                TARGET_COLLECTION_NAME,
                 "main",
                 "abcdef123456",
                 "MIT",
@@ -144,11 +209,11 @@ class SourceCodeFileIngestionProcessorTest {
 
         when(localStoreService.computeFileContentFingerprint(sourceFilePath)).thenReturn("same-fingerprint");
         when(localStoreService.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
-        when(hybridVectorService.countPointsForUrl("github-openai-java-chat", sourceUrl))
+        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
                 .thenReturn(2L);
 
-        SourceFileProcessingResult processingResult = ingestionProcessor.process(
-                repositoryRoot, sourceFilePath, repositoryMetadata, "github-openai-java-chat");
+        SourceFileProcessingResult processingResult =
+                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
 
         assertFalse(processingResult.outcome().processed());
         assertTrue(processingResult.outcome().failure().isEmpty());
@@ -185,7 +250,7 @@ class SourceCodeFileIngestionProcessorTest {
         GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
                 repositoryRoot.toString(),
                 GitHubRepositoryIdentity.of("openai", "java-chat"),
-                "github-openai-java-chat",
+                TARGET_COLLECTION_NAME,
                 "main",
                 "abcdef123456",
                 "MIT",
@@ -200,11 +265,11 @@ class SourceCodeFileIngestionProcessorTest {
 
         when(localStoreService.computeFileContentFingerprint(sourceFilePath)).thenReturn("same-fingerprint");
         when(localStoreService.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
-        when(hybridVectorService.countPointsForUrl("github-openai-java-chat", sourceUrl))
+        when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
                 .thenReturn(1L);
 
-        SourceFileProcessingResult processingResult = ingestionProcessor.process(
-                repositoryRoot, sourceFilePath, repositoryMetadata, "github-openai-java-chat");
+        SourceFileProcessingResult processingResult =
+                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
 
         assertFalse(processingResult.outcome().processed());
         assertTrue(processingResult.outcome().failure().isEmpty());
@@ -238,14 +303,14 @@ class SourceCodeFileIngestionProcessorTest {
         GitHubRepoMetadata repositoryMetadata = new GitHubRepoMetadata(
                 repositoryRoot.toString(),
                 GitHubRepositoryIdentity.of("owner", "repo"),
-                "github-owner-repo",
+                TARGET_COLLECTION_NAME,
                 "main",
                 "abc123",
                 "",
                 "");
 
         SourceFileProcessingResult processingResult =
-                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, "github-owner-repo");
+                ingestionProcessor.process(repositoryRoot, sourceFilePath, repositoryMetadata, TARGET_COLLECTION_NAME);
 
         assertFalse(processingResult.outcome().processed());
         assertTrue(processingResult.fileUrl().startsWith("https://github.com/owner/repo/blob/main/src/Empty.java"));

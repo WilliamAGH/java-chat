@@ -63,18 +63,13 @@ public class IngestionController extends BaseController {
             log.error(
                     "IO error during ingestion (exception type: {})",
                     ioException.getClass().getSimpleName());
-            return buildIngestionError(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to ingest documents: " + ioException.getMessage(),
-                    ioException);
+            return buildIngestionError(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to ingest documents", ioException);
         } catch (RuntimeException runtimeException) {
             log.error(
                     "Unexpected error during ingestion (exception type: {})",
                     runtimeException.getClass().getSimpleName());
             return buildIngestionError(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to perform ingestion: " + runtimeException.getMessage(),
-                    runtimeException);
+                    HttpStatus.INTERNAL_SERVER_ERROR, "Failed to perform ingestion", runtimeException);
         }
     }
 
@@ -95,17 +90,13 @@ public class IngestionController extends BaseController {
                     "Local ingestion IO error (exception type: {})",
                     ioException.getClass().getSimpleName());
             return buildIngestionError(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to perform local ingestion: " + ioException.getMessage(),
-                    ioException);
+                    HttpStatus.INTERNAL_SERVER_ERROR, "Failed to perform local ingestion", ioException);
         } catch (RuntimeException runtimeException) {
             log.error(
                     "Local ingestion error (exception type: {})",
                     runtimeException.getClass().getSimpleName());
             return buildIngestionError(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to perform local ingestion: " + runtimeException.getMessage(),
-                    runtimeException);
+                    HttpStatus.INTERNAL_SERVER_ERROR, "Failed to perform local ingestion", runtimeException);
         }
     }
 
@@ -121,7 +112,7 @@ public class IngestionController extends BaseController {
     private ResponseEntity<IngestionErrorResponse> buildIngestionValidationError(
             IllegalArgumentException validationException) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(IngestionErrorResponse.error(validationException.getMessage()));
+                .body(IngestionErrorResponse.error("Invalid ingestion request"));
     }
 
     private ResponseEntity<IngestionErrorResponse> buildIngestionError(

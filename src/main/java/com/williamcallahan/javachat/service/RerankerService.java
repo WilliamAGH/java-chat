@@ -33,7 +33,7 @@ public class RerankerService {
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
 
     /** Output budget including hidden reasoning before the small JSON ordering. */
-    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 512;
+    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 4_000;
 
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
@@ -103,8 +103,7 @@ public class RerankerService {
 
         try {
             return openAIStreamingService
-                    .completeJsonObject(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET)
-                    .timeout(rerankerTimeout)
+                    .completeJsonObject(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET, rerankerTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();

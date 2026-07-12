@@ -75,27 +75,30 @@ public class CustomErrorController implements ErrorController {
             })
     public Object handleError(HttpServletRequest request, HttpServletResponse servletResponse, Model model) {
         // Get error details from request attributes
-        Object status = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
-        Object message = request.getAttribute(RequestDispatcher.ERROR_MESSAGE);
-        Object exception = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
-        Object requestUri = request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
+        Object errorStatusCodeAttribute = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
+        Object errorExceptionAttribute = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
+        Object errorRequestUriAttribute = request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
 
-        int statusCode = status != null ? (Integer) status : 500;
-        String errorMessage = message != null ? message.toString() : "An unexpected error occurred";
-        String uri = requestUri != null ? requestUri.toString() : request.getRequestURI();
+        int statusCode = errorStatusCodeAttribute instanceof Integer errorStatusCode
+                ? errorStatusCode
+                : HttpStatus.INTERNAL_SERVER_ERROR.value();
+        String requestUri =
+                errorRequestUriAttribute != null ? errorRequestUriAttribute.toString() : request.getRequestURI();
         String requestId = request.getRequestId();
         servletResponse.setHeader(REQUEST_ID_HEADER, requestId);
 
         // Determine if this is an API request or a page request
-        boolean isApiRequest = uri.equals("/api") || uri.startsWith("/api/");
-        logRequestFailure(request, statusCode, uri, isApiRequest, requestId, exception);
+        boolean isApiRequest = requestUri.equals("/api") || requestUri.startsWith("/api/");
+        logRequestFailure(request, statusCode, requestUri, isApiRequest, requestId, errorExceptionAttribute);
 
         if (isApiRequest) {
             // Return JSON error response for API requests
-            return handleApiError(statusCode, errorMessage, (Exception) exception);
+            Exception requestException =
+                    errorExceptionAttribute instanceof Exception exceptionInstance ? exceptionInstance : null;
+            return handleApiError(statusCode, requestException);
         } else {
             // Return HTML error page for browser requests
-            return handlePageError(statusCode, resolveUserFacingMessage(statusCode), uri, model);
+            return handlePageError(statusCode, resolveUserFacingMessage(statusCode), requestUri, model);
         }
     }
 
@@ -153,30 +156,28 @@ public class CustomErrorController implements ErrorController {
     /**
      * Handles API error responses with JSON format.
      */
-    private ResponseEntity<ApiResponse> handleApiError(int statusCode, String message, Exception exception) {
-        HttpStatus httpStatus = HttpStatus.resolve(statusCode);
-        if (httpStatus == null) {
-            httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
-        }
+    private ResponseEntity<ApiResponse> handleApiError(int statusCode, Exception requestException) {
+        HttpStatus httpStatus = resolveHttpStatus(statusCode);
+        String userFacingMessage = httpStatus.getReasonPhrase();
 
-        if (exception != null) {
-            return exceptionBuilder.buildErrorResponse(httpStatus, message, exception);
+        if (requestException != null) {
+            return exceptionBuilder.buildErrorResponse(httpStatus, userFacingMessage, requestException);
         } else {
-            return exceptionBuilder.buildErrorResponse(httpStatus, message);
+            return exceptionBuilder.buildErrorResponse(httpStatus, userFacingMessage);
         }
     }
 
     /**
      * Handles page error responses with HTML error pages.
      */
-    private ModelAndView handlePageError(int statusCode, String message, String uri, Model model) {
+    private ModelAndView handlePageError(int statusCode, String userFacingMessage, String requestUri, Model model) {
         ModelAndView modelAndView = new ModelAndView();
 
         // Add error details to model for potential template use
         model.addAttribute("status", statusCode);
         model.addAttribute("error", HttpStatus.resolve(statusCode));
-        model.addAttribute("message", message);
-        model.addAttribute("path", uri);
+        model.addAttribute("message", userFacingMessage);
+        model.addAttribute("path", requestUri);
         model.addAttribute("timestamp", System.currentTimeMillis());
 
         HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
@@ -193,11 +194,19 @@ public class CustomErrorController implements ErrorController {
     }
 
     private String resolveUserFacingMessage(int statusCode) {
-        HttpStatus status = HttpStatus.resolve(statusCode);
-        if (status != null) {
-            return status.getReasonPhrase();
+        HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
+        if (resolvedStatus != null) {
+            return resolvedStatus.getReasonPhrase();
         }
         return "Unexpected error";
+    }
+
+    private HttpStatus resolveHttpStatus(int statusCode) {
+        HttpStatus resolvedStatus = HttpStatus.resolve(statusCode);
+        if (resolvedStatus != null) {
+            return resolvedStatus;
+        }
+        return HttpStatus.INTERNAL_SERVER_ERROR;
     }
 
     private String resolveErrorViewName(HttpStatus status) {

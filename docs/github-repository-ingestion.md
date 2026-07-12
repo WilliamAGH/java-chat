@@ -11,26 +11,14 @@ Java Chat supports GitHub source-code ingestion into dedicated hybrid Qdrant col
 
 ## Canonical repository identity
 
-Every repository is identified by canonical `owner/repository` (lowercase).
+The canonical owner for repository identity and collection-name validation is
+[`scripts/lib/github_identity.sh`](../scripts/lib/github_identity.sh), specifically
+`require_canonical_collection_name`.
 
-Derived values:
-
-- `repoKey`: `owner/repository`
-- `repoUrl`: `https://github.com/owner/repository`
-- canonical collection name:
-  - default: `github-owner-repository` (when owner/repo use only `[a-z0-9-]`)
-  - collision-safe encoded form with hash suffix for punctuation variants (for example underscores/dots)
-
-The ingestion pipeline stores this identity in payload metadata:
-
-- `repoKey`
-- `repoUrl`
-- `repoOwner`
-- `repoName`
-- `repoBranch`
-- `commitHash`
-
-`docSet` for GitHub source files is `github/owner/repository`.
+Every ingestion entrypoint asks that owner to validate the repository before processing. The result
+is one collection for each GitHub repository: local-clone, URL, and batch-sync ingestion reject a
+collection name that does not match the source repository. Ingested content retains the repository
+metadata required for incremental synchronization.
 
 ## Commands
 
@@ -83,9 +71,10 @@ SYNC_EXISTING=1 make process-github-repo
 Batch sync flow:
 
 1. Discover all Qdrant collections prefixed with `github-`.
-2. Read `repoUrl`/`repoKey` and `commitHash` payload metadata from each collection.
-3. Resolve remote HEAD commit (`git ls-remote <repoUrl> HEAD`).
-4. Reingest only collections where remote HEAD differs from stored `commitHash`.
+2. Read the source repository and indexed revision from each collection's payload metadata.
+3. Verify collection identity through `require_canonical_collection_name`.
+4. Resolve the source repository's remote HEAD commit.
+5. Reingest only collections whose source has changed.
 
 ## Incremental update behavior
 
@@ -135,10 +124,11 @@ Then the file is chunked and upserted again.
 
 ## Collection and payload indexes
 
-GitHub collections are created (if missing) with hybrid vector schema copied from reference collection (`java-docs` by default), then payload indexes are ensured for:
-
-- core fields: `url`, `hash`, `chunkIndex`, `docSet`, `docPath`, `sourceName`, `sourceKind`, `docVersion`, `docType`
-- GitHub fields: `filePath`, `language`, `repoUrl`, `repoOwner`, `repoName`, `repoKey`, `repoBranch`, `commitHash`, `license`, `repoDescription`
+The canonical GitHub payload-index inventory is owned by
+[`scripts/lib/github_identity.sh`](../scripts/lib/github_identity.sh), specifically
+`ensure_github_payload_indexes`. The pipeline creates a missing collection from the reference
+schema and asks that owner to ensure the canonical indexes before ingestion. This keeps GitHub
+collections consistently queryable while centralizing future index changes.
 
 ## Environment variables
 

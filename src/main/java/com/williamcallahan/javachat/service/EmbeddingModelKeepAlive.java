@@ -88,6 +88,9 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         long probeStartNanos = nanoTime.getAsLong();
         try {
             embeddingClient.warmUp();
+        } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException exception) {
+            recordDeferred(elapsedMillis(probeStartNanos));
+            return;
         } catch (RuntimeException exception) {
             recordFailure(elapsedMillis(probeStartNanos), exception);
             if (exception instanceof EmbeddingServiceUnavailableException) {
@@ -96,6 +99,12 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
             throw exception;
         }
         recordSuccess(elapsedMillis(probeStartNanos));
+    }
+
+    private void recordDeferred(long probeDurationMillis) {
+        String logSafeModelName = modelName.replace("\r", "\\r").replace("\n", "\\n");
+        log.atDebug().log(() -> "event=embedding_model_probe_deferred outcome=deferred model=" + logSafeModelName
+                + " durationMs=" + probeDurationMillis + " reason=foreground_embedding_active");
     }
 
     /**

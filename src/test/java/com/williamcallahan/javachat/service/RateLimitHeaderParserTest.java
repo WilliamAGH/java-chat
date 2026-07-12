@@ -3,8 +3,10 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.openai.core.http.Headers;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -45,5 +47,20 @@ class RateLimitHeaderParserTest {
         Headers headers = Headers.builder().put("Retry-After", "15").build();
         RateLimitHeaderParser parser = new RateLimitHeaderParser();
         assertEquals(15L, parser.parseRetryAfterSeconds(headers));
+    }
+
+    @Test
+    void parseResetInstant_waitsForLatestPositiveRateLimitBucket() {
+        Headers headers = Headers.builder()
+                .put("x-ratelimit-reset-requests", "1s")
+                .put("x-ratelimit-reset-tokens", "60s")
+                .build();
+        RateLimitHeaderParser parser = new RateLimitHeaderParser();
+
+        Instant parsedResetTime = parser.parseResetInstant(headers).orElseThrow();
+        long remainingResetSeconds =
+                Duration.between(Instant.now(), parsedResetTime).getSeconds();
+
+        assertTrue(remainingResetSeconds >= 58, "Expected the 60-second token reset window");
     }
 }

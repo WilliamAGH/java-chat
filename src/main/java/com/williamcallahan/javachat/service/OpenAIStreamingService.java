@@ -41,7 +41,7 @@ import reactor.core.scheduler.Schedulers;
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
 
-    private static final int COMPLETE_REQUEST_TIMEOUT_SECONDS = 30;
+    private static final Duration DEFAULT_COMPLETE_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK =
             SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
     private static final String STREAM_STAGE_STREAM = SseConstants.STATUS_STAGE_STREAM;
@@ -139,7 +139,7 @@ public class OpenAIStreamingService {
     }
 
     /**
-     * Streams a response using a structured prompt with provider failover before first token.
+     * Streams a response using a structured prompt with bounded retries before first text.
      *
      * @param structuredPrompt typed prompt segments
      * @param temperature response temperature
@@ -162,8 +162,8 @@ public class OpenAIStreamingService {
                     Sinks.Many<StreamingNotice> noticeSink =
                             Sinks.many().multicast().onBackpressureBuffer();
                     StreamingAttemptContext attemptContext =
-                            new StreamingAttemptContext(availableProviders, 0, noticeSink);
-                    Flux<String> contentFlux = executeStreamingWithProviderFallback(
+                            StreamingAttemptContext.first(availableProviders, noticeSink);
+                    Flux<String> contentFlux = executeStreamingWithPreTextRetry(
                                     structuredPrompt, temperature, attemptContext)
                             .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
                     return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
@@ -179,7 +179,7 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature) {
-        return complete(prompt, temperature, null, false);
+        return complete(prompt, temperature, CompletionConfiguration.withDefaultTimeout());
     }
 
     /**
@@ -194,7 +194,10 @@ public class OpenAIStreamingService {
         if (maximumOutputTokens <= 0) {
             return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
         }
-        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens), false);
+        return complete(
+                prompt,
+                temperature,
+                CompletionConfiguration.withOutputBudget(maximumOutputTokens, DEFAULT_COMPLETE_REQUEST_TIMEOUT));
     }
 
     /**
@@ -206,14 +209,30 @@ public class OpenAIStreamingService {
      * @return completion text from the first provider honoring the JSON contract
      */
     public Mono<String> completeJsonObject(String prompt, double temperature, int maximumOutputTokens) {
+        return completeJsonObject(prompt, temperature, maximumOutputTokens, DEFAULT_COMPLETE_REQUEST_TIMEOUT);
+    }
+
+    /**
+     * Sends a non-streaming completion request that requires a JSON object response within a caller-owned timeout.
+     *
+     * @param prompt completion prompt
+     * @param temperature response temperature
+     * @param maximumOutputTokens maximum output tokens needed by this caller
+     * @param requestTimeout whole-request timeout owned by this caller
+     * @return completion text from the first provider honoring the JSON contract
+     */
+    public Mono<String> completeJsonObject(
+            String prompt, double temperature, int maximumOutputTokens, Duration requestTimeout) {
         if (maximumOutputTokens <= 0) {
             return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
         }
-        return complete(prompt, temperature, Integer.valueOf(maximumOutputTokens), true);
+        if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
+            return Mono.error(new IllegalArgumentException("requestTimeout must be positive"));
+        }
+        return complete(prompt, temperature, CompletionConfiguration.jsonObject(maximumOutputTokens, requestTimeout));
     }
 
-    private Mono<String> complete(
-            String prompt, double temperature, Integer maximumOutputTokens, boolean requireJsonObject) {
+    private Mono<String> complete(String prompt, double temperature, CompletionConfiguration configuration) {
         return Mono.<String>defer(() -> {
                     List<OpenAiProviderCandidate> availableProviders =
                             providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
@@ -229,12 +248,12 @@ public class OpenAIStreamingService {
                         OpenAiProviderCandidate providerCandidate = availableProviders.get(providerIndex);
                         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
 
-                        ResponseCreateParams requestParameters = buildCompletionRequest(
-                                prompt, temperature, activeProvider, maximumOutputTokens, requireJsonObject);
+                        ResponseCreateParams requestParameters =
+                                buildCompletionRequest(prompt, temperature, activeProvider, configuration);
                         try {
                             log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
                             RequestOptions requestOptions = RequestOptions.builder()
-                                    .timeout(completeTimeout())
+                                    .timeout(completeTimeout(configuration.requestTimeout()))
                                     .build();
                             Response completion =
                                     providerCandidate.client().responses().create(requestParameters, requestOptions);
@@ -275,16 +294,19 @@ public class OpenAIStreamingService {
             String prompt,
             double temperature,
             RateLimitService.ApiProvider activeProvider,
-            Integer maximumOutputTokens,
-            boolean requireJsonObject) {
-        if (requireJsonObject) {
+            CompletionConfiguration configuration) {
+        if (configuration.requireJsonObject()) {
             return requestFactory.buildJsonCompletionRequest(
-                    prompt, temperature, activeProvider, maximumOutputTokens.intValue());
+                    prompt,
+                    temperature,
+                    activeProvider,
+                    configuration.maximumOutputTokens().intValue());
         }
-        if (maximumOutputTokens == null) {
+        if (configuration.maximumOutputTokens() == null) {
             return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
         }
-        return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider, maximumOutputTokens);
+        return requestFactory.buildCompletionRequest(
+                prompt, temperature, activeProvider, configuration.maximumOutputTokens());
     }
 
     /**
@@ -297,7 +319,7 @@ public class OpenAIStreamingService {
         return providerRoutingService.isRecoverableStreamingFailure(throwable);
     }
 
-    private Flux<String> executeStreamingWithProviderFallback(
+    private Flux<String> executeStreamingWithPreTextRetry(
             StructuredPrompt structuredPrompt, double temperature, StreamingAttemptContext attemptContext) {
         OpenAiProviderCandidate providerCandidate = attemptContext.currentProvider();
         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
@@ -316,18 +338,18 @@ public class OpenAIStreamingService {
                         providerCandidate.client(), preparedStreamingRequest.responseParams(), activeProvider)
                 .doOnNext(ignoredChunk -> emittedTextChunk.set(true))
                 .onErrorResume(streamingFailure -> {
-                    if (!attemptContext.hasNextProvider()
+                    if (!attemptContext.hasNextAttempt()
                             || emittedTextChunk.get()
                             || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
                         return Flux.error(streamingFailure);
                     }
 
-                    StreamingAttemptContext nextAttempt = attemptContext.withNextProvider();
-                    OpenAiProviderCandidate fallbackProvider = nextAttempt.currentProvider();
+                    StreamingAttemptContext nextAttempt = attemptContext.withNextAttempt();
+                    OpenAiProviderCandidate retryProvider = nextAttempt.currentProvider();
                     log.warn(
-                            "[LLM] Falling back to providerId={} before first chunk "
+                            "[LLM] Retrying with providerId={} before first chunk "
                                     + "(failedProviderId={}, attempt={}/{}, exceptionType={})",
-                            fallbackProvider.provider().ordinal(),
+                            retryProvider.provider().ordinal(),
                             activeProvider.ordinal(),
                             nextAttempt.currentAttempt(),
                             nextAttempt.maxAttempts(),
@@ -336,19 +358,18 @@ public class OpenAIStreamingService {
                     emitStreamingNotice(
                             attemptContext.noticeSink(),
                             StreamingNotice.builder(
-                                            "Retrying stream with alternate provider",
-                                            STREAM_STATUS_CODE_PROVIDER_FALLBACK)
+                                            "Retrying stream with provider", STREAM_STATUS_CODE_PROVIDER_FALLBACK)
                                     .diagnosticContext("The API returned an invalid or transient streaming response. "
                                             + "Retrying before any response text was emitted.")
                                     .retryable(true)
                                     .origin(new StreamingNoticeOrigin(
-                                            fallbackProvider.provider().getName(),
+                                            retryProvider.provider().getName(),
                                             STREAM_STAGE_STREAM,
                                             nextAttempt.currentAttempt(),
                                             nextAttempt.maxAttempts()))
                                     .build());
 
-                    return executeStreamingWithProviderFallback(structuredPrompt, temperature, nextAttempt);
+                    return executeStreamingWithPreTextRetry(structuredPrompt, temperature, nextAttempt);
                 });
     }
 
@@ -378,10 +399,24 @@ public class OpenAIStreamingService {
                 .build();
     }
 
-    private Timeout completeTimeout() {
-        return Timeout.builder()
-                .request(Duration.ofSeconds(COMPLETE_REQUEST_TIMEOUT_SECONDS))
-                .build();
+    private Timeout completeTimeout(Duration requestTimeout) {
+        return Timeout.builder().request(requestTimeout).build();
+    }
+
+    private record CompletionConfiguration(
+            Integer maximumOutputTokens, boolean requireJsonObject, Duration requestTimeout) {
+
+        private static CompletionConfiguration withDefaultTimeout() {
+            return new CompletionConfiguration(null, false, DEFAULT_COMPLETE_REQUEST_TIMEOUT);
+        }
+
+        private static CompletionConfiguration withOutputBudget(int maximumOutputTokens, Duration requestTimeout) {
+            return new CompletionConfiguration(maximumOutputTokens, false, requestTimeout);
+        }
+
+        private static CompletionConfiguration jsonObject(int maximumOutputTokens, Duration requestTimeout) {
+            return new CompletionConfiguration(maximumOutputTokens, true, requestTimeout);
+        }
     }
 
     private OpenAIClient createClient(String apiKey, String baseUrl) {
@@ -389,8 +424,8 @@ public class OpenAIStreamingService {
                 .apiKey(apiKey)
                 .baseUrl(OpenAiSdkUrlNormalizer.normalize(baseUrl))
                 .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, resolvedLlmGatewayTier())
-                // Disable SDK-level retries: Reactor timeout and onErrorResume handle failures.
-                // Retries cause InterruptedException when Reactor cancels a sleeping retry.
+                // Caller-owned request timeouts and provider routing own failure handling.
+                // SDK retry sleeps interfere with reactive cancellation.
                 .maxRetries(0)
                 .build();
     }

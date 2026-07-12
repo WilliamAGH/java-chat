@@ -10,9 +10,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class ProviderCircuitState {
     private final int maxBackoffMultiplier;
 
-    private volatile boolean circuitOpen = false;
-    private volatile Instant nextRetryTime;
-    private volatile int backoffMultiplier = 1;
+    private boolean circuitOpen = false;
+    private Instant nextRetryTime = Instant.EPOCH;
+    private int backoffMultiplier = 1;
     private final AtomicInteger requestsToday = new AtomicInteger(0);
     private volatile Instant dayReset = Instant.now().plus(Duration.ofDays(1));
 
@@ -29,7 +29,7 @@ final class ProviderCircuitState {
     /**
      * Returns whether the provider is currently eligible for requests.
      */
-    boolean isAvailable() {
+    synchronized boolean isAvailable() {
         if (circuitOpen && Instant.now().isBefore(nextRetryTime)) {
             return false;
         }
@@ -43,7 +43,7 @@ final class ProviderCircuitState {
     /**
      * Marks one successful request and closes the circuit if it was open.
      */
-    void recordSuccess() {
+    synchronized void recordSuccess() {
         backoffMultiplier = 1;
         circuitOpen = false;
         requestsToday.incrementAndGet();
@@ -52,14 +52,16 @@ final class ProviderCircuitState {
     /**
      * Marks a rate limit and computes next retry using explicit delay or bounded exponential backoff.
      */
-    void recordRateLimit(long retryAfterSeconds) {
-        circuitOpen = true;
+    synchronized void recordRateLimit(long retryAfterSeconds) {
+        Instant retryTime;
         if (retryAfterSeconds > 0) {
-            nextRetryTime = Instant.now().plusSeconds(retryAfterSeconds);
-            return;
+            retryTime = Instant.now().plusSeconds(retryAfterSeconds);
+        } else {
+            backoffMultiplier = Math.min(backoffMultiplier * 2, maxBackoffMultiplier);
+            retryTime = Instant.now().plusSeconds(backoffMultiplier);
         }
-        backoffMultiplier = Math.min(backoffMultiplier * 2, maxBackoffMultiplier);
-        nextRetryTime = Instant.now().plusSeconds(backoffMultiplier);
+        nextRetryTime = retryTime;
+        circuitOpen = true;
     }
 
     /**

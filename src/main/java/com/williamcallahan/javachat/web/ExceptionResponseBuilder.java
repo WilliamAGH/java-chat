@@ -5,8 +5,6 @@ import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.domain.errors.ApiSuccessResponse;
 import java.util.Objects;
-import java.util.Optional;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -56,90 +54,29 @@ public class ExceptionResponseBuilder {
     }
 
     /**
-     * Builds a detailed error description suitable for API responses or UI diagnostics.
+     * Builds a client-safe error description without downstream messages, headers, or bodies.
      *
      * @param exception the exception to describe
-     * @return detailed description including class name, message, and protocol-specific details
+     * @return exception type and numeric HTTP status when available
      * @throws NullPointerException when exception is null
      */
     public String describeException(Exception exception) {
         Objects.requireNonNull(exception, EXCEPTION_REQUIRED_MESSAGE);
-        StringBuilder details = new StringBuilder();
-        details.append(exception.getClass().getSimpleName());
-        String message = exception.getMessage();
-        if (message != null && !message.isBlank()) {
-            details.append(": ").append(message);
-        }
+        StringBuilder details = new StringBuilder(exception.getClass().getSimpleName());
 
         if (exception instanceof RestClientResponseException restClientException) {
-            appendRestClientDetails(details, restClientException);
-        }
-        if (exception instanceof WebClientResponseException webClientException) {
-            appendWebClientDetails(details, webClientException);
-        }
-        if (exception instanceof OpenAIServiceException openAiException) {
-            appendOpenAiDetails(details, openAiException);
-        }
-        if (exception instanceof ResponseStatusException statusException) {
-            appendStatusExceptionDetails(details, statusException);
+            appendHttpStatus(details, restClientException.getStatusCode().value());
+        } else if (exception instanceof WebClientResponseException webClientException) {
+            appendHttpStatus(details, webClientException.getStatusCode().value());
+        } else if (exception instanceof OpenAIServiceException openAiException) {
+            appendHttpStatus(details, openAiException.statusCode());
+        } else if (exception instanceof ResponseStatusException statusException) {
+            appendHttpStatus(details, statusException.getStatusCode().value());
         }
         return details.toString();
     }
 
-    private void appendRestClientDetails(StringBuilder details, RestClientResponseException exception) {
-        details.append(" [httpStatus=").append(exception.getStatusCode().value());
-        String statusText = exception.getStatusText();
-        if (!statusText.isBlank()) {
-            details.append(" ").append(statusText);
-        }
-        String responseBody = exception.getResponseBodyAsString();
-        if (!responseBody.isBlank()) {
-            details.append(", body=").append(responseBody);
-        }
-        HttpHeaders headers =
-                Optional.ofNullable(exception.getResponseHeaders()).orElseGet(HttpHeaders::new);
-        if (!headers.isEmpty()) {
-            details.append(", headers=").append(headers);
-        }
-        details.append("]");
-    }
-
-    private void appendWebClientDetails(StringBuilder details, WebClientResponseException exception) {
-        details.append(" [httpStatus=").append(exception.getStatusCode().value());
-        String statusText = exception.getStatusText();
-        if (!statusText.isBlank()) {
-            details.append(" ").append(statusText);
-        }
-        String responseBody = exception.getResponseBodyAsString();
-        if (!responseBody.isBlank()) {
-            details.append(", body=").append(responseBody);
-        }
-        HttpHeaders headers = exception.getHeaders();
-        if (!headers.isEmpty()) {
-            details.append(", headers=").append(headers);
-        }
-        details.append("]");
-    }
-
-    private void appendOpenAiDetails(StringBuilder details, OpenAIServiceException exception) {
-        details.append(" [httpStatus=").append(exception.statusCode());
-        var headers = exception.headers();
-        if (!headers.isEmpty()) {
-            details.append(", headers=").append(headers);
-        }
-        String body = exception.body().toString();
-        if (!body.isBlank()) {
-            details.append(", body=").append(body);
-        }
-        exception.code().ifPresent(code -> details.append(", code=").append(code));
-        exception.param().ifPresent(param -> details.append(", param=").append(param));
-        exception.type().ifPresent(type -> details.append(", type=").append(type));
-        details.append("]");
-    }
-
-    private void appendStatusExceptionDetails(StringBuilder details, ResponseStatusException exception) {
-        details.append(" [httpStatus=")
-                .append(exception.getStatusCode().value())
-                .append("]");
+    private static void appendHttpStatus(StringBuilder details, int httpStatus) {
+        details.append(" [httpStatus=").append(httpStatus).append("]");
     }
 }
