@@ -124,6 +124,12 @@ public class RerankerService {
         prompt.append("Consider Java-specific context, version relevance, and learning value.\n");
         prompt.append("Prefer official documentation over blogs or third-party sources.\n");
         prompt.append("Prefer stable release documentation over early-access or preview content.\n");
+        prompt.append("There are exactly ")
+                .append(documents.size())
+                .append(" documents. Valid indices are 0 through ")
+                .append(documents.size() - 1)
+                .append(".\n");
+        prompt.append("Include each valid index exactly once and do not return any other values.\n");
         prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices.\n");
         prompt.append("Do not include markdown, prose, or explanations.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
