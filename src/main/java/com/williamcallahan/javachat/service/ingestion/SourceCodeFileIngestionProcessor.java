@@ -126,8 +126,9 @@ public class SourceCodeFileIngestionProcessor {
                 .orElse(null);
 
         boolean unchangedByFingerprint = isUnchangedByFingerprint(previousFileRecord, fileContext, fileContent);
-        if (unchangedByFingerprint
-                && hasSufficientStoredPointCoverage(previousFileRecord, collectionName, fileContext)) {
+        boolean hasSufficientPointCoverage = unchangedByFingerprint
+                && hasSufficientStoredPointCoverage(previousFileRecord, collectionName, fileContext);
+        if (hasSufficientPointCoverage) {
             log.debug("Skipping unchanged file (already ingested): {}", fileContext.relativePath());
             return new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), fileUrl);
         }
@@ -137,7 +138,7 @@ public class SourceCodeFileIngestionProcessor {
                     fileContext.relativePath());
         }
 
-        boolean requiresFullReindex = previousFileRecord != null && !unchangedByFingerprint;
+        boolean requiresFullReindex = previousFileRecord != null;
         if (requiresFullReindex) {
             try {
                 ingestedFilePruneService.pruneCollectionFileStrict(
