@@ -38,6 +38,9 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
     /** Rechecks an unavailable provider before container health exhausts its retry budget. */
     private static final long UNAVAILABLE_RECOVERY_INTERVAL_MILLIS = 30_000L;
 
+    /** Escalates only after a probe condition repeats on the next observation. */
+    private static final int REPEATED_PROBE_ALERT_COUNT = 2;
+
     private static final long NANOS_PER_MILLISECOND = 1_000_000L;
 
     private final EmbeddingClient embeddingClient;
@@ -135,7 +138,7 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
                 log.atInfo().log(() -> "event=embedding_model_probe_slow outcome=success model="
                         + logSafeModelName + " durationMs=" + probeDurationMillis + " consecutiveSlowProbes="
                         + consecutiveSlowProbeCount);
-            } else if (consecutiveSlowProbeCount == 2) {
+            } else if (consecutiveSlowProbeCount == REPEATED_PROBE_ALERT_COUNT) {
                 log.atWarn()
                         .log(() -> "event=embedding_model_probe_slow_loop outcome=success model="
                                 + logSafeModelName + " durationMs=" + probeDurationMillis + " consecutiveSlowProbes="
@@ -175,7 +178,7 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
                     .setCause(exception)
                     .log(() -> "event=embedding_model_probe_failed outcome=failure model=" + logSafeModelName
                             + " durationMs=" + probeDurationMillis + " consecutiveFailures=" + consecutiveFailureCount);
-        } else if (consecutiveFailureCount == 2) {
+        } else if (consecutiveFailureCount == REPEATED_PROBE_ALERT_COUNT) {
             log.atError()
                     .setCause(exception)
                     .log(() -> "event=embedding_model_probe_failure_loop outcome=failure model=" + logSafeModelName
