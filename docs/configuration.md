@@ -25,7 +25,7 @@ Common variables:
 - `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
+- `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway cloud alias `google/gemma-4-26b-a4b`)
 - `OPENAI_REASONING_EFFORT` (optional, GPT‑5 family)
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`)
 - `OPENAI_STREAMING_READ_TIMEOUT_SECONDS` (default `75`)
@@ -38,10 +38,10 @@ Configure chat through the shared gateway with:
 LLM_PRIMARY_PROVIDER=openai
 OPENAI_API_KEY=lgw-...
 OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
-OPENAI_MODEL=gemma-4-26b-a4b
+OPENAI_MODEL=google/gemma-4-26b-a4b
 ```
 
-`gemma-4-26b-a4b` is a gateway alias and may fail over across upstream providers configured for that alias. This gateway-side routing is separate from Java Chat's `LLM_PRIMARY_PROVIDER` ordering. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
+`google/gemma-4-26b-a4b` is the gateway's cloud-only Gemma alias. It keeps user-facing streams off the mixed on-prem fleet until that fleet's model-aware readiness is proven. Gateway-side routing is separate from Java Chat's `LLM_PRIMARY_PROVIDER` ordering. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
 
 ### Provider notes
 

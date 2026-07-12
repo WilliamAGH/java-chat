@@ -32,8 +32,8 @@ public class RerankerService {
     /** Maximum character length of document text included in the rerank prompt. */
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
 
-    /** Output budget for the small JSON ordering the reranker requires. */
-    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 128;
+    /** Output budget including hidden reasoning before the small JSON ordering. */
+    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 512;
 
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;

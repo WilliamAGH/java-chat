@@ -51,7 +51,7 @@ class RerankerServiceTest {
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(streamingService).completeJsonObject(anyString(), eq(0.0), outputBudgetCaptor.capture());
         verify(streamingService, never()).complete(anyString(), eq(0.0));
-        assertEquals(128, outputBudgetCaptor.getValue());
+        assertEquals(512, outputBudgetCaptor.getValue());
         assertEquals(sourceDocuments.get(1), rankedDocuments.get(0));
     }
 }
