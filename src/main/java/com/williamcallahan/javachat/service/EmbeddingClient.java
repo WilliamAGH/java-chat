@@ -20,6 +20,13 @@ public interface EmbeddingClient {
     List<float[]> embed(List<String> texts, LlmGatewayTier requestTier);
 
     /**
+     * Returns the provider model identifier used for embedding requests.
+     *
+     * @return configured embedding model identifier
+     */
+    String modelName();
+
+    /**
      * Produces a dense embedding vector for a single text.
      *
      * @param text input text

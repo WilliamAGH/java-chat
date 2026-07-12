@@ -106,6 +106,11 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         createEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT), LlmGatewayTier.BATCH);
     }
 
+    @Override
+    public String modelName() {
+        return modelName;
+    }
+
     private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier) {
         EmbeddingCreateParams.Builder embeddingRequestBuilder =
                 EmbeddingCreateParams.builder().model(modelName).inputOfArrayOfStrings(texts);
