@@ -139,7 +139,7 @@ public class OpenAIStreamingService {
     }
 
     /**
-     * Streams a response using a structured prompt with provider failover before first token.
+     * Streams a response using a structured prompt with bounded retries before first text.
      *
      * @param structuredPrompt typed prompt segments
      * @param temperature response temperature
@@ -162,8 +162,8 @@ public class OpenAIStreamingService {
                     Sinks.Many<StreamingNotice> noticeSink =
                             Sinks.many().multicast().onBackpressureBuffer();
                     StreamingAttemptContext attemptContext =
-                            new StreamingAttemptContext(availableProviders, 0, noticeSink);
-                    Flux<String> contentFlux = executeStreamingWithProviderFallback(
+                            StreamingAttemptContext.first(availableProviders, noticeSink);
+                    Flux<String> contentFlux = executeStreamingWithPreTextRetry(
                                     structuredPrompt, temperature, attemptContext)
                             .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
                     return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
@@ -319,7 +319,7 @@ public class OpenAIStreamingService {
         return providerRoutingService.isRecoverableStreamingFailure(throwable);
     }
 
-    private Flux<String> executeStreamingWithProviderFallback(
+    private Flux<String> executeStreamingWithPreTextRetry(
             StructuredPrompt structuredPrompt, double temperature, StreamingAttemptContext attemptContext) {
         OpenAiProviderCandidate providerCandidate = attemptContext.currentProvider();
         RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
@@ -338,18 +338,18 @@ public class OpenAIStreamingService {
                         providerCandidate.client(), preparedStreamingRequest.responseParams(), activeProvider)
                 .doOnNext(ignoredChunk -> emittedTextChunk.set(true))
                 .onErrorResume(streamingFailure -> {
-                    if (!attemptContext.hasNextProvider()
+                    if (!attemptContext.hasNextAttempt()
                             || emittedTextChunk.get()
                             || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
                         return Flux.error(streamingFailure);
                     }
 
-                    StreamingAttemptContext nextAttempt = attemptContext.withNextProvider();
-                    OpenAiProviderCandidate fallbackProvider = nextAttempt.currentProvider();
+                    StreamingAttemptContext nextAttempt = attemptContext.withNextAttempt();
+                    OpenAiProviderCandidate retryProvider = nextAttempt.currentProvider();
                     log.warn(
-                            "[LLM] Falling back to providerId={} before first chunk "
+                            "[LLM] Retrying with providerId={} before first chunk "
                                     + "(failedProviderId={}, attempt={}/{}, exceptionType={})",
-                            fallbackProvider.provider().ordinal(),
+                            retryProvider.provider().ordinal(),
                             activeProvider.ordinal(),
                             nextAttempt.currentAttempt(),
                             nextAttempt.maxAttempts(),
@@ -358,19 +358,18 @@ public class OpenAIStreamingService {
                     emitStreamingNotice(
                             attemptContext.noticeSink(),
                             StreamingNotice.builder(
-                                            "Retrying stream with alternate provider",
-                                            STREAM_STATUS_CODE_PROVIDER_FALLBACK)
+                                            "Retrying stream with provider", STREAM_STATUS_CODE_PROVIDER_FALLBACK)
                                     .diagnosticContext("The API returned an invalid or transient streaming response. "
                                             + "Retrying before any response text was emitted.")
                                     .retryable(true)
                                     .origin(new StreamingNoticeOrigin(
-                                            fallbackProvider.provider().getName(),
+                                            retryProvider.provider().getName(),
                                             STREAM_STAGE_STREAM,
                                             nextAttempt.currentAttempt(),
                                             nextAttempt.maxAttempts()))
                                     .build());
 
-                    return executeStreamingWithProviderFallback(structuredPrompt, temperature, nextAttempt);
+                    return executeStreamingWithPreTextRetry(structuredPrompt, temperature, nextAttempt);
                 });
     }
 
