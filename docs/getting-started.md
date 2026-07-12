@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Java 25 (project toolchain)
-- Node.js (frontend build/dev)
+- Node.js 24.15.0 (frontend build/dev)
 - Docker (optional, for local Qdrant)
 - `wget` (optional, for `make fetch-all`)
 
