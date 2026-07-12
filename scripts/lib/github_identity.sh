@@ -112,7 +112,23 @@ extract_repository_identity() {
         exit 1
     fi
 
-    CANONICAL_COLLECTION_NAME="github-${encoded_owner_segment}-${encoded_name_segment}"
+    local repository_boundary="-"
+    if [[ ! "$REPOSITORY_OWNER" =~ ^[a-z0-9]+$ ]]; then
+        repository_boundary="_"
+    fi
+    CANONICAL_COLLECTION_NAME="github-${encoded_owner_segment}${repository_boundary}${encoded_name_segment}"
+}
+
+# Rejects collection names that do not match their repository's canonical identity.
+require_canonical_collection_name() {
+    local collection_name="$1"
+    local repository_url="$2"
+
+    extract_repository_identity "$repository_url"
+    if [ "$collection_name" != "$CANONICAL_COLLECTION_NAME" ]; then
+        echo -e "${RED}Collection '$collection_name' does not match canonical name '$CANONICAL_COLLECTION_NAME'.${NC}" >&2
+        return 1
+    fi
 }
 
 # ── Cache management ─────────────────────────────────────────────────

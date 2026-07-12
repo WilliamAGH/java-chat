@@ -286,10 +286,7 @@ public class GitHubRepoProcessor {
         GitHubRepositoryIdentity repositoryIdentity =
                 repositoryIdentityResolver.resolve(owner, repositoryName, repositoryUrl);
 
-        String collectionName = envOrEmpty(ENV_GITHUB_COLLECTION_NAME);
-        if (collectionName.isBlank()) {
-            collectionName = repositoryIdentity.canonicalCollectionName();
-        }
+        String collectionName = requireEnv(ENV_GITHUB_COLLECTION_NAME);
 
         return new GitHubRepoMetadata(
                 repoPath,

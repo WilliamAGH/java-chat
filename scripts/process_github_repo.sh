@@ -172,12 +172,7 @@ run_single_ingestion() {
     local app_jar="$4"
 
     resolve_repository_metadata_from_path "$repository_path"
-    if [ "$collection_name" != "$CANONICAL_COLLECTION_NAME" ]; then
-        echo -e "${RED}Error: Collection naming mismatch for $REPOSITORY_URL${NC}"
-        echo -e "${RED}Expected canonical collection: $CANONICAL_COLLECTION_NAME${NC}"
-        echo -e "${RED}Received collection: $collection_name${NC}"
-        exit 1
-    fi
+    require_canonical_collection_name "$collection_name" "$REPOSITORY_URL"
 
     print_ingestion_banner "$repository_path" "$collection_name"
     ensure_collection_exists "$collection_name" "$qdrant_base_url"
@@ -235,6 +230,8 @@ sync_single_collection() {
         return
     fi
 
+    require_canonical_collection_name "$collection_name" "$stored_repository_url"
+
     local remote_commit
     remote_commit="$(remote_head_commit "$stored_repository_url")"
     if [ -z "$remote_commit" ]; then
@@ -252,12 +249,6 @@ sync_single_collection() {
     echo -e "${CYAN}Syncing updated repository for $collection_name: $stored_repository_url${NC}"
     local cached_repository_path
     cached_repository_path="$(ensure_repository_cache_clone "$stored_repository_url" "")"
-
-    extract_repository_identity "$stored_repository_url"
-    if [ "$collection_name" != "$CANONICAL_COLLECTION_NAME" ]; then
-        echo -e "${RED}Collection '$collection_name' does not match canonical name '$CANONICAL_COLLECTION_NAME'${NC}"
-        exit 1
-    fi
 
     local previous_repo_url="$REPO_URL"
     REPO_URL="$stored_repository_url"
@@ -325,7 +316,14 @@ else
 fi
 
 build_application "$LOG_FILE"
-APP_JAR="$(locate_app_jar)"
+SOURCE_APP_JAR="$(locate_app_jar)"
+STAGED_APP_JAR_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-github-ingestion.XXXXXX")"
+cleanup_staged_app_jar() {
+    chmod u+w "$STAGED_APP_JAR_DIRECTORY" "$STAGED_APP_JAR_DIRECTORY/application.jar" 2>/dev/null || true
+    rm -rf "$STAGED_APP_JAR_DIRECTORY"
+}
+trap cleanup_staged_app_jar EXIT
+APP_JAR="$(stage_app_jar "$SOURCE_APP_JAR" "$STAGED_APP_JAR_DIRECTORY")"
 QDRANT_BASE_URL="$(qdrant_rest_base_url)"
 
 if [ "$SYNC_EXISTING" = "1" ]; then

@@ -179,6 +179,36 @@ locate_app_jar() {
     echo "$jar_path"
 }
 
+# Copies a runnable JAR into a private directory and removes write access so a
+# later build cannot change the archive used by a running JVM.
+#
+# Arguments:
+#   $1 - source JAR path
+#   $2 - empty staging directory owned by the caller
+stage_app_jar() {
+    local source_jar_path="$1"
+    local staging_directory="$2"
+    local staged_jar_path="$staging_directory/application.jar"
+
+    if [ ! -f "$source_jar_path" ]; then
+        echo -e "${RED}Runnable jar does not exist: $source_jar_path${NC}" >&2
+        return 1
+    fi
+    if [ ! -d "$staging_directory" ]; then
+        echo -e "${RED}JAR staging directory does not exist: $staging_directory${NC}" >&2
+        return 1
+    fi
+
+    cp "$source_jar_path" "$staged_jar_path"
+    if ! jar tf "$staged_jar_path" >/dev/null; then
+        echo -e "${RED}Staged runnable jar is not a valid archive: $staged_jar_path${NC}" >&2
+        return 1
+    fi
+    chmod 0444 "$staged_jar_path"
+    chmod 0555 "$staging_directory"
+    echo "$staged_jar_path"
+}
+
 # Manages PID file lifecycle: kills any existing process, registers cleanup trap.
 # Sets APP_PID to empty initially; the caller must set it after launching the Java process.
 #
