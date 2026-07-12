@@ -26,6 +26,7 @@ import org.springframework.web.servlet.ModelAndView;
 public class CustomErrorController implements ErrorController {
 
     private static final Logger log = LoggerFactory.getLogger(CustomErrorController.class);
+    private static final int MAX_LOG_FIELD_LENGTH = 512;
     private static final String ERROR_PATH = "/error";
     private static final String ERROR_VIEW_ACCESS_DENIED = "forward:/errors/access-denied";
     private static final String ERROR_VIEW_AUTH_REQUIRED = "forward:/errors/authentication-required";
@@ -81,14 +82,9 @@ public class CustomErrorController implements ErrorController {
         String errorMessage = message != null ? message.toString() : "An unexpected error occurred";
         String uri = requestUri != null ? requestUri.toString() : request.getRequestURI();
 
-        // Log the error for monitoring without echoing request-derived strings
-        log.error("Error {} occurred while handling request", statusCode);
-        if (exception instanceof Exception exceptionInstance) {
-            log.error("Exception type: {}", exceptionInstance.getClass().getSimpleName());
-        }
-
         // Determine if this is an API request or a page request
         boolean isApiRequest = uri.equals("/api") || uri.startsWith("/api/");
+        logRequestFailure(request, statusCode, uri, isApiRequest, exception);
 
         if (isApiRequest) {
             // Return JSON error response for API requests
@@ -97,6 +93,52 @@ public class CustomErrorController implements ErrorController {
             // Return HTML error page for browser requests
             return handlePageError(statusCode, resolveUserFacingMessage(statusCode), uri, model);
         }
+    }
+
+    private void logRequestFailure(
+            HttpServletRequest request, int statusCode, String uri, boolean apiRequest, Object exception) {
+        String method = safeLogField(request.getMethod());
+        String canonicalUri = safeLogField(uri.split("[?#]", 2)[0]);
+        String serverHost = safeLogField(request.getServerName());
+        String userAgent = safeLogField(request.getHeader("User-Agent"));
+        String requestId = safeLogField(request.getRequestId());
+        String source = safeLogField(request.getAttribute(RequestDispatcher.ERROR_SERVLET_NAME));
+        String diagnostic = "Request failed status={} source={} method={} uri={} host={} userAgent={} requestId={}";
+
+        if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+            if (exception instanceof Exception exceptionInstance) {
+                log.error(
+                        diagnostic,
+                        statusCode,
+                        source,
+                        method,
+                        canonicalUri,
+                        serverHost,
+                        userAgent,
+                        requestId,
+                        exceptionInstance);
+            } else {
+                log.error(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, requestId);
+            }
+        } else if (statusCode == HttpStatus.NOT_FOUND.value() && apiRequest) {
+            log.warn(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, requestId);
+        } else {
+            log.info(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, requestId);
+        }
+    }
+
+    private String safeLogField(Object requestField) {
+        if (requestField == null) {
+            return "unknown";
+        }
+        String logField = requestField.toString();
+        int boundedLength = Math.min(logField.length(), MAX_LOG_FIELD_LENGTH);
+        StringBuilder safeField = new StringBuilder(boundedLength);
+        for (int index = 0; index < boundedLength; index++) {
+            char character = logField.charAt(index);
+            safeField.append(Character.isISOControl(character) ? '?' : character);
+        }
+        return safeField.toString();
     }
 
     /**

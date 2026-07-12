@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
@@ -39,7 +40,8 @@ class RerankerServiceTest {
     void rerankUsesBoundedCompletionBudget() {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.isAvailable()).thenReturn(true);
-        when(streamingService.complete(anyString(), eq(0.0), anyInt())).thenReturn(Mono.just("{\"order\":[1,0]}"));
+        when(streamingService.completeJsonObject(anyString(), eq(0.0), anyInt()))
+                .thenReturn(Mono.just("{\"order\":[1,0]}"));
 
         RerankerService rerankerService =
                 new RerankerService(streamingService, new ObjectMapper(), new AppProperties());
@@ -47,10 +49,13 @@ class RerankerServiceTest {
 
         List<Document> rankedDocuments = rerankerService.rerank("query", sourceDocuments, 2);
 
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(streamingService).complete(anyString(), eq(0.0), outputBudgetCaptor.capture());
+        verify(streamingService).completeJsonObject(promptCaptor.capture(), eq(0.0), outputBudgetCaptor.capture());
         verify(streamingService, never()).complete(anyString(), eq(0.0));
-        assertEquals(128, outputBudgetCaptor.getValue());
+        assertTrue(promptCaptor.getValue().contains("Valid indices are 0 through 1."));
+        assertTrue(promptCaptor.getValue().contains("Include each valid index exactly once"));
+        assertEquals(512, outputBudgetCaptor.getValue());
         assertEquals(sourceDocuments.get(1), rankedDocuments.get(0));
     }
 }

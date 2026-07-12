@@ -2,8 +2,10 @@ package com.williamcallahan.javachat.service;
 
 import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
+import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.ResponsesModel;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -117,7 +119,7 @@ public class OpenAiRequestFactory {
      */
     public ResponseCreateParams buildCompletionRequest(
             String prompt, double temperature, RateLimitService.ApiProvider provider) {
-        return buildCompletionRequest(prompt, temperature, provider, null);
+        return buildCompletionRequest(prompt, temperature, provider, null, false);
     }
 
     /**
@@ -134,15 +136,36 @@ public class OpenAiRequestFactory {
         if (maximumOutputTokens <= 0) {
             throw new IllegalArgumentException("maximumOutputTokens must be positive");
         }
-        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens));
+        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens), false);
+    }
+
+    /**
+     * Builds completion request parameters that require a JSON object response.
+     *
+     * @param prompt completion prompt
+     * @param temperature response temperature
+     * @param provider provider chosen for this request attempt
+     * @param maximumOutputTokens maximum output tokens needed by this caller
+     * @return request payload with a declared JSON-object output contract
+     */
+    public ResponseCreateParams buildJsonCompletionRequest(
+            String prompt, double temperature, RateLimitService.ApiProvider provider, int maximumOutputTokens) {
+        if (maximumOutputTokens <= 0) {
+            throw new IllegalArgumentException("maximumOutputTokens must be positive");
+        }
+        return buildCompletionRequest(prompt, temperature, provider, Integer.valueOf(maximumOutputTokens), true);
     }
 
     private ResponseCreateParams buildCompletionRequest(
-            String prompt, double temperature, RateLimitService.ApiProvider provider, Integer maximumOutputTokens) {
+            String prompt,
+            double temperature,
+            RateLimitService.ApiProvider provider,
+            Integer maximumOutputTokens,
+            boolean requireJsonObject) {
         boolean useGitHubModels = provider == RateLimitService.ApiProvider.GITHUB_MODELS;
         String modelId = normalizedModelId(useGitHubModels);
         String truncatedPrompt = truncatePromptForCompletion(prompt, modelId, useGitHubModels);
-        return buildResponseParams(truncatedPrompt, temperature, modelId, maximumOutputTokens);
+        return buildResponseParams(truncatedPrompt, temperature, modelId, maximumOutputTokens, requireJsonObject);
     }
 
     private String truncatePromptForCompletion(String prompt, String modelId, boolean useGitHubModels) {
@@ -172,12 +195,27 @@ public class OpenAiRequestFactory {
 
     private ResponseCreateParams buildResponseParams(
             String prompt, double temperature, String normalizedModelId, Integer maximumOutputTokens) {
+        return buildResponseParams(prompt, temperature, normalizedModelId, maximumOutputTokens, false);
+    }
+
+    private ResponseCreateParams buildResponseParams(
+            String prompt,
+            double temperature,
+            String normalizedModelId,
+            Integer maximumOutputTokens,
+            boolean requireJsonObject) {
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel =
                 gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
 
         ResponseCreateParams.Builder builder =
                 ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
+
+        if (requireJsonObject) {
+            builder.text(ResponseTextConfig.builder()
+                    .format(ResponseFormatJsonObject.builder().build())
+                    .build());
+        }
 
         if (maximumOutputTokens != null) {
             builder.maxOutputTokens(maximumOutputTokens.longValue());

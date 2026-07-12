@@ -16,7 +16,7 @@ Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) and supports:
 - **GitHub Models** via `GITHUB_TOKEN`
 - **OpenAI** via `OPENAI_API_KEY`
 
-If both keys are present, the service prefers OpenAI for streaming. There is no automatic cross-provider fallback; if the preferred provider fails or is rate-limited, the error is surfaced to the client rather than silently switching providers.
+Provider order is controlled by `LLM_PRIMARY_PROVIDER` (default `github_models`). When both keys are present, eligible failures can fail over to the configured secondary provider before the first streamed token; failures that are not eligible for failover are surfaced to the client.
 
 Common variables:
 
@@ -25,10 +25,23 @@ Common variables:
 - `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (default `gpt-5.2`)
+- `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
 - `OPENAI_REASONING_EFFORT` (optional, GPT‑5 family)
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`)
 - `OPENAI_STREAMING_READ_TIMEOUT_SECONDS` (default `75`)
+
+### Researchly shared gateway
+
+Configure chat through the shared gateway with:
+
+```dotenv
+LLM_PRIMARY_PROVIDER=openai
+OPENAI_API_KEY=lgw-...
+OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
+OPENAI_MODEL=gemma-4-26b-a4b
+```
+
+`gemma-4-26b-a4b` is the gateway's regular Gemma alias and may fail over across the providers configured for it. Gateway-side routing is separate from Java Chat's `LLM_PRIMARY_PROVIDER` ordering. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
 
 ### Provider notes
 

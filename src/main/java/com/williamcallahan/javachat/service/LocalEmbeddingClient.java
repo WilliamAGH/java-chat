@@ -79,6 +79,11 @@ public final class LocalEmbeddingClient implements EmbeddingClient {
         fetchValidatedEmbeddings(List.of(EMBEDDING_WARM_UP_PROBE_TEXT));
     }
 
+    @Override
+    public String modelName() {
+        return modelName;
+    }
+
     private List<float[]> fetchValidatedEmbeddings(List<String> texts) {
         try {
             return callEmbeddingApi(texts);
