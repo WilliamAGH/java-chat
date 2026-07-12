@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -12,7 +11,6 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.williamcallahan.javachat.domain.errors.ApiErrorResponse;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -23,22 +21,23 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.ui.ExtendedModelMap;
 
 /** Verifies error diagnostics retain request attribution without exposing query data. */
 @WebMvcTest(controllers = CustomErrorController.class)
-@Import(com.williamcallahan.javachat.config.AppProperties.class)
+@Import({com.williamcallahan.javachat.config.AppProperties.class, ExceptionResponseBuilder.class})
 @WithMockUser
 class CustomErrorControllerTest {
 
     @Autowired
     MockMvc mvc;
 
-    @MockitoBean
-    ExceptionResponseBuilder exceptionBuilder;
+    @Autowired
+    CustomErrorController controller;
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(CustomErrorController.class);
     private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
@@ -74,9 +73,6 @@ class CustomErrorControllerTest {
 
     @Test
     void logs_unknown_api_path_at_warn() throws Exception {
-        when(exceptionBuilder.buildErrorResponse(HttpStatus.NOT_FOUND, "Missing"))
-                .thenReturn(ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiErrorResponse.error("Missing")));
-
         mvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/api/unknown")
                         .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet"))
                 .andExpect(status().isNotFound());
@@ -99,6 +95,54 @@ class CustomErrorControllerTest {
         ILoggingEvent event = onlyLogEvent();
         assertEquals(Level.ERROR, event.getLevel());
         assertEquals(failure.getClass().getName(), event.getThrowableProxy().getClassName());
+    }
+
+    @Test
+    void logs_server_error_without_exception_at_error() throws Exception {
+        mvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/chat"))
+                .andExpect(status().isInternalServerError());
+
+        ILoggingEvent event = onlyLogEvent();
+        assertEquals(Level.ERROR, event.getLevel());
+        assertNull(event.getThrowableProxy());
+    }
+
+    @Test
+    void returns_the_same_non_empty_servlet_request_id_that_it_logs() {
+        String expectedRequestId = "servlet-request-123";
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest() {
+            @Override
+            public String getRequestId() {
+                return expectedRequestId;
+            }
+        };
+        servletRequest.setMethod("PATCH");
+        servletRequest.setServerName("localhost");
+        servletRequest.addHeader("User-Agent", "browser");
+        servletRequest.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, HttpStatus.NOT_FOUND.value());
+        servletRequest.setAttribute(RequestDispatcher.ERROR_MESSAGE, "Missing");
+        servletRequest.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, "/api/unknown");
+        servletRequest.setAttribute(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet");
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+
+        controller.handleError(servletRequest, servletResponse, new ExtendedModelMap());
+
+        assertEquals(expectedRequestId, servletResponse.getHeader("X-Request-ID"));
+        String message = onlyLogEvent().getFormattedMessage();
+        assertTrue(message.contains("method=PATCH uri=/api/unknown"));
+        assertTrue(message.contains("requestId=" + expectedRequestId));
+    }
+
+    @Test
+    void bounds_long_fields_and_marks_missing_fields_unknown() throws Exception {
+        String longUserAgent = "a".repeat(600);
+        mvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/api/unknown").header("User-Agent", longUserAgent))
+                .andExpect(status().isNotFound());
+
+        String message = onlyLogEvent().getFormattedMessage();
+        assertTrue(message.contains("source=unknown"));
+        assertTrue(message.contains("userAgent=" + "a".repeat(512) + " requestId="));
+        assertFalse(message.contains("a".repeat(513)));
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder errorRequest(
