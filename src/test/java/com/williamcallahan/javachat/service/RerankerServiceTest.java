@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,25 +38,28 @@ class RerankerServiceTest {
     }
 
     @Test
-    void rerankUsesBoundedCompletionBudget() {
+    void rerankUsesConfiguredCompletionBudgetAndTimeout() {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         when(streamingService.isAvailable()).thenReturn(true);
-        when(streamingService.completeJsonObject(anyString(), eq(0.0), anyInt()))
+        Duration rerankerTimeout = Duration.ofSeconds(45);
+        when(streamingService.completeJsonObject(anyString(), eq(0.0), anyInt(), eq(rerankerTimeout)))
                 .thenReturn(Mono.just("{\"order\":[1,0]}"));
 
-        RerankerService rerankerService =
-                new RerankerService(streamingService, new ObjectMapper(), new AppProperties());
+        AppProperties appProperties = new AppProperties();
+        appProperties.getRag().setRerankerTimeout(rerankerTimeout);
+        RerankerService rerankerService = new RerankerService(streamingService, new ObjectMapper(), appProperties);
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
         List<Document> rankedDocuments = rerankerService.rerank("query", sourceDocuments, 2);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Integer> outputBudgetCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(streamingService).completeJsonObject(promptCaptor.capture(), eq(0.0), outputBudgetCaptor.capture());
+        verify(streamingService)
+                .completeJsonObject(promptCaptor.capture(), eq(0.0), outputBudgetCaptor.capture(), eq(rerankerTimeout));
         verify(streamingService, never()).complete(anyString(), eq(0.0));
         assertTrue(promptCaptor.getValue().contains("Valid indices are 0 through 1."));
         assertTrue(promptCaptor.getValue().contains("Include each valid index exactly once"));
-        assertEquals(512, outputBudgetCaptor.getValue());
+        assertEquals(4_000, outputBudgetCaptor.getValue());
         assertEquals(sourceDocuments.get(1), rankedDocuments.get(0));
     }
 }
