@@ -87,9 +87,9 @@ public class SseSupport {
                         BufferOverflowStrategy.DROP_OLDEST)
                 // Two subscribers consume this stream in controllers:
                 // 1) text event emission, 2) heartbeat termination signal.
-                // autoConnect(2) prevents a race where one subscriber could miss the first chunks.
+                // refCount(2) preserves their rendezvous and disconnects upstream when both cancel.
                 .publish()
-                .autoConnect(2);
+                .refCount(2);
     }
 
     /**
