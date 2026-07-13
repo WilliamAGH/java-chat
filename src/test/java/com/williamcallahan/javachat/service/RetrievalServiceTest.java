@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -56,6 +57,9 @@ class RetrievalServiceTest {
         AppProperties appProperties = new AppProperties();
         RetrievalService retrievalService =
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+        String javaApiBaseUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl();
+        String stringJavadocUrl = javaApiBaseUrl + "java.base/java/lang/String.html";
 
         Document urlOnlyDocument = Document.builder()
                 .id("url-only")
@@ -70,19 +74,19 @@ class RetrievalServiceTest {
         Document firstJavadocChunk = Document.builder()
                 .id("first-javadoc-chunk")
                 .text("First Javadoc chunk")
-                .metadata("url", "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html")
+                .metadata("url", stringJavadocUrl)
                 .metadata("hash", "first-content-hash")
                 .build();
         Document secondJavadocChunkWithDistinctHash = Document.builder()
                 .id("second-javadoc-chunk")
                 .text("Second Javadoc chunk")
-                .metadata("url", "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html#assert(...)")
+                .metadata("url", stringJavadocUrl + "#assert(...)")
                 .metadata("hash", "second-content-hash")
                 .build();
         Document sameContentHashWithDifferentUrl = Document.builder()
                 .id("same-content-hash")
                 .text("Duplicate content under another URL")
-                .metadata("url", "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html")
+                .metadata("url", javaApiBaseUrl + "java.base/java/lang/Object.html")
                 .metadata("hash", "first-content-hash")
                 .build();
         List<Document> retrievalCandidates = List.of(
@@ -105,9 +109,7 @@ class RetrievalServiceTest {
                 List.of(urlOnlyDocument, firstJavadocChunk, secondJavadocChunkWithDistinctHash),
                 retrievalOutcome.documents());
         assertEquals(2, citationOutcome.citations().size());
-        assertEquals(
-                "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html",
-                citationOutcome.citations().get(1).getUrl());
+        assertEquals(stringJavadocUrl, citationOutcome.citations().get(1).getUrl());
         assertEquals("First Javadoc chunk", citationOutcome.citations().get(1).getSnippet());
         assertEquals(0, citationOutcome.failedConversionCount());
     }
