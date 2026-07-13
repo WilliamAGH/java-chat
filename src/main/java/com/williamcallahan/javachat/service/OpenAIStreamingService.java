@@ -316,7 +316,10 @@ public class OpenAIStreamingService {
      * @return true when fallback conditions indicate transient failure
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
-        return providerRoutingService.isRecoverableStreamingFailure(throwable);
+        Throwable upstreamFailure = OpenAiStreamingFailureException.findInCauseChain(throwable)
+                .map(OpenAiStreamingFailureException::getCause)
+                .orElse(throwable);
+        return providerRoutingService.isRecoverableStreamingFailure(upstreamFailure);
     }
 
     private Flux<String> executeStreamingWithPreTextRetry(
@@ -341,7 +344,8 @@ public class OpenAIStreamingService {
                     if (!attemptContext.hasNextAttempt()
                             || emittedTextChunk.get()
                             || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
-                        return Flux.error(streamingFailure);
+                        return Flux.error(OpenAiStreamingFailureException.terminalAndLog(
+                                streamingFailure, preparedStreamingRequest, attemptContext, emittedTextChunk.get()));
                     }
 
                     StreamingAttemptContext nextAttempt = attemptContext.withNextAttempt();

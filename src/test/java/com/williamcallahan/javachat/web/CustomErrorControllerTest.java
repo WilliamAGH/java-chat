@@ -3,9 +3,9 @@ package com.williamcallahan.javachat.web;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +18,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.ConsoleAppender;
 import ch.qos.logback.core.read.ListAppender;
+import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -80,13 +81,14 @@ class CustomErrorControllerTest {
 
         ILoggingEvent requestFailureLog = onlyLogEvent();
         assertEquals(Level.INFO, requestFailureLog.getLevel());
-        String diagnostic = requestFailureLog.getFormattedMessage();
-        assertTrue(diagnostic.contains("status=404 source=default??Servlet method=GET"));
-        assertTrue(diagnostic.contains("uri=/missing.js host=spoofed-host"));
-        assertTrue(diagnostic.contains("userAgent=spoofed-browser requestId="));
-        assertFalse(diagnostic.contains("secret"));
-        List<?> structuredLogFields = requestFailureLog.getKeyValuePairs();
-        assertTrue(structuredLogFields == null || structuredLogFields.isEmpty());
+        assertEquals("Request failed", requestFailureLog.getFormattedMessage());
+        assertEquals(HttpStatus.NOT_FOUND.value(), structuredLogField(requestFailureLog, "status"));
+        assertEquals("default??Servlet", structuredLogField(requestFailureLog, "source"));
+        assertEquals("GET", structuredLogField(requestFailureLog, "method"));
+        assertEquals("/missing.js", structuredLogField(requestFailureLog, "uri"));
+        assertEquals("spoofed-host", structuredLogField(requestFailureLog, "host"));
+        assertEquals("spoofed-browser", structuredLogField(requestFailureLog, "userAgent"));
+        assertEquals("", structuredLogField(requestFailureLog, "requestId"));
         assertNull(requestFailureLog.getThrowableProxy());
     }
 
@@ -98,26 +100,26 @@ class CustomErrorControllerTest {
 
         ILoggingEvent requestFailureLog = onlyLogEvent();
         assertEquals(Level.WARN, requestFailureLog.getLevel());
-        assertTrue(requestFailureLog
-                .getFormattedMessage()
-                .contains("status=404 source=dispatcherServlet method=GET uri=/api/unknown"));
+        assertEquals(HttpStatus.NOT_FOUND.value(), structuredLogField(requestFailureLog, "status"));
+        assertEquals("dispatcherServlet", structuredLogField(requestFailureLog, "source"));
+        assertEquals("GET", structuredLogField(requestFailureLog, "method"));
+        assertEquals("/api/unknown", structuredLogField(requestFailureLog, "uri"));
     }
 
     @Test
-    void renders_unquoted_request_failure_fields_in_console_output() throws Exception {
+    void renders_quoted_request_failure_fields_in_console_output() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/api/unknown")
                         .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet"))
                 .andExpect(status().isNotFound());
 
         String renderedRequestFailure = consolePatternEncoder().getLayout().doLayout(onlyLogEvent());
 
-        assertTrue(renderedRequestFailure.contains("Request failed status=" + HttpStatus.NOT_FOUND.value()));
-        assertTrue(renderedRequestFailure.contains("source=dispatcherServlet"));
-        assertTrue(renderedRequestFailure.contains("method=GET"));
-        assertTrue(renderedRequestFailure.contains("uri=/api/unknown"));
-        assertTrue(renderedRequestFailure.contains("host=localhost"));
-        assertTrue(renderedRequestFailure.contains("userAgent=unknown"));
-        assertFalse(renderedRequestFailure.contains("status=\""));
+        assertTrue(renderedRequestFailure.contains("Request failed status=\"" + HttpStatus.NOT_FOUND.value() + "\""));
+        assertTrue(renderedRequestFailure.contains("source=\"dispatcherServlet\""));
+        assertTrue(renderedRequestFailure.contains("method=\"GET\""));
+        assertTrue(renderedRequestFailure.contains("uri=\"/api/unknown\""));
+        assertTrue(renderedRequestFailure.contains("host=\"localhost\""));
+        assertTrue(renderedRequestFailure.contains("userAgent=\"unknown\""));
     }
 
     @Test
@@ -160,6 +162,21 @@ class CustomErrorControllerTest {
     }
 
     @Test
+    void logsAlreadyReportedTerminalStreamingFailureAtWarnWithoutException() throws Exception {
+        OpenAiStreamingFailureException terminalFailure = mock(OpenAiStreamingFailureException.class);
+        IllegalStateException dispatchFailure = new IllegalStateException("dispatch failed", terminalFailure);
+
+        mockMvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/api/chat")
+                        .requestAttr(RequestDispatcher.ERROR_EXCEPTION, dispatchFailure)
+                        .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet"))
+                .andExpect(status().isInternalServerError());
+
+        ILoggingEvent requestFailureLog = onlyLogEvent();
+        assertEquals(Level.WARN, requestFailureLog.getLevel());
+        assertNull(requestFailureLog.getThrowableProxy());
+    }
+
+    @Test
     void logs_server_error_without_exception_at_error() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/chat"))
                 .andExpect(status().isInternalServerError());
@@ -188,9 +205,10 @@ class CustomErrorControllerTest {
         errorController.handleError(servletRequest, servletResponse, new ExtendedModelMap());
 
         assertEquals(expectedRequestId, servletResponse.getHeader("X-Request-ID"));
-        String diagnostic = onlyLogEvent().getFormattedMessage();
-        assertTrue(diagnostic.contains("method=PATCH uri=/api/unknown"));
-        assertTrue(diagnostic.contains("requestId=" + expectedRequestId));
+        ILoggingEvent requestFailureLog = onlyLogEvent();
+        assertEquals("PATCH", structuredLogField(requestFailureLog, "method"));
+        assertEquals("/api/unknown", structuredLogField(requestFailureLog, "uri"));
+        assertEquals(expectedRequestId, structuredLogField(requestFailureLog, "requestId"));
     }
 
     @Test
@@ -199,10 +217,9 @@ class CustomErrorControllerTest {
                 LONG_REQUEST_URI_PREFIX + LONG_REQUEST_URI_CHARACTER.repeat(LONG_REQUEST_URI_CHARACTER_COUNT);
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, longRequestUri)).andExpect(status().isNotFound());
 
-        String diagnostic = onlyLogEvent().getFormattedMessage();
-        assertTrue(diagnostic.contains("source=unknown"));
-        assertTrue(diagnostic.contains("uri=" + longRequestUri.substring(0, 512)));
-        assertFalse(diagnostic.contains(longRequestUri.substring(0, 513)));
+        ILoggingEvent requestFailureLog = onlyLogEvent();
+        assertEquals("unknown", structuredLogField(requestFailureLog, "source"));
+        assertEquals(longRequestUri.substring(0, 512), structuredLogField(requestFailureLog, "uri"));
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder errorRequest(
@@ -217,6 +234,14 @@ class CustomErrorControllerTest {
         List<ILoggingEvent> capturedLogs = logAppender.list;
         assertEquals(1, capturedLogs.size());
         return capturedLogs.getFirst();
+    }
+
+    private Object structuredLogField(ILoggingEvent requestFailureLog, String fieldName) {
+        return requestFailureLog.getKeyValuePairs().stream()
+                .filter(structuredField -> structuredField.key.equals(fieldName))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing structured log field: " + fieldName))
+                .value;
     }
 
     private PatternLayoutEncoder consolePatternEncoder() {

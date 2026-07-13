@@ -2,9 +2,15 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -12,20 +18,29 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.openai.client.OpenAIClient;
+import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
+import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
+import com.openai.models.ErrorObject;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.services.blocking.ResponseService;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.Exceptions;
+import reactor.core.publisher.Sinks;
+import reactor.test.StepVerifier;
 
 /**
  * Verifies primary-provider backoff and streaming failure classification.
@@ -156,6 +171,81 @@ class OpenAIStreamingServiceTest {
         NotFoundException notFoundException =
                 NotFoundException.builder().headers(headers).build();
         assertTrue(streamingService.isRecoverableStreamingFailure(notFoundException));
+    }
+
+    @Test
+    void recoverableStreamingFailureUnwrapsNestedTerminalContext() {
+        OpenAIStreamingService streamingService = createStreamingService();
+        NotFoundException notFoundException =
+                NotFoundException.builder().headers(Headers.builder().build()).build();
+        ResponseCreateParams responseParameters =
+                ResponseCreateParams.builder().input("test").model("gpt-5.2").build();
+        OpenAiPreparedRequest preparedRequest = new OpenAiPreparedRequest(responseParameters, "gpt-5.2");
+        OpenAiProviderCandidate providerCandidate =
+                new OpenAiProviderCandidate(mock(OpenAIClient.class), RateLimitService.ApiProvider.OPENAI);
+        StreamingAttemptContext attemptContext = StreamingAttemptContext.first(
+                List.of(providerCandidate), Sinks.many().multicast().onBackpressureBuffer());
+        OpenAiStreamingFailureException terminalFailure = OpenAiStreamingFailureException.terminalAndLog(
+                notFoundException, preparedRequest, attemptContext, false);
+
+        assertTrue(streamingService.isRecoverableStreamingFailure(
+                new IllegalStateException("reactor boundary", terminalFailure)));
+    }
+
+    @Test
+    void subscribedTerminalStreamFailureLogsOneBoundedAlert() {
+        String upstreamSecretBody = "OPENAI_API_KEY=secret-body";
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+        OpenAIStreamingService streamingService =
+                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService responseService = mock(ResponseService.class);
+        ErrorObject upstreamError = ErrorObject.builder()
+                .message(upstreamSecretBody)
+                .code("queue_upstream_timeout")
+                .param(Optional.empty())
+                .type("upstream_timeout")
+                .build();
+        InternalServerException upstreamFailure = InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .error(upstreamError)
+                .build();
+        when(githubModelsClient.responses()).thenReturn(responseService);
+        when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(upstreamFailure);
+        ReflectionTestUtils.setField(streamingService, "clientPrimary", githubModelsClient);
+
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectErrorSatisfies(failure -> {
+                    OpenAiStreamingFailureException terminalFailure =
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
+                    assertSame(upstreamFailure, terminalFailure.getCause());
+                    assertEquals(2, terminalFailure.currentAttempt());
+                    assertTrue(terminalFailure.beforeFirstChunk());
+                })
+                .verify();
+
+        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        List<ILoggingEvent> terminalAlerts = serviceLogEvents.list.stream()
+                .filter(loggingEvent -> loggingEvent.getLevel() == Level.ERROR)
+                .filter(loggingEvent -> loggingEvent.getKeyValuePairs().stream()
+                        .anyMatch(
+                                logField -> "event".equals(logField.key) && "llm_stream_failed".equals(logField.value)))
+                .toList();
+        assertEquals(1, terminalAlerts.size());
+        ILoggingEvent terminalAlert = terminalAlerts.getFirst();
+        assertNull(terminalAlert.getThrowableProxy());
+        assertFalse(terminalAlert.getFormattedMessage().contains(upstreamSecretBody));
+        assertFalse(terminalAlert.toString().contains(upstreamSecretBody));
     }
 
     @Test
