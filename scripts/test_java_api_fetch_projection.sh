@@ -193,4 +193,22 @@ if [ "$(cat "$oracle_validation_capture_file")" != "true" ]; then
     fail_java_api_fetch_projection_test "Oracle Javadoc validation dropped the partial-mirror policy"
 fi
 
+run_summary_capture_file="$TEST_DOCS_ROOT/run-summary"
+LOG_FILE="$TEST_DOCS_ROOT/full-run.log"
+fetch_documentation_source() {
+    return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
+}
+write_documentation_fetch_metadata() {
+    printf '%s|%s|%s\n' "$TOTAL_FETCHED" "$TOTAL_PARTIAL" "$TOTAL_FAILED" > "$run_summary_capture_file"
+}
+
+if (run_documentation_fetch > /dev/null 2>&1); then
+    fail_java_api_fetch_projection_test "a full fetch run reported success while every source remained partial"
+fi
+
+IFS='|' read -r aggregated_fetched_count aggregated_partial_count aggregated_failed_count < "$run_summary_capture_file"
+if [ "$aggregated_fetched_count" -ne 0 ] || [ "$aggregated_partial_count" -le 0 ] || [ "$aggregated_failed_count" -ne 0 ]; then
+    fail_java_api_fetch_projection_test "a full fetch run did not aggregate retained partial mirrors separately from failures"
+fi
+
 printf 'PASS: Java API fetch projections preserve partial mirrors without reporting completion.\n'
