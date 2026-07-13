@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamSse } from "./sse";
+import { streamSse, streamSseGet } from "./sse";
 
 const SSE_STREAM_RESPONSE_STATUS = 200;
+const HTTP_SERVICE_UNAVAILABLE_STATUS = 503;
 const FETCH_FAILURE_MESSAGE = "Network request failed";
 const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
+const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
+const STATUS_EVENT_MESSAGE = "Switching to an available provider";
+const STATUS_EVENT_PROVIDER = "openai";
+const MISSING_STREAM_BODY_MESSAGE = "No response body";
 
 function createSseStreamResponse(sseWireText: string): Response {
   const encoder = new TextEncoder();
@@ -61,6 +66,95 @@ describe("streamSse transport handling", () => {
     expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
+  });
+
+  it("reports and rejects a non-abort GET fetch failure exactly once", async () => {
+    const fetchFailure = new Error(FETCH_FAILURE_MESSAGE);
+    const fetchMock = vi.fn().mockRejectedValue(fetchFailure);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts")).rejects.toBe(
+      fetchFailure,
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({ message: FETCH_FAILURE_MESSAGE });
+  });
+
+  it("reports a non-OK GET response exactly once", async () => {
+    const serviceUnavailableMessage = `HTTP ${HTTP_SERVICE_UNAVAILABLE_STATUS}: Service Unavailable`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: HTTP_SERVICE_UNAVAILABLE_STATUS,
+          statusText: "Service Unavailable",
+        }),
+      ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toThrow(serviceUnavailableMessage);
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({ message: serviceUnavailableMessage });
+  });
+
+  it("reports a missing GET response body exactly once", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: SSE_STREAM_RESPONSE_STATUS,
+          statusText: "OK",
+        }),
+      ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toThrow(MISSING_STREAM_BODY_MESSAGE);
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({ message: MISSING_STREAM_BODY_MESSAGE });
+  });
+
+  it("reports a valid server error event exactly once", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          createSseStreamResponse(
+            `event: error\ndata: {"message":"${SERVER_EVENT_ERROR_MESSAGE}"}\n\n`,
+          ),
+        ),
+    );
+
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSseGet("/api/test/stream", { onText, onError }, "sse.test.ts"),
+    ).rejects.toThrow(SERVER_EVENT_ERROR_MESSAGE);
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith({ message: SERVER_EVENT_ERROR_MESSAGE });
   });
 
   it("treats AbortError during read as a cancellation (no onError)", async () => {
@@ -139,6 +233,30 @@ describe("streamSse payload validation", () => {
 
     expect(onText).toHaveBeenCalledOnce();
     expect(onText).toHaveBeenCalledWith("Hello");
+  });
+
+  it("preserves provider from a valid wire-format status event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          createSseStreamResponse(
+            `event: status\ndata: {"message":"${STATUS_EVENT_MESSAGE}","provider":"${STATUS_EVENT_PROVIDER}"}\n\n`,
+          ),
+        ),
+    );
+    const onText = vi.fn();
+    const onStatus = vi.fn();
+
+    await streamSse("/api/test/stream", {}, { onText, onStatus }, "sse.test.ts");
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onStatus).toHaveBeenCalledOnce();
+    expect(onStatus).toHaveBeenCalledWith({
+      message: STATUS_EVENT_MESSAGE,
+      provider: STATUS_EVENT_PROVIDER,
+    });
   });
 
   it("rejects legacy raw text payloads", async () => {
