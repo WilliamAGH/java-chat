@@ -7,14 +7,10 @@ import reactor.core.publisher.Flux;
  *
  * @param textChunks the streaming response flux
  * @param provider the initially selected LLM provider for this request
- * @param providerChanges providers selected for a retry after a pre-text fallback
  * @param notices runtime streaming notices (for example, pre-first-token provider failover)
  */
 public record StreamingResult(
-        Flux<String> textChunks,
-        RateLimitService.ApiProvider provider,
-        Flux<RateLimitService.ApiProvider> providerChanges,
-        Flux<StreamingNotice> notices) {
+        Flux<String> textChunks, RateLimitService.ApiProvider provider, Flux<StreamingNotice> notices) {
     /** Returns a user-friendly display name for the provider. */
     public String providerDisplayName() {
         return provider.getName();

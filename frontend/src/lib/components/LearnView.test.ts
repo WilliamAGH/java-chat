@@ -53,6 +53,9 @@ describe("LearnView guided chat streaming stability", () => {
     const allLessonsButton = await findByRole("button", { name: "All Lessons" });
     expect(allLessonsButton).toHaveAttribute("aria-label", "All Lessons");
     expect(allLessonsButton).toHaveTextContent("All Lessons");
+
+    await fireEvent.click(allLessonsButton);
+    expect(await findByRole("button", { name: /test lesson/i })).toBeInTheDocument();
   });
 
   it("keeps the guided assistant message DOM node stable when the stream completes", async () => {

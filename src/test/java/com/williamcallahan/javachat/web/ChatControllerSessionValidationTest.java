@@ -40,7 +40,7 @@ class ChatControllerSessionValidationTest {
         assertEquals(SESSION_NOT_FOUND_MESSAGE, unknownSessionBody.message());
         assertFalse(chatMemoryService.hasSession(UNKNOWN_SESSION_ID));
 
-        chatMemoryService.addUser(RECOGNIZED_SESSION_ID, STORED_MESSAGE_TEXT);
+        chatMemoryService.addExchange(RECOGNIZED_SESSION_ID, STORED_MESSAGE_TEXT, "Stored assistant response");
         ResponseEntity<SessionValidationResponse> recognizedSessionEntity =
                 chatController.validateSession(RECOGNIZED_SESSION_ID);
         SessionValidationResponse recognizedSessionBody = recognizedSessionEntity.getBody();

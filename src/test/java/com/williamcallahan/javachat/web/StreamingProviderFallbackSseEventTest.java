@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_PROVIDER;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -9,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -29,6 +32,7 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingNotice;
 import com.williamcallahan.javachat.service.StreamingResult;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -39,6 +43,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /** Verifies both chat SSE endpoints publish the provider selected after a pre-text fallback. */
 @WebMvcTest(controllers = {ChatController.class, GuidedLearningController.class})
@@ -50,11 +55,14 @@ class StreamingProviderFallbackSseEventTest {
     private static final String LESSON_SLUG = "sealed-classes";
     private static final String USER_QUERY = "explain provider fallback";
     private static final String FALLBACK_RESPONSE_TEXT = "fallback provider response";
-    private static final String INITIAL_PROVIDER_NAME = "github_models";
-    private static final String FALLBACK_PROVIDER_NAME = "openai";
+    private static final String INITIAL_PROVIDER_NAME = RateLimitService.ApiProvider.GITHUB_MODELS.getName();
+    private static final String FALLBACK_PROVIDER_NAME = RateLimitService.ApiProvider.OPENAI.getName();
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    SseSupport sseSupport;
 
     @MockitoBean
     ChatService chatService;
@@ -78,7 +86,7 @@ class StreamingProviderFallbackSseEventTest {
     ExceptionResponseBuilder exceptionResponseBuilder;
 
     @Test
-    void chatStreamPublishesFallbackProviderAndNoticeBeforeFallbackText() throws Exception {
+    void chatStreamConsumesReplayableFallbackNoticeOnceAndPublishesProviderAndStatusBeforeText() throws Exception {
         given(chatMemoryService.getHistory(CHAT_SESSION_ID)).willReturn(List.of());
         given(chatService.buildStructuredPromptWithContextOutcome(
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
@@ -86,7 +94,8 @@ class StreamingProviderFallbackSseEventTest {
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         given(retrievalService.toCitations(anyList())).willReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         given(openAIStreamingService.isAvailable()).willReturn(true);
-        StreamingResult providerFallbackStreamingResult = providerFallbackStreamingResult();
+        AtomicInteger noticeSubscriptionCount = new AtomicInteger();
+        StreamingResult providerFallbackStreamingResult = providerFallbackStreamingResult(noticeSubscriptionCount);
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(providerFallbackStreamingResult));
 
@@ -94,17 +103,23 @@ class StreamingProviderFallbackSseEventTest {
                 "/api/chat/stream", "{\"sessionId\":\"" + CHAT_SESSION_ID + "\",\"message\":\"" + USER_QUERY + "\"}");
 
         assertFallbackProviderProtocol(serializedSseStream);
+        verify(chatMemoryService).addExchange(CHAT_SESSION_ID, USER_QUERY, FALLBACK_RESPONSE_TEXT);
+        assertEquals(
+                1,
+                noticeSubscriptionCount.get(),
+                "ChatController must delegate the replayed notice to one SseSupport subscription");
     }
 
     @Test
-    void guidedStreamPublishesFallbackProviderAndNoticeBeforeFallbackText() throws Exception {
+    void guidedStreamConsumesReplayableFallbackNoticeOnceAndPublishesProviderAndStatusBeforeText() throws Exception {
         given(chatMemoryService.getHistory(GUIDED_SESSION_ID)).willReturn(List.of());
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         given(guidedLearningService.citationsForBookDocuments(anyList())).willReturn(List.of());
         given(openAIStreamingService.isAvailable()).willReturn(true);
-        StreamingResult providerFallbackStreamingResult = providerFallbackStreamingResult();
+        AtomicInteger noticeSubscriptionCount = new AtomicInteger();
+        StreamingResult providerFallbackStreamingResult = providerFallbackStreamingResult(noticeSubscriptionCount);
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(providerFallbackStreamingResult));
 
@@ -114,9 +129,14 @@ class StreamingProviderFallbackSseEventTest {
                         + USER_QUERY + "\"}");
 
         assertFallbackProviderProtocol(serializedSseStream);
+        verify(chatMemoryService).addExchange(GUIDED_SESSION_ID, USER_QUERY, FALLBACK_RESPONSE_TEXT);
+        assertEquals(
+                1,
+                noticeSubscriptionCount.get(),
+                "GuidedLearningController must delegate the replayed notice to one SseSupport subscription");
     }
 
-    private StreamingResult providerFallbackStreamingResult() {
+    private StreamingResult providerFallbackStreamingResult(AtomicInteger noticeSubscriptionCount) {
         StreamingNotice fallbackNotice = mock(StreamingNotice.class);
         given(fallbackNotice.summary()).willReturn("Retrying stream with provider");
         given(fallbackNotice.diagnosticContext()).willReturn("Retrying before response text was emitted.");
@@ -127,11 +147,16 @@ class StreamingProviderFallbackSseEventTest {
         given(fallbackNotice.attempt()).willReturn(2);
         given(fallbackNotice.maxAttempts()).willReturn(2);
 
+        Sinks.Many<StreamingNotice> replayedNoticeSink = Sinks.many().replay().limit(1);
+        assertEquals(Sinks.EmitResult.OK, replayedNoticeSink.tryEmitNext(fallbackNotice));
+        assertEquals(Sinks.EmitResult.OK, replayedNoticeSink.tryEmitComplete());
+
+        Flux<StreamingNotice> replayedNoticeFlux = Flux.defer(() -> {
+            noticeSubscriptionCount.incrementAndGet();
+            return replayedNoticeSink.asFlux();
+        });
         return new StreamingResult(
-                Flux.just(FALLBACK_RESPONSE_TEXT),
-                RateLimitService.ApiProvider.GITHUB_MODELS,
-                Flux.just(RateLimitService.ApiProvider.OPENAI),
-                Flux.just(fallbackNotice));
+                Flux.just(FALLBACK_RESPONSE_TEXT), RateLimitService.ApiProvider.GITHUB_MODELS, replayedNoticeFlux);
     }
 
     private String serializeSseResponse(String endpoint, String requestJson) throws Exception {
@@ -149,7 +174,7 @@ class StreamingProviderFallbackSseEventTest {
                 .getContentAsString();
     }
 
-    private static void assertFallbackProviderProtocol(String serializedSseStream) {
+    private void assertFallbackProviderProtocol(String serializedSseStream) {
         int initialProviderEventPosition = providerEventPosition(serializedSseStream, INITIAL_PROVIDER_NAME);
         int fallbackProviderEventPosition = providerEventPosition(serializedSseStream, FALLBACK_PROVIDER_NAME);
         int fallbackNoticePosition =
@@ -168,6 +193,9 @@ class StreamingProviderFallbackSseEventTest {
                 initialProviderEventPosition < fallbackProviderEventPosition,
                 "Initial provider must precede fallback provider. Payload was:\n" + serializedSseStream);
         assertTrue(
+                fallbackProviderEventPosition < fallbackNoticePosition,
+                "Fallback provider must precede fallback status. Payload was:\n" + serializedSseStream);
+        assertTrue(
                 fallbackProviderEventPosition < fallbackTextPosition,
                 "Fallback provider must precede fallback text. Payload was:\n" + serializedSseStream);
         assertTrue(
@@ -175,13 +203,14 @@ class StreamingProviderFallbackSseEventTest {
                 "Fallback notice must precede fallback text. Payload was:\n" + serializedSseStream);
     }
 
-    private static int providerEventPosition(String serializedSseStream, String providerName) {
-        String compactProviderEvent = "event:provider\ndata:{\"provider\":\"" + providerName + "\"}";
+    private int providerEventPosition(String serializedSseStream, String providerName) {
+        String providerPayload = sseSupport.jsonSerialize(new SseSupport.ProviderPayload(providerName));
+        String compactProviderEvent = "event:" + EVENT_PROVIDER + "\ndata:" + providerPayload;
         int compactEventPosition = serializedSseStream.indexOf(compactProviderEvent);
         if (compactEventPosition >= 0) {
             return compactEventPosition;
         }
-        String spacedProviderEvent = "event: provider\ndata: {\"provider\":\"" + providerName + "\"}";
+        String spacedProviderEvent = "event: " + EVENT_PROVIDER + "\ndata: " + providerPayload;
         return serializedSseStream.indexOf(spacedProviderEvent);
     }
 }

@@ -28,29 +28,18 @@ class ChatMemoryServiceTest {
     }
 
     @Test
-    @DisplayName("Should store and retrieve user messages")
-    void shouldStoreAndRetrieveUserMessages() {
+    @DisplayName("Should store completed exchanges")
+    void shouldStoreCompletedExchanges() {
         String sessionId = "test-session";
-        chatMemoryService.addUser(sessionId, "What is Java?");
+        chatMemoryService.addExchange(sessionId, "What is Java?", "Java is a programming language.");
 
         List<Message> history = chatMemoryService.getHistory(sessionId);
 
-        assertEquals(1, history.size());
+        assertEquals(2, history.size());
         assertInstanceOf(UserMessage.class, history.get(0));
         assertEquals("What is Java?", ((UserMessage) history.get(0)).getText());
-    }
-
-    @Test
-    @DisplayName("Should store and retrieve assistant messages")
-    void shouldStoreAndRetrieveAssistantMessages() {
-        String sessionId = "test-session";
-        chatMemoryService.addAssistant(sessionId, "Java is a programming language.");
-
-        List<Message> history = chatMemoryService.getHistory(sessionId);
-
-        assertEquals(1, history.size());
-        assertInstanceOf(AssistantMessage.class, history.get(0));
-        assertEquals("Java is a programming language.", ((AssistantMessage) history.get(0)).getText());
+        assertInstanceOf(AssistantMessage.class, history.get(1));
+        assertEquals("Java is a programming language.", ((AssistantMessage) history.get(1)).getText());
     }
 
     @Test
@@ -58,10 +47,8 @@ class ChatMemoryServiceTest {
     void shouldMaintainConversationOrder() {
         String sessionId = "test-session";
 
-        chatMemoryService.addUser(sessionId, "What is Java?");
-        chatMemoryService.addAssistant(sessionId, "Java is a programming language.");
-        chatMemoryService.addUser(sessionId, "Give me an example.");
-        chatMemoryService.addAssistant(sessionId, "Here is a Hello World example...");
+        chatMemoryService.addExchange(sessionId, "What is Java?", "Java is a programming language.");
+        chatMemoryService.addExchange(sessionId, "Give me an example.", "Here is a Hello World example...");
 
         List<Message> history = chatMemoryService.getHistory(sessionId);
 
@@ -86,8 +73,7 @@ class ChatMemoryServiceTest {
     @DisplayName("Should clear session history")
     void shouldClearSessionHistory() {
         String sessionId = "test-session";
-        chatMemoryService.addUser(sessionId, "Test message");
-        chatMemoryService.addAssistant(sessionId, "Test response");
+        chatMemoryService.addExchange(sessionId, "Test message", "Test response");
 
         chatMemoryService.clear(sessionId);
 
@@ -99,14 +85,14 @@ class ChatMemoryServiceTest {
     @Test
     @DisplayName("Should isolate sessions from each other")
     void shouldIsolateSessions() {
-        chatMemoryService.addUser("session-1", "Message for session 1");
-        chatMemoryService.addUser("session-2", "Message for session 2");
+        chatMemoryService.addExchange("session-1", "Message for session 1", "Response for session 1");
+        chatMemoryService.addExchange("session-2", "Message for session 2", "Response for session 2");
 
         List<Message> history1 = chatMemoryService.getHistory("session-1");
         List<Message> history2 = chatMemoryService.getHistory("session-2");
 
-        assertEquals(1, history1.size());
-        assertEquals(1, history2.size());
+        assertEquals(2, history1.size());
+        assertEquals(2, history2.size());
         assertEquals("Message for session 1", ((UserMessage) history1.get(0)).getText());
         assertEquals("Message for session 2", ((UserMessage) history2.get(0)).getText());
     }
@@ -115,23 +101,22 @@ class ChatMemoryServiceTest {
     @DisplayName("Should return snapshot that is safe to iterate")
     void shouldReturnSnapshotSafeToIterate() {
         String sessionId = "test-session";
-        chatMemoryService.addUser(sessionId, "First message");
+        chatMemoryService.addExchange(sessionId, "First message", "First response");
 
         List<Message> history = chatMemoryService.getHistory(sessionId);
 
         // Modify the original session after getting history
-        chatMemoryService.addUser(sessionId, "Second message");
+        chatMemoryService.addExchange(sessionId, "Second message", "Second response");
 
         // The snapshot should not be affected
-        assertEquals(1, history.size());
+        assertEquals(2, history.size());
     }
 
     @Test
     @DisplayName("Should track turns alongside messages")
     void shouldTrackTurnsAlongsideMessages() {
         String sessionId = "test-session";
-        chatMemoryService.addUser(sessionId, "User question");
-        chatMemoryService.addAssistant(sessionId, "Assistant answer");
+        chatMemoryService.addExchange(sessionId, "User question", "Assistant answer");
 
         var turns = chatMemoryService.getTurns(sessionId);
 
@@ -156,7 +141,7 @@ class ChatMemoryServiceTest {
             workerPool.execute(() -> {
                 try {
                     startSignal.await();
-                    chatMemoryService.addUser(sessionId, "message-" + messageIndex);
+                    chatMemoryService.addExchange(sessionId, "message-" + messageIndex, "response-" + messageIndex);
                 } catch (InterruptedException interruption) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -172,10 +157,10 @@ class ChatMemoryServiceTest {
 
         List<Message> history = chatMemoryService.getHistory(sessionId);
         var turns = chatMemoryService.getTurns(sessionId);
-        assertEquals(workerCount, history.size());
-        assertEquals(workerCount, turns.size());
-        for (int messageIndex = 0; messageIndex < workerCount; messageIndex++) {
-            String historyText = ((UserMessage) history.get(messageIndex)).getText();
+        assertEquals(workerCount * 2, history.size());
+        assertEquals(workerCount * 2, turns.size());
+        for (int messageIndex = 0; messageIndex < workerCount * 2; messageIndex++) {
+            String historyText = history.get(messageIndex).getText();
             String turnText = turns.get(messageIndex).getText();
             assertEquals(historyText, turnText);
         }

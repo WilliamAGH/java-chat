@@ -75,9 +75,6 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
     private long streamingRequestTimeoutSeconds;
 
-    @Value("${OPENAI_STREAMING_READ_TIMEOUT_SECONDS:75}")
-    private long streamingReadTimeoutSeconds;
-
     /**
      * LLM-gateway priority class sent as the {@code X-Tier} header on live chat
      * turns. The gateway queue treats untagged requests as {@code default}
@@ -168,20 +165,12 @@ public class OpenAIStreamingService {
                     // Routing selects two candidates, so one pre-text fallback signal is sufficient.
                     Sinks.Many<StreamingNotice> noticeSink =
                             Sinks.many().replay().limit(1);
-                    Sinks.One<RateLimitService.ApiProvider> providerChangeSink = Sinks.one();
                     StreamingAttemptContext attemptContext =
-                            StreamingAttemptContext.first(availableProviders, noticeSink, providerChangeSink);
+                            StreamingAttemptContext.first(availableProviders, noticeSink);
                     Flux<String> contentFlux = executeStreamingWithPreTextRetry(
                                     structuredPrompt, temperature, attemptContext)
-                            .doFinally(ignoredSignalType -> {
-                                noticeSink.tryEmitComplete();
-                                providerChangeSink.tryEmitEmpty();
-                            });
-                    return Mono.just(new StreamingResult(
-                            contentFlux,
-                            initialProvider.provider(),
-                            providerChangeSink.asMono().flux(),
-                            noticeSink.asFlux()));
+                            .doFinally(ignoredSignalType -> noticeSink.tryEmitComplete());
+                    return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -379,7 +368,6 @@ public class OpenAIStreamingService {
                             nextAttempt.maxAttempts(),
                             streamingFailure.getClass().getSimpleName());
 
-                    emitProviderChange(attemptContext.providerChangeSink(), retryProvider.provider());
                     emitStreamingNotice(
                             attemptContext.noticeSink(),
                             StreamingNotice.builder(
@@ -419,7 +407,6 @@ public class OpenAIStreamingService {
     private Timeout streamingTimeout() {
         return Timeout.builder()
                 .request(Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
-                .read(Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
                 .build();
     }
 
@@ -493,17 +480,6 @@ public class OpenAIStreamingService {
         Sinks.EmitResult emitResult = noticeSink.tryEmitNext(streamingNotice);
         if (emitResult.isFailure()) {
             log.debug("Failed to emit streaming notice (emitResult={})", emitResult);
-        }
-    }
-
-    private void emitProviderChange(
-            Sinks.One<RateLimitService.ApiProvider> providerChangeSink, RateLimitService.ApiProvider fallbackProvider) {
-        Sinks.EmitResult emitResult = providerChangeSink.tryEmitValue(fallbackProvider);
-        if (emitResult.isFailure()) {
-            log.debug(
-                    "Failed to emit fallback provider change (providerId={}, emitResult={})",
-                    fallbackProvider.ordinal(),
-                    emitResult);
         }
     }
 }

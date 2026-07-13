@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.service.HtmlContentExtractor;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
@@ -19,6 +20,8 @@ import org.jsoup.nodes.Document;
  */
 public class StandaloneExtractionTest {
 
+    private record ExtractionSource(String relativePath, String displayName) {}
+
     /**
      * Runs the extraction comparison against sampled documentation files.
      *
@@ -29,13 +32,14 @@ public class StandaloneExtractionTest {
         HtmlContentExtractor extractor = new HtmlContentExtractor();
         String docsRoot = "data/docs";
 
-        // Test sources
-        String[][] sources = {
-            {"java/java24-complete", "Java 24"},
-            {"java/java25-complete", "Java 25"},
-            {"spring-boot-complete", "Spring Boot"},
-            {"spring-framework-complete", "Spring Framework"}
-        };
+        List<ExtractionSource> extractionSources =
+                new ArrayList<>(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                        .map(javaApiDocumentationSource -> new ExtractionSource(
+                                javaApiDocumentationSource.relativeMirrorPath(),
+                                javaApiDocumentationSource.displayName()))
+                        .toList());
+        extractionSources.add(new ExtractionSource("spring-boot-complete", "Spring Boot"));
+        extractionSources.add(new ExtractionSource("spring-framework-complete", "Spring Framework"));
 
         System.out.println("\n========================================");
         System.out.println("HTML EXTRACTION QUALITY CONTROL TEST");
@@ -45,17 +49,16 @@ public class StandaloneExtractionTest {
         int grandTotalNewNoise = 0;
         List<String> problematicFiles = new ArrayList<>();
 
-        for (String[] source : sources) {
-            String dir = source[0];
-            String name = source[1];
-            Path sourcePath = Paths.get(docsRoot, dir);
+        for (ExtractionSource extractionSource : extractionSources) {
+            String sourceDisplayName = extractionSource.displayName();
+            Path sourcePath = Paths.get(docsRoot, extractionSource.relativePath());
 
             if (!Files.exists(sourcePath)) {
-                System.out.println("⚠ Skipping " + name + " (not found)");
+                System.out.println("⚠ Skipping " + sourceDisplayName + " (not found)");
                 continue;
             }
 
-            System.out.println("\n=== Testing " + name + " ===");
+            System.out.println("\n=== Testing " + sourceDisplayName + " ===");
 
             // Get sample files
             List<Path> htmlFiles;
@@ -157,7 +160,7 @@ public class StandaloneExtractionTest {
             }
 
             // Summary for this source
-            System.out.println("Summary for " + name + ":");
+            System.out.println("Summary for " + sourceDisplayName + ":");
             System.out.println("  Total noise patterns: " + totalOldNoise + " → " + totalNewNoise + " ("
                     + (totalOldNoise - totalNewNoise) + " removed)");
 

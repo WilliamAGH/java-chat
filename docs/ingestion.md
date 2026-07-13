@@ -23,11 +23,9 @@ Fetch all configured sources:
 make fetch-all
 ```
 
-This runs `scripts/fetch_all_docs.sh` (requires `wget`). Source URLs live in:
-
-- `src/main/resources/docs-sources.properties`
-
-See [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors) for flags (`--force`, `--include-quick`, `--no-clean`).
+This runs `scripts/fetch_all_docs.sh` (requires `wget`). See the canonical source ownership and edit
+workflow in [pipeline-commands.md](pipeline-commands.md#scrape-fetch-html-mirrors), along with flags
+(`--force`, `--include-quick`, `--no-clean`).
 
 ## Process + upload to Qdrant
 
@@ -46,14 +44,14 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 
 ### Doc set filtering (CLI)
 
-Limit ingestion to specific doc sets:
+List canonical complete Java API paths, then limit ingestion to a selected doc set:
 
 ```bash
-DOCS_SETS=java25-complete make process-doc-sets
-./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete,spring-boot-complete
+./scripts/fetch_all_docs.sh --list-java-api-sources
+DOCS_SETS=relative/path/from/listing make process-doc-sets
 ```
 
-See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for the full doc set ID table.
+See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for filtering and the canonical Java API listing command.
 
 ## Hybrid vector storage
 

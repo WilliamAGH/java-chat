@@ -14,8 +14,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
@@ -126,9 +128,7 @@ public class GuidedLearningService {
                     List<Document> retrievedDocuments = retrievalService.retrieve(query);
                     List<Document> bookDocuments = filterToBook(retrievedDocuments);
                     if (bookDocuments.isEmpty()) return List.<Citation>of();
-                    List<Citation> baseCitations =
-                            retrievalService.toCitations(bookDocuments).citations();
-                    return pdfCitationEnhancer.enhanceWithPageAnchors(bookDocuments, baseCitations);
+                    return buildPageAnchoredCitations(bookDocuments);
                 })
                 .orElse(List.of());
     }
@@ -199,15 +199,67 @@ public class GuidedLearningService {
         if (bookContextDocuments == null || bookContextDocuments.isEmpty()) {
             return List.of();
         }
-        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(bookContextDocuments);
-        if (citationOutcome.failedConversionCount() > 0) {
+        return buildPageAnchoredCitations(bookContextDocuments);
+    }
+
+    /**
+     * Builds page-anchored citations without collapsing distinct source chunks before anchoring.
+     *
+     * <p>Each document is converted independently through the canonical citation converter, then only
+     * successfully converted documents are paired with their citation for page-anchor enhancement. This
+     * preserves the enhancer's one-to-one contract before presentation deduplication operates on final
+     * anchor-bearing URLs.</p>
+     *
+     * @param bookContextDocuments retrieved Think Java documents used to ground a response
+     * @return citations whose PDF URLs include their estimated page anchors
+     */
+    private List<Citation> buildPageAnchoredCitations(List<Document> bookContextDocuments) {
+        List<Document> citationDocuments = new ArrayList<>();
+        List<Citation> citationsBeforePageAnchoring = new ArrayList<>();
+        int failedCitationConversions = 0;
+
+        for (Document bookContextDocument : bookContextDocuments) {
+            if (bookContextDocument == null) {
+                continue;
+            }
+
+            RetrievalService.CitationOutcome singleDocumentCitationOutcome =
+                    retrievalService.toCitations(List.of(bookContextDocument));
+            failedCitationConversions += singleDocumentCitationOutcome.failedConversionCount();
+            for (Citation documentCitation : singleDocumentCitationOutcome.citations()) {
+                citationDocuments.add(bookContextDocument);
+                citationsBeforePageAnchoring.add(documentCitation);
+            }
+        }
+
+        if (failedCitationConversions > 0) {
             logger.warn(
                     "Guided citation conversion had {} failure(s) out of {} documents",
-                    citationOutcome.failedConversionCount(),
+                    failedCitationConversions,
                     bookContextDocuments.size());
         }
-        List<Citation> baseCitations = citationOutcome.citations();
-        return pdfCitationEnhancer.enhanceWithPageAnchors(bookContextDocuments, baseCitations);
+        if (citationDocuments.isEmpty()) {
+            return List.of();
+        }
+        return deduplicateCitationsByAnchoredUrl(
+                pdfCitationEnhancer.enhanceWithPageAnchors(citationDocuments, citationsBeforePageAnchoring));
+    }
+
+    /**
+     * Retains the first citation for each final, page-anchored URL in encounter order.
+     *
+     * @param pageAnchoredCitations citations after their PDF page fragments have been added
+     * @return citations without repeated final URLs
+     */
+    private static List<Citation> deduplicateCitationsByAnchoredUrl(List<Citation> pageAnchoredCitations) {
+        Set<String> retainedAnchoredCitationUrls = new LinkedHashSet<>();
+        List<Citation> deduplicatedPageAnchoredCitations = new ArrayList<>();
+        for (Citation pageAnchoredCitation : pageAnchoredCitations) {
+            if (retainedAnchoredCitationUrls.add(pageAnchoredCitation.getUrl())) {
+                deduplicatedPageAnchoredCitations.add(pageAnchoredCitation);
+            }
+        }
+        return deduplicatedPageAnchoredCitations;
     }
 
     /**

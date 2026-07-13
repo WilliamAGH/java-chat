@@ -7,10 +7,11 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -35,6 +36,8 @@ public class RetrievalService {
     private static final String METADATA_TITLE = "title";
     private static final String METADATA_PACKAGE = "package";
     private static final String METADATA_HASH = "hash";
+    private static final String FILE_URL_PREFIX = "file://";
+    private static final char URL_FRAGMENT_DELIMITER = '#';
 
     private final HybridSearchService hybridSearchService;
     private final AppProperties appProperties;
@@ -117,10 +120,10 @@ public class RetrievalService {
         List<Document> filtered = retrievalConstraint.hasServerSideConstraint()
                 ? candidates
                 : applyVersionFilterIfPresent(versionFilter, candidates);
-        List<Document> uniqueByHash = dedupeByHashThenUrl(filtered);
+        List<Document> deduplicatedCandidates = deduplicateByContentHashThenHashlessCanonicalUrl(filtered);
 
         List<Document> reranked = rerankerService.rerank(
-                query, uniqueByHash, appProperties.getRag().getSearchReturnK());
+                query, deduplicatedCandidates, appProperties.getRag().getSearchReturnK());
 
         if (!reranked.isEmpty()) {
             Map<String, ?> firstDocMetadata = reranked.get(0).getMetadata();
@@ -182,37 +185,43 @@ public class RetrievalService {
         return RetrievalConstraint.forDocVersion(versionNumber);
     }
 
-    private List<Document> dedupeByHashThenUrl(List<Document> documents) {
+    private List<Document> deduplicateByContentHashThenHashlessCanonicalUrl(List<Document> documents) {
         if (documents.isEmpty()) {
             return documents;
         }
-        Map<String, Document> byHash = new LinkedHashMap<>();
-        List<Document> withoutHash = new ArrayList<>();
+        Set<String> retainedContentHashes = new HashSet<>();
+        Set<String> retainedHashlessCanonicalUrls = new HashSet<>();
+        List<Document> deduplicatedDocuments = new ArrayList<>(documents.size());
+        int unidentifiedDocumentCount = 0;
         for (Document document : documents) {
-            String hash = stringMetadataValue(document.getMetadata(), METADATA_HASH);
-            if (!hash.isBlank()) {
-                byHash.putIfAbsent(hash, document);
+            String contentHash = stringMetadataValue(document.getMetadata(), METADATA_HASH);
+            if (!contentHash.isBlank()) {
+                if (!retainedContentHashes.add(contentHash)) {
+                    continue;
+                }
             } else {
-                withoutHash.add(document);
+                String documentUrl = stringMetadataValue(document.getMetadata(), METADATA_URL)
+                        .trim();
+                if (!documentUrl.isBlank()) {
+                    String canonicalDocumentUrl = documentUrl.startsWith(FILE_URL_PREFIX)
+                            ? DocsSourceRegistry.resolveLocalPath(documentUrl.substring(FILE_URL_PREFIX.length()))
+                                    .map(DocsSourceRegistry::canonicalizeHttpDocUrl)
+                                    .orElse(documentUrl)
+                            : DocsSourceRegistry.normalizeDocUrl(documentUrl);
+                    if (!retainedHashlessCanonicalUrls.add(canonicalDocumentUrl)) {
+                        continue;
+                    }
+                } else {
+                    unidentifiedDocumentCount++;
+                }
             }
+
+            deduplicatedDocuments.add(document);
         }
-        Map<String, Document> byUrl = new LinkedHashMap<>();
-        List<Document> unidentified = new ArrayList<>();
-        for (Document document : withoutHash) {
-            String url = stringMetadataValue(document.getMetadata(), METADATA_URL);
-            if (!url.isBlank()) {
-                byUrl.putIfAbsent(url, document);
-            } else {
-                unidentified.add(document);
-            }
+        if (unidentifiedDocumentCount > 0) {
+            log.warn("Dedup kept {} documents with neither hash nor URL metadata", unidentifiedDocumentCount);
         }
-        if (!unidentified.isEmpty()) {
-            log.warn("Dedup kept {} documents with neither hash nor URL metadata", unidentified.size());
-        }
-        List<Document> combined = new ArrayList<>(byHash.values());
-        combined.addAll(byUrl.values());
-        combined.addAll(unidentified);
-        return List.copyOf(combined);
+        return List.copyOf(deduplicatedDocuments);
     }
 
     private static String stringMetadataValue(Map<String, ?> metadata, String key) {
@@ -274,6 +283,7 @@ public class RetrievalService {
             return new CitationOutcome(List.of(), 0);
         }
         List<Citation> citations = new ArrayList<>();
+        Set<String> retainedCitationIdentities = new HashSet<>();
         int failedConversionCount = 0;
         for (Document sourceDocument : documents) {
             if (sourceDocument == null) {
@@ -285,6 +295,10 @@ public class RetrievalService {
                 String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
                 String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
                 String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName);
+                String citationIdentity = citationIdentityFor(rawUrl, url);
+                if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
+                    continue;
+                }
                 citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDocument.getText())));
             } catch (RuntimeException citationConversionFailure) {
                 failedConversionCount++;
@@ -303,6 +317,24 @@ public class RetrievalService {
                     documents.size());
         }
         return new CitationOutcome(citations, failedConversionCount);
+    }
+
+    private static String fragmentlessCitationSourceUrl(String citationUrl) {
+        int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
+        return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);
+    }
+
+    /**
+     * Keeps redacted display URLs from merging citations for separate unresolved local sources.
+     */
+    private static String citationIdentityFor(String rawUrl, String citationUrl) {
+        String trimmedRawUrl = rawUrl.trim();
+        if (trimmedRawUrl.startsWith(FILE_URL_PREFIX)
+                && DocsSourceRegistry.resolveLocalPath(trimmedRawUrl.substring(FILE_URL_PREFIX.length()))
+                        .isEmpty()) {
+            return fragmentlessCitationSourceUrl(trimmedRawUrl);
+        }
+        return fragmentlessCitationSourceUrl(citationUrl);
     }
 
     /**
@@ -338,7 +370,8 @@ public class RetrievalService {
             return "";
         }
         try {
-            return String.valueOf(metadataValue);
+            String metadataText = String.valueOf(metadataValue);
+            return METADATA_URL.equals(key) ? DocsSourceRegistry.normalizeDocUrl(metadataText) : metadataText;
         } catch (RuntimeException _) {
             return "[unprintable:" + metadataValue.getClass().getSimpleName() + "]";
         }

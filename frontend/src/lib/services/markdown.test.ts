@@ -193,6 +193,10 @@ describe("applyJavaLanguageDetection", () => {
     const javaKeywordBoundarySnippets = [
       "int[] greetingCounts = { 1 };",
       'String.valueOf("hello");',
+      "public\u00B7ation",
+      "public\u0387ation",
+      "public\u1369ation",
+      "public\u19DAation",
     ];
 
     for (const javaKeywordBoundarySnippet of javaKeywordBoundarySnippets) {
@@ -216,6 +220,8 @@ describe("applyJavaLanguageDetection", () => {
       'const hint = "tip";',
       'const publication = "article";',
       'const republic = "state";',
+      'const public$ation = "article";',
+      'const public\u0001ation = "article";',
       'const public\uFEFFation = "article";',
     ];
 

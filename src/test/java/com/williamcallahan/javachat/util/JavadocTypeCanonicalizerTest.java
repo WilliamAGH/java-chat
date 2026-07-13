@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.util;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +20,9 @@ class JavadocTypeCanonicalizerTest {
 
     @Test
     void refineMemberAnchorUrlIgnoresGenericOnlyMethodParameterFragment() {
-        String classPageUrl = "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/String.html";
+        String classPageUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/lang/String.html";
         String surroundingDocText = "Use parse(<T>) to parse values.";
 
         String refinedUrl =

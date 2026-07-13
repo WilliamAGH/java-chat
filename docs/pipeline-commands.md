@@ -14,7 +14,7 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 | **Scrape** (mirror HTML) | `make fetch-all` | `make fetch-force` |
 | **Ingest** (chunk → embed → upload) | `make process-all` | Clear state, then `make process-all` ([details](#full-re-ingest)) |
 | **Both** | `make full-pipeline` | `make fetch-force`, then clear state, then `make process-all` |
-| **Ingest subset** | `DOCS_SETS=java25-complete make process-doc-sets` | — |
+| **Ingest subset** | Set `DOCS_SETS` to a catalog path, then run `make process-doc-sets` | — |
 | **Ingest GitHub repo** | `REPO_URL=https://github.com/owner/repo make process-github-repo` | — |
 
 ---
@@ -22,7 +22,19 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 ## Scrape (fetch HTML mirrors)
 
 The scrape phase mirrors upstream documentation into `data/docs/` using `wget`.
-Source URLs are defined in `src/main/resources/docs-sources.properties`.
+
+### Java API source catalog
+
+Complete Java API mirror records are defined in
+`src/main/resources/java-api-documentation-sources.manifest`; source URLs outside complete Java API mirrors are defined in
+`src/main/resources/docs-sources.properties`.
+
+The manifest is the single semantic owner of each complete Java API release, remote URL, mirror path,
+display name, and fetch policy. Add, change, or remove a complete Java API source by editing one manifest
+row only. Do not add `JAVA*_API_BASE` properties or environment overrides, and do not duplicate the
+manifest's rows or field values in properties, Java constants, shell arrays, tests, or docs.
+Run `./scripts/fetch_all_docs.sh --list-java-api-sources` to inspect the exact rows consumed by the fetch
+script; the CLI catalog and citation registry project the same rows and parity is enforced by tests.
 
 ### Make targets
 
@@ -35,7 +47,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 ### Script flags
 
 ```bash
-./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force]
+./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--list-java-api-sources]
 ```
 
 | Flag | Effect |
@@ -43,12 +55,14 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 | `--include-quick` | Also fetch small landing-page mirrors (Spring Boot/Framework/AI quick sets) |
 | `--no-clean` | Do not quarantine incomplete mirrors before refetching |
 | `--force` | Refresh all sources even if they look complete |
+| `--list-java-api-sources` | Print configured Java API source projections without fetching |
 | `--help` | Show usage |
 
 ### What "incremental" means for scraping
 
 - `wget --mirror --timestamping` skips files that haven't changed on the server.
-- Sources with fewer HTML files than their configured minimum are quarantined and re-fetched.
+- Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
+- Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
 - Oracle Javadoc uses a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
 
 ---
@@ -107,23 +121,18 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 Limit ingestion to specific doc sets by ID or path:
 
 ```bash
-# Single doc set
-DOCS_SETS=java25-complete make process-doc-sets
-./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete
+# Complete Java API paths: copy relativeMirrorPath from the listing command
+./scripts/fetch_all_docs.sh --list-java-api-sources
+DOCS_SETS=relative/path/from/listing make process-doc-sets
 
-# Multiple doc sets
-./scripts/process_all_to_qdrant.sh --doc-sets=java25-complete,spring-boot-complete
-
-# Path-style IDs
-./scripts/process_all_to_qdrant.sh --doc-sets=java/java25-complete
+# Non-Java example
+./scripts/process_all_to_qdrant.sh --doc-sets=spring-boot-complete
 ```
 
-Available doc set IDs are defined in `DocumentationSetCatalog.java`. Common ones:
+Complete Java API doc set paths are projected from the manifest. Common non-Java doc sets are:
 
 | ID | Content |
 |---|---|
-| `java24-complete` | Java 24 complete API (Oracle Javadoc) |
-| `java25-complete` | Java 25 complete API (Oracle Javadoc) |
 | `spring-boot-complete` | Spring Boot reference + API docs |
 | `spring-framework-complete` | Spring Framework reference + Javadoc |
 | `spring-ai-complete` | Spring AI reference + API (stable + 2.0) |
@@ -230,7 +239,7 @@ To run the CLI directly:
 app_jar=$(ls -1 build/libs/*.jar | grep -v -- "-plain.jar" | head -1)
 
 # With doc set filtering
-DOCS_SETS=java25-complete java -Dspring.profiles.active=cli -jar "$app_jar"
+DOCS_SETS=spring-boot-complete java -Dspring.profiles.active=cli -jar "$app_jar"
 ```
 
 The docs root defaults to `data/docs` unless `DOCS_DIR` is set.

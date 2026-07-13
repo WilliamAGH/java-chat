@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -46,6 +47,117 @@ class RetrievalServiceTest {
         assertEquals(1, retrievalOutcome.notices().size());
         assertEquals(
                 "Partial retrieval failure", retrievalOutcome.notices().get(0).summary());
+    }
+
+    @Test
+    void preservesDistinctSamePageChunksForRerankingAndDeduplicatesTheirCitations() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        DocumentFactory documentFactory = mock(DocumentFactory.class);
+        AppProperties appProperties = new AppProperties();
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+        String javaApiBaseUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl();
+        String stringJavadocUrl = javaApiBaseUrl + "java.base/java/lang/String.html";
+
+        Document urlOnlyDocument = Document.builder()
+                .id("url-only")
+                .text("URL-only candidate")
+                .metadata("url", "https://example.org/java/reference")
+                .build();
+        Document canonicalUrlDuplicateWithoutHash = Document.builder()
+                .id("url-only-duplicate")
+                .text("URL-only duplicate candidate")
+                .metadata("url", "https://example.org//java/reference")
+                .build();
+        Document firstJavadocChunk = Document.builder()
+                .id("first-javadoc-chunk")
+                .text("First Javadoc chunk")
+                .metadata("url", stringJavadocUrl)
+                .metadata("hash", "first-content-hash")
+                .build();
+        Document secondJavadocChunkWithDistinctHash = Document.builder()
+                .id("second-javadoc-chunk")
+                .text("Second Javadoc chunk")
+                .metadata("url", stringJavadocUrl + "#assert(...)")
+                .metadata("hash", "second-content-hash")
+                .build();
+        Document sameContentHashWithDifferentUrl = Document.builder()
+                .id("same-content-hash")
+                .text("Duplicate content under another URL")
+                .metadata("url", javaApiBaseUrl + "java.base/java/lang/Object.html")
+                .metadata("hash", "first-content-hash")
+                .build();
+        List<Document> retrievalCandidates = List.of(
+                urlOnlyDocument,
+                canonicalUrlDuplicateWithoutHash,
+                firstJavadocChunk,
+                secondJavadocChunkWithDistinctHash,
+                sameContentHashWithDifferentUrl);
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+                .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
+            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+            return deduplicatedCandidates;
+        });
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Java string basics");
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
+
+        assertEquals(
+                List.of(urlOnlyDocument, firstJavadocChunk, secondJavadocChunkWithDistinctHash),
+                retrievalOutcome.documents());
+        assertEquals(2, citationOutcome.citations().size());
+        assertEquals(stringJavadocUrl, citationOutcome.citations().get(1).getUrl());
+        assertEquals("First Javadoc chunk", citationOutcome.citations().get(1).getSnippet());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void keepsDistinctUnmappedLocalDocumentsAndRedactsTheirCitations() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        DocumentFactory documentFactory = mock(DocumentFactory.class);
+        AppProperties appProperties = new AppProperties();
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+        String firstUnmappedLocalUrl = "file:///unmapped/first.html";
+        String secondUnmappedLocalUrl = "file:///unmapped/second.html";
+
+        Document firstUnmappedLocalDocument = Document.builder()
+                .id("first-unmapped-local")
+                .text("First local document")
+                .metadata("url", firstUnmappedLocalUrl)
+                .build();
+        Document secondUnmappedLocalDocument = Document.builder()
+                .id("second-unmapped-local")
+                .text("Second local document")
+                .metadata("url", secondUnmappedLocalUrl)
+                .build();
+        List<Document> retrievalCandidates = List.of(firstUnmappedLocalDocument, secondUnmappedLocalDocument);
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+                .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
+            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+            return deduplicatedCandidates;
+        });
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Local documentation");
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
+        String redactedLocalCitationUrl = DocsSourceRegistry.normalizeDocUrl(firstUnmappedLocalUrl);
+
+        assertEquals(retrievalCandidates, retrievalOutcome.documents());
+        assertEquals(2, citationOutcome.citations().size());
+        assertEquals(
+                List.of(redactedLocalCitationUrl, redactedLocalCitationUrl),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertTrue(citationOutcome.citations().stream()
+                .map(citation -> citation.getUrl())
+                .noneMatch(citationUrl -> citationUrl.contains("/unmapped/")));
+        assertEquals(0, citationOutcome.failedConversionCount());
     }
 
     @Test

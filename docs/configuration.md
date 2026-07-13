@@ -27,8 +27,7 @@ Common variables:
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
 - `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
 - `OPENAI_REASONING_EFFORT` (optional, GPT‑5 family)
-- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`)
-- `OPENAI_STREAMING_READ_TIMEOUT_SECONDS` (default `75`)
+- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call while provider gateways own first-output and inter-output deadlines)
 
 ### Researchly shared gateway
 

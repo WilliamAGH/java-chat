@@ -257,21 +257,33 @@ public class SseSupport {
     }
 
     /**
-     * Maps runtime streaming notices from the LLM provider into SSE status events.
+     * Projects runtime streaming notices into their SSE protocol events.
+     *
+     * <p>Provider-fallback notices emit the fallback provider before their status event. One
+     * subscription to the replayed notice flux owns both projections, while {@code concatMap}
+     * keeps each notice's protocol events ordered and non-interleaved.</p>
      *
      * @param notices flux of streaming notices from the provider
-     * @return flux of ServerSentEvents with structured status payloads
+     * @return flux of ordered ServerSentEvents with provider and status payloads
      */
     public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<StreamingNotice> notices) {
-        return notices.map(notice -> statusEvent(SseEventPayload.builder(notice.summary())
-                .details(notice.diagnosticContext())
-                .code(notice.code())
-                .retryable(notice.retryable())
-                .provider(notice.provider())
-                .stage(notice.stage())
-                .attempt(notice.attempt())
-                .maxAttempts(notice.maxAttempts())
-                .build()));
+        return notices.concatMap(this::streamingNoticeEventSequence);
+    }
+
+    private Flux<ServerSentEvent<String>> streamingNoticeEventSequence(StreamingNotice streamingNotice) {
+        ServerSentEvent<String> noticeStatusEvent = statusEvent(SseEventPayload.builder(streamingNotice.summary())
+                .details(streamingNotice.diagnosticContext())
+                .code(streamingNotice.code())
+                .retryable(streamingNotice.retryable())
+                .provider(streamingNotice.provider())
+                .stage(streamingNotice.stage())
+                .attempt(streamingNotice.attempt())
+                .maxAttempts(streamingNotice.maxAttempts())
+                .build());
+        if (STATUS_CODE_STREAM_PROVIDER_FALLBACK.equals(streamingNotice.code())) {
+            return Flux.just(providerEvent(streamingNotice.provider()), noticeStatusEvent);
+        }
+        return Flux.just(noticeStatusEvent);
     }
 
     /**

@@ -250,7 +250,6 @@ public class GuidedLearningController extends BaseController {
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
         List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
-        chatMemory.addUser(sessionId, userQuery);
         return Flux.defer(() -> {
                     StringBuilder fullResponse = new StringBuilder();
 
@@ -297,24 +296,18 @@ public class GuidedLearningController extends BaseController {
 
                                 Flux<ServerSentEvent<String>> statusEvents =
                                         sseSupport.citationWarningStatusFlux(finalCitationWarning);
-                                Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                Flux<ServerSentEvent<String>> runtimeStreamingEvents =
                                         sseSupport.streamingNoticeEvents(streamingResult.notices());
-                                Flux<ServerSentEvent<String>> providerChangeEvents = streamingResult
-                                        .providerChanges()
-                                        .map(provider -> sseSupport.providerEvent(provider.getName()));
 
-                                // Subscribe to replayable fallback signals before the ref-counted data stream starts.
+                                // Start replayable fallback protocol events before the ref-counted data stream so
+                                // the provider and status notice arrive before fallback text.
                                 return Flux.concat(
                                         Flux.just(providerEvent),
                                         statusEvents,
-                                        Flux.merge(
-                                                providerChangeEvents,
-                                                runtimeStreamingStatusEvents,
-                                                dataEvents,
-                                                heartbeats),
+                                        Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
                                         citationEvent);
                             })
-                            .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
+                            .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =

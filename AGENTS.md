@@ -17,6 +17,7 @@ alwaysApply: true
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
 - [GT1a-l] Git, history safety, hooks/signing, lock files, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
+- [SS1a-j] Single Semantic Owner and Java API catalog ownership
 - [ID1a-d] Idiomatic Patterns & Defaults
 - [EV1a-f] Secrets and Env Vars (no secrets in properties; OpenAI/Qdrant via .env/env)
 - [RC1a-f] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
@@ -78,6 +79,8 @@ alwaysApply: true
 - [SS1f] **Stop-Work Trigger**: If an implementation requires listing the same governed fields/keys/rules in a second place, stop and redesign before editing.
 - [SS1g] **No Positional-Null Sludge**: Constructor/factory calls with repeated placeholder nulls or low-legibility optional argument trains are prohibited; use named factories/builders, parameter objects, or bind/import the canonical owner.
 - [SS1h] **Whole-List Smell**: If a file "knows the whole list" of a governed concept and it is not the canonical owner, the design is presumed wrong and must be reduced or removed.
+- [SS1i] **Java API Catalog Owner**: Define complete Java API mirror records only in `src/main/resources/java-api-documentation-sources.manifest`; consume that manifest from Java, shell, tests, and documentation.
+- [SS1j] **Java API Catalog Projection**: Never recreate Java API releases, URLs, mirror paths, display names, or fetch parameters in properties, constants, arrays, fixtures, or documentation; verify projections with `--list-java-api-sources` and `JavaApiDocumentationSourceParityTest`.
 
 ## [ID1] Idiomatic Patterns & Defaults
 

@@ -6,7 +6,7 @@ description: "Evergreen contract for change decisions (new file vs edit), reposi
 
 # Code Change Policy Contract
 
-See `AGENTS.md` ([FS1a-k], [FS1l], [AR1a-f], [ND1a-c], [CC1a-d], [AB1a-d], [RC1a-f], [CS1a-h]).
+See `AGENTS.md` ([SS1a-j], [FS1a-k], [FS1l], [AR1a-f], [ND1a-c], [CC1a-d], [AB1a-d], [RC1a-f], [CS1a-h]).
 
 ## Non-negotiables (applies to every change)
 
@@ -28,6 +28,7 @@ Use this as a hard rule, not a suggestion.
 | Logic change in stable code | Extract/replace via composition; keep stable code stable ([AB1c], [CC1a]) | Add flags, shims, or “compat” paths to hide uncertainty ([RC1b]) |
 | Touching a large/overloaded file | Extract at least one seam (new type + typed contract) ([FS1f], [FS1b]) | Grow the file further ([FS1f]) |
 | Reuse needed across features | Add a domain value object / explicit port / explicit service with intent-revealing name ([AB1b]) | Add `*Utils/*Helper/*Common/*Base*` grab bags ([FS1e]) |
+| Governed catalog change | Edit its single canonical owner and project it everywhere else ([SS1a-c]) | Restate the inventory in code, scripts, tests, fixtures, or docs ([SS1b], [SS1h]) |
 
 ### When adding a method is allowed
 

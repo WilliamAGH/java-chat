@@ -13,7 +13,7 @@ import {
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from "./csrf";
-import { streamWithRetry } from "./streamRecovery";
+import { streamSse } from "./sse";
 
 export type { StreamStatus, StreamError, Citation };
 
@@ -52,17 +52,17 @@ export async function streamChat(
   onChunk: (chunk: string) => void,
   options: StreamChatOptions = {},
 ): Promise<void> {
-  return streamWithRetry(
+  return streamSse(
     "/api/chat/stream",
     { sessionId, latest: message },
     {
-      onChunk,
+      onText: onChunk,
       onStatus: options.onStatus,
       onError: options.onError,
       onCitations: options.onCitations,
-      signal: options.signal,
     },
     "chat.ts",
+    { signal: options.signal },
   );
 }
 

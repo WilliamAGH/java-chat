@@ -38,29 +38,19 @@ public class ChatMemoryService {
     }
 
     /**
-     * Adds a user message to the session history and turn list.
+     * Commits one completed user/assistant exchange atomically.
+     *
+     * <p>Failed or cancelled streams never leave an unmatched user turn in memory.</p>
      *
      * @param sessionId session identifier
-     * @param text message text
+     * @param userText user message text
+     * @param assistantText assistant message text
      */
-    public void addUser(String sessionId, String text) {
+    public void addExchange(String sessionId, String userText, String assistantText) {
         Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
         SessionConversation sessionConversation =
                 sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
-        sessionConversation.addUserMessage(text);
-    }
-
-    /**
-     * Adds an assistant message to the session history and turn list.
-     *
-     * @param sessionId session identifier
-     * @param text message text
-     */
-    public void addAssistant(String sessionId, String text) {
-        Objects.requireNonNull(sessionId, REQUIRE_SESSION_ID);
-        SessionConversation sessionConversation =
-                sessionConversations.computeIfAbsent(sessionId, _ -> new SessionConversation());
-        sessionConversation.addAssistantMessage(text);
+        sessionConversation.addExchange(userText, assistantText);
     }
 
     /**
@@ -114,14 +104,11 @@ public class ChatMemoryService {
         private final List<Message> historyMessages = new ArrayList<>();
         private final List<ChatTurn> turnHistory = new ArrayList<>();
 
-        synchronized void addUserMessage(String text) {
-            historyMessages.add(new UserMessage(text));
-            turnHistory.add(new ChatTurn("user", text));
-        }
-
-        synchronized void addAssistantMessage(String text) {
-            historyMessages.add(new AssistantMessage(text));
-            turnHistory.add(new ChatTurn("assistant", text));
+        synchronized void addExchange(String userText, String assistantText) {
+            historyMessages.add(new UserMessage(userText));
+            turnHistory.add(new ChatTurn("user", userText));
+            historyMessages.add(new AssistantMessage(assistantText));
+            turnHistory.add(new ChatTurn("assistant", assistantText));
         }
 
         synchronized List<Message> historySnapshot() {

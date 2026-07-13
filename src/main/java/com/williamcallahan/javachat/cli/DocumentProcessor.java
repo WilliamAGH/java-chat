@@ -69,6 +69,9 @@ public class DocumentProcessor {
     private static final String LOG_DOCSET_FILTER = "Doc set filter active";
     private static final String LOG_DOCSET_SELECTED = "Doc sets selected: {} set(s)";
 
+    private static final String DOCSET_ALL_SELECTOR = "all";
+    private static final String DOCSET_FILTER_DELIMITER = ",";
+
     private static final String SKIP_REASON_INVALID_PATH = "invalid path";
     private static final String SKIP_REASON_DIR_MISSING = "directory not found";
     private static final String SKIP_REASON_NO_ELIGIBLE_FILES = "no eligible files";
@@ -248,17 +251,17 @@ public class DocumentProcessor {
             }
             return DocumentationSetCatalog.baseSets();
         }
-        final Set<String> tokens = parseDocSetFilter(filter);
-        if (tokens.isEmpty() || tokens.contains("all")) {
+        final Set<String> selectorTokens = parseDocSetFilter(filter);
+        if (selectorTokens.isEmpty() || selectorTokens.stream().anyMatch(DOCSET_ALL_SELECTOR::equalsIgnoreCase)) {
             return DocumentationSetCatalog.allSets();
         }
-        final List<DocumentationSet> selectedSets = new ArrayList<>();
-        for (DocumentationSet docSet : DocumentationSetCatalog.allSets()) {
-            if (docSet.matchesAny(tokens)) {
-                selectedSets.add(docSet);
+        final List<DocumentationSet> selectedDocumentationSets = new ArrayList<>();
+        for (DocumentationSet documentationSet : DocumentationSetCatalog.allSets()) {
+            if (documentationSet.matchesSelectorTokens(selectorTokens)) {
+                selectedDocumentationSets.add(documentationSet);
             }
         }
-        if (selectedSets.isEmpty()) {
+        if (selectedDocumentationSets.isEmpty()) {
             throw new DocumentProcessingException(String.format(
                     Locale.ROOT,
                     "DOCS_SETS matched no documentation sets. Available doc sets: %s",
@@ -266,36 +269,30 @@ public class DocumentProcessor {
         }
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_DOCSET_FILTER);
-            LOGGER.info(LOG_DOCSET_SELECTED, selectedSets.size());
+            LOGGER.info(LOG_DOCSET_SELECTED, selectedDocumentationSets.size());
         }
-        return selectedSets;
+        return selectedDocumentationSets;
     }
 
     private static Set<String> parseDocSetFilter(final String filter) {
-        final Set<String> tokens = new LinkedHashSet<>();
+        final Set<String> selectorTokens = new LinkedHashSet<>();
         if (filter == null || filter.isBlank()) {
-            return tokens;
+            return selectorTokens;
         }
-        for (String token : filter.split(",")) {
-            final String normalized = normalizeToken(token);
-            if (!normalized.isBlank()) {
-                tokens.add(normalized);
+        for (String commaSeparatedSelector : filter.split(DOCSET_FILTER_DELIMITER)) {
+            final String selectorToken = commaSeparatedSelector.trim();
+            if (!selectorToken.isBlank()) {
+                selectorTokens.add(selectorToken);
             }
         }
-        return tokens;
+        return selectorTokens;
     }
 
-    private static String formatDocSetSummary(final List<DocumentationSet> docSets) {
-        return docSets.stream()
-                .map(docSet -> docSet.docSetId() + " (" + docSet.displayName() + ")")
+    private static String formatDocSetSummary(final List<DocumentationSet> documentationSets) {
+        return documentationSets.stream()
+                .map(documentationSet ->
+                        documentationSet.primarySelector() + " (" + documentationSet.displayName() + ")")
                 .collect(Collectors.joining(", "));
-    }
-
-    private static String normalizeToken(final String token) {
-        if (token == null) {
-            return "";
-        }
-        return token.trim().toLowerCase(Locale.ROOT);
     }
 
     private void logProcessingStats(final int processed, final long elapsedMillis) {

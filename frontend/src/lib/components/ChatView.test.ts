@@ -70,4 +70,25 @@ describe("ChatView streaming stability", () => {
     expect(assistantMessageElementAfter).toBe(assistantMessageElement);
     expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
   });
+
+  it("shows the active fallback provider from structured stream status", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, _onChunk, options) => {
+      options?.onStatus?.({
+        message: "Retrying stream with provider",
+        details: "The first provider failed before response text.",
+        provider: "fallback-provider",
+      });
+      return new Promise<void>(() => {});
+    });
+
+    const { getByLabelText, getByRole, findByText } = await renderChatView();
+    const messageInput = getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+    await fireEvent.input(messageInput, { target: { value: "Explain records" } });
+    await fireEvent.click(getByRole("button", { name: "Send message" }));
+
+    expect(await findByText(/Provider: fallback-provider/)).toBeTruthy();
+  });
 });
