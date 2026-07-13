@@ -160,11 +160,13 @@ quarantine_versioned_reference_subdirs() {
 #   $2 - target directory (for HTML count)
 #   $3 - human-readable name
 #   $4 - minimum required HTML files (0 = no minimum)
+#   $5 - whether a validated partial mirror is accepted
 validate_fetch_result() {
     local wget_exit_code="$1"
     local target_dir="$2"
     local name="$3"
     local min_files="$4"
+    local partial_mirror_allowed="$5"
 
     local fetched_html_count
     fetched_html_count="$(count_html_files "$target_dir")"
@@ -178,8 +180,12 @@ validate_fetch_result() {
 
     log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
     if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
-        log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
-        return 1
+        if [ "$partial_mirror_allowed" = "true" ]; then
+            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
+        else
+            log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
+            return 1
+        fi
     fi
     return 0
 }
@@ -193,12 +199,14 @@ validate_fetch_result() {
 #   $3 - human-readable name
 #   $4 - --cut-dirs value
 #   $5 - minimum required HTML files
+#   $6 - whether a validated partial mirror is accepted
 fetch_oracle_javadoc_seed() {
     local url="$1"
     local target_dir="$2"
     local name="$3"
     local cut_dirs="$4"
     local min_files="$5"
+    local partial_mirror_allowed="$6"
 
     local seed_file="$target_dir/.oracle-javadoc-seed.txt"
     log "${BLUE}ℹ Oracle Javadoc detected; generating explicit URL seed list...${NC}"
@@ -229,7 +237,7 @@ fetch_oracle_javadoc_seed() {
     local wget_exit_code=$?
     cd - > /dev/null
 
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files"
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
 }
 
 # Fetches documentation using wget --mirror for generic (non-Oracle) sites.
@@ -241,6 +249,7 @@ fetch_oracle_javadoc_seed() {
 #   $4 - --cut-dirs value
 #   $5 - minimum required HTML files
 #   $6 - reject regex (optional)
+#   $7 - whether a validated partial mirror is accepted
 fetch_docs_mirror() {
     local url="$1"
     local target_dir="$2"
@@ -248,6 +257,7 @@ fetch_docs_mirror() {
     local cut_dirs="$4"
     local min_files="$5"
     local reject_regex="${6:-}"
+    local partial_mirror_allowed="$7"
 
     local wget_args=(
         --mirror \
@@ -280,7 +290,7 @@ fetch_docs_mirror() {
     local wget_exit_code=$?
     cd - > /dev/null
 
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files"
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
 }
 
 # Dispatches documentation fetching: performs pre-fetch housekeeping (existing
@@ -294,6 +304,7 @@ fetch_docs_mirror() {
 #   $4 - --cut-dirs value
 #   $5 - minimum required HTML files
 #   $6 - reject regex (optional)
+#   $7 - whether a validated partial mirror is accepted
 fetch_docs() {
     local url="$1"
     local target_dir="$2"
@@ -301,6 +312,7 @@ fetch_docs() {
     local cut_dirs="$4"
     local min_files="$5"
     local reject_regex="${6:-}"
+    local partial_mirror_allowed="$7"
 
     # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
     reject_regex="${reject_regex//__OR__/|}"
@@ -311,7 +323,7 @@ fetch_docs() {
     if [ "$existing_count" -gt 0 ]; then
         log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
     fi
-    if [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
+    if [ "$partial_mirror_allowed" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
         quarantine_incomplete_dir "$target_dir" "$name" "$existing_count" "$min_files"
     fi
 
@@ -336,35 +348,70 @@ fetch_docs() {
             log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
             return 0
         fi
-        fetch_oracle_javadoc_seed "$url" "$target_dir" "$name" "$cut_dirs" "$min_files"
+        fetch_oracle_javadoc_seed "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$partial_mirror_allowed"
     else
-        fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex"
+        fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
     fi
 }
 
+# Projects one seven-field documentation source row into the fetch boundary.
+fetch_documentation_source() {
+    local documentation_source_projection="$1"
+    local fetch_projection_delimiters="${documentation_source_projection//[^|]/}"
+    if [ "${#fetch_projection_delimiters}" -ne 6 ]; then
+        log "${RED}✗ Documentation source projection must contain exactly seven fields${NC}"
+        return 1
+    fi
+
+    local documentation_source_url
+    local mirror_directory
+    local documentation_source_name
+    local cut_directories
+    local minimum_html_files
+    local reject_regex
+    local partial_mirror_allowed
+    IFS='|' read -r documentation_source_url mirror_directory documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed <<< "$documentation_source_projection"
+
+    if [ "$partial_mirror_allowed" != "true" ] && [ "$partial_mirror_allowed" != "false" ]; then
+        log "${RED}✗ Documentation source partial-mirror policy must be true or false${NC}"
+        return 1
+    fi
+
+    echo ""
+    log "Processing: $documentation_source_name"
+    log "URL: $documentation_source_url"
+    log "Target: $mirror_directory"
+
+    fetch_docs "$documentation_source_url" "$mirror_directory" "$documentation_source_name" "$cut_directories" "$minimum_html_files" "$reject_regex" "$partial_mirror_allowed"
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 # Documentation sources configuration
-# Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX
+# Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
 DOC_SOURCES=(
     # Spring Boot (current)
-    "${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|$DOCS_ROOT/spring-boot-complete|Spring Boot Reference (current)|1|50|"
-    "${SPRING_BOOT_API_BASE:-https://docs.spring.io/spring-boot/api/}|$DOCS_ROOT/spring-boot-complete|Spring Boot API (current)|1|7000|"
+    "${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|$DOCS_ROOT/spring-boot-complete|Spring Boot Reference (current)|1|50||false"
+    "${SPRING_BOOT_API_BASE:-https://docs.spring.io/spring-boot/api/}|$DOCS_ROOT/spring-boot-complete|Spring Boot API (current)|1|7000||false"
 
     # Spring AI
     # Stable reference (1.1.x) - avoid pulling versioned reference subtrees (including 2.0) and SNAPSHOT content.
-    "${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|$DOCS_ROOT/spring-ai-reference|Spring AI Reference (stable)|1|80|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT"
+    "${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|$DOCS_ROOT/spring-ai-reference|Spring AI Reference (stable)|1|80|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
     # 2.0 reference (milestone) - avoid SNAPSHOT content.
-    "${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|$DOCS_ROOT/spring-ai-reference-2|Spring AI Reference (2.0)|1|80|/spring-ai/reference/[^/]*SNAPSHOT"
+    "${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|$DOCS_ROOT/spring-ai-reference-2|Spring AI Reference (2.0)|1|80|/spring-ai/reference/[^/]*SNAPSHOT|false"
     # API docs (stable + 2.x). Keep these separate to avoid quarantine/validation conflicts.
-    "${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|$DOCS_ROOT/spring-ai-api-stable|Spring AI API (stable)|1|200|"
-    "${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|$DOCS_ROOT/spring-ai-api-2|Spring AI API (2.x)|1|200|"
+    "${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|$DOCS_ROOT/spring-ai-api-stable|Spring AI API (stable)|1|200||false"
+    "${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|$DOCS_ROOT/spring-ai-api-2|Spring AI API (2.x)|1|200||false"
 
     # Spring Framework (current) - avoid pulling older reference versions under /reference/6.x, etc.
-    "${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT"
-    "${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Javadoc (current)|1|7000|"
+    "${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
+    "${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|$DOCS_ROOT/spring-framework-complete|Spring Framework Javadoc (current)|1|7000||false"
 
-    "${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|$DOCS_ROOT/oracle/javase|Java 25 Release Notes Issues|3|1|"
-    "${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|$DOCS_ROOT/ibm/articles|IBM Java 25 Overview|1|1|"
-    "${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|$DOCS_ROOT/jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1|"
+    "${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|$DOCS_ROOT/oracle/javase|Java 25 Release Notes Issues|3|1||false"
+    "${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|$DOCS_ROOT/ibm/articles|IBM Java 25 Overview|1|1||false"
+    "${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|$DOCS_ROOT/jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1||false"
 )
 
 load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
@@ -377,10 +424,10 @@ fi
 
 if [ "$INCLUDE_QUICK" = "true" ]; then
     DOC_SOURCES+=(
-        "${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|$DOCS_ROOT/spring-boot|Spring Boot Quick (reference landing)|1|1|"
-        "${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|$DOCS_ROOT/spring-framework|Spring Framework Quick (reference landing)|1|1|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT"
-        "${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|$DOCS_ROOT/spring-ai|Spring AI Quick (reference landing)|1|1|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT"
-        "${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|$DOCS_ROOT/spring-ai-2|Spring AI Quick (2.0 landing)|1|1|/spring-ai/reference/[^/]*SNAPSHOT"
+        "${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|$DOCS_ROOT/spring-boot|Spring Boot Quick (reference landing)|1|1||false"
+        "${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|$DOCS_ROOT/spring-framework|Spring Framework Quick (reference landing)|1|1|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
+        "${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|$DOCS_ROOT/spring-ai|Spring AI Quick (reference landing)|1|1|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
+        "${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|$DOCS_ROOT/spring-ai-2|Spring AI Quick (2.0 landing)|1|1|/spring-ai/reference/[^/]*SNAPSHOT|false"
     )
 fi
 
@@ -403,19 +450,12 @@ log "Starting documentation fetch process..."
 echo "=============================================="
 
 # Process each documentation source
-for source in "${DOC_SOURCES[@]}"; do
-    IFS='|' read -r url target_dir name cut_dirs min_files reject_regex <<< "$source"
-    
-    echo ""
-    log "Processing: $name"
-    log "URL: $url"
-    log "Target: $target_dir"
-    
-    if fetch_docs "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "${reject_regex:-}"; then
+for documentation_source_projection in "${DOC_SOURCES[@]}"; do
+    if fetch_documentation_source "$documentation_source_projection"; then
         TOTAL_FETCHED=$((TOTAL_FETCHED + 1))
     else
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        log "${RED}Error: Failed to fetch $name; auditing the remaining sources before exit${NC}"
+        log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
     fi
 done
 
