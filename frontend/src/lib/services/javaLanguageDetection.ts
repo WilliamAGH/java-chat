@@ -15,7 +15,7 @@ const JAVA_IDENTIFIER_IGNORABLE_CONTROL_RANGES = "\\u0000-\\u0008\\u000E-\\u001B
 
 /** Matches Java identifier parts, including identifier-ignorable characters. */
 const JAVA_IDENTIFIER_PART_PATTERN = new RegExp(
-  `[\\p{ID_Continue}\\p{Sc}\\p{Cf}${JAVA_IDENTIFIER_IGNORABLE_CONTROL_RANGES}]`,
+  `[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Nd}\\p{Mc}\\p{Mn}\\p{Cf}${JAVA_IDENTIFIER_IGNORABLE_CONTROL_RANGES}]`,
   "u",
 );
 
