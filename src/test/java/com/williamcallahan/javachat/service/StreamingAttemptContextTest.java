@@ -14,19 +14,16 @@ import reactor.core.publisher.Sinks;
  * Verifies bounded streaming attempts for single- and multi-provider routing.
  */
 class StreamingAttemptContextTest {
-    private static final int EXPECTED_MAX_ATTEMPTS = 2;
+    private static final int SINGLE_PROVIDER_ATTEMPT_COUNT = 1;
+    private static final int DISTINCT_PROVIDER_ATTEMPT_COUNT = 2;
 
     @Test
-    void singleProviderGetsExactlyOneBoundedRetry() {
+    void singleProviderIsAttemptedExactlyOnce() {
         OpenAiProviderCandidate onlyProvider = provider(RateLimitService.ApiProvider.OPENAI);
         StreamingAttemptContext firstAttempt = StreamingAttemptContext.first(List.of(onlyProvider), noticeSink());
 
-        assertAttempt(firstAttempt, onlyProvider, 1, true);
-
-        StreamingAttemptContext retryAttempt = firstAttempt.withNextAttempt();
-
-        assertAttempt(retryAttempt, onlyProvider, 2, false);
-        assertThrows(IllegalStateException.class, retryAttempt::withNextAttempt);
+        assertAttempt(firstAttempt, onlyProvider, 1, SINGLE_PROVIDER_ATTEMPT_COUNT, false);
+        assertThrows(IllegalStateException.class, firstAttempt::withNextAttempt);
     }
 
     @Test
@@ -36,11 +33,11 @@ class StreamingAttemptContextTest {
         StreamingAttemptContext firstAttempt =
                 StreamingAttemptContext.first(List.of(primaryProvider, secondaryProvider), noticeSink());
 
-        assertAttempt(firstAttempt, primaryProvider, 1, true);
+        assertAttempt(firstAttempt, primaryProvider, 1, DISTINCT_PROVIDER_ATTEMPT_COUNT, true);
 
         StreamingAttemptContext secondAttempt = firstAttempt.withNextAttempt();
 
-        assertAttempt(secondAttempt, secondaryProvider, 2, false);
+        assertAttempt(secondAttempt, secondaryProvider, 2, DISTINCT_PROVIDER_ATTEMPT_COUNT, false);
         assertThrows(IllegalStateException.class, secondAttempt::withNextAttempt);
     }
 
@@ -56,10 +53,11 @@ class StreamingAttemptContextTest {
             StreamingAttemptContext attemptContext,
             OpenAiProviderCandidate expectedProvider,
             int expectedAttempt,
+            int expectedMaximumAttempts,
             boolean expectedHasNextAttempt) {
         assertSame(expectedProvider, attemptContext.currentProvider());
         assertEquals(expectedAttempt, attemptContext.currentAttempt());
-        assertEquals(EXPECTED_MAX_ATTEMPTS, attemptContext.maxAttempts());
+        assertEquals(expectedMaximumAttempts, attemptContext.maxAttempts());
         assertEquals(expectedHasNextAttempt, attemptContext.hasNextAttempt());
     }
 }

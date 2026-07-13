@@ -51,7 +51,7 @@ public class OpenAIStreamingService {
     /** GitHub Models client when configured. */
     private OpenAIClient clientPrimary;
 
-    /** OpenAI direct client when configured. */
+    /** OpenAI-compatible client when configured. */
     private OpenAIClient clientSecondary;
 
     private volatile boolean isAvailable;
@@ -131,7 +131,7 @@ public class OpenAIStreamingService {
                     "No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
         } else {
             log.info(
-                    "OpenAI streaming available (primaryConfigured={}, secondaryConfigured={})",
+                    "OpenAI streaming available (githubModelsConfigured={}, openAiCompatibleConfigured={})",
                     clientPrimary != null,
                     clientSecondary != null);
         }

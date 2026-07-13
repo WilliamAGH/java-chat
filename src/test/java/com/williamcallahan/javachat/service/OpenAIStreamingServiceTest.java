@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -242,7 +241,7 @@ class OpenAIStreamingServiceTest {
                 })
                 .verify();
 
-        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(responseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
         List<ILoggingEvent> terminalAlerts = streamingFailureLogEvents.list.stream()
                 .filter(loggingEvent -> loggingEvent.getLevel() == Level.ERROR)
                 .toList();
@@ -254,7 +253,7 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void emptyTextDeltaDoesNotDisablePreTextRetry() {
+    void emptyTextDeltaDoesNotRepeatTheOnlyProvider() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
@@ -294,8 +293,54 @@ class OpenAIStreamingServiceTest {
                 })
                 .verify();
 
-        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
-        verify(emptyTextDelta, times(2)).delta();
+        verify(responseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(emptyTextDelta).delta();
+    }
+
+    @Test
+    void preTextFailureMovesToDistinctSecondProvider() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient openAiClient = mock(OpenAIClient.class);
+        ResponseService githubModelsResponseService = mock(ResponseService.class);
+        ResponseService openAiResponseService = mock(ResponseService.class);
+        StreamResponse<ResponseStreamEvent> openAiStream = mock();
+        ResponseStreamEvent visibleTextEvent = mock(ResponseStreamEvent.class);
+        ResponseTextDeltaEvent visibleTextDelta = mock(ResponseTextDeltaEvent.class);
+        InternalServerException githubModelsFailure = InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .build();
+        when(githubModelsClient.responses()).thenReturn(githubModelsResponseService);
+        when(openAiClient.responses()).thenReturn(openAiResponseService);
+        when(githubModelsResponseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(githubModelsFailure);
+        when(openAiResponseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenReturn(openAiStream);
+        when(openAiStream.stream()).thenReturn(Stream.of(visibleTextEvent));
+        when(visibleTextEvent.outputTextDelta()).thenReturn(Optional.of(visibleTextDelta));
+        when(visibleTextDelta.delta()).thenReturn("second provider text");
+        ReflectionTestUtils.setField(streamingService, "clientPrimary", githubModelsClient);
+        ReflectionTestUtils.setField(streamingService, "clientSecondary", openAiClient);
+
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectNext("second provider text")
+                .verifyComplete();
+
+        verify(githubModelsResponseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(openAiResponseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
     }
 
     @Test

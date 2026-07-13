@@ -9,8 +9,6 @@ import reactor.core.publisher.Sinks;
  */
 record StreamingAttemptContext(
         List<OpenAiProviderCandidate> availableProviders, int attemptIndex, Sinks.Many<StreamingNotice> noticeSink) {
-    private static final int SINGLE_PROVIDER_MAX_ATTEMPTS = 2;
-
     StreamingAttemptContext {
         Objects.requireNonNull(availableProviders, "availableProviders");
         Objects.requireNonNull(noticeSink, "noticeSink");
@@ -30,8 +28,7 @@ record StreamingAttemptContext(
     }
 
     OpenAiProviderCandidate currentProvider() {
-        int providerIndex = Math.min(attemptIndex, availableProviders.size() - 1);
-        return availableProviders.get(providerIndex);
+        return availableProviders.get(attemptIndex);
     }
 
     int currentAttempt() {
@@ -55,6 +52,6 @@ record StreamingAttemptContext(
     }
 
     private static int maximumAttemptsFor(List<OpenAiProviderCandidate> availableProviders) {
-        return availableProviders.size() == 1 ? SINGLE_PROVIDER_MAX_ATTEMPTS : availableProviders.size();
+        return availableProviders.size();
     }
 }
