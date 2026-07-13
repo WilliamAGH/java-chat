@@ -16,14 +16,12 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * Verifies the OG image endpoint returns correct content type, cache headers, and image dimensions.
  */
-@ActiveProfiles("test")
 @WebMvcTest(controllers = OpenGraphImageController.class)
 @Import({OpenGraphImageRenderer.class, com.williamcallahan.javachat.config.AppProperties.class})
 @WithMockUser

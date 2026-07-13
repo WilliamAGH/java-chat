@@ -27,11 +27,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** Verifies error documentation pages preserve direct and forwarded HTTP status semantics. */
-@ActiveProfiles("test")
 @WebMvcTest(controllers = ErrorDocumentationController.class)
 @Import(com.williamcallahan.javachat.config.AppProperties.class)
 @WithMockUser

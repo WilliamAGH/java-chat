@@ -182,6 +182,7 @@ spotless {
 
 // Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
+    systemProperty("spring.profiles.active", "test")
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(

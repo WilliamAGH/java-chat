@@ -17,14 +17,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies enrichment endpoints return expected payloads under WebMvcTest.
  */
-@ActiveProfiles("test")
 @WebMvcTest(controllers = EnrichmentController.class)
 @Import({AppProperties.class, WebMvcConfig.class})
 @org.springframework.test.context.TestPropertySource(properties = "app.docs.jdk-version=24")
