@@ -165,14 +165,23 @@ public class OpenAIStreamingService {
                     }
 
                     OpenAiProviderCandidate initialProvider = availableProviders.get(0);
+                    // Routing selects two candidates, so one pre-text fallback signal is sufficient.
                     Sinks.Many<StreamingNotice> noticeSink =
-                            Sinks.many().multicast().onBackpressureBuffer();
+                            Sinks.many().replay().limit(1);
+                    Sinks.One<RateLimitService.ApiProvider> providerChangeSink = Sinks.one();
                     StreamingAttemptContext attemptContext =
-                            StreamingAttemptContext.first(availableProviders, noticeSink);
+                            StreamingAttemptContext.first(availableProviders, noticeSink, providerChangeSink);
                     Flux<String> contentFlux = executeStreamingWithPreTextRetry(
                                     structuredPrompt, temperature, attemptContext)
-                            .doFinally(ignoredSignal -> noticeSink.tryEmitComplete());
-                    return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
+                            .doFinally(ignoredSignalType -> {
+                                noticeSink.tryEmitComplete();
+                                providerChangeSink.tryEmitEmpty();
+                            });
+                    return Mono.just(new StreamingResult(
+                            contentFlux,
+                            initialProvider.provider(),
+                            providerChangeSink.asMono().flux(),
+                            noticeSink.asFlux()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -370,6 +379,7 @@ public class OpenAIStreamingService {
                             nextAttempt.maxAttempts(),
                             streamingFailure.getClass().getSimpleName());
 
+                    emitProviderChange(attemptContext.providerChangeSink(), retryProvider.provider());
                     emitStreamingNotice(
                             attemptContext.noticeSink(),
                             StreamingNotice.builder(
@@ -483,6 +493,17 @@ public class OpenAIStreamingService {
         Sinks.EmitResult emitResult = noticeSink.tryEmitNext(streamingNotice);
         if (emitResult.isFailure()) {
             log.debug("Failed to emit streaming notice (emitResult={})", emitResult);
+        }
+    }
+
+    private void emitProviderChange(
+            Sinks.One<RateLimitService.ApiProvider> providerChangeSink, RateLimitService.ApiProvider fallbackProvider) {
+        Sinks.EmitResult emitResult = providerChangeSink.tryEmitValue(fallbackProvider);
+        if (emitResult.isFailure()) {
+            log.debug(
+                    "Failed to emit fallback provider change (providerId={}, emitResult={})",
+                    fallbackProvider.ordinal(),
+                    emitResult);
         }
     }
 }

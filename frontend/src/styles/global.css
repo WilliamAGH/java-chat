@@ -5,7 +5,7 @@
  */
 
 @font-face {
-  font-family: "Fraunces";
+  font-family: Fraunces;
   src: url("/fonts/Fraunces-Variable.ttf") format("truetype");
   font-weight: 100 900;
   font-display: swap;
@@ -291,27 +291,6 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes slide-in-right {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes pulse-subtle {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
   }
 }
 

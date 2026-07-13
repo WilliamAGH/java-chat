@@ -175,6 +175,9 @@ public class ChatController extends BaseController {
 
                                     Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
                                             sseSupport.streamingNoticeEvents(streamingResult.notices());
+                                    Flux<ServerSentEvent<String>> providerChangeEvents = streamingResult
+                                            .providerChanges()
+                                            .map(provider -> sseSupport.providerEvent(provider.getName()));
 
                                     // Wrap chunks in JSON to preserve whitespace
                                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
@@ -182,10 +185,16 @@ public class ChatController extends BaseController {
                                     Flux<ServerSentEvent<String>> citationEvent =
                                             Flux.just(sseSupport.citationEvent(finalCitations));
 
+                                    // Subscribe to replayable fallback signals before the ref-counted data stream
+                                    // starts.
                                     return Flux.concat(
                                             Flux.just(providerEvent),
                                             statusEvents,
-                                            Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                                            Flux.merge(
+                                                    providerChangeEvents,
+                                                    runtimeStreamingStatusEvents,
+                                                    dataEvents,
+                                                    heartbeats),
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {

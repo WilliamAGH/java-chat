@@ -56,7 +56,8 @@ export const MAX_STREAM_RECOVERY_RETRIES = resolveStreamRecoveryRetryCount(
  * The retry gate is intentionally strict:
  * - bounded retries via MAX_STREAM_RECOVERY_RETRIES,
  * - only before any assistant chunk has been rendered,
- * - only for known malformed/overflow stream signatures.
+ * - terminal backend metadata takes precedence over earlier status events,
+ * - unstructured failures require a known recoverable signature.
  */
 export function shouldRetryStreamRequest(
   streamFailure: unknown,
@@ -71,6 +72,9 @@ export function shouldRetryStreamRequest(
   }
   if (attemptedRetries >= maxRecoveryRetries) {
     return false;
+  }
+  if (typeof streamErrorEvent?.retryable === "boolean") {
+    return streamErrorEvent.retryable;
   }
   if (latestStreamStatus?.stage === "stream" && latestStreamStatus.retryable === false) {
     return false;

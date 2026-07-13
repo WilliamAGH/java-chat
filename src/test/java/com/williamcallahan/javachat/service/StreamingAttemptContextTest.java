@@ -20,7 +20,8 @@ class StreamingAttemptContextTest {
     @Test
     void singleProviderIsAttemptedExactlyOnce() {
         OpenAiProviderCandidate onlyProvider = provider(RateLimitService.ApiProvider.OPENAI);
-        StreamingAttemptContext firstAttempt = StreamingAttemptContext.first(List.of(onlyProvider), noticeSink());
+        StreamingAttemptContext firstAttempt =
+                StreamingAttemptContext.first(List.of(onlyProvider), noticeSink(), providerChangeSink());
 
         assertAttempt(firstAttempt, onlyProvider, 1, SINGLE_PROVIDER_ATTEMPT_COUNT, false);
         assertThrows(IllegalStateException.class, firstAttempt::withNextAttempt);
@@ -30,8 +31,8 @@ class StreamingAttemptContextTest {
     void multipleProvidersAreAttemptedExactlyOnceEach() {
         OpenAiProviderCandidate primaryProvider = provider(RateLimitService.ApiProvider.OPENAI);
         OpenAiProviderCandidate secondaryProvider = provider(RateLimitService.ApiProvider.GITHUB_MODELS);
-        StreamingAttemptContext firstAttempt =
-                StreamingAttemptContext.first(List.of(primaryProvider, secondaryProvider), noticeSink());
+        StreamingAttemptContext firstAttempt = StreamingAttemptContext.first(
+                List.of(primaryProvider, secondaryProvider), noticeSink(), providerChangeSink());
 
         assertAttempt(firstAttempt, primaryProvider, 1, DISTINCT_PROVIDER_ATTEMPT_COUNT, true);
 
@@ -47,6 +48,10 @@ class StreamingAttemptContextTest {
 
     private static Sinks.Many<StreamingNotice> noticeSink() {
         return Sinks.many().multicast().onBackpressureBuffer();
+    }
+
+    private static Sinks.One<RateLimitService.ApiProvider> providerChangeSink() {
+        return Sinks.one();
     }
 
     private static void assertAttempt(
