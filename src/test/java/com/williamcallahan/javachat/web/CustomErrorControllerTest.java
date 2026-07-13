@@ -74,6 +74,11 @@ class CustomErrorControllerTest {
     @Test
     void logs_non_api_not_found_at_info_with_safe_request_metadata() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/missing.js?token=secret")
+                        .header("User-Agent", "spoofed-browser")
+                        .with(servletRequest -> {
+                            servletRequest.setServerName("spoofed-host");
+                            return servletRequest;
+                        })
                         .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "default\r\nServlet"))
                 .andExpect(status().isNotFound());
 
@@ -81,7 +86,8 @@ class CustomErrorControllerTest {
         assertEquals(Level.INFO, requestFailureLog.getLevel());
         String diagnostic = requestFailureLog.getFormattedMessage();
         assertTrue(diagnostic.contains("status=404 source=default??Servlet method=GET"));
-        assertTrue(diagnostic.contains("uri=/missing.js requestId="));
+        assertTrue(diagnostic.contains("uri=/missing.js host=spoofed-host"));
+        assertTrue(diagnostic.contains("userAgent=spoofed-browser requestId="));
         assertFalse(diagnostic.contains("secret"));
         List<?> structuredLogFields = requestFailureLog.getKeyValuePairs();
         assertTrue(structuredLogFields == null || structuredLogFields.isEmpty());
@@ -117,8 +123,8 @@ class CustomErrorControllerTest {
         assertFalse(renderedRequestFailure.contains("\u2028"));
         assertTrue(renderedRequestFailure.contains("method=GET"));
         assertTrue(renderedRequestFailure.contains("uri=/api/unknown"));
-        assertFalse(renderedRequestFailure.contains("host="));
-        assertFalse(renderedRequestFailure.contains("userAgent="));
+        assertTrue(renderedRequestFailure.contains("host=localhost"));
+        assertTrue(renderedRequestFailure.contains("userAgent=unknown"));
         assertFalse(renderedRequestFailure.contains("status=\""));
     }
 
