@@ -25,8 +25,8 @@ function readCookie(cookieName: string): string | null {
   }
   const cookieEntry = document.cookie
     .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${cookieName}=`));
+    .map((cookieSegment) => cookieSegment.trim())
+    .find((cookieSegment) => cookieSegment.startsWith(`${cookieName}=`));
 
   if (!cookieEntry) {
     return null;
@@ -52,35 +52,39 @@ export function csrfHeader(): Record<string, string> {
   return { [CSRF_HEADER_NAME]: tokenText };
 }
 
-async function readApiErrorResponse(
-  response: Response,
+async function readCsrfError(
+  httpResponse: Response,
   source: string,
 ): Promise<ApiErrorResponse | null> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
+  const responseMediaType = httpResponse.headers.get("content-type") ?? "";
+  if (!responseMediaType.includes("application/json")) {
     return null;
   }
 
-  const payload: unknown = await response.json().catch((parseError: unknown) => {
+  const parsedErrorDocument: unknown = await httpResponse.json().catch((parseError: unknown) => {
     console.error(`[${source}] Failed to parse CSRF error payload:`, parseError);
     return undefined;
   });
-  if (payload === undefined) {
+  if (parsedErrorDocument === undefined) {
     return null;
   }
 
-  const validation = validateWithSchema(ApiErrorResponseSchema, payload, `${source}:csrf-error`);
-  if (!validation.success) {
+  const csrfErrorValidation = validateWithSchema(
+    ApiErrorResponseSchema,
+    parsedErrorDocument,
+    `${source}:csrf-error`,
+  );
+  if (!csrfErrorValidation.success) {
     return null;
   }
-  return validation.validated;
+  return csrfErrorValidation.validated;
 }
 
 export async function extractApiErrorMessage(
-  response: Response,
+  httpResponse: Response,
   source: string,
 ): Promise<string | null> {
-  const apiError = await readApiErrorResponse(response, source);
+  const apiError = await readCsrfError(httpResponse, source);
   if (!apiError) {
     return null;
   }
@@ -123,7 +127,7 @@ export async function refreshCsrfToken(): Promise<boolean> {
   }
 
   refreshPromise = fetch(CSRF_REFRESH_ENDPOINT, { method: "GET", cache: "no-store" })
-    .then((response) => response.ok)
+    .then((csrfRefreshResponse) => csrfRefreshResponse.ok)
     .catch((refreshError: unknown) => {
       console.warn("[csrf] Failed to refresh CSRF token:", refreshError);
       return false;
@@ -137,44 +141,44 @@ export async function refreshCsrfToken(): Promise<boolean> {
 }
 
 export async function fetchWithCsrfRetry(
-  input: RequestInfo | URL,
-  init: RequestInit,
+  requestTarget: RequestInfo | URL,
+  requestOptions: RequestInit,
   source: string,
 ): Promise<Response> {
-  const response = await fetch(input, withCurrentCsrfHeader(init));
-  if (response.status !== CSRF_FORBIDDEN_STATUS) {
-    return response;
+  const initialHttpResponse = await fetch(requestTarget, withCurrentCsrfHeader(requestOptions));
+  if (initialHttpResponse.status !== CSRF_FORBIDDEN_STATUS) {
+    return initialHttpResponse;
   }
 
-  if (init.signal?.aborted) {
-    return response;
+  if (requestOptions.signal?.aborted) {
+    return initialHttpResponse;
   }
 
-  const apiError = await readApiErrorResponse(response.clone(), source);
-  if (!apiError || !isRecoverableCsrfErrorMessage(apiError.message)) {
-    return response;
+  const initialCsrfError = await readCsrfError(initialHttpResponse.clone(), source);
+  if (!initialCsrfError || !isRecoverableCsrfErrorMessage(initialCsrfError.message)) {
+    return initialHttpResponse;
   }
 
-  const refreshed = await refreshCsrfToken();
-  if (!refreshed) {
+  const csrfTokenRefreshed = await refreshCsrfToken();
+  if (!csrfTokenRefreshed) {
     maybeToastExpired();
-    return response;
+    return initialHttpResponse;
   }
 
-  if (init.signal?.aborted) {
-    return response;
+  if (requestOptions.signal?.aborted) {
+    return initialHttpResponse;
   }
 
-  const retriedResponse = await fetch(input, withCurrentCsrfHeader(init));
-  if (retriedResponse.status !== CSRF_FORBIDDEN_STATUS) {
-    return retriedResponse;
+  const retriedHttpResponse = await fetch(requestTarget, withCurrentCsrfHeader(requestOptions));
+  if (retriedHttpResponse.status !== CSRF_FORBIDDEN_STATUS) {
+    return retriedHttpResponse;
   }
 
-  const retriedError = await readApiErrorResponse(retriedResponse.clone(), `${source}:retry`);
-  if (retriedError && isRecoverableCsrfErrorMessage(retriedError.message)) {
+  const retriedCsrfError = await readCsrfError(retriedHttpResponse.clone(), `${source}:retry`);
+  if (retriedCsrfError && isRecoverableCsrfErrorMessage(retriedCsrfError.message)) {
     maybeToastExpired();
   }
-  return retriedResponse;
+  return retriedHttpResponse;
 }
 
 function maybeToastExpired(): void {
