@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,7 +18,6 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.ConsoleAppender;
 import ch.qos.logback.core.read.ListAppender;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -33,12 +31,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.ui.ExtendedModelMap;
 
 /** Verifies error diagnostics retain request attribution without exposing query data. */
-@ActiveProfiles("test")
 @WebMvcTest(controllers = CustomErrorController.class)
 @Import({com.williamcallahan.javachat.config.AppProperties.class, ExceptionResponseBuilder.class})
 @WithMockUser
@@ -165,21 +161,6 @@ class CustomErrorControllerTest {
         assertEquals(
                 failure.getClass().getName(),
                 requestFailureLog.getThrowableProxy().getClassName());
-    }
-
-    @Test
-    void logsAlreadyReportedTerminalStreamingFailureAtWarnWithoutException() throws Exception {
-        OpenAiStreamingFailureException terminalFailure = mock(OpenAiStreamingFailureException.class);
-        IllegalStateException dispatchFailure = new IllegalStateException("dispatch failed", terminalFailure);
-
-        mockMvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/api/chat")
-                        .requestAttr(RequestDispatcher.ERROR_EXCEPTION, dispatchFailure)
-                        .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet"))
-                .andExpect(status().isInternalServerError());
-
-        ILoggingEvent requestFailureLog = onlyLogEvent();
-        assertEquals(Level.WARN, requestFailureLog.getLevel());
-        assertNull(requestFailureLog.getThrowableProxy());
     }
 
     @Test

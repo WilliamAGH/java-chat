@@ -1,8 +1,6 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
-import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
@@ -113,12 +111,9 @@ public class CustomErrorController implements ErrorController {
         String userAgent = safeLogField(request.getHeader("User-Agent"));
         String safeRequestId = safeLogField(request.getRequestId());
         String source = safeLogField(request.getAttribute(RequestDispatcher.ERROR_SERVLET_NAME));
-        boolean terminalStreamFailureAlreadyLogged = exception instanceof Throwable requestFailure
-                && OpenAiStreamingFailureException.findInCauseChain(requestFailure)
-                        .isPresent();
 
-        LoggingEventBuilder requestFailureLog = log.atLevel(resolveFailureLogLevel(
-                        statusCode, isApiRequest(requestUri), terminalStreamFailureAlreadyLogged))
+        LoggingEventBuilder requestFailureLog = log.atLevel(
+                        resolveFailureLogLevel(statusCode, isApiRequest(requestUri)))
                 .setMessage("Request failed status={} source={} method={} uri={} host={} userAgent={} requestId={}")
                 .addArgument(statusCode)
                 .addArgument(source)
@@ -128,8 +123,7 @@ public class CustomErrorController implements ErrorController {
                 .addArgument(userAgent)
                 .addArgument(safeRequestId);
         if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()
-                && exception instanceof Exception exceptionInstance
-                && !terminalStreamFailureAlreadyLogged) {
+                && exception instanceof Exception exceptionInstance) {
             requestFailureLog = requestFailureLog.setCause(exceptionInstance);
         }
         requestFailureLog.log();
@@ -139,10 +133,9 @@ public class CustomErrorController implements ErrorController {
         return requestUri.equals("/api") || requestUri.startsWith("/api/");
     }
 
-    private Level resolveFailureLogLevel(
-            int statusCode, boolean apiRequest, boolean terminalStreamFailureAlreadyLogged) {
+    private Level resolveFailureLogLevel(int statusCode, boolean apiRequest) {
         if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
-            return terminalStreamFailureAlreadyLogged ? Level.WARN : Level.ERROR;
+            return Level.ERROR;
         }
         if (statusCode == HttpStatus.NOT_FOUND.value() && apiRequest) {
             return Level.WARN;
@@ -151,7 +144,17 @@ public class CustomErrorController implements ErrorController {
     }
 
     private String safeLogField(Object requestField) {
-        return StructuredLogValue.bounded(requestField, MAX_LOG_FIELD_LENGTH).text();
+        if (requestField == null) {
+            return "unknown";
+        }
+        String logField = requestField.toString();
+        int boundedLength = Math.min(logField.length(), MAX_LOG_FIELD_LENGTH);
+        StringBuilder safeField = new StringBuilder(boundedLength);
+        for (int index = 0; index < boundedLength; index++) {
+            char character = logField.charAt(index);
+            safeField.append(Character.isISOControl(character) ? '?' : character);
+        }
+        return safeField.toString();
     }
 
     /**
