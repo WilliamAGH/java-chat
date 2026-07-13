@@ -27,10 +27,6 @@ final class DocumentationSetCatalog {
     private static final String DOCSET_SPRING_AI_COMPLETE_NAME = "Spring AI Complete";
     private static final String DOCSET_SPRING_AI_COMPLETE_PATH = "spring-ai-complete";
 
-    private static final String DOCSET_JAVA_24_QUICK_NAME = "Java 24 Quick";
-    private static final String DOCSET_JAVA_24_QUICK_PATH = "java24";
-    private static final String DOCSET_JAVA_25_QUICK_NAME = "Java 25 Quick";
-    private static final String DOCSET_JAVA_25_QUICK_PATH = "java25";
     private static final String DOCSET_SPRING_BOOT_QUICK_NAME = "Spring Boot Quick";
     private static final String DOCSET_SPRING_BOOT_QUICK_PATH = "spring-boot";
     private static final String DOCSET_SPRING_FRAMEWORK_QUICK_NAME = "Spring Framework Quick";
@@ -41,8 +37,6 @@ final class DocumentationSetCatalog {
     private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = buildBaseDocumentationSets();
 
     private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
-            new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_QUICK_NAME, DOCSET_JAVA_25_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));

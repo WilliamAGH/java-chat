@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
@@ -9,12 +10,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
  * Verifies that CLI and shell ingestion project the canonical Java API source inventory.
  */
 class JavaApiDocumentationSourceParityTest {
+
+    private static final Set<String> LEGACY_QUICK_JAVA_DOCSET_TOKENS = Set.of("java24", "java25");
 
     @Test
     void projectsCanonicalJavaApiSourcesIntoCliCatalogAndFetchScript() throws IOException, InterruptedException {
@@ -23,11 +27,13 @@ class JavaApiDocumentationSourceParityTest {
                 .map(javaApiDocumentationSource -> new DocumentationSet(
                         javaApiDocumentationSource.displayName(), javaApiDocumentationSource.relativeMirrorPath()))
                 .toList();
-        List<DocumentationSet> actualCliDocumentationSets = DocumentationSetCatalog.baseSets().stream()
+        List<DocumentationSet> actualCliDocumentationSets = DocumentationSetCatalog.allSets().stream()
                 .filter(expectedCliDocumentationSets::contains)
                 .toList();
 
         assertEquals(expectedCliDocumentationSets, actualCliDocumentationSets);
+        assertFalse(DocumentationSetCatalog.allSets().stream()
+                .anyMatch(documentationSet -> documentationSet.matchesAny(LEGACY_QUICK_JAVA_DOCSET_TOKENS)));
 
         Path fetchScriptPath = Path.of("scripts", "fetch_all_docs.sh").toAbsolutePath();
         ProcessBuilder fetchSourceListingCommand =
