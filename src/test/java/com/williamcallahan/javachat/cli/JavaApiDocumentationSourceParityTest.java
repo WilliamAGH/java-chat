@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
@@ -10,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +20,7 @@ import org.junit.jupiter.api.Test;
  */
 class JavaApiDocumentationSourceParityTest {
 
-    private static final Set<String> LEGACY_QUICK_JAVA_DOCSET_TOKENS = Set.of("java24", "java25");
+    private static final String LEGACY_JAVA_QUICK_SELECTOR_PREFIX = "java";
 
     @Test
     void projectsCanonicalJavaApiSourcesIntoCliCatalogAndFetchScript() throws IOException, InterruptedException {
@@ -32,8 +34,6 @@ class JavaApiDocumentationSourceParityTest {
                 .toList();
 
         assertEquals(expectedCliDocumentationSets, actualCliDocumentationSets);
-        assertFalse(DocumentationSetCatalog.allSets().stream()
-                .anyMatch(documentationSet -> documentationSet.matchesAny(LEGACY_QUICK_JAVA_DOCSET_TOKENS)));
 
         Path fetchScriptPath = Path.of("scripts", "fetch_all_docs.sh").toAbsolutePath();
         ProcessBuilder fetchSourceListingCommand =
@@ -70,5 +70,42 @@ class JavaApiDocumentationSourceParityTest {
         int fetchProjectionTestExitCode = fetchProjectionTestProcess.waitFor();
 
         assertEquals(0, fetchProjectionTestExitCode, fetchProjectionTestOutput);
+    }
+
+    @Test
+    void acceptsOnlyCanonicalRelativeMirrorPathsForManifestBackedJavaApiSets() {
+        for (JavaApiDocumentationSource javaApiDocumentationSource : DocsSourceRegistry.javaApiDocumentationSources()) {
+            DocumentationSet catalogDocumentationSet = DocumentationSetCatalog.allSets().stream()
+                    .filter(documentationSet ->
+                            documentationSet.relativePath().equals(javaApiDocumentationSource.relativeMirrorPath()))
+                    .findFirst()
+                    .orElseThrow();
+
+            String canonicalRelativeMirrorPath = javaApiDocumentationSource.relativeMirrorPath();
+            assertEquals(canonicalRelativeMirrorPath, catalogDocumentationSet.primarySelector());
+            assertTrue(catalogDocumentationSet.matchesSelectorTokens(Set.of(canonicalRelativeMirrorPath)));
+
+            List<String> prohibitedSelectorAliases = List.of(
+                    javaApiDocumentationSource.displayName(),
+                    canonicalRelativeMirrorPath.replace('/', '-'),
+                    javaApiDocumentationSource.javaRelease(),
+                    LEGACY_JAVA_QUICK_SELECTOR_PREFIX + javaApiDocumentationSource.javaRelease(),
+                    canonicalRelativeMirrorPath.toUpperCase(Locale.ROOT));
+            for (String prohibitedSelectorAlias : prohibitedSelectorAliases) {
+                assertFalse(
+                        catalogDocumentationSet.matchesSelectorTokens(Set.of(prohibitedSelectorAlias)),
+                        "Canonical Java API selector accepted alias " + prohibitedSelectorAlias);
+            }
+        }
+    }
+
+    @Test
+    void preservesEstablishedSelectorsForNonJavaDocumentationSets() {
+        DocumentationSet quickDocumentationSet =
+                DocumentationSetCatalog.quickSets().getFirst();
+
+        assertEquals(quickDocumentationSet.relativePath().replace('/', '-'), quickDocumentationSet.primarySelector());
+        assertTrue(quickDocumentationSet.matchesSelectorTokens(
+                Set.of(quickDocumentationSet.displayName().toUpperCase(Locale.ROOT))));
     }
 }
