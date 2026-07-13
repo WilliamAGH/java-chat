@@ -112,6 +112,8 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers("/api/**")
                         .permitAll()
+                        .requestMatchers("/actuator/**")
+                        .denyAll()
                         .anyRequest()
                         .permitAll())
                 // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
