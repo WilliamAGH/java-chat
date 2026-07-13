@@ -38,4 +38,11 @@ class GitHubRepositoryIdentityResolverTest {
                 IllegalArgumentException.class,
                 () -> repositoryIdentityResolver.resolve("", "", "https://gitlab.com/openai/java-chat"));
     }
+
+    @Test
+    void rejectsRepositoryUrlWithOnlyOnePathSegment() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> repositoryIdentityResolver.resolve("", "", "https://github.com/openai"));
+    }
 }

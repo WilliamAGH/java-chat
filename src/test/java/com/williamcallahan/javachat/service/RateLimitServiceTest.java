@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -25,7 +26,7 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromOpenAiServiceExceptionUsesRetryAfterHeaderSeconds() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         Headers headers = Headers.builder().put("Retry-After", "12").build();
         RateLimitException exception =
@@ -67,6 +68,25 @@ class RateLimitServiceTest {
         assertThrows(
                 RateLimitDecisionException.class,
                 () -> manager.recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.OPENAI, exception));
+
+        verifyNoInteractions(rateLimitState);
+    }
+
+    @Test
+    void recordRateLimitFromOpenAiServiceExceptionRejectsNonRateLimitStatus() {
+        RateLimitState rateLimitState = mock(RateLimitState.class);
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
+
+        Headers headers = Headers.builder().put("Retry-After", "12").build();
+        UnexpectedStatusCodeException exception = UnexpectedStatusCodeException.builder()
+                .statusCode(HttpStatus.BAD_GATEWAY.value())
+                .headers(headers)
+                .build();
+
+        assertThrows(
+                RateLimitDecisionException.class,
+                () -> rateLimitService.recordRateLimitFromOpenAiServiceException(
                         RateLimitService.ApiProvider.OPENAI, exception));
 
         verifyNoInteractions(rateLimitState);
