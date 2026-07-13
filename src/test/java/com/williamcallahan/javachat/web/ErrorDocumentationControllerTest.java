@@ -119,6 +119,7 @@ class ErrorDocumentationControllerTest {
         return logAppender.list.getFirst();
     }
 
+    /** Forces classpath resource reads to fail after discovery succeeds. */
     private static final class UnreadableResourceClassLoader extends ClassLoader {
         private UnreadableResourceClassLoader(ClassLoader parentClassLoader) {
             super(parentClassLoader);
