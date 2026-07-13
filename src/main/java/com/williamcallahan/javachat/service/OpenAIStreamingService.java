@@ -75,9 +75,6 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
     private long streamingRequestTimeoutSeconds;
 
-    @Value("${OPENAI_STREAMING_READ_TIMEOUT_SECONDS:75}")
-    private long streamingReadTimeoutSeconds;
-
     /**
      * LLM-gateway priority class sent as the {@code X-Tier} header on live chat
      * turns. The gateway queue treats untagged requests as {@code default}
@@ -410,7 +407,6 @@ public class OpenAIStreamingService {
     private Timeout streamingTimeout() {
         return Timeout.builder()
                 .request(Duration.ofSeconds(Math.max(1, streamingRequestTimeoutSeconds)))
-                .read(Duration.ofSeconds(Math.max(1, streamingReadTimeoutSeconds)))
                 .build();
     }
 
