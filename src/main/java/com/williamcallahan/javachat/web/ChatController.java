@@ -121,8 +121,6 @@ public class ChatController extends BaseController {
         List<Message> history = chatMemory.getHistory(sessionId);
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
-        chatMemory.addUser(sessionId, userQuery);
-
         return Flux.defer(() -> {
                     // Build structured prompt for intelligent truncation
                     // Pass model hint to optimize RAG for token-constrained models
@@ -191,7 +189,7 @@ public class ChatController extends BaseController {
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {
-                                    chatMemory.addAssistant(sessionId, fullResponse.toString());
+                                    chatMemory.addExchange(sessionId, userQuery, fullResponse.toString());
                                     PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                                 });
                     }

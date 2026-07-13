@@ -250,7 +250,6 @@ public class GuidedLearningController extends BaseController {
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
         List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
-        chatMemory.addUser(sessionId, userQuery);
         return Flux.defer(() -> {
                     StringBuilder fullResponse = new StringBuilder();
 
@@ -308,7 +307,7 @@ public class GuidedLearningController extends BaseController {
                                         Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
                                         citationEvent);
                             })
-                            .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
+                            .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =
