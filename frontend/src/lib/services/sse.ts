@@ -9,7 +9,7 @@
 import {
   StreamStatusSchema,
   StreamErrorSchema,
-  TextEventPayloadSchema,
+  TextChunkSchema,
   ProviderEventSchema,
   CitationsArraySchema,
   type StreamStatus,
@@ -25,6 +25,8 @@ const SSE_EVENT_STATUS = "status";
 const SSE_EVENT_ERROR = "error";
 const SSE_EVENT_CITATION = "citation";
 const SSE_EVENT_PROVIDER = "provider";
+const SSE_EVENT_TEXT = "text";
+const INVALID_SSE_EVENT_MESSAGE = "Received an invalid SSE event from the server";
 
 /** Optional request options for streaming fetch calls. */
 export interface StreamSseRequestOptions {
@@ -44,10 +46,16 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+function throwInvalidSseEvent(callbacks: SseCallbacks): never {
+  const streamError: StreamError = { message: INVALID_SSE_EVENT_MESSAGE };
+  callbacks.onError?.(streamError);
+  throw new Error(streamError.message);
+}
+
 /**
  * Attempts JSON parsing only when content looks like JSON.
- * Returns parsed object or null for plain text content.
- * Logs parse errors for debugging without interrupting stream processing.
+ * Returns the parsed value or null when the payload is not valid JSON.
+ * Logs parse errors with source context for protocol diagnostics.
  */
 export function tryParseJson(content: string, source: string): unknown {
   const trimmed = content.trim();
@@ -57,7 +65,6 @@ export function tryParseJson(content: string, source: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch (parseError) {
-    // Log for debugging but don't throw - allows graceful fallback to raw text
     console.warn(`[${source}] JSON parse failed for content that looked like JSON:`, {
       preview: trimmed.slice(0, 100),
       error: parseError instanceof Error ? parseError.message : String(parseError),
@@ -85,16 +92,20 @@ function processEvent(
   if (normalizedType === SSE_EVENT_STATUS) {
     const parsed = tryParseJson(eventData, source);
     const validated = validateWithSchema(StreamStatusSchema, parsed, `${source}:status`);
-    callbacks.onStatus?.(validated.success ? validated.validated : { message: eventData });
+    if (!validated.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    callbacks.onStatus?.(validated.validated);
     return;
   }
 
   if (normalizedType === SSE_EVENT_ERROR) {
     const parsed = tryParseJson(eventData, source);
     const validated = validateWithSchema(StreamErrorSchema, parsed, `${source}:error`);
-    const streamError: StreamError = validated.success
-      ? validated.validated
-      : { message: eventData };
+    if (!validated.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    const streamError = validated.validated;
     callbacks.onError?.(streamError);
     const errorWithDetails: Error & { details?: string } = new Error(streamError.message);
     errorWithDetails.details = streamError.details ?? undefined;
@@ -104,28 +115,39 @@ function processEvent(
   if (normalizedType === SSE_EVENT_CITATION) {
     const parsed = tryParseJson(eventData, source);
     const validated = validateWithSchema(CitationsArraySchema, parsed, `${source}:citations`);
-    if (validated.success) {
-      callbacks.onCitations?.(validated.validated);
+    if (!validated.success) {
+      throwInvalidSseEvent(callbacks);
     }
+    callbacks.onCitations?.(validated.validated);
     return;
   }
 
   if (normalizedType === SSE_EVENT_PROVIDER) {
     const parsed = tryParseJson(eventData, source);
     const validated = validateWithSchema(ProviderEventSchema, parsed, `${source}:provider`);
-    if (validated.success) {
-      callbacks.onProvider?.(validated.validated);
+    if (!validated.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    callbacks.onProvider?.(validated.validated);
+    return;
+  }
+
+  if (normalizedType === SSE_EVENT_TEXT) {
+    const parsed = tryParseJson(eventData, source);
+    const validated = validateWithSchema(TextChunkSchema, parsed, `${source}:text`);
+    if (!validated.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    if (validated.validated.text !== "") {
+      callbacks.onText(validated.validated.text);
     }
     return;
   }
 
-  // Default and "text" events - extract text from JSON wrapper if present
-  const parsed = tryParseJson(eventData, source);
-  const validated = validateWithSchema(TextEventPayloadSchema, parsed, `${source}:text`);
-  const textContent = validated.success ? validated.validated.text : eventData;
-  if (textContent !== "") {
-    callbacks.onText(textContent);
-  }
+  console.error(`[${source}] Rejected unsupported SSE event type`, {
+    eventType: normalizedType || "<missing>",
+  });
+  throwInvalidSseEvent(callbacks);
 }
 
 /**

@@ -32,8 +32,8 @@ export const StreamStatusSchema = z.object(sseEventFieldShape);
 /** Error response from SSE error events. */
 export const StreamErrorSchema = z.object(sseEventFieldShape);
 
-/** Text event payload wrapper. */
-export const TextEventPayloadSchema = z.object({
+/** Canonical text chunk emitted by SSE text events. */
+export const TextChunkSchema = z.object({
   text: z.string(),
 });
 
@@ -95,7 +95,7 @@ export const ApiErrorResponseSchema = z.object({
 
 export type StreamStatus = z.infer<typeof StreamStatusSchema>;
 export type StreamError = z.infer<typeof StreamErrorSchema>;
-export type TextEventPayload = z.infer<typeof TextEventPayloadSchema>;
+export type TextChunk = z.infer<typeof TextChunkSchema>;
 export type ProviderEvent = z.infer<typeof ProviderEventSchema>;
 export type Citation = z.infer<typeof CitationSchema>;
 export type GuidedLesson = z.infer<typeof GuidedLessonSchema>;
