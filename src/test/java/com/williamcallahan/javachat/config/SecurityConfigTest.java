@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -34,7 +35,10 @@ class SecurityConfigTest {
     private static final String LOGOUT_ENDPOINT = "/logout";
     private static final String CSRF_COOKIE_NAME = "XSRF-TOKEN";
     private static final String CSRF_HEADER_NAME = "X-XSRF-TOKEN";
+    private static final String CSRF_COOKIE_ROOT_PATH = "/";
+    private static final String CSRF_COOKIE_SAME_SITE_ATTRIBUTE = "SameSite";
     private static final String CSRF_COOKIE_SAME_SITE_POLICY = "Lax";
+    private static final int CSRF_COOKIE_DELETION_MAX_AGE_SECONDS = 0;
     private static final String CSRF_INVALID_MESSAGE =
             "CSRF token missing or invalid. Refresh the page and retry the request.";
 
@@ -46,8 +50,7 @@ class SecurityConfigTest {
         MvcResult csrfRefreshExchange = requestCsrfCookie();
         Cookie csrfCookie = csrfRefreshExchange.getResponse().getCookie(CSRF_COOKIE_NAME);
         assertNotNull(csrfCookie);
-        assertEquals(CSRF_COOKIE_SAME_SITE_POLICY, csrfCookie.getAttribute("SameSite"));
-        assertFalse(csrfCookie.isHttpOnly());
+        assertBrowserReadableCsrfCookieAttributes(csrfCookie);
         assertNull(csrfRefreshExchange.getRequest().getSession(false));
         assertNull(csrfRefreshExchange.getResponse().getCookie("JSESSIONID"));
 
@@ -70,6 +73,15 @@ class SecurityConfigTest {
     }
 
     @Test
+    void issuesSecureBrowserReadableCsrfCookieOverHttps() throws Exception {
+        Cookie issuedCsrfCookie = requestSecureCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
+        assertNotNull(issuedCsrfCookie);
+
+        assertTrue(issuedCsrfCookie.getSecure());
+        assertBrowserReadableCsrfCookieAttributes(issuedCsrfCookie);
+    }
+
+    @Test
     void rejectsMismatchedAndSingleSidedCsrfTokens() throws Exception {
         Cookie csrfCookie = requestCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
         assertNotNull(csrfCookie);
@@ -89,23 +101,45 @@ class SecurityConfigTest {
 
     @Test
     void deletesCsrfCookieImmediatelyOnLogout() throws Exception {
-        Cookie csrfCookie = requestCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
-        assertNotNull(csrfCookie);
+        Cookie issuedCsrfCookie = requestSecureCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
+        assertNotNull(issuedCsrfCookie);
 
-        MvcResult logoutExchange = mockMvc.perform(
-                        post(LOGOUT_ENDPOINT).cookie(csrfCookie).header(CSRF_HEADER_NAME, csrfCookie.getValue()))
+        MvcResult logoutExchange = mockMvc.perform(post(LOGOUT_ENDPOINT)
+                        .secure(true)
+                        .cookie(issuedCsrfCookie)
+                        .header(CSRF_HEADER_NAME, issuedCsrfCookie.getValue()))
                 .andExpect(status().is3xxRedirection())
                 .andReturn();
 
         Cookie deletedCsrfCookie = logoutExchange.getResponse().getCookie(CSRF_COOKIE_NAME);
         assertNotNull(deletedCsrfCookie);
-        assertEquals(0, deletedCsrfCookie.getMaxAge());
+        assertTrue(deletedCsrfCookie.getSecure());
+        assertBrowserReadableCsrfCookieAttributes(deletedCsrfCookie);
+        assertEquals(CSRF_COOKIE_DELETION_MAX_AGE_SECONDS, deletedCsrfCookie.getMaxAge());
     }
 
     private MvcResult requestCsrfCookie() throws Exception {
         return mockMvc.perform(get(CSRF_REFRESH_ENDPOINT))
                 .andExpect(status().isOk())
                 .andReturn();
+    }
+
+    /**
+     * Requests a CSRF cookie through the HTTPS transport path so cookie security attributes are observable.
+     */
+    private MvcResult requestSecureCsrfCookie() throws Exception {
+        return mockMvc.perform(get(CSRF_REFRESH_ENDPOINT).secure(true))
+                .andExpect(status().isOk())
+                .andReturn();
+    }
+
+    /**
+     * Verifies browser-visible attributes shared by issued and deleted CSRF cookies.
+     */
+    private static void assertBrowserReadableCsrfCookieAttributes(Cookie csrfCookie) {
+        assertEquals(CSRF_COOKIE_ROOT_PATH, csrfCookie.getPath());
+        assertEquals(CSRF_COOKIE_SAME_SITE_POLICY, csrfCookie.getAttribute(CSRF_COOKIE_SAME_SITE_ATTRIBUTE));
+        assertFalse(csrfCookie.isHttpOnly());
     }
 
     /**
