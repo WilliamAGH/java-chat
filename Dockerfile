@@ -65,6 +65,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 # ================================
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
 ARG SOURCE_COMMIT=unknown
+LABEL io.iocloudhost.logs.owner=split
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
