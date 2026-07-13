@@ -143,7 +143,7 @@ make compose-up
 ### Qdrant troubleshooting
 
 - `QDRANT_HOST` must be a hostname only (no `http://` or `https://` prefix).
-- Local compose maps Qdrant to allowed ports: gRPC `8086`, REST `8087` (`docker-compose-qdrant.yml`).
+- Local compose maps Qdrant to allowed ports: gRPC `8086`, REST `8087` (`infra/docker-compose-qdrant.yml`).
 - Some scripts use REST for health checks; set `QDRANT_REST_PORT=8087` when using local compose.
 - On startup, `QdrantIndexInitializer` validates that all four collections have matching dense vector dimensions. A dimension mismatch (e.g., after changing embedding providers) causes startup failure — delete the collections and re-ingest.
 

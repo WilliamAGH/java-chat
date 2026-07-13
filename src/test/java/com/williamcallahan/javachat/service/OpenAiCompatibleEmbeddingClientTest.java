@@ -22,10 +22,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -235,7 +237,8 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void defersProbeWhenForegroundEmbeddingIsAlreadyActive() throws Exception {
+    void defersProbeWhenForegroundEmbeddingIsAlreadyActive()
+            throws InterruptedException, ExecutionException, TimeoutException {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
         EmbeddingService liveEmbeddingService = mock(EmbeddingService.class);
@@ -270,7 +273,8 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void foregroundDoesNotWaitForProbeAdmittedBeforeItArrives() throws Exception {
+    void foregroundDoesNotWaitForProbeAdmittedBeforeItArrives()
+            throws InterruptedException, ExecutionException, TimeoutException {
         OpenAIClient liveClient = mock(OpenAIClient.class);
         OpenAIClient batchClient = mock(OpenAIClient.class);
         EmbeddingService liveEmbeddingService = mock(EmbeddingService.class);

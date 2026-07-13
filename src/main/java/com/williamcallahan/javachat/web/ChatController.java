@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
@@ -11,11 +12,13 @@ import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
-import java.util.ArrayList;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -49,6 +52,7 @@ public class ChatController extends BaseController {
     private static final String SESSION_FOUND_MESSAGE = "Session found";
     private static final String SESSION_FOUND_EMPTY_MESSAGE = "Session found but empty";
     private static final String PIPELINE_LOG_SEPARATOR = "============================================";
+    private static final int MAX_STREAM_LOG_SESSION_ID_LENGTH = 128;
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -102,7 +106,8 @@ public class ChatController extends BaseController {
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> stream(@RequestBody ChatStreamRequest request, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> stream(
+            @Valid @RequestBody ChatStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
@@ -113,7 +118,7 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
-        List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        List<Message> history = chatMemory.getHistory(sessionId);
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
         chatMemory.addUser(sessionId, userQuery);
@@ -195,15 +200,27 @@ public class ChatController extends BaseController {
                             "Streaming service unavailable", "OpenAI streaming service is not ready");
                 })
                 .onErrorResume(error -> {
-                    String errorDetail = buildUserFacingErrorMessage(error);
-                    String diagnostics =
-                            error instanceof Exception exception ? describeException(exception) : error.toString();
-                    PIPELINE_LOG.error(
-                            "[{}] STREAMING ERROR (sessionId={}, exceptionType={})",
-                            requestToken,
-                            sessionId,
-                            error.getClass().getSimpleName(),
-                            error);
+                    Optional<ReportedStreamingFailure> terminalFailureContext =
+                            ReportedStreamingFailure.findInCauseChain(error);
+                    Throwable upstreamError = terminalFailureContext
+                            .map(ReportedStreamingFailure::upstreamFailure)
+                            .orElse(error);
+                    String errorDetail = buildUserFacingErrorMessage(upstreamError);
+                    String diagnostics = upstreamError instanceof Exception exception
+                            ? describeException(exception)
+                            : upstreamError.getClass().getName();
+                    if (terminalFailureContext.isEmpty()) {
+                        PIPELINE_LOG
+                                .atError()
+                                .setMessage("[{}] STREAMING ERROR")
+                                .addArgument(requestToken)
+                                .addKeyValue(
+                                        "sessionId",
+                                        StructuredLogValue.bounded(sessionId, MAX_STREAM_LOG_SESSION_ID_LENGTH)
+                                                .text())
+                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
+                                .log();
+                    }
                     boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
                     return sseSupport.streamErrorEvent(errorDetail, diagnostics, retryable);
                 });

@@ -24,10 +24,11 @@ final class OrderedMarkerScanner {
      * Describes a detected ordered list marker.
      *
      * @param startIndex position where the marker begins
+     * @param delimiterIndex position of the marker delimiter
      * @param afterIndex position after the marker (start of content)
      * @param kind the type of ordered marker detected
      */
-    record MarkerMatch(int startIndex, int afterIndex, InlineListOrderedKind kind) {}
+    record MarkerMatch(int startIndex, int delimiterIndex, int afterIndex, InlineListOrderedKind kind) {}
 
     /**
      * Strategy for reading a specific type of ordered marker.
@@ -55,26 +56,29 @@ final class OrderedMarkerScanner {
      * @return true if the line starts with a CommonMark-compliant ordered marker
      */
     static boolean startsWithOrderedMarker(String trimmedLine) {
-        if (trimmedLine == null || trimmedLine.isEmpty()) {
-            return false;
-        }
-        var match = scanAt(trimmedLine, 0);
-        if (match.isEmpty()) {
-            return false;
-        }
-        // CommonMark requires whitespace after marker delimiter (. or ))
-        // Reject "1.Foo" but accept "1. Foo" or "1." at end of line
-        for (int cursor = 0; cursor < trimmedLine.length(); cursor++) {
-            char c = trimmedLine.charAt(cursor);
-            if (c == '.' || c == ')') {
-                // Found delimiter at position cursor
-                int posAfterDelimiter = cursor + 1;
-                // Valid if: at end of line, or next char is whitespace
-                return posAfterDelimiter >= trimmedLine.length()
-                        || Character.isWhitespace(trimmedLine.charAt(posAfterDelimiter));
-            }
-        }
-        return false;
+        return scanAt(trimmedLine, 0)
+                .map(markerMatch -> hasWhitespaceAfterMarkerDelimiter(trimmedLine, markerMatch))
+                .orElse(false);
+    }
+
+    /**
+     * Checks whether text starts with a numeric ordered list marker and its required whitespace.
+     *
+     * @param trimmedLine line with leading whitespace already removed
+     * @return true if the line starts with a CommonMark-compliant numeric ordered marker
+     */
+    static boolean startsWithNumericOrderedMarker(String trimmedLine) {
+        return scanAt(trimmedLine, 0, InlineListOrderedKind.NUMERIC)
+                .map(markerMatch -> hasWhitespaceAfterMarkerDelimiter(trimmedLine, markerMatch))
+                .orElse(false);
+    }
+
+    private static boolean hasWhitespaceAfterMarkerDelimiter(String trimmedLine, MarkerMatch markerMatch) {
+        // CommonMark requires whitespace after marker delimiter (. or )).
+        // Reject "1.Foo" but accept "1. Foo" or "1." at end of line.
+        int positionAfterDelimiter = markerMatch.delimiterIndex() + 1;
+        return positionAfterDelimiter >= trimmedLine.length()
+                || Character.isWhitespace(trimmedLine.charAt(positionAfterDelimiter));
     }
 
     /**
@@ -149,7 +153,7 @@ final class OrderedMarkerScanner {
             afterIndex++;
         }
 
-        return new MarkerMatch(startIndex, afterIndex, kind);
+        return new MarkerMatch(startIndex, sequenceEnd, afterIndex, kind);
     }
 
     private static int readNumericSequence(String text, int index) {

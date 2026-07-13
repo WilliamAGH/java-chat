@@ -11,7 +11,7 @@ GRADLEW := ./gradlew
 # Application Configuration
 # ============================================================================
 APP_NAME := java-chat
-QDRANT_COMPOSE_FILE := docker-compose-qdrant.yml
+QDRANT_COMPOSE_FILE := infra/docker-compose-qdrant.yml
 
 # Port configuration
 DEFAULT_PORT := 8085

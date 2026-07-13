@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,7 +42,7 @@ class OpenGraphImageRendererTest {
     }
 
     @Test
-    void renders_valid_png_with_correct_dimensions() throws Exception {
+    void renders_valid_png_with_correct_dimensions() throws IOException {
         byte[] pngBytes = renderer.openGraphPngBytes();
 
         assertNotNull(pngBytes, OG_IMAGE_BYTES_NOT_NULL_ASSERTION_MESSAGE);

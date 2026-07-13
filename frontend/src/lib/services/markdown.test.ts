@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseMarkdown, applyJavaLanguageDetection, escapeHtml } from "./markdown";
+import { applyJavaLanguageDetection } from "./javaLanguageDetection";
+import { parseMarkdown, escapeHtml } from "./markdown";
 
 describe("parseMarkdown", () => {
   it("returns empty string for empty input", () => {
@@ -63,6 +64,42 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain("Close the resource.");
     expect(renderedHtml).toContain("This also applies when an exception is thrown.");
     expect(renderedHtml).not.toContain("{{");
+  });
+
+  it("hides an incomplete enrichment close while preserving streamed prose", () => {
+    const markdown = "{{background: Records automate all of this.}";
+    const renderedHtml = parseMarkdown(markdown, true);
+
+    expect(renderedHtml).toContain("Records automate all of this.");
+    expect(renderedHtml).not.toContain("this.}");
+    expect(renderedHtml).not.toContain("{{background:");
+  });
+
+  it("retains a streamed code closing brace in an unresolved enrichment", () => {
+    const streamedEnrichment = "{{example:class ResourceUser {\n  void closeResource() {\n  }\n}";
+    const renderedHtml = parseMarkdown(streamedEnrichment, true);
+
+    expect(renderedHtml).toContain("class ResourceUser {");
+    expect(renderedHtml).toContain("void closeResource() {");
+    expect(renderedHtml).toContain("\n}</p>");
+    expect(renderedHtml).not.toContain("{{example:");
+  });
+
+  it("retains a code closing brace while the enrichment delimiter streams", () => {
+    const streamedEnrichment = "{{example:class ResourceUser {\n  void closeResource() {\n  }\n}}";
+    const renderedHtml = parseMarkdown(streamedEnrichment, true);
+
+    expect(renderedHtml).toContain("class ResourceUser {");
+    expect(renderedHtml).toContain("void closeResource() {");
+    expect(renderedHtml).toContain("\n}</p>");
+    expect(renderedHtml).not.toContain("{{example:");
+  });
+
+  it("resolves completed enrichment containing an unmatched literal brace", () => {
+    const renderedHtml = parseMarkdown("{{hint: Use the literal { character.}}");
+
+    expect(renderedHtml).toContain('data-enrichment-type="hint"');
+    expect(renderedHtml).toContain("Use the literal { character.");
   });
 
   it("recovers a valid nested marker from an unbalanced outer marker", () => {

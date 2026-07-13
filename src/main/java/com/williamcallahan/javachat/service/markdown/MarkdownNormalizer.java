@@ -155,21 +155,7 @@ final class MarkdownNormalizer {
     }
 
     private static boolean isNumericHeader(String trimmedLine) {
-        if (trimmedLine == null || trimmedLine.isBlank()) {
-            return false;
-        }
-        int digitIndex = 0;
-        while (digitIndex < trimmedLine.length() && Character.isDigit(trimmedLine.charAt(digitIndex))) {
-            digitIndex++;
-        }
-        if (digitIndex == 0 || digitIndex > 3 || digitIndex >= trimmedLine.length()) {
-            return false;
-        }
-        char markerChar = trimmedLine.charAt(digitIndex);
-        if (markerChar != '.' && markerChar != ')') {
-            return false;
-        }
-        return digitIndex + 1 < trimmedLine.length() && trimmedLine.charAt(digitIndex + 1) == ' ';
+        return OrderedMarkerScanner.startsWithNumericOrderedMarker(trimmedLine);
     }
 
     private static void appendFenceMarker(

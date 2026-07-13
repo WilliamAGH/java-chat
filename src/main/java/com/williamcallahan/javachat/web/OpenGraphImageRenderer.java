@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * and never changes at runtime.
  */
 @Component
-public class OpenGraphImageRenderer {
+public final class OpenGraphImageRenderer {
 
     static final int OG_IMAGE_WIDTH = 1200;
     static final int OG_IMAGE_HEIGHT = 630;

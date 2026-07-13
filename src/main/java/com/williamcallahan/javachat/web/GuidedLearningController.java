@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
@@ -10,12 +11,14 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
+import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -39,6 +42,7 @@ import reactor.core.publisher.Flux;
 @PermitAll
 @PreAuthorize("permitAll()")
 public class GuidedLearningController extends BaseController {
+    private static final int MAX_GUIDED_LOG_FIELD_LENGTH = 256;
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 
     /** Timeout for synchronous lesson content generation operations. */
@@ -141,11 +145,16 @@ public class GuidedLearningController extends BaseController {
                     return Flux.merge(dataStream.map(sseSupport::textEvent), sseSupport.heartbeats(dataStream));
                 })
                 .onErrorResume(error -> {
-                    log.error(
-                            "Guided lesson content stream error (lessonSlug={}, exceptionType={})",
-                            slug,
-                            error.getClass().getSimpleName(),
-                            error);
+                    if (ReportedStreamingFailure.findInCauseChain(error).isEmpty()) {
+                        log.atError()
+                                .setMessage("Guided lesson content stream error")
+                                .addKeyValue(
+                                        "lessonSlug",
+                                        StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                                .text())
+                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
+                                .log();
+                    }
                     boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
                     return sseSupport.streamErrorEvent(
                             "Lesson content stream failed",
@@ -211,7 +220,7 @@ public class GuidedLearningController extends BaseController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(
-            @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+            @Valid @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
@@ -237,7 +246,7 @@ public class GuidedLearningController extends BaseController {
      * @return SSE stream of response chunks with heartbeats
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
-        List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
         chatMemory.addUser(sessionId, userQuery);
         return Flux.defer(() -> {
                     StringBuilder fullResponse = new StringBuilder();
@@ -297,15 +306,28 @@ public class GuidedLearningController extends BaseController {
                             .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
                 })
                 .onErrorResume(error -> {
-                    log.error(
-                            "Guided streaming error (sessionId={}, lessonSlug={}, exceptionType={})",
-                            sessionId,
-                            lessonSlug,
-                            error.getClass().getSimpleName(),
-                            error);
+                    Optional<ReportedStreamingFailure> terminalFailureContext =
+                            ReportedStreamingFailure.findInCauseChain(error);
+                    if (terminalFailureContext.isEmpty()) {
+                        log.atError()
+                                .setMessage("Guided streaming error")
+                                .addKeyValue(
+                                        "sessionId",
+                                        StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                                .text())
+                                .addKeyValue(
+                                        "lessonSlug",
+                                        StructuredLogValue.bounded(lessonSlug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                                .text())
+                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
+                                .log();
+                    }
+                    Throwable upstreamFailure = terminalFailureContext
+                            .map(ReportedStreamingFailure::upstreamFailure)
+                            .orElse(error);
                     boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
                     return sseSupport.streamErrorEvent(
-                            "Streaming error: " + error.getClass().getSimpleName(),
+                            "Streaming error: " + upstreamFailure.getClass().getSimpleName(),
                             "The response stream encountered an error. Please try again.",
                             retryable);
                 });

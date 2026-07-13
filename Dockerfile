@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ================================
 # JAVA CHAT DOCKERFILE
 # ================================
@@ -9,7 +11,7 @@
 # ================================
 # FRONTEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/node:22.17.0-bookworm-slim AS frontend-builder
+FROM public.ecr.aws/docker/library/node:24.15.0-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy dependency definitions first for cache layer
@@ -19,9 +21,12 @@ COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-# Copy source files and build
+# Copy source files, validate, test, and build
 COPY frontend/ .
-RUN npm run build
+COPY .gitignore /app/.ignore
+COPY Dockerfile /app/Dockerfile
+COPY docs/getting-started.md /app/docs/getting-started.md
+RUN npm run validate && npm run test && npm run build
 
 # ================================
 # BACKEND BUILD STAGE
@@ -60,6 +65,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 # ================================
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
 ARG SOURCE_COMMIT=unknown
+LABEL io.iocloudhost.logs.owner=split
 
 # 1. System packages (never changes) - FIRST for maximum cache reuse
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -92,11 +98,11 @@ USER appuser
 
 EXPOSE 8085
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
+# Gate Coolify's rolling cutover on dependencies being ready for application traffic.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
-ENTRYPOINT ["/bin/sh", "-c", "java \
+ENTRYPOINT ["/bin/sh", "-c", "exec java \
   -XX:+IgnoreUnrecognizedVMOptions \
   --enable-native-access=ALL-UNNAMED \
   --sun-misc-unsafe-memory-access=allow \

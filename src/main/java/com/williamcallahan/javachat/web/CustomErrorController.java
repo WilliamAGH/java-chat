@@ -1,12 +1,16 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
+import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -88,8 +92,8 @@ public class CustomErrorController implements ErrorController {
         servletResponse.setHeader(REQUEST_ID_HEADER, requestId);
 
         // Determine if this is an API request or a page request
-        boolean isApiRequest = requestUri.equals("/api") || requestUri.startsWith("/api/");
-        logRequestFailure(request, statusCode, requestUri, isApiRequest, requestId, errorExceptionAttribute);
+        boolean isApiRequest = isApiRequest(requestUri);
+        logRequestFailure(request, statusCode, requestUri, errorExceptionAttribute);
 
         if (isApiRequest) {
             // Return JSON error response for API requests
@@ -102,55 +106,51 @@ public class CustomErrorController implements ErrorController {
         }
     }
 
-    private void logRequestFailure(
-            HttpServletRequest request,
-            int statusCode,
-            String uri,
-            boolean apiRequest,
-            String requestId,
-            Object exception) {
+    private void logRequestFailure(HttpServletRequest request, int statusCode, String requestUri, Object exception) {
         String method = safeLogField(request.getMethod());
-        String canonicalUri = safeLogField(uri.split("[?#]", 2)[0]);
+        String canonicalUri = safeLogField(requestUri.split("[?#]", 2)[0]);
         String serverHost = safeLogField(request.getServerName());
         String userAgent = safeLogField(request.getHeader("User-Agent"));
-        String safeRequestId = safeLogField(requestId);
+        String safeRequestId = safeLogField(request.getRequestId());
         String source = safeLogField(request.getAttribute(RequestDispatcher.ERROR_SERVLET_NAME));
-        String diagnostic = "Request failed status={} source={} method={} uri={} host={} userAgent={} requestId={}";
+        boolean terminalStreamFailureAlreadyLogged = exception instanceof Throwable requestFailure
+                && ReportedStreamingFailure.findInCauseChain(requestFailure).isPresent();
 
-        if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
-            if (exception instanceof Exception exceptionInstance) {
-                log.error(
-                        diagnostic,
-                        statusCode,
-                        source,
-                        method,
-                        canonicalUri,
-                        serverHost,
-                        userAgent,
-                        safeRequestId,
-                        exceptionInstance);
-            } else {
-                log.error(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, safeRequestId);
-            }
-        } else if (statusCode == HttpStatus.NOT_FOUND.value() && apiRequest) {
-            log.warn(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, safeRequestId);
-        } else {
-            log.info(diagnostic, statusCode, source, method, canonicalUri, serverHost, userAgent, safeRequestId);
+        LoggingEventBuilder requestFailureLog = log.atLevel(resolveFailureLogLevel(
+                        statusCode, isApiRequest(requestUri), terminalStreamFailureAlreadyLogged))
+                .setMessage("Request failed status={} source={} method={} uri={} host={} userAgent={} requestId={}")
+                .addArgument(statusCode)
+                .addArgument(source)
+                .addArgument(method)
+                .addArgument(canonicalUri)
+                .addArgument(serverHost)
+                .addArgument(userAgent)
+                .addArgument(safeRequestId);
+        if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()
+                && exception instanceof Exception exceptionInstance
+                && !terminalStreamFailureAlreadyLogged) {
+            requestFailureLog = requestFailureLog.setCause(exceptionInstance);
         }
+        requestFailureLog.log();
+    }
+
+    private boolean isApiRequest(String requestUri) {
+        return requestUri.equals("/api") || requestUri.startsWith("/api/");
+    }
+
+    private Level resolveFailureLogLevel(
+            int statusCode, boolean apiRequest, boolean terminalStreamFailureAlreadyLogged) {
+        if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+            return terminalStreamFailureAlreadyLogged ? Level.WARN : Level.ERROR;
+        }
+        if (statusCode == HttpStatus.NOT_FOUND.value() && apiRequest) {
+            return Level.WARN;
+        }
+        return Level.INFO;
     }
 
     private String safeLogField(Object requestField) {
-        if (requestField == null) {
-            return "unknown";
-        }
-        String logField = requestField.toString();
-        int boundedLength = Math.min(logField.length(), MAX_LOG_FIELD_LENGTH);
-        StringBuilder safeField = new StringBuilder(boundedLength);
-        for (int index = 0; index < boundedLength; index++) {
-            char character = logField.charAt(index);
-            safeField.append(Character.isISOControl(character) ? '?' : character);
-        }
-        return safeField.toString();
+        return StructuredLogValue.bounded(requestField, MAX_LOG_FIELD_LENGTH).text();
     }
 
     /**

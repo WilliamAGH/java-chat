@@ -14,6 +14,7 @@ import com.williamcallahan.javachat.domain.markdown.MarkdownStructuredResponse;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import jakarta.annotation.security.PermitAll;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -69,7 +70,8 @@ public class MarkdownController {
             value = "/render",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<MarkdownRenderResponse> renderMarkdown(@RequestBody MarkdownRenderRequest renderRequest) {
+    public ResponseEntity<MarkdownRenderResponse> renderMarkdown(
+            @Valid @RequestBody MarkdownRenderRequest renderRequest) {
         try {
             if (renderRequest.isBlank()) {
                 return ResponseEntity.ok(new MarkdownRenderOutcome("", "server", false, 0, 0));
@@ -113,7 +115,8 @@ public class MarkdownController {
             value = "/preview",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<MarkdownRenderResponse> previewMarkdown(@RequestBody MarkdownRenderRequest renderRequest) {
+    public ResponseEntity<MarkdownRenderResponse> previewMarkdown(
+            @Valid @RequestBody MarkdownRenderRequest renderRequest) {
         try {
             if (renderRequest.isBlank()) {
                 return ResponseEntity.ok(new MarkdownRenderOutcome("", "preview", false, 0, 0));
@@ -201,7 +204,7 @@ public class MarkdownController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<MarkdownStructuredResponse> renderStructured(
-            @RequestBody MarkdownRenderRequest renderRequest) {
+            @Valid @RequestBody MarkdownRenderRequest renderRequest) {
         try {
             if (renderRequest.isBlank()) {
                 return ResponseEntity.ok(new MarkdownStructuredOutcome(

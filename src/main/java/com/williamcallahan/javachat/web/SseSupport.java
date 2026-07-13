@@ -204,7 +204,7 @@ public class SseSupport {
     public ServerSentEvent<String> textEvent(String chunk) {
         return ServerSentEvent.<String>builder()
                 .event(EVENT_TEXT)
-                .data(jsonSerialize(new ChunkPayload(chunk)))
+                .data(jsonSerialize(new TextChunk(chunk)))
                 .build();
     }
 
@@ -312,8 +312,8 @@ public class SseSupport {
                 .build());
     }
 
-    /** Payload record for text chunks - preserves whitespace in JSON. */
-    public record ChunkPayload(String text) {}
+    /** Preserves text-chunk whitespace through JSON serialization. */
+    public record TextChunk(String text) {}
 
     /**
      * Payload record for status and error SSE events.

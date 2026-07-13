@@ -118,7 +118,7 @@ class EmbeddingModelKeepAliveTest {
     }
 
     @Test
-    void unexpectedProbeFailureMarksHealthDownAndPropagates() {
+    void unexpectedProbeFailurePropagatesWithoutChangingHealth() {
         SequencedEmbeddingClient embeddingClient =
                 new SequencedEmbeddingClient(ProbeOutcome.SUCCESS, ProbeOutcome.UNEXPECTED);
         EmbeddingModelKeepAlive keepAlive =
@@ -130,8 +130,8 @@ class EmbeddingModelKeepAliveTest {
 
         assertThrows(IllegalStateException.class, keepAlive::keepEmbeddingModelWarm);
 
-        assertEquals(Status.DOWN, keepAlive.health().getStatus());
-        assertEquals(1, eventCount(Level.WARN, "event=embedding_model_probe_failed"));
+        assertEquals(Status.UP, keepAlive.health().getStatus());
+        assertEquals(0, eventCount(Level.WARN, "event=embedding_model_probe_failed"));
     }
 
     private long eventCount(Level level, String eventName) {

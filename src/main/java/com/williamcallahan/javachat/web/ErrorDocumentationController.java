@@ -68,18 +68,18 @@ public class ErrorDocumentationController {
         return serveHtmlFile(errorType + HTML_EXTENSION, request);
     }
 
-    private ResponseEntity<String> serveHtmlFile(String filename, HttpServletRequest request) {
-        ClassPathResource resource = new ClassPathResource(ERRORS_PATH + filename);
-        if (!resource.exists()) {
+    private ResponseEntity<String> serveHtmlFile(String documentationFilename, HttpServletRequest request) {
+        ClassPathResource documentationResource = new ClassPathResource(ERRORS_PATH + documentationFilename);
+        if (!documentationResource.exists()) {
             return ResponseEntity.notFound().build();
         }
-        try (InputStream inputStream = resource.getInputStream()) {
-            String content = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+        try (InputStream inputStream = documentationResource.getInputStream()) {
+            String documentationHtml = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
             return ResponseEntity.status(resolveResponseStatus(request))
                     .contentType(MediaType.TEXT_HTML)
-                    .body(content);
+                    .body(documentationHtml);
         } catch (IOException exception) {
-            log.error("Failed to read error documentation page {}", filename, exception);
+            log.error("Failed to read error documentation page", exception);
             return ResponseEntity.internalServerError().build();
         }
     }

@@ -1,10 +1,13 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * Verifies fail-fast credential validation for required API keys.
@@ -61,6 +64,14 @@ class RequiredCredentialValidationTest {
         RequiredCredentialValidation validation =
                 createValidation(GITHUB_TEST_TOKEN, EMPTY_CREDENTIAL, false, EMPTY_CREDENTIAL);
         assertDoesNotThrow(validation::validateRequiredCredentials);
+    }
+
+    @Test
+    void validationRemainsEagerWhenApplicationBeansAreLazy() {
+        Lazy lazyConfiguration = RequiredCredentialValidation.class.getAnnotation(Lazy.class);
+
+        assertNotNull(lazyConfiguration);
+        assertFalse(lazyConfiguration.value());
     }
 
     private RequiredCredentialValidation createValidation(

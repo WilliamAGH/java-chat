@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -141,7 +142,7 @@ public class RateLimitService {
         ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
         OpenAIServiceException requiredException = Objects.requireNonNull(exception, "exception");
 
-        if (requiredException.statusCode() != 429) {
+        if (requiredException.statusCode() != HttpStatus.TOO_MANY_REQUESTS.value()) {
             throw new RateLimitDecisionException(
                     "OpenAI rate-limit recording requires HTTP 429, got " + requiredException.statusCode());
         }

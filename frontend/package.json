@@ -12,13 +12,14 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "npm run lint:ox && npm run lint:ox:typeaware && npm run lint:sg",
-    "lint:sg": "ast-grep scan -c config/sgconfig.yml && echo 'No naming violations found'",
+    "lint:sg": "ast-grep scan -c config/sgconfig.yml src vite.config.ts vitest.config.ts --globs '!**/node_modules/**' && echo 'No naming violations found'",
     "lint:ox": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
     "lint:ox:typeaware": "oxlint -c config/oxlintrc.json --type-aware .",
     "lint:fix": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin --fix .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "validate": "npm run format:check && npm run lint && npm run check"
+    "validate:node-version": "node scripts/verify-node-version.mjs",
+    "validate": "npm run validate:node-version && npm run format:check && npm run lint && npm run check"
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
@@ -28,6 +29,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.44.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",
@@ -57,6 +59,6 @@
     ]
   },
   "engines": {
-    "node": "22.17.0"
+    "node": "24.15.0"
   }
 }

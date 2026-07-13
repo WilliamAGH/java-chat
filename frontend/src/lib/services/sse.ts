@@ -9,7 +9,7 @@
 import {
   StreamStatusSchema,
   StreamErrorSchema,
-  TextEventPayloadSchema,
+  TextChunkSchema,
   ProviderEventSchema,
   CitationsArraySchema,
   type StreamStatus,
@@ -25,6 +25,8 @@ const SSE_EVENT_STATUS = "status";
 const SSE_EVENT_ERROR = "error";
 const SSE_EVENT_CITATION = "citation";
 const SSE_EVENT_PROVIDER = "provider";
+const SSE_EVENT_TEXT = "text";
+const INVALID_SSE_EVENT_MESSAGE = "Received an invalid SSE event from the server";
 
 /** Optional request options for streaming fetch calls. */
 export interface StreamSseRequestOptions {
@@ -33,7 +35,7 @@ export interface StreamSseRequestOptions {
 
 /** Callbacks for SSE stream processing. */
 export interface SseCallbacks {
-  onText: (content: string) => void;
+  onText: (streamText: string) => void;
   onStatus?: (status: StreamStatus) => void;
   onError?: (error: StreamError) => void;
   onCitations?: (citations: Citation[]) => void;
@@ -44,22 +46,27 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+function throwInvalidSseEvent(callbacks: SseCallbacks): never {
+  const streamError: StreamError = { message: INVALID_SSE_EVENT_MESSAGE };
+  callbacks.onError?.(streamError);
+  throw new Error(streamError.message);
+}
+
 /**
- * Attempts JSON parsing only when content looks like JSON.
- * Returns parsed object or null for plain text content.
- * Logs parse errors for debugging without interrupting stream processing.
+ * Attempts JSON parsing when an SSE payload looks like JSON.
+ * Returns the parsed SSE payload or null when it is not valid JSON.
+ * Logs parse errors with source context for protocol diagnostics.
  */
-export function tryParseJson(content: string, source: string): unknown {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+export function tryParseJson(rawSsePayload: string, source: string): unknown {
+  const trimmedSsePayload = rawSsePayload.trim();
+  if (!trimmedSsePayload.startsWith("{") && !trimmedSsePayload.startsWith("[")) {
     return null;
   }
   try {
-    return JSON.parse(trimmed);
+    return JSON.parse(trimmedSsePayload);
   } catch (parseError) {
-    // Log for debugging but don't throw - allows graceful fallback to raw text
-    console.warn(`[${source}] JSON parse failed for content that looked like JSON:`, {
-      preview: trimmed.slice(0, 100),
+    console.warn(`[${source}] JSON parse failed for an SSE payload that looked like JSON:`, {
+      preview: trimmedSsePayload.slice(0, 100),
       error: parseError instanceof Error ? parseError.message : String(parseError),
     });
   }
@@ -69,63 +76,98 @@ export function tryParseJson(content: string, source: string): unknown {
 /**
  * Processes a complete SSE event and dispatches to appropriate callback.
  *
- * @param eventType - The SSE event type (status, error, citation, text, or empty for default)
- * @param eventData - The raw event data payload
+ * @param sseEventType - The SSE event type (status, error, citation, provider, or text)
+ * @param rawSseEventText - The raw event text emitted by the SSE stream
  * @param callbacks - Callbacks to invoke based on event type
  * @throws Error when an error event is received (to terminate the stream)
  */
 function processEvent(
-  eventType: string,
-  eventData: string,
+  sseEventType: string,
+  rawSseEventText: string,
   callbacks: SseCallbacks,
   source: string,
 ): void {
-  const normalizedType = eventType.trim().toLowerCase();
+  const normalizedSseEventType = sseEventType.trim().toLowerCase();
 
-  if (normalizedType === SSE_EVENT_STATUS) {
-    const parsed = tryParseJson(eventData, source);
-    const validated = validateWithSchema(StreamStatusSchema, parsed, `${source}:status`);
-    callbacks.onStatus?.(validated.success ? validated.validated : { message: eventData });
+  if (normalizedSseEventType === SSE_EVENT_STATUS) {
+    const parsedSseEvent = tryParseJson(rawSseEventText, source);
+    const statusValidation = validateWithSchema(
+      StreamStatusSchema,
+      parsedSseEvent,
+      `${source}:status`,
+    );
+    if (!statusValidation.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    callbacks.onStatus?.(statusValidation.validated);
     return;
   }
 
-  if (normalizedType === SSE_EVENT_ERROR) {
-    const parsed = tryParseJson(eventData, source);
-    const validated = validateWithSchema(StreamErrorSchema, parsed, `${source}:error`);
-    const streamError: StreamError = validated.success
-      ? validated.validated
-      : { message: eventData };
+  if (normalizedSseEventType === SSE_EVENT_ERROR) {
+    const parsedSseEvent = tryParseJson(rawSseEventText, source);
+    const errorValidation = validateWithSchema(
+      StreamErrorSchema,
+      parsedSseEvent,
+      `${source}:error`,
+    );
+    if (!errorValidation.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    const streamError = errorValidation.validated;
     callbacks.onError?.(streamError);
-    const errorWithDetails: Error & { details?: string } = new Error(streamError.message);
-    errorWithDetails.details = streamError.details ?? undefined;
-    throw errorWithDetails;
+    const streamFailure: Error & { details?: string } = new Error(streamError.message);
+    streamFailure.details = streamError.details ?? undefined;
+    throw streamFailure;
   }
 
-  if (normalizedType === SSE_EVENT_CITATION) {
-    const parsed = tryParseJson(eventData, source);
-    const validated = validateWithSchema(CitationsArraySchema, parsed, `${source}:citations`);
-    if (validated.success) {
-      callbacks.onCitations?.(validated.validated);
+  if (normalizedSseEventType === SSE_EVENT_CITATION) {
+    const parsedSseEvent = tryParseJson(rawSseEventText, source);
+    const citationsValidation = validateWithSchema(
+      CitationsArraySchema,
+      parsedSseEvent,
+      `${source}:citations`,
+    );
+    if (!citationsValidation.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    callbacks.onCitations?.(citationsValidation.validated);
+    return;
+  }
+
+  if (normalizedSseEventType === SSE_EVENT_PROVIDER) {
+    const parsedSseEvent = tryParseJson(rawSseEventText, source);
+    const providerValidation = validateWithSchema(
+      ProviderEventSchema,
+      parsedSseEvent,
+      `${source}:provider`,
+    );
+    if (!providerValidation.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    callbacks.onProvider?.(providerValidation.validated);
+    return;
+  }
+
+  if (normalizedSseEventType === SSE_EVENT_TEXT) {
+    const parsedSseEvent = tryParseJson(rawSseEventText, source);
+    const textChunkValidation = validateWithSchema(
+      TextChunkSchema,
+      parsedSseEvent,
+      `${source}:text`,
+    );
+    if (!textChunkValidation.success) {
+      throwInvalidSseEvent(callbacks);
+    }
+    if (textChunkValidation.validated.text !== "") {
+      callbacks.onText(textChunkValidation.validated.text);
     }
     return;
   }
 
-  if (normalizedType === SSE_EVENT_PROVIDER) {
-    const parsed = tryParseJson(eventData, source);
-    const validated = validateWithSchema(ProviderEventSchema, parsed, `${source}:provider`);
-    if (validated.success) {
-      callbacks.onProvider?.(validated.validated);
-    }
-    return;
-  }
-
-  // Default and "text" events - extract text from JSON wrapper if present
-  const parsed = tryParseJson(eventData, source);
-  const validated = validateWithSchema(TextEventPayloadSchema, parsed, `${source}:text`);
-  const textContent = validated.success ? validated.validated.text : eventData;
-  if (textContent !== "") {
-    callbacks.onText(textContent);
-  }
+  console.error(`[${source}] Rejected unsupported SSE event type`, {
+    eventType: normalizedSseEventType || "<missing>",
+  });
+  throwInvalidSseEvent(callbacks);
 }
 
 /**
@@ -139,22 +181,22 @@ function processEvent(
  * - Graceful stream cancellation on early exit
  *
  * @param url - The endpoint URL
- * @param body - The request body to POST
+ * @param requestBody - The request body to POST
  * @param callbacks - Callbacks for different event types
  * @param source - Source identifier for logging (e.g., 'chat.ts', 'guided.ts')
  */
 export async function streamSse(
   url: string,
-  body: object,
+  requestBody: object,
   callbacks: SseCallbacks,
   source: string,
-  options: StreamSseRequestOptions = {},
+  requestOptions: StreamSseRequestOptions = {},
 ): Promise<void> {
-  const abortSignal = options.signal;
-  let response: Response;
+  const abortSignal = requestOptions.signal;
+  let httpResponse: Response;
 
   try {
-    response = await fetchWithCsrfRetry(
+    httpResponse = await fetchWithCsrfRetry(
       url,
       {
         method: "POST",
@@ -162,7 +204,7 @@ export async function streamSse(
           "Content-Type": "application/json",
           ...csrfHeader(),
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
         signal: abortSignal,
       },
       `streamSse:${source}`,
@@ -174,7 +216,7 @@ export async function streamSse(
     throw fetchError;
   }
 
-  await consumeSseResponse(response, callbacks, source, abortSignal);
+  await consumeSseStream(httpResponse, callbacks, source, abortSignal);
 }
 
 /**
@@ -184,13 +226,13 @@ export async function streamSseGet(
   url: string,
   callbacks: SseCallbacks,
   source: string,
-  options: StreamSseRequestOptions = {},
+  requestOptions: StreamSseRequestOptions = {},
 ): Promise<void> {
-  const abortSignal = options.signal;
-  let response: Response;
+  const abortSignal = requestOptions.signal;
+  let httpResponse: Response;
 
   try {
-    response = await fetch(url, { method: "GET", signal: abortSignal });
+    httpResponse = await fetch(url, { method: "GET", signal: abortSignal });
   } catch (fetchError) {
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
@@ -198,115 +240,121 @@ export async function streamSseGet(
     throw fetchError;
   }
 
-  await consumeSseResponse(response, callbacks, source, abortSignal);
+  await consumeSseStream(httpResponse, callbacks, source, abortSignal);
 }
 
-async function consumeSseResponse(
-  response: Response,
+async function consumeSseStream(
+  httpResponse: Response,
   callbacks: SseCallbacks,
   source: string,
   abortSignal?: AbortSignal,
 ): Promise<void> {
-  if (!response.ok) {
-    const apiMessage = await extractApiErrorMessage(response, `streamSse:${source}`);
+  if (!httpResponse.ok) {
+    const apiMessage = await extractApiErrorMessage(httpResponse, `streamSse:${source}`);
     const errorMessage =
-      apiMessage ?? `HTTP ${response.status}: ${response.statusText || "Request failed"}`;
+      apiMessage ?? `HTTP ${httpResponse.status}: ${httpResponse.statusText || "Request failed"}`;
     const httpError = new Error(errorMessage);
     callbacks.onError?.({ message: httpError.message });
     throw httpError;
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) {
-    const bodyError = new Error("No response body");
-    callbacks.onError?.({ message: bodyError.message });
-    throw bodyError;
+  const sseReader = httpResponse.body?.getReader();
+  if (!sseReader) {
+    const missingStreamError = new Error("No response body");
+    callbacks.onError?.({ message: missingStreamError.message });
+    throw missingStreamError;
   }
 
   const decoder = new TextDecoder();
   let streamCompletedNormally = false;
-  let buffer = "";
-  let eventBuffer = "";
-  let hasEventData = false;
-  let currentEventType: string | null = null;
+  let unprocessedText = "";
+  let sseEventBuffer = "";
+  let hasBufferedSseEvent = false;
+  let currentSseEventType: string | null = null;
 
-  const flushEvent = () => {
-    if (!hasEventData) {
-      currentEventType = null;
+  const flushSseEvent = () => {
+    if (!hasBufferedSseEvent) {
+      currentSseEventType = null;
       return;
     }
 
-    const eventType = currentEventType ?? "";
-    const rawEventData = eventBuffer;
-    eventBuffer = "";
-    hasEventData = false;
-    currentEventType = null;
+    const sseEventType = currentSseEventType ?? "";
+    const rawSseEventText = sseEventBuffer;
+    sseEventBuffer = "";
+    hasBufferedSseEvent = false;
+    currentSseEventType = null;
 
-    processEvent(eventType, rawEventData, callbacks, source);
+    processEvent(sseEventType, rawSseEventText, callbacks, source);
   };
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done: streamEnded, value: byteSegment } = await sseReader.read();
 
-      if (done) {
+      if (streamEnded) {
         streamCompletedNormally = true;
         // Flush any remaining bytes from the TextDecoder (handles multi-byte chars split across chunks)
-        const remaining = decoder.decode();
-        if (remaining) {
-          buffer += remaining;
+        const remainingDecodedText = decoder.decode();
+        if (remainingDecodedText) {
+          unprocessedText += remainingDecodedText;
         }
         // Commit any remaining buffered line before flushing event data
-        if (buffer.length > 0) {
-          eventBuffer = eventBuffer ? `${eventBuffer}\n${buffer}` : buffer;
-          hasEventData = true;
-          buffer = "";
+        if (unprocessedText.length > 0) {
+          sseEventBuffer = sseEventBuffer
+            ? `${sseEventBuffer}\n${unprocessedText}`
+            : unprocessedText;
+          hasBufferedSseEvent = true;
+          unprocessedText = "";
         }
-        flushEvent();
+        flushSseEvent();
         break;
       }
 
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-      const lines = buffer.split("\n");
-      buffer = lines[lines.length - 1];
+      const decodedText = decoder.decode(byteSegment, { stream: true });
+      unprocessedText += decodedText;
+      const receivedLines = unprocessedText.split("\n");
+      unprocessedText = receivedLines[receivedLines.length - 1];
 
-      for (let lineIndex = 0; lineIndex < lines.length - 1; lineIndex++) {
-        let line = lines[lineIndex];
-        if (line.endsWith("\r")) {
-          line = line.slice(0, -1);
+      for (let lineIndex = 0; lineIndex < receivedLines.length - 1; lineIndex++) {
+        let receivedLine = receivedLines[lineIndex];
+        if (receivedLine.endsWith("\r")) {
+          receivedLine = receivedLine.slice(0, -1);
         }
 
         // Skip SSE comments (keepalive heartbeats)
-        if (line.startsWith(":")) {
+        if (receivedLine.startsWith(":")) {
           continue;
         }
 
         // Track event type
-        if (line.startsWith("event:")) {
-          currentEventType = line.startsWith("event: ") ? line.slice(7) : line.slice(6);
+        if (receivedLine.startsWith("event:")) {
+          currentSseEventType = receivedLine.startsWith("event: ")
+            ? receivedLine.slice(7)
+            : receivedLine.slice(6);
           continue;
         }
 
         // Accumulate data within current SSE event
-        if (line.startsWith("data:")) {
+        if (receivedLine.startsWith("data:")) {
           // Per SSE spec, strip optional space after "data:" prefix
-          const eventPayload = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
+          const sseEventText = receivedLine.startsWith("data: ")
+            ? receivedLine.slice(6)
+            : receivedLine.slice(5);
 
           // Skip [DONE] token
-          if (eventPayload === "[DONE]") {
+          if (sseEventText === "[DONE]") {
             continue;
           }
 
           // Accumulate within current SSE event
-          if (hasEventData) {
-            eventBuffer += "\n";
+          if (hasBufferedSseEvent) {
+            sseEventBuffer += "\n";
           }
-          eventBuffer += eventPayload;
-          hasEventData = true;
-        } else if (line.trim() === "") {
+          sseEventBuffer += sseEventText;
+          hasBufferedSseEvent = true;
+        } else if (receivedLine.trim() === "") {
           // Blank line marks end of SSE event - commit accumulated data
-          flushEvent();
+          flushSseEvent();
         }
       }
     }
@@ -319,12 +367,12 @@ async function consumeSseResponse(
     // Cancel reader on abnormal exit to prevent dangling connections
     if (!streamCompletedNormally) {
       try {
-        await reader.cancel();
+        await sseReader.cancel();
       } catch {
         // Expected: cancel() throws if stream already closed by abort signal or server.
         // Safe to ignore - we're in cleanup and the stream is already terminated.
       }
     }
-    reader.releaseLock();
+    sseReader.releaseLock();
   }
 }

@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -25,13 +26,13 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromOpenAiServiceExceptionUsesRetryAfterHeaderSeconds() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         Headers headers = Headers.builder().put("Retry-After", "12").build();
         RateLimitException exception =
                 RateLimitException.builder().headers(headers).build();
 
-        manager.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+        rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -39,7 +40,7 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromOpenAiServiceExceptionUsesResetWindowWhenRetryAfterMissing() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         Headers headers =
                 Headers.builder().put("x-ratelimit-reset-requests", "2s").build();
@@ -48,7 +49,7 @@ class RateLimitServiceTest {
                 .headers(headers)
                 .build();
 
-        manager.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+        rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -56,7 +57,7 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromOpenAiServiceExceptionFailsWhenHeadersDoNotContainTiming() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         Headers headers = Headers.builder().put("x-request-id", "abc").build();
         UnexpectedStatusCodeException exception = UnexpectedStatusCodeException.builder()
@@ -66,7 +67,26 @@ class RateLimitServiceTest {
 
         assertThrows(
                 RateLimitDecisionException.class,
-                () -> manager.recordRateLimitFromOpenAiServiceException(
+                () -> rateLimitService.recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.OPENAI, exception));
+
+        verifyNoInteractions(rateLimitState);
+    }
+
+    @Test
+    void recordRateLimitFromOpenAiServiceExceptionRejectsNonRateLimitStatus() {
+        RateLimitState rateLimitState = mock(RateLimitState.class);
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
+
+        Headers headers = Headers.builder().put("Retry-After", "12").build();
+        UnexpectedStatusCodeException exception = UnexpectedStatusCodeException.builder()
+                .statusCode(HttpStatus.BAD_GATEWAY.value())
+                .headers(headers)
+                .build();
+
+        assertThrows(
+                RateLimitDecisionException.class,
+                () -> rateLimitService.recordRateLimitFromOpenAiServiceException(
                         RateLimitService.ApiProvider.OPENAI, exception));
 
         verifyNoInteractions(rateLimitState);
@@ -75,14 +95,14 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromExceptionUsesWebClientRetryAfterHeader() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         HttpHeaders headers = new HttpHeaders();
         headers.add("Retry-After", "8");
         WebClientResponseException exception = WebClientResponseException.create(
                 429, "Too Many Requests", headers, new byte[0], StandardCharsets.UTF_8);
 
-        manager.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception);
+        rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception);
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -90,13 +110,13 @@ class RateLimitServiceTest {
     @Test
     void recordRateLimitFromExceptionFailsForNonWebClientErrors() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
-        RateLimitService manager = new RateLimitService(rateLimitState, new MockEnvironment());
+        RateLimitService rateLimitService = new RateLimitService(rateLimitState, new MockEnvironment());
 
         RuntimeException exception = new RuntimeException("network issue");
 
         assertThrows(
                 RateLimitDecisionException.class,
-                () -> manager.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception));
+                () -> rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception));
 
         verifyNoInteractions(rateLimitState);
     }
