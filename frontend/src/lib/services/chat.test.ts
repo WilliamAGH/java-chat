@@ -16,13 +16,14 @@ describe("streamChat", () => {
   });
 
   it("surfaces a recoverable stream failure without replaying the POST", async () => {
-    const streamFailure = {
-      message: "OverflowException: malformed response frame",
+    const streamFailure = new Error("OverflowException: malformed response frame");
+    const streamError = {
+      message: streamFailure.message,
       details: "Malformed response frame at byte 512",
     };
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
-      callbacks.onError?.(streamFailure);
-      throw new Error(streamFailure.message);
+      callbacks.onError?.(streamError);
+      throw streamFailure;
     });
 
     const onChunk = vi.fn();
@@ -36,7 +37,7 @@ describe("streamChat", () => {
         onError,
         signal: streamAbortController.signal,
       }),
-    ).rejects.toThrow("OverflowException: malformed response frame");
+    ).rejects.toBe(streamFailure);
 
     expect(streamSseMock).toHaveBeenCalledTimes(1);
     expect(streamSseMock).toHaveBeenCalledWith(
@@ -52,7 +53,7 @@ describe("streamChat", () => {
     );
     expect(onStatus).not.toHaveBeenCalled();
     expect(onChunk).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith(streamFailure);
+    expect(onError).toHaveBeenCalledWith(streamError);
   });
 
   it("does not replay after a stream has emitted a chunk", async () => {
