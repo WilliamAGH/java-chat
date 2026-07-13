@@ -126,4 +126,53 @@ if [ ! -s "$quarantine_capture_file" ]; then
     fail_java_api_fetch_projection_test "allowPartial=false did not quarantine an incomplete mirror"
 fi
 
+oracle_dispatch_capture_file="$TEST_DOCS_ROOT/oracle-dispatch-policy"
+fetch_oracle_javadoc_seed() {
+    printf '%s\n' "$6" > "$oracle_dispatch_capture_file"
+}
+if ! (fetch_docs \
+    "https://docs.oracle.com/en/java/javase/21/docs/api/" \
+    "$TEST_DOCS_ROOT/oracle-dispatch" \
+    "Java 21 API" \
+    5 \
+    10 \
+    "" \
+    true); then
+    fail_java_api_fetch_projection_test "Oracle Javadoc fetch dispatch failed"
+fi
+if [ "$(cat "$oracle_dispatch_capture_file")" != "true" ]; then
+    fail_java_api_fetch_projection_test "Oracle Javadoc dispatch dropped the partial-mirror policy"
+fi
+
+set --
+# shellcheck source=fetch_all_docs.sh
+source "$FETCH_SCRIPT"
+
+LOG_FILE="$TEST_DOCS_ROOT/oracle-seed-fetch.log"
+oracle_validation_capture_file="$TEST_DOCS_ROOT/oracle-validation-policy"
+python3() {
+    : > "$5"
+}
+wget() {
+    return 0
+}
+validate_fetch_result() {
+    printf '%s\n' "$5" > "$oracle_validation_capture_file"
+}
+
+mkdir -p "$TEST_DOCS_ROOT/oracle-validation"
+if ! (cd "$TEST_DOCS_ROOT/oracle-validation" \
+    && fetch_oracle_javadoc_seed \
+        "https://docs.oracle.com/en/java/javase/21/docs/api/" \
+        "$TEST_DOCS_ROOT/oracle-validation" \
+        "Java 21 API" \
+        5 \
+        10 \
+        true); then
+    fail_java_api_fetch_projection_test "Oracle Javadoc validation boundary failed"
+fi
+if [ "$(cat "$oracle_validation_capture_file")" != "true" ]; then
+    fail_java_api_fetch_projection_test "Oracle Javadoc validation dropped the partial-mirror policy"
+fi
+
 printf 'PASS: Java API fetch projections retain all fields and enforce partial-mirror policy.\n'
