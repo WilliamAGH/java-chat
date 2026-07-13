@@ -99,6 +99,46 @@ describe("streamRecovery", () => {
     expect(retryDecision).toBe(true);
   });
 
+  it("retries a generic terminal stream error when the backend marks it retryable", () => {
+    const retryDecision = shouldRetryStreamRequest(
+      new Error("Streaming error"),
+      {
+        message: "Streaming error",
+        code: "stream.provider.retryable-error",
+        retryable: true,
+        stage: "stream",
+      },
+      null,
+      false,
+      0,
+      1,
+    );
+
+    expect(retryDecision).toBe(true);
+  });
+
+  it("refuses retry when a terminal error overrides an earlier retryable status", () => {
+    const retryDecision = shouldRetryStreamRequest(
+      new Error("Streaming error"),
+      {
+        message: "Streaming error",
+        code: "stream.provider.fatal-error",
+        retryable: false,
+        stage: "stream",
+      },
+      {
+        message: "Provider fallback succeeded",
+        retryable: true,
+        stage: "stream",
+      },
+      false,
+      0,
+      1,
+    );
+
+    expect(retryDecision).toBe(false);
+  });
+
   it("preserves stream error details in thrown stream failure exception", () => {
     const streamFailureException = toStreamFailureException(new Error("Transport failed"), {
       message: "OverflowException",
