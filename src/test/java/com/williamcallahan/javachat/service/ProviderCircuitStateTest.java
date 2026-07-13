@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -37,7 +39,8 @@ class ProviderCircuitStateTest {
     }
 
     @Test
-    void concurrentCircuitOpeningAndAvailabilityChecksDoNotExposePartialState() throws Exception {
+    void concurrentCircuitOpeningAndAvailabilityChecksDoNotExposePartialState()
+            throws ExecutionException, InterruptedException, TimeoutException {
         ExecutorService transitionExecutor = Executors.newFixedThreadPool(2);
         AtomicReference<ProviderCircuitState> circuitStateReference = new AtomicReference<>();
         AtomicInteger completedAvailabilityChecks = new AtomicInteger();
