@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { streamSse } from "./sse";
 
-const STREAM_RESPONSE_STATUS = 200;
+const SSE_STREAM_RESPONSE_STATUS = 200;
 
-function createSseResponse(eventPayload: string): Response {
+function createSseStreamResponse(sseWireText: string): Response {
   const encoder = new TextEncoder();
-  const responseBody = new ReadableStream<Uint8Array>({
+  const sseStreamBody = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode(eventPayload));
+      controller.enqueue(encoder.encode(sseWireText));
       controller.close();
     },
   });
-  return new Response(responseBody, {
-    status: STREAM_RESPONSE_STATUS,
+  return new Response(sseStreamBody, {
+    status: SSE_STREAM_RESPONSE_STATUS,
     statusText: "OK",
   });
 }
@@ -83,7 +83,7 @@ describe("streamSse payload validation", () => {
   it("dispatches canonical chunk payloads", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseResponse('event: text\ndata: {"text":"Hello"}\n\n')),
+      vi.fn().mockResolvedValue(createSseStreamResponse('event: text\ndata: {"text":"Hello"}\n\n')),
     );
     const onText = vi.fn();
 
@@ -97,7 +97,7 @@ describe("streamSse payload validation", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseResponse("event: text\ndata: Hello\n\n")),
+      vi.fn().mockResolvedValue(createSseStreamResponse("event: text\ndata: Hello\n\n")),
     );
     const onText = vi.fn();
 
@@ -111,7 +111,7 @@ describe("streamSse payload validation", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseResponse('event: typo\ndata: {"text":"Hello"}\n\n')),
+      vi.fn().mockResolvedValue(createSseStreamResponse('event: typo\ndata: {"text":"Hello"}\n\n')),
     );
     const onText = vi.fn();
 
@@ -125,7 +125,7 @@ describe("streamSse payload validation", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseResponse("event: status\ndata: Loading\n\n")),
+      vi.fn().mockResolvedValue(createSseStreamResponse("event: status\ndata: Loading\n\n")),
     );
     const onText = vi.fn();
     const onStatus = vi.fn();
@@ -136,11 +136,34 @@ describe("streamSse payload validation", () => {
     expect(onStatus).not.toHaveBeenCalled();
   });
 
+  it("terminates the stream when a provider payload fails validation", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(createSseStreamResponse("event: provider\ndata: {}\n\n")),
+    );
+    const onText = vi.fn();
+    const onError = vi.fn();
+    const onProvider = vi.fn();
+
+    await expect(
+      streamSse("/api/test/stream", {}, { onText, onError, onProvider }, "sse.test.ts"),
+    ).rejects.toThrow("Received an invalid SSE event from the server");
+
+    expect(onProvider).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith({
+      message: "Received an invalid SSE event from the server",
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("validateWithSchema [sse.test.ts:provider]"),
+    );
+  });
+
   it("surfaces malformed error payloads as protocol failures", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(createSseResponse("event: error\ndata: Failure\n\n")),
+      vi.fn().mockResolvedValue(createSseStreamResponse("event: error\ndata: Failure\n\n")),
     );
     const onText = vi.fn();
     const onError = vi.fn();
@@ -148,6 +171,25 @@ describe("streamSse payload validation", () => {
     await expect(
       streamSse("/api/test/stream", {}, { onText, onError }, "sse.test.ts"),
     ).rejects.toThrow("Received an invalid SSE event from the server");
+    expect(onError).toHaveBeenCalledWith({
+      message: "Received an invalid SSE event from the server",
+    });
+  });
+
+  it("rejects malformed JSON-shaped text payloads", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(createSseStreamResponse('event: text\ndata: {"text":\n\n')),
+    );
+    const onText = vi.fn();
+    const onError = vi.fn();
+
+    await expect(
+      streamSse("/api/test/stream", {}, { onText, onError }, "sse.test.ts"),
+    ).rejects.toThrow("Received an invalid SSE event from the server");
+    expect(onText).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith({
       message: "Received an invalid SSE event from the server",
     });
