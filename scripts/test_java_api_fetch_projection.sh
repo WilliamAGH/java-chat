@@ -8,7 +8,8 @@ TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TEST_SCRIPT_DIRECTORY/.." && pwd)"
 FETCH_SCRIPT="$PROJECT_ROOT/scripts/fetch_all_docs.sh"
 JAVA_API_SOURCES_MANIFEST="$PROJECT_ROOT/src/main/resources/java-api-documentation-sources.manifest"
-TEST_DOCS_ROOT="/canonical-test-docs"
+TEST_DOCS_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TEST_DOCS_ROOT"' EXIT
 
 fail_java_api_fetch_projection_test() {
     local failure_message="$1"
@@ -16,11 +17,9 @@ fail_java_api_fetch_projection_test() {
     exit 1
 }
 
-test_script_arguments=("$@")
 set --
 # shellcheck source=fetch_all_docs.sh
 source "$FETCH_SCRIPT"
-set -- "${test_script_arguments[@]}"
 
 log() {
     :
@@ -70,4 +69,44 @@ for java_api_source_index in "${!JAVA_API_SOURCE_PROJECTIONS[@]}"; do
     fi
 done
 
-printf 'PASS: Java API fetch projections retain seven distinct fields in manifest order.\n'
+set --
+# shellcheck source=fetch_all_docs.sh
+source "$FETCH_SCRIPT"
+
+log() {
+    :
+}
+
+count_html_files() {
+    printf '5\n'
+}
+
+if ! validate_fetch_result 0 "$TEST_DOCS_ROOT/partial" "Partial mirror" 10 true; then
+    fail_java_api_fetch_projection_test "allowPartial=true rejected a validated below-minimum mirror"
+fi
+if validate_fetch_result 0 "$TEST_DOCS_ROOT/complete-required" "Complete mirror" 10 false; then
+    fail_java_api_fetch_projection_test "allowPartial=false accepted a below-minimum mirror"
+fi
+
+quarantine_capture_file="$TEST_DOCS_ROOT/quarantine.log"
+quarantine_incomplete_dir() {
+    printf 'quarantined\n' >> "$quarantine_capture_file"
+}
+fetch_docs_mirror() {
+    return 0
+}
+
+if ! (fetch_docs "https://example.com/api/" "$TEST_DOCS_ROOT/partial" "Partial mirror" 1 10 "" true); then
+    fail_java_api_fetch_projection_test "allowPartial=true fetch dispatch failed"
+fi
+if [ -s "$quarantine_capture_file" ]; then
+    fail_java_api_fetch_projection_test "allowPartial=true quarantined an incremental mirror"
+fi
+if ! (fetch_docs "https://example.com/api/" "$TEST_DOCS_ROOT/complete-required" "Complete mirror" 1 10 "" false); then
+    fail_java_api_fetch_projection_test "allowPartial=false fetch dispatch failed"
+fi
+if [ ! -s "$quarantine_capture_file" ]; then
+    fail_java_api_fetch_projection_test "allowPartial=false did not quarantine an incomplete mirror"
+fi
+
+printf 'PASS: Java API fetch projections retain all fields and enforce partial-mirror policy.\n'
