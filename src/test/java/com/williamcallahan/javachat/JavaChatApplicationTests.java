@@ -28,7 +28,6 @@ import org.springframework.test.web.servlet.MockMvc;
         properties = {
             "spring.ai.openai.api-key=test",
             "spring.ai.openai.chat.api-key=test",
-            "management.endpoints.web.exposure.include=*",
             "management.endpoint.health.probes.enabled=true",
             "management.endpoint.health.group.readiness.include=readinessState,qdrant,embeddingModelKeepAlive",
             "spring.ai.vectorstore.qdrant.host=localhost",

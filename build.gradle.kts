@@ -183,6 +183,7 @@ spotless {
 // Test configuration - base settings for all Test tasks
 tasks.withType<Test> {
     useJUnitPlatform()
+    systemProperty("spring.profiles.active", "test")
     maxHeapSize = "1024m"
     jvmArgs(
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
@@ -195,6 +196,7 @@ tasks.withType<Test> {
 
 // Unit test task - exclude integration tests
 tasks.test {
+    environment("GITHUB_TOKEN", "test-token")
     useJUnitPlatform {
         excludeTags("integration")
     }
