@@ -36,6 +36,7 @@ public class RetrievalService {
     private static final String METADATA_TITLE = "title";
     private static final String METADATA_PACKAGE = "package";
     private static final String METADATA_HASH = "hash";
+    private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
 
     private final HybridSearchService hybridSearchService;
@@ -202,8 +203,8 @@ public class RetrievalService {
                 String documentUrl = stringMetadataValue(document.getMetadata(), METADATA_URL)
                         .trim();
                 if (!documentUrl.isBlank()) {
-                    String canonicalDocumentUrl = documentUrl.startsWith("file://")
-                            ? DocsSourceRegistry.resolveLocalPath(documentUrl.substring("file://".length()))
+                    String canonicalDocumentUrl = documentUrl.startsWith(FILE_URL_PREFIX)
+                            ? DocsSourceRegistry.resolveLocalPath(documentUrl.substring(FILE_URL_PREFIX.length()))
                                     .map(DocsSourceRegistry::canonicalizeHttpDocUrl)
                                     .orElse(documentUrl)
                             : DocsSourceRegistry.normalizeDocUrl(documentUrl);
@@ -282,7 +283,7 @@ public class RetrievalService {
             return new CitationOutcome(List.of(), 0);
         }
         List<Citation> citations = new ArrayList<>();
-        Set<String> retainedCitationUrls = new HashSet<>();
+        Set<String> retainedCitationIdentities = new HashSet<>();
         int failedConversionCount = 0;
         for (Document sourceDocument : documents) {
             if (sourceDocument == null) {
@@ -294,9 +295,8 @@ public class RetrievalService {
                 String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
                 String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
                 String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName);
-                String fragmentlessCitationSourceUrl = fragmentlessCitationSourceUrl(url);
-                if (!fragmentlessCitationSourceUrl.isBlank()
-                        && !retainedCitationUrls.add(fragmentlessCitationSourceUrl)) {
+                String citationIdentity = citationIdentityFor(rawUrl, url);
+                if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
                 }
                 citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDocument.getText())));
@@ -322,6 +322,19 @@ public class RetrievalService {
     private static String fragmentlessCitationSourceUrl(String citationUrl) {
         int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
         return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);
+    }
+
+    /**
+     * Keeps redacted display URLs from merging citations for separate unresolved local sources.
+     */
+    private static String citationIdentityFor(String rawUrl, String citationUrl) {
+        String trimmedRawUrl = rawUrl.trim();
+        if (trimmedRawUrl.startsWith(FILE_URL_PREFIX)
+                && DocsSourceRegistry.resolveLocalPath(trimmedRawUrl.substring(FILE_URL_PREFIX.length()))
+                        .isEmpty()) {
+            return fragmentlessCitationSourceUrl(trimmedRawUrl);
+        }
+        return fragmentlessCitationSourceUrl(citationUrl);
     }
 
     /**
@@ -357,7 +370,8 @@ public class RetrievalService {
             return "";
         }
         try {
-            return String.valueOf(metadataValue);
+            String metadataText = String.valueOf(metadataValue);
+            return METADATA_URL.equals(key) ? DocsSourceRegistry.normalizeDocUrl(metadataText) : metadataText;
         } catch (RuntimeException _) {
             return "[unprintable:" + metadataValue.getClass().getSimpleName() + "]";
         }
