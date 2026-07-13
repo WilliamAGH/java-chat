@@ -14,8 +14,8 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -220,7 +220,7 @@ public class GuidedLearningController extends BaseController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(
-            @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
+            @Valid @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
 
         String sessionId = request.resolvedSessionId();
@@ -246,7 +246,7 @@ public class GuidedLearningController extends BaseController {
      * @return SSE stream of response chunks with heartbeats
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
-        List<org.springframework.ai.chat.messages.Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
         chatMemory.addUser(sessionId, userQuery);
         return Flux.defer(() -> {
                     StringBuilder fullResponse = new StringBuilder();

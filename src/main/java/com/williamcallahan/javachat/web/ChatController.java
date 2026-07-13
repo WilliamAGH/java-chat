@@ -15,7 +15,7 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
-import java.util.ArrayList;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -106,7 +106,8 @@ public class ChatController extends BaseController {
      * @return A {@link Flux} of strings representing the streaming response, sent as SSE data events.
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> stream(@RequestBody ChatStreamRequest request, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> stream(
+            @Valid @RequestBody ChatStreamRequest request, HttpServletResponse response) {
         sseSupport.configureStreamingHeaders(response);
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
@@ -117,7 +118,7 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
-        List<Message> history = new ArrayList<>(chatMemory.getHistory(sessionId));
+        List<Message> history = chatMemory.getHistory(sessionId);
         PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
         chatMemory.addUser(sessionId, userQuery);
