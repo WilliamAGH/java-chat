@@ -8,10 +8,14 @@ import reactor.core.publisher.Sinks;
  * Tracks bounded provider attempts during streaming before response text is emitted.
  */
 record StreamingAttemptContext(
-        List<OpenAiProviderCandidate> availableProviders, int attemptIndex, Sinks.Many<StreamingNotice> noticeSink) {
+        List<OpenAiProviderCandidate> availableProviders,
+        int attemptIndex,
+        Sinks.Many<StreamingNotice> noticeSink,
+        Sinks.One<RateLimitService.ApiProvider> providerChangeSink) {
     StreamingAttemptContext {
         Objects.requireNonNull(availableProviders, "availableProviders");
         Objects.requireNonNull(noticeSink, "noticeSink");
+        Objects.requireNonNull(providerChangeSink, "providerChangeSink");
         if (availableProviders.isEmpty()) {
             throw new IllegalArgumentException("availableProviders cannot be empty");
         }
@@ -23,8 +27,10 @@ record StreamingAttemptContext(
     }
 
     static StreamingAttemptContext first(
-            List<OpenAiProviderCandidate> availableProviders, Sinks.Many<StreamingNotice> noticeSink) {
-        return new StreamingAttemptContext(availableProviders, 0, noticeSink);
+            List<OpenAiProviderCandidate> availableProviders,
+            Sinks.Many<StreamingNotice> noticeSink,
+            Sinks.One<RateLimitService.ApiProvider> providerChangeSink) {
+        return new StreamingAttemptContext(availableProviders, 0, noticeSink, providerChangeSink);
     }
 
     OpenAiProviderCandidate currentProvider() {
@@ -48,7 +54,7 @@ record StreamingAttemptContext(
             throw new IllegalStateException("streaming attempts are exhausted");
         }
 
-        return new StreamingAttemptContext(availableProviders, attemptIndex + 1, noticeSink);
+        return new StreamingAttemptContext(availableProviders, attemptIndex + 1, noticeSink, providerChangeSink);
     }
 
     private static int maximumAttemptsFor(List<OpenAiProviderCandidate> availableProviders) {

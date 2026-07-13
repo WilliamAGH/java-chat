@@ -35,9 +35,11 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.web.SseConstants;
 import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -298,7 +300,7 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void preTextFailureMovesToDistinctSecondProvider() {
+    void preTextFailureMovesToDistinctSecondProviderAndPublishesReplayableFallbackSignals() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
@@ -333,10 +335,28 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "clientPrimary", githubModelsClient);
         ReflectionTestUtils.setField(streamingService, "clientSecondary", openAiClient);
 
-        StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
-                        .flatMapMany(StreamingResult::textChunks))
+        StreamingResult streamingResult = Objects.requireNonNull(streamingService
+                .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                .block());
+
+        assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, streamingResult.provider());
+        StepVerifier.create(streamingResult.textChunks())
                 .expectNext("second provider text")
+                .verifyComplete();
+
+        StepVerifier.create(streamingResult.providerChanges())
+                .expectNext(RateLimitService.ApiProvider.OPENAI)
+                .verifyComplete();
+
+        StepVerifier.create(streamingResult.notices())
+                .assertNext(fallbackNotice -> {
+                    assertEquals(SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK, fallbackNotice.code());
+                    assertEquals("openai", fallbackNotice.provider());
+                    assertEquals(SseConstants.STATUS_STAGE_STREAM, fallbackNotice.stage());
+                    assertEquals(2, fallbackNotice.attempt());
+                    assertEquals(2, fallbackNotice.maxAttempts());
+                    assertTrue(fallbackNotice.retryable());
+                })
                 .verifyComplete();
 
         verify(githubModelsResponseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));

@@ -127,7 +127,10 @@ class ChatControllerStreamingFailureTest {
         when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
-                        Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
+                        Flux.error(streamingFailure),
+                        RateLimitService.ApiProvider.OPENAI,
+                        Flux.empty(),
+                        Flux.empty())));
         when(streamingService.isRecoverableStreamingFailure(streamingFailure)).thenReturn(retryable);
 
         return chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY, null), new MockHttpServletResponse())

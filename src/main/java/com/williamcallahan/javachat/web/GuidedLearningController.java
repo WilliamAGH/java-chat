@@ -299,11 +299,19 @@ public class GuidedLearningController extends BaseController {
                                         sseSupport.citationWarningStatusFlux(finalCitationWarning);
                                 Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
                                         sseSupport.streamingNoticeEvents(streamingResult.notices());
+                                Flux<ServerSentEvent<String>> providerChangeEvents = streamingResult
+                                        .providerChanges()
+                                        .map(provider -> sseSupport.providerEvent(provider.getName()));
 
+                                // Subscribe to replayable fallback signals before the ref-counted data stream starts.
                                 return Flux.concat(
                                         Flux.just(providerEvent),
                                         statusEvents,
-                                        Flux.merge(dataEvents, heartbeats, runtimeStreamingStatusEvents),
+                                        Flux.merge(
+                                                providerChangeEvents,
+                                                runtimeStreamingStatusEvents,
+                                                dataEvents,
+                                                heartbeats),
                                         citationEvent);
                             })
                             .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
