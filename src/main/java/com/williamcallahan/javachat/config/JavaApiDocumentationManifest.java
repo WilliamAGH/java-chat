@@ -35,13 +35,18 @@ final class JavaApiDocumentationManifest {
             throw new IllegalStateException("Canonical Java API documentation source manifest is missing");
         }
 
-        try (manifestStream;
-                BufferedReader manifestReader =
-                        new BufferedReader(new InputStreamReader(manifestStream, StandardCharsets.UTF_8))) {
-            return parse(manifestReader.lines().toList());
+        try {
+            return parse(manifestStream);
         } catch (IOException manifestReadError) {
             throw new IllegalStateException(
                     "Canonical Java API documentation source manifest could not be read", manifestReadError);
+        }
+    }
+
+    static List<JavaApiDocumentationSource> parse(InputStream manifestStream) throws IOException {
+        try (BufferedReader manifestReader =
+                new BufferedReader(new InputStreamReader(manifestStream, StandardCharsets.UTF_8))) {
+            return parse(manifestReader.lines().toList());
         }
     }
 

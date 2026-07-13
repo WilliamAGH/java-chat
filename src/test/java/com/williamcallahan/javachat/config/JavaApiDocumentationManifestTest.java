@@ -1,9 +1,11 @@
 package com.williamcallahan.javachat.config;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,6 +23,25 @@ class JavaApiDocumentationManifestTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void acceptsSharedCrLfManifestFixtureInJavaAndBash() throws IOException, InterruptedException {
+        String canonicalManifestText = Files.readString(CANONICAL_MANIFEST_PATH, StandardCharsets.UTF_8);
+        String crLfManifestText = canonicalManifestText.replace("\n", "\r\n");
+        Path crLfManifestPath = temporaryDirectory.resolve("crlf.manifest");
+        Files.writeString(crLfManifestPath, crLfManifestText, StandardCharsets.UTF_8);
+
+        try (InputStream manifestStream = Files.newInputStream(crLfManifestPath)) {
+            List<String> javaProjectionRows = JavaApiDocumentationManifest.parse(manifestStream).stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::toManifestRow)
+                    .toList();
+            List<String> canonicalRows = canonicalManifestText.lines().skip(1).toList();
+            assertEquals(canonicalRows, javaProjectionRows);
+        }
+
+        ShellValidation shellValidation = runShellValidation(crLfManifestPath);
+        assertEquals(0, shellValidation.exitCode(), shellValidation.standardOutput());
+    }
 
     @Test
     void rejectsSharedInvalidManifestFixturesInJavaAndBash() throws IOException, InterruptedException {
@@ -52,19 +73,27 @@ class JavaApiDocumentationManifestTest {
 
             Path invalidManifestPath = temporaryDirectory.resolve("invalid-manifest-" + fixtureIndex + ".manifest");
             Files.write(invalidManifestPath, invalidManifestLines, StandardCharsets.UTF_8);
-            Process bashValidation = new ProcessBuilder(
-                            "/bin/bash",
-                            "-c",
-                            "source \"$1\"; load_java_api_documentation_sources \"$2\"",
-                            "manifest-validation",
-                            SHELL_INTERPRETER_PATH.toAbsolutePath().toString(),
-                            invalidManifestPath.toString())
-                    .redirectErrorStream(true)
-                    .start();
-            String bashOutput = new String(bashValidation.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int bashExitCode = bashValidation.waitFor();
-            assertNotEquals(0, bashExitCode, "Bash accepted invalid fixture " + fixtureIndex + ": " + bashOutput);
+            ShellValidation shellValidation = runShellValidation(invalidManifestPath);
+            assertNotEquals(
+                    0,
+                    shellValidation.exitCode(),
+                    "Bash accepted invalid fixture " + fixtureIndex + ": " + shellValidation.standardOutput());
         }
+    }
+
+    private static ShellValidation runShellValidation(Path manifestPath) throws IOException, InterruptedException {
+        Process bashValidation = new ProcessBuilder(
+                        "/bin/bash",
+                        "-c",
+                        "source \"$1\"; load_java_api_documentation_sources \"$2\"",
+                        "manifest-validation",
+                        SHELL_INTERPRETER_PATH.toAbsolutePath().toString(),
+                        manifestPath.toString())
+                .redirectErrorStream(true)
+                .start();
+        String standardOutput = new String(bashValidation.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int exitCode = bashValidation.waitFor();
+        return new ShellValidation(exitCode, standardOutput);
     }
 
     private static List<String> withLine(List<String> manifestLines, int lineIndex, String replacementLine) {
@@ -103,4 +132,6 @@ class JavaApiDocumentationManifestTest {
         changedManifestLines.add(String.join("|", duplicateMirrorColumns));
         return List.copyOf(changedManifestLines);
     }
+
+    private record ShellValidation(int exitCode, String standardOutput) {}
 }

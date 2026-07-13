@@ -70,6 +70,7 @@ load_java_api_documentation_sources() {
     local retained_relative_mirror_paths=("")
     while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
         manifest_line_number=$((manifest_line_number + 1))
+        manifest_line="${manifest_line%$'\r'}"
         if [ "$manifest_line_number" -eq 1 ]; then
             manifest_header="$manifest_line"
             if [ -z "$manifest_header" ]; then
