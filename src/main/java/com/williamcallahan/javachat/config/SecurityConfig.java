@@ -28,6 +28,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfig {
     private static final String WILDCARD_ORIGIN = "*";
+    private static final String HEALTH_ENDPOINT = "/actuator/health";
+    private static final String LIVENESS_ENDPOINT = "/actuator/health/liveness";
+    private static final String READINESS_ENDPOINT = "/actuator/health/readiness";
+    private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
     private static final long CSRF_TOKEN_TTL_MINUTES = 15L;
 
     /**
@@ -54,16 +58,18 @@ public class SecurityConfig {
         return source;
     }
 
-    /**
-     * Permit all Actuator endpoints (health, info, metrics) with dev-friendly defaults.
-     */
+    /** Permits only the container probes and Prometheus scrape surface. */
     @Bean
     @Order(0)
     public SecurityFilterChain managementSecurityFilterChain(
             HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
         http.securityMatcher(EndpointRequest.toAnyEndpoint())
                 .cors(c -> c.configurationSource(corsConfigurationSource))
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .authorizeHttpRequests(auth -> auth.requestMatchers(
+                                HEALTH_ENDPOINT, LIVENESS_ENDPOINT, READINESS_ENDPOINT, PROMETHEUS_ENDPOINT)
+                        .permitAll()
+                        .anyRequest()
+                        .denyAll())
                 // Allow same-origin iframes (used by tab shell loading chat.html/guided.html)
                 .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
                 .csrf(csrf -> csrf.ignoringRequestMatchers(EndpointRequest.toAnyEndpoint()))

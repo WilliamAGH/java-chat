@@ -61,6 +61,7 @@ dependencies {
 
     // Spring Boot starters
     implementation(libs.bundles.spring.boot.web)
+    runtimeOnly(libs.micrometer.registry.prometheus)
 
     // Spring AI
     implementation(libs.bundles.spring.ai)

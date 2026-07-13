@@ -94,9 +94,9 @@ EXPOSE 8085
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8085}/actuator/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8085}/actuator/health/liveness || exit 1
 
-ENTRYPOINT ["/bin/sh", "-c", "java \
+ENTRYPOINT ["/bin/sh", "-c", "exec java \
   -XX:+IgnoreUnrecognizedVMOptions \
   --enable-native-access=ALL-UNNAMED \
   --sun-misc-unsafe-memory-access=allow \
