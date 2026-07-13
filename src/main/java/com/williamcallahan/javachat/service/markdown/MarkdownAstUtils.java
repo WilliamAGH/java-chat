@@ -8,6 +8,8 @@ import com.vladsch.flexmark.util.ast.Node;
 final class MarkdownAstUtils {
     private MarkdownAstUtils() {}
 
+    private static final int MAX_CITATION_MARKER_DIGITS = 3;
+
     static void stripInlineCitationMarkers(Node root) {
         for (Node childNode = root.getFirstChild(); childNode != null; childNode = childNode.getNext()) {
             // Skip code blocks/spans and links entirely
@@ -44,7 +46,9 @@ final class MarkdownAstUtils {
                 int scanIndex = cursor + 1;
                 int digitCount = 0;
                 boolean validToken = true;
-                while (scanIndex < text.length() && Character.isDigit(text.charAt(scanIndex)) && digitCount < 3) {
+                while (scanIndex < text.length()
+                        && Character.isDigit(text.charAt(scanIndex))
+                        && digitCount < MAX_CITATION_MARKER_DIGITS) {
                     scanIndex++;
                     digitCount++;
                 }

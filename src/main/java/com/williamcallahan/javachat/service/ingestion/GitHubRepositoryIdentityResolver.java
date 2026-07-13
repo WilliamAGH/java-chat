@@ -18,6 +18,7 @@ public class GitHubRepositoryIdentityResolver {
 
     private static final String GITHUB_HOST = "github.com";
     private static final String SSH_PREFIX = "git@github.com:";
+    private static final int MIN_REPOSITORY_PATH_SEGMENT_COUNT = 2;
 
     /**
      * Resolves canonical identity using explicit owner/repository values first, then URL parsing.
@@ -76,7 +77,7 @@ public class GitHubRepositoryIdentityResolver {
         }
 
         String[] pathSegments = trimmedPath.split("/");
-        if (pathSegments.length < 2) {
+        if (pathSegments.length < MIN_REPOSITORY_PATH_SEGMENT_COUNT) {
             throw new IllegalArgumentException("Repository URL must include owner and repository path segments");
         }
 

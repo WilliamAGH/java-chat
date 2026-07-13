@@ -8,6 +8,7 @@ const CSRF_COOKIE_NAME = "XSRF-TOKEN";
 /** Header name expected by Spring Security's CsrfTokenRequestAttributeHandler. */
 const CSRF_HEADER_NAME = "X-XSRF-TOKEN";
 const CSRF_REFRESH_ENDPOINT = "/api/security/csrf";
+const CSRF_FORBIDDEN_STATUS = 403;
 
 export const CSRF_EXPIRED_MESSAGE = "CSRF token expired. Refresh the page and retry the request.";
 export const CSRF_INVALID_MESSAGE =
@@ -141,7 +142,7 @@ export async function fetchWithCsrfRetry(
   source: string,
 ): Promise<Response> {
   const response = await fetch(input, withCurrentCsrfHeader(init));
-  if (response.status !== 403) {
+  if (response.status !== CSRF_FORBIDDEN_STATUS) {
     return response;
   }
 
@@ -165,7 +166,7 @@ export async function fetchWithCsrfRetry(
   }
 
   const retriedResponse = await fetch(input, withCurrentCsrfHeader(init));
-  if (retriedResponse.status !== 403) {
+  if (retriedResponse.status !== CSRF_FORBIDDEN_STATUS) {
     return retriedResponse;
   }
 

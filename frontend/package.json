@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "npm run lint:ox && npm run lint:ox:typeaware && npm run lint:sg",
-    "lint:sg": "ast-grep scan -c config/sgconfig.yml && echo 'No naming violations found'",
+    "lint:sg": "ast-grep scan -c config/sgconfig.yml src --globs '!**/node_modules/**' && echo 'No naming violations found'",
     "lint:ox": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
     "lint:ox:typeaware": "oxlint -c config/oxlintrc.json --type-aware .",
     "lint:fix": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin --fix .",

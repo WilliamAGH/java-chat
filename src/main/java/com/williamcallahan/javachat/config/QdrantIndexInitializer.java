@@ -20,6 +20,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -200,11 +201,12 @@ public class QdrantIndexInitializer {
         for (String base : qdrantRestConnection.candidateRestBaseUrls()) {
             String url = base + path;
             try {
-                ResponseEntity<String> response = restTemplate.exchange(
+                ResponseEntity<String> qdrantResponse = restTemplate.exchange(
                         url, HttpMethod.PUT, new HttpEntity<>(body.root(), headers), String.class);
-                int status = response.getStatusCode().value();
-                if (status < 200 || status >= 300) {
-                    throw new IllegalStateException("Qdrant create collection returned HTTP " + status);
+                HttpStatusCode qdrantStatusCode = qdrantResponse.getStatusCode();
+                if (!qdrantStatusCode.is2xxSuccessful()) {
+                    throw new IllegalStateException(
+                            "Qdrant create collection returned HTTP " + qdrantStatusCode.value());
                 }
                 log.info("[QDRANT] Created hybrid collection (collection={})", collection);
                 return;

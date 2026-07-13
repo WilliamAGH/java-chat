@@ -16,6 +16,10 @@ import org.springframework.stereotype.Service;
 public class HtmlContentExtractor {
 
     private static final int MIN_INLINE_TEXT_LENGTH = 20;
+    private static final int MIN_MAIN_CONTENT_TEXT_LENGTH = 500;
+    private static final int MAX_ALLOWED_NOISE_PATTERN_COUNT = 3;
+    private static final int MAX_SHORT_TEXT_LINE_LENGTH = 3;
+    private static final int MIN_JAVA_API_CONTENT_LENGTH = 100;
     private static final String CODE_FENCE_MARKER = "```";
     private static final int CODE_FENCE_LENGTH = CODE_FENCE_MARKER.length();
     private static final int MAX_CONSECUTIVE_NEWLINES = 2;
@@ -116,7 +120,9 @@ public class HtmlContentExtractor {
                 .filter(div -> {
                     String text = div.text();
                     // Must have substantial content and not be navigation
-                    return text.length() > 500 && !isNavigationElement(div) && !containsExcessiveNoise(text);
+                    return text.length() > MIN_MAIN_CONTENT_TEXT_LENGTH
+                            && !isNavigationElement(div)
+                            && !containsExcessiveNoise(text);
                 })
                 .max((e1, e2) -> Integer.compare(e1.text().length(), e2.text().length()))
                 .orElse(null);
@@ -232,7 +238,7 @@ public class HtmlContentExtractor {
         }
 
         // If more than 3 noise patterns, likely navigation/footer
-        return noiseCount > 3;
+        return noiseCount > MAX_ALLOWED_NOISE_PATTERN_COUNT;
     }
 
     /**
@@ -253,7 +259,8 @@ public class HtmlContentExtractor {
                 cleaned.append(line).append("\n");
             } else if (trimmed.isEmpty()) {
                 cleaned.append("\n");
-            } else if (!isNoiseLine(trimmed) && (trimmed.length() > 3 || startsWithUppercaseLetter(trimmed))) {
+            } else if (!isNoiseLine(trimmed)
+                    && (trimmed.length() > MAX_SHORT_TEXT_LINE_LENGTH || startsWithUppercaseLetter(trimmed))) {
                 cleaned.append(line).append("\n");
             }
         }
@@ -382,7 +389,7 @@ public class HtmlContentExtractor {
         String result = content.toString().trim();
 
         // If we didn't get much content, fall back to general extraction
-        if (result.length() < 100) {
+        if (result.length() < MIN_JAVA_API_CONTENT_LENGTH) {
             return extractCleanContent(doc);
         }
 
