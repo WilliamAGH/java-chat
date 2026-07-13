@@ -33,10 +33,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.ui.ExtendedModelMap;
 
 /** Verifies error diagnostics retain request attribution without exposing query data. */
+@ActiveProfiles("test")
 @WebMvcTest(controllers = CustomErrorController.class)
 @Import({com.williamcallahan.javachat.config.AppProperties.class, ExceptionResponseBuilder.class})
 @WithMockUser
@@ -72,11 +74,6 @@ class CustomErrorControllerTest {
     @Test
     void logs_non_api_not_found_at_info_with_safe_request_metadata() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/missing.js?token=secret")
-                        .header("User-Agent", "spoofed-browser")
-                        .with(servletRequest -> {
-                            servletRequest.setServerName("spoofed-host");
-                            return servletRequest;
-                        })
                         .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "default\r\nServlet"))
                 .andExpect(status().isNotFound());
 
@@ -84,8 +81,7 @@ class CustomErrorControllerTest {
         assertEquals(Level.INFO, requestFailureLog.getLevel());
         String diagnostic = requestFailureLog.getFormattedMessage();
         assertTrue(diagnostic.contains("status=404 source=default??Servlet method=GET"));
-        assertTrue(diagnostic.contains("uri=/missing.js host=spoofed-host"));
-        assertTrue(diagnostic.contains("userAgent=spoofed-browser requestId="));
+        assertTrue(diagnostic.contains("uri=/missing.js requestId="));
         assertFalse(diagnostic.contains("secret"));
         List<?> structuredLogFields = requestFailureLog.getKeyValuePairs();
         assertTrue(structuredLogFields == null || structuredLogFields.isEmpty());
@@ -121,8 +117,8 @@ class CustomErrorControllerTest {
         assertFalse(renderedRequestFailure.contains("\u2028"));
         assertTrue(renderedRequestFailure.contains("method=GET"));
         assertTrue(renderedRequestFailure.contains("uri=/api/unknown"));
-        assertTrue(renderedRequestFailure.contains("host=localhost"));
-        assertTrue(renderedRequestFailure.contains("userAgent=unknown"));
+        assertFalse(renderedRequestFailure.contains("host="));
+        assertFalse(renderedRequestFailure.contains("userAgent="));
         assertFalse(renderedRequestFailure.contains("status=\""));
     }
 
