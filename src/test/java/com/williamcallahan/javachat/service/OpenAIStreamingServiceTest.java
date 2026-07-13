@@ -20,6 +20,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.openai.client.OpenAIClient;
 import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
+import com.openai.core.http.StreamResponse;
 import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
@@ -27,12 +28,15 @@ import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.openai.models.ErrorObject;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseStreamEvent;
+import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.services.blocking.ResponseService;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -246,6 +250,100 @@ class OpenAIStreamingServiceTest {
         assertNull(terminalAlert.getThrowableProxy());
         assertFalse(terminalAlert.getFormattedMessage().contains(upstreamSecretBody));
         assertFalse(terminalAlert.toString().contains(upstreamSecretBody));
+    }
+
+    @Test
+    void emptyTextDeltaDoesNotDisablePreTextRetry() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+        OpenAIStreamingService streamingService =
+                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService responseService = mock(ResponseService.class);
+        StreamResponse<ResponseStreamEvent> providerStream = mock();
+        ResponseStreamEvent emptyTextEvent = mock(ResponseStreamEvent.class);
+        ResponseTextDeltaEvent emptyTextDelta = mock(ResponseTextDeltaEvent.class);
+        InternalServerException upstreamFailure = InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .build();
+        when(githubModelsClient.responses()).thenReturn(responseService);
+        when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenReturn(providerStream);
+        when(emptyTextEvent.outputTextDelta()).thenReturn(Optional.of(emptyTextDelta));
+        when(emptyTextDelta.delta()).thenReturn("");
+        when(providerStream.stream())
+                .thenAnswer(ignoredInvocation -> Stream.concat(Stream.of(emptyTextEvent), Stream.generate(() -> {
+                    throw upstreamFailure;
+                })));
+        ReflectionTestUtils.setField(streamingService, "clientPrimary", githubModelsClient);
+
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectErrorSatisfies(failure -> {
+                    OpenAiStreamingFailureException terminalFailure =
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
+                    assertSame(upstreamFailure, terminalFailure.getCause());
+                    assertEquals(2, terminalFailure.currentAttempt());
+                    assertTrue(terminalFailure.beforeFirstChunk());
+                })
+                .verify();
+
+        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(emptyTextDelta, times(2)).delta();
+    }
+
+    @Test
+    void nonEmptyTextDeltaDisablesPreTextRetry() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiRequestFactory requestFactory =
+                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
+        OpenAIStreamingService streamingService =
+                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService responseService = mock(ResponseService.class);
+        StreamResponse<ResponseStreamEvent> providerStream = mock();
+        ResponseStreamEvent visibleTextEvent = mock(ResponseStreamEvent.class);
+        ResponseStreamEvent failedStreamEvent = mock(ResponseStreamEvent.class);
+        ResponseTextDeltaEvent visibleTextDelta = mock(ResponseTextDeltaEvent.class);
+        InternalServerException upstreamFailure = InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .build();
+        when(githubModelsClient.responses()).thenReturn(responseService);
+        when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenReturn(providerStream);
+        when(visibleTextEvent.outputTextDelta()).thenReturn(Optional.of(visibleTextDelta));
+        when(visibleTextDelta.delta()).thenReturn("first token");
+        when(failedStreamEvent.outputTextDelta()).thenThrow(upstreamFailure);
+        when(providerStream.stream()).thenAnswer(ignoredInvocation -> Stream.of(visibleTextEvent, failedStreamEvent));
+        ReflectionTestUtils.setField(streamingService, "clientPrimary", githubModelsClient);
+
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectNext("first token")
+                .expectErrorSatisfies(failure -> {
+                    OpenAiStreamingFailureException terminalFailure =
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
+                    assertSame(upstreamFailure, terminalFailure.getCause());
+                    assertEquals(1, terminalFailure.currentAttempt());
+                    assertFalse(terminalFailure.beforeFirstChunk());
+                })
+                .verify();
+
+        verify(responseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(visibleTextDelta).delta();
     }
 
     @Test

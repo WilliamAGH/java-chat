@@ -35,6 +35,7 @@ public final class OpenAiStreamingFailureException extends RuntimeException {
     private static final String QUEUE_UPSTREAM_TIMEOUT_CODE = "queue_upstream_timeout";
     private static final int UPSTREAM_GATEWAY_TIMEOUT_STATUS = 504;
 
+    /** Classifies terminal failures without exposing upstream exception text. */
     enum StreamingFailureKind {
         QUEUE_UPSTREAM_TIMEOUT("queue_upstream_timeout"),
         UPSTREAM_GATEWAY_TIMEOUT("upstream_gateway_timeout"),

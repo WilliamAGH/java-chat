@@ -339,7 +339,11 @@ public class OpenAIStreamingService {
 
         return executeStreamingRequest(
                         providerCandidate.client(), preparedStreamingRequest.responseParams(), activeProvider)
-                .doOnNext(ignoredChunk -> emittedTextChunk.set(true))
+                .doOnNext(textChunk -> {
+                    if (!textChunk.isEmpty()) {
+                        emittedTextChunk.set(true);
+                    }
+                })
                 .onErrorResume(streamingFailure -> {
                     if (!attemptContext.hasNextAttempt()
                             || emittedTextChunk.get()
