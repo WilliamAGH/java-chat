@@ -115,6 +115,38 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void preservesDistinctUnmappedLocalDocumentsWithoutContentHashes() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        DocumentFactory documentFactory = mock(DocumentFactory.class);
+        AppProperties appProperties = new AppProperties();
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+
+        Document firstUnmappedLocalDocument = Document.builder()
+                .id("first-unmapped-local")
+                .text("First local document")
+                .metadata("url", "file:///unmapped/first.html")
+                .build();
+        Document secondUnmappedLocalDocument = Document.builder()
+                .id("second-unmapped-local")
+                .text("Second local document")
+                .metadata("url", "file:///unmapped/second.html")
+                .build();
+        List<Document> retrievalCandidates = List.of(firstUnmappedLocalDocument, secondUnmappedLocalDocument);
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+                .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
+            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+            return deduplicatedCandidates;
+        });
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Local documentation");
+
+        assertEquals(retrievalCandidates, retrievalOutcome.documents());
+    }
+
+    @Test
     void propagatesStrictHybridSearchFailure() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
