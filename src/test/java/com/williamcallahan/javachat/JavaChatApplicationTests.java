@@ -18,12 +18,14 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies the Spring Boot test context loads with mocked AI dependencies.
  */
+@ActiveProfiles("test")
 @SpringBootTest(
         properties = {
             "spring.ai.openai.api-key=test",

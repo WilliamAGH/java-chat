@@ -33,6 +33,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import reactor.core.publisher.Flux;
@@ -44,6 +45,7 @@ import reactor.core.publisher.Mono;
  * <p>This guards against regressions where guided mode would rely on inline footnote markers like
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
+@ActiveProfiles("test")
 @WebMvcTest(controllers = GuidedLearningController.class)
 @Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser

@@ -10,12 +10,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Verifies robots.txt output and sitemap link generation.
  */
+@ActiveProfiles("test")
 @WebMvcTest(controllers = RobotsController.class)
 @Import({SiteUrlResolver.class, com.williamcallahan.javachat.config.AppProperties.class})
 @TestPropertySource(properties = "app.public-base-url=https://java-chat.example")

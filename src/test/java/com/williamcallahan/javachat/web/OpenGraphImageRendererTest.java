@@ -13,11 +13,13 @@ import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
 /**
  * Verifies that the OG image renderer produces a valid 1200x630 PNG.
  */
+@ActiveProfiles("test")
 @SpringBootTest(classes = OpenGraphImageRenderer.class)
 @TestPropertySource(properties = OpenGraphImageRendererTest.SPRING_MAIN_BANNER_MODE_OFF_PROPERTY)
 class OpenGraphImageRendererTest {
