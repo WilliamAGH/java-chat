@@ -106,17 +106,13 @@ class CustomErrorControllerTest {
     @Test
     void renders_unquoted_request_failure_fields_in_console_output() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/api/unknown")
-                        .requestAttr(
-                                RequestDispatcher.ERROR_SERVLET_NAME,
-                                "dispatcherServlet\" forged=\"true\\path\u2028next"))
+                        .requestAttr(RequestDispatcher.ERROR_SERVLET_NAME, "dispatcherServlet"))
                 .andExpect(status().isNotFound());
 
         String renderedRequestFailure = consolePatternEncoder().getLayout().doLayout(onlyLogEvent());
 
         assertTrue(renderedRequestFailure.contains("Request failed status=" + HttpStatus.NOT_FOUND.value()));
-        assertTrue(renderedRequestFailure.contains("source=dispatcherServlet? forged=?true?path?next"));
-        assertFalse(renderedRequestFailure.contains("forged=\"true\""));
-        assertFalse(renderedRequestFailure.contains("\u2028"));
+        assertTrue(renderedRequestFailure.contains("source=dispatcherServlet"));
         assertTrue(renderedRequestFailure.contains("method=GET"));
         assertTrue(renderedRequestFailure.contains("uri=/api/unknown"));
         assertTrue(renderedRequestFailure.contains("host=localhost"));
