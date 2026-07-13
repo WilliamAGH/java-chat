@@ -46,6 +46,11 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+function reportSseFailure(callbacks: SseCallbacks, sseFailure: unknown): void {
+  const sseFailureMessage = sseFailure instanceof Error ? sseFailure.message : String(sseFailure);
+  callbacks.onError?.({ message: sseFailureMessage });
+}
+
 function throwInvalidSseEvent(callbacks: SseCallbacks): never {
   const streamError: StreamError = { message: INVALID_SSE_EVENT_MESSAGE };
   callbacks.onError?.(streamError);
@@ -213,6 +218,7 @@ export async function streamSse(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
+    reportSseFailure(callbacks, fetchError);
     throw fetchError;
   }
 
@@ -237,6 +243,7 @@ export async function streamSseGet(
     if (abortSignal?.aborted || isAbortError(fetchError)) {
       return;
     }
+    reportSseFailure(callbacks, fetchError);
     throw fetchError;
   }
 
@@ -289,7 +296,14 @@ async function consumeSseStream(
 
   try {
     while (true) {
-      const { done: streamEnded, value: byteSegment } = await sseReader.read();
+      const { done: streamEnded, value: byteSegment } = await sseReader
+        .read()
+        .catch((streamReadFailure: unknown): never => {
+          if (!abortSignal?.aborted && !isAbortError(streamReadFailure)) {
+            reportSseFailure(callbacks, streamReadFailure);
+          }
+          throw streamReadFailure;
+        });
 
       if (streamEnded) {
         streamCompletedNormally = true;
