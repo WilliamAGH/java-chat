@@ -197,10 +197,8 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature, int maximumOutputTokens) {
-        if (maximumOutputTokens <= 0) {
-            return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
-        }
-        return executeCompletion(prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens));
+        return Mono.defer(() -> executeCompletion(
+                prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens)));
     }
 
     /**
@@ -227,14 +225,8 @@ public class OpenAIStreamingService {
      */
     public Mono<String> completeJsonObject(
             String prompt, double temperature, int maximumOutputTokens, Duration requestTimeout) {
-        if (maximumOutputTokens <= 0) {
-            return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
-        }
-        if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
-            return Mono.error(new IllegalArgumentException("requestTimeout must be positive"));
-        }
-        return executeCompletion(
-                prompt, temperature, CompletionRequestConfiguration.jsonObject(maximumOutputTokens, requestTimeout));
+        return Mono.defer(() -> executeCompletion(
+                prompt, temperature, CompletionRequestConfiguration.jsonObject(maximumOutputTokens, requestTimeout)));
     }
 
     private Mono<String> executeCompletion(

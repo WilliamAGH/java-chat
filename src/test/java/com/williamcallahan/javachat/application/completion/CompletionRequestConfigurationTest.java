@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 
+/** Verifies completion requests have one application-owned invariant boundary. */
 class CompletionRequestConfigurationTest {
 
     @Test
