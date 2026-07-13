@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.web;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -86,8 +87,8 @@ class CustomErrorControllerTest {
         assertEquals("default??Servlet", structuredLogField(requestFailureLog, "source"));
         assertEquals("GET", structuredLogField(requestFailureLog, "method"));
         assertEquals("/missing.js", structuredLogField(requestFailureLog, "uri"));
-        assertEquals("spoofed-host", structuredLogField(requestFailureLog, "host"));
-        assertEquals("spoofed-browser", structuredLogField(requestFailureLog, "userAgent"));
+        assertFalse(hasStructuredLogField(requestFailureLog, "host"));
+        assertFalse(hasStructuredLogField(requestFailureLog, "userAgent"));
         assertEquals("", structuredLogField(requestFailureLog, "requestId"));
         assertNull(requestFailureLog.getThrowableProxy());
     }
@@ -118,8 +119,8 @@ class CustomErrorControllerTest {
         assertTrue(renderedRequestFailure.contains("source=\"dispatcherServlet\""));
         assertTrue(renderedRequestFailure.contains("method=\"GET\""));
         assertTrue(renderedRequestFailure.contains("uri=\"/api/unknown\""));
-        assertTrue(renderedRequestFailure.contains("host=\"localhost\""));
-        assertTrue(renderedRequestFailure.contains("userAgent=\"unknown\""));
+        assertFalse(renderedRequestFailure.contains("host="));
+        assertFalse(renderedRequestFailure.contains("userAgent="));
     }
 
     @Test
@@ -242,6 +243,11 @@ class CustomErrorControllerTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("Missing structured log field: " + fieldName))
                 .value;
+    }
+
+    private boolean hasStructuredLogField(ILoggingEvent requestFailureLog, String fieldName) {
+        return requestFailureLog.getKeyValuePairs().stream()
+                .anyMatch(structuredField -> structuredField.key.equals(fieldName));
     }
 
     private PatternLayoutEncoder consolePatternEncoder() {
