@@ -3,7 +3,7 @@
     <!-- Plain console output keeps container log levels machine-detectable. -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n</pattern>
         </encoder>
     </appender>
 
@@ -15,7 +15,7 @@
             <maxHistory>7</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>%d{ISO8601} [%thread] %-5level %logger - %msg%n</pattern>
+            <pattern>%d{ISO8601} [%thread] %-5level %logger - %msg %kvp%n</pattern>
         </encoder>
     </appender>
 
