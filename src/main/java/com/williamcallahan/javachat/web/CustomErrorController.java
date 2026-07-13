@@ -109,6 +109,8 @@ public class CustomErrorController implements ErrorController {
     private void logRequestFailure(HttpServletRequest request, int statusCode, String requestUri, Object exception) {
         String method = safeLogField(request.getMethod());
         String canonicalUri = safeLogField(requestUri.split("[?#]", 2)[0]);
+        String serverHost = safeLogField(request.getServerName());
+        String userAgent = safeLogField(request.getHeader("User-Agent"));
         String safeRequestId = safeLogField(request.getRequestId());
         String source = safeLogField(request.getAttribute(RequestDispatcher.ERROR_SERVLET_NAME));
         boolean terminalStreamFailureAlreadyLogged = exception instanceof Throwable requestFailure
@@ -116,12 +118,14 @@ public class CustomErrorController implements ErrorController {
 
         LoggingEventBuilder requestFailureLog = log.atLevel(resolveFailureLogLevel(
                         statusCode, isApiRequest(requestUri), terminalStreamFailureAlreadyLogged))
-                .setMessage("Request failed")
-                .addKeyValue("status", statusCode)
-                .addKeyValue("source", source)
-                .addKeyValue("method", method)
-                .addKeyValue("uri", canonicalUri)
-                .addKeyValue("requestId", safeRequestId);
+                .setMessage("Request failed status={} source={} method={} uri={} host={} userAgent={} requestId={}")
+                .addArgument(statusCode)
+                .addArgument(source)
+                .addArgument(method)
+                .addArgument(canonicalUri)
+                .addArgument(serverHost)
+                .addArgument(userAgent)
+                .addArgument(safeRequestId);
         if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()
                 && exception instanceof Exception exceptionInstance
                 && !terminalStreamFailureAlreadyLogged) {
