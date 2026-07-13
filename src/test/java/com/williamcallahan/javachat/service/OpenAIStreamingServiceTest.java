@@ -32,7 +32,9 @@ import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.services.blocking.ResponseService;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
+import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureReporter;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
 import java.util.List;
@@ -90,7 +92,8 @@ class OpenAIStreamingServiceTest {
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
         OpenAiProviderRoutingService providerRoutingService =
                 new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
-        return new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        return new OpenAIStreamingService(
+                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
     }
 
     @Test
@@ -191,9 +194,7 @@ class OpenAIStreamingServiceTest {
         NotFoundException notFoundException =
                 NotFoundException.builder().headers(Headers.builder().build()).build();
         OpenAiStreamingFailureException terminalFailure = OpenAiStreamingFailureException.terminalAndLog(
-                notFoundException,
-                new OpenAiStreamingFailureException.TerminalAttempt(
-                        "openai", "gpt-5.2", new OpenAiStreamingFailureException.AttemptProgress(1, 1), false));
+                notFoundException, new StreamingFailureReporter.TerminalAttempt("openai", "gpt-5.2", 1, 1, false));
 
         assertTrue(streamingService.isRecoverableStreamingFailure(
                 new IllegalStateException("reactor boundary", terminalFailure)));
@@ -209,8 +210,8 @@ class OpenAIStreamingServiceTest {
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
         OpenAiProviderRoutingService providerRoutingService =
                 new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
-        OpenAIStreamingService streamingService =
-                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
         ResponseService responseService = mock(ResponseService.class);
         ErrorObject upstreamError = ErrorObject.builder()
@@ -259,8 +260,8 @@ class OpenAIStreamingServiceTest {
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
         OpenAiProviderRoutingService providerRoutingService =
                 new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
-        OpenAIStreamingService streamingService =
-                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
         ResponseService responseService = mock(ResponseService.class);
         StreamResponse<ResponseStreamEvent> providerStream = mock();
@@ -304,8 +305,8 @@ class OpenAIStreamingServiceTest {
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
         OpenAiProviderRoutingService providerRoutingService =
                 new OpenAiProviderRoutingService(rateLimitService, 600, "github_models");
-        OpenAIStreamingService streamingService =
-                new OpenAIStreamingService(rateLimitService, requestFactory, providerRoutingService);
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
         ResponseService responseService = mock(ResponseService.class);
         StreamResponse<ResponseStreamEvent> providerStream = mock();

@@ -15,11 +15,10 @@ import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
 import com.openai.models.ErrorObject;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.AlertField;
-import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.AttemptProgress;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.QueueHeader;
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.StreamingFailureKind;
-import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.TerminalAttempt;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter.TerminalAttempt;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -190,20 +189,16 @@ class OpenAiStreamingFailureExceptionTest {
     }
 
     @Test
-    void terminalAttemptRejectsInvalidProviderModelAndAttemptProgress() {
-        assertThrows(IllegalArgumentException.class, () -> new AttemptProgress(0, 1));
-        assertThrows(IllegalArgumentException.class, () -> new AttemptProgress(2, 1));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerminalAttempt(" ", MODEL_ID, new AttemptProgress(1, 1), false));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerminalAttempt(PROVIDER_NAME, "", new AttemptProgress(1, 1), false));
-        assertThrows(NullPointerException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, null, false));
+    void terminalAttemptRejectsInvalidProviderModelAndAttemptBounds() {
+        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 0, 1, false));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 1, false));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(" ", MODEL_ID, 1, 1, false));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, "", 1, 1, false));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 1, 0, false));
     }
 
     private static TerminalAttempt terminalAttempt(boolean emittedTextChunk) {
-        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, new AttemptProgress(2, 2), emittedTextChunk);
+        return new TerminalAttempt(PROVIDER_NAME, MODEL_ID, 2, 2, emittedTextChunk);
     }
 
     private ILoggingEvent onlyTerminalAlert() {

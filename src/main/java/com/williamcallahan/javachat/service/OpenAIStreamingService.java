@@ -12,8 +12,9 @@ import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
-import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
+import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import com.williamcallahan.javachat.web.SseConstants;
@@ -43,7 +44,6 @@ import reactor.core.scheduler.Schedulers;
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
 
-    private static final Duration DEFAULT_COMPLETE_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK =
             SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
     private static final String STREAM_STAGE_STREAM = SseConstants.STATUS_STAGE_STREAM;
@@ -58,6 +58,7 @@ public class OpenAIStreamingService {
     private final RateLimitService rateLimitService;
     private final OpenAiRequestFactory requestFactory;
     private final OpenAiProviderRoutingService providerRoutingService;
+    private final StreamingFailureReporter streamingFailureReporter;
 
     @Value("${GITHUB_TOKEN:}")
     private String githubToken;
@@ -94,14 +95,17 @@ public class OpenAIStreamingService {
      * @param rateLimitService provider rate-limit state tracker
      * @param requestFactory request payload and truncation builder
      * @param providerRoutingService provider ordering and fallback classifier
+     * @param streamingFailureReporter terminal provider-failure boundary
      */
     public OpenAIStreamingService(
             RateLimitService rateLimitService,
             OpenAiRequestFactory requestFactory,
-            OpenAiProviderRoutingService providerRoutingService) {
+            OpenAiProviderRoutingService providerRoutingService,
+            StreamingFailureReporter streamingFailureReporter) {
         this.rateLimitService = rateLimitService;
         this.requestFactory = requestFactory;
         this.providerRoutingService = providerRoutingService;
+        this.streamingFailureReporter = streamingFailureReporter;
         this.isAvailable = false;
     }
 
@@ -181,7 +185,7 @@ public class OpenAIStreamingService {
      * @return completion text from the first successful provider attempt
      */
     public Mono<String> complete(String prompt, double temperature) {
-        return complete(prompt, temperature, CompletionConfiguration.withDefaultTimeout());
+        return executeCompletion(prompt, temperature, CompletionRequestConfiguration.defaultText());
     }
 
     /**
@@ -196,10 +200,7 @@ public class OpenAIStreamingService {
         if (maximumOutputTokens <= 0) {
             return Mono.error(new IllegalArgumentException("maximumOutputTokens must be positive"));
         }
-        return complete(
-                prompt,
-                temperature,
-                CompletionConfiguration.withOutputBudget(maximumOutputTokens, DEFAULT_COMPLETE_REQUEST_TIMEOUT));
+        return executeCompletion(prompt, temperature, CompletionRequestConfiguration.boundedText(maximumOutputTokens));
     }
 
     /**
@@ -211,7 +212,8 @@ public class OpenAIStreamingService {
      * @return completion text from the first provider honoring the JSON contract
      */
     public Mono<String> completeJsonObject(String prompt, double temperature, int maximumOutputTokens) {
-        return completeJsonObject(prompt, temperature, maximumOutputTokens, DEFAULT_COMPLETE_REQUEST_TIMEOUT);
+        return completeJsonObject(
+                prompt, temperature, maximumOutputTokens, CompletionRequestConfiguration.defaultRequestTimeout());
     }
 
     /**
@@ -231,10 +233,12 @@ public class OpenAIStreamingService {
         if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
             return Mono.error(new IllegalArgumentException("requestTimeout must be positive"));
         }
-        return complete(prompt, temperature, CompletionConfiguration.jsonObject(maximumOutputTokens, requestTimeout));
+        return executeCompletion(
+                prompt, temperature, CompletionRequestConfiguration.jsonObject(maximumOutputTokens, requestTimeout));
     }
 
-    private Mono<String> complete(String prompt, double temperature, CompletionConfiguration configuration) {
+    private Mono<String> executeCompletion(
+            String prompt, double temperature, CompletionRequestConfiguration configuration) {
         return Mono.<String>defer(() -> {
                     List<OpenAiProviderCandidate> availableProviders =
                             providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
@@ -296,19 +300,22 @@ public class OpenAIStreamingService {
             String prompt,
             double temperature,
             RateLimitService.ApiProvider activeProvider,
-            CompletionConfiguration configuration) {
+            CompletionRequestConfiguration configuration) {
         if (configuration.requireJsonObject()) {
             return requestFactory.buildJsonCompletionRequest(
                     prompt,
                     temperature,
                     activeProvider,
-                    configuration.maximumOutputTokens().intValue());
+                    configuration.maximumOutputTokens().orElseThrow());
         }
-        if (configuration.maximumOutputTokens() == null) {
+        if (configuration.maximumOutputTokens().isEmpty()) {
             return requestFactory.buildCompletionRequest(prompt, temperature, activeProvider);
         }
         return requestFactory.buildCompletionRequest(
-                prompt, temperature, activeProvider, configuration.maximumOutputTokens());
+                prompt,
+                temperature,
+                activeProvider,
+                configuration.maximumOutputTokens().orElseThrow());
     }
 
     /**
@@ -350,13 +357,13 @@ public class OpenAIStreamingService {
                     if (!attemptContext.hasNextAttempt()
                             || emittedTextChunk.get()
                             || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
-                        return Flux.error(OpenAiStreamingFailureException.terminalAndLog(
+                        return Flux.error(streamingFailureReporter.reportTerminalFailure(
                                 streamingFailure,
-                                new OpenAiStreamingFailureException.TerminalAttempt(
+                                new StreamingFailureReporter.TerminalAttempt(
                                         activeProvider.getName(),
                                         preparedStreamingRequest.modelId(),
-                                        new OpenAiStreamingFailureException.AttemptProgress(
-                                                attemptContext.currentAttempt(), attemptContext.maxAttempts()),
+                                        attemptContext.currentAttempt(),
+                                        attemptContext.maxAttempts(),
                                         emittedTextChunk.get())));
                     }
 
@@ -416,22 +423,6 @@ public class OpenAIStreamingService {
 
     private Timeout completeTimeout(Duration requestTimeout) {
         return Timeout.builder().request(requestTimeout).build();
-    }
-
-    private record CompletionConfiguration(
-            Integer maximumOutputTokens, boolean requireJsonObject, Duration requestTimeout) {
-
-        private static CompletionConfiguration withDefaultTimeout() {
-            return new CompletionConfiguration(null, false, DEFAULT_COMPLETE_REQUEST_TIMEOUT);
-        }
-
-        private static CompletionConfiguration withOutputBudget(int maximumOutputTokens, Duration requestTimeout) {
-            return new CompletionConfiguration(maximumOutputTokens, false, requestTimeout);
-        }
-
-        private static CompletionConfiguration jsonObject(int maximumOutputTokens, Duration requestTimeout) {
-            return new CompletionConfiguration(maximumOutputTokens, true, requestTimeout);
-        }
     }
 
     private OpenAIClient createClient(String apiKey, String baseUrl) {

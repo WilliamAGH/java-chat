@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.adapters.out.llm.openai;
 
 import com.openai.errors.OpenAIServiceException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
+import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter.TerminalAttempt;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import java.io.Serial;
 import java.util.EnumMap;
@@ -120,8 +121,8 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         TerminalAttempt validatedAttempt = Objects.requireNonNull(terminalAttempt, "terminalAttempt");
         this.providerName = boundedLogValue(validatedAttempt.providerName());
         this.modelId = boundedLogValue(validatedAttempt.modelId());
-        this.currentAttempt = validatedAttempt.attemptProgress().current();
-        this.maxAttempts = validatedAttempt.attemptProgress().max();
+        this.currentAttempt = validatedAttempt.currentAttempt();
+        this.maxAttempts = validatedAttempt.maxAttempts();
         this.emittedTextChunk = validatedAttempt.emittedTextChunk();
         if (upstreamFailure instanceof OpenAIServiceException serviceException) {
             this.upstreamHttpStatus = serviceException.statusCode();
@@ -277,7 +278,7 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         Objects.requireNonNull(upstreamFailure, "upstreamFailure");
         Objects.requireNonNull(terminalAttempt, "terminalAttempt");
         String streamPhase = terminalAttempt.emittedTextChunk() ? "after first chunk" : "before first chunk";
-        int currentAttempt = terminalAttempt.attemptProgress().current();
+        int currentAttempt = terminalAttempt.currentAttempt();
         String attemptUnit = currentAttempt == 1 ? "attempt" : "attempts";
         String boundedModelId = boundedLogValue(terminalAttempt.modelId());
         if (upstreamFailure instanceof OpenAIServiceException serviceException) {
@@ -323,53 +324,5 @@ public final class OpenAiStreamingFailureException extends RuntimeException impl
         return StructuredLogValue.bounded(
                         Objects.requireNonNull(fieldText, "fieldText"), MAX_STREAM_FAILURE_FIELD_LENGTH)
                 .text();
-    }
-
-    /** Captures the provider attempt that became terminal. */
-    public record TerminalAttempt(
-            String providerName, String modelId, AttemptProgress attemptProgress, boolean emittedTextChunk) {
-
-        /**
-         * Validates immutable context before it can be logged or propagated.
-         *
-         * @param providerName provider selected for the terminal attempt
-         * @param modelId model selected for the terminal attempt
-         * @param attemptProgress one-based current and maximum attempt counts
-         * @param emittedTextChunk whether visible text was emitted before the failure
-         */
-        public TerminalAttempt {
-            providerName = requireNonBlank(providerName, "providerName");
-            modelId = requireNonBlank(modelId, "modelId");
-            attemptProgress = Objects.requireNonNull(attemptProgress, "attemptProgress");
-        }
-    }
-
-    /** Captures valid one-based progress through the provider-attempt sequence. */
-    public record AttemptProgress(int current, int max) {
-
-        /**
-         * Validates that the current attempt belongs to the bounded attempt sequence.
-         *
-         * @param current one-based current attempt number
-         * @param max maximum number of allowed attempts
-         */
-        public AttemptProgress {
-            if (current < 1) {
-                throw new IllegalArgumentException("current must be positive");
-            }
-            if (max < 1) {
-                throw new IllegalArgumentException("max must be positive");
-            }
-            if (current > max) {
-                throw new IllegalArgumentException("current must not exceed max");
-            }
-        }
-    }
-
-    private static String requireNonBlank(String fieldText, String fieldName) {
-        if (fieldText == null || fieldText.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-        return fieldText;
     }
 }
