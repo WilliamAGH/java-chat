@@ -91,12 +91,9 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         } catch (OpenAiCompatibleEmbeddingClient.EmbeddingProbeDeferredException exception) {
             recordDeferred(elapsedMillis(probeStartNanos));
             return;
-        } catch (RuntimeException exception) {
-            recordFailure(elapsedMillis(probeStartNanos), exception);
-            if (exception instanceof EmbeddingServiceUnavailableException) {
-                return;
-            }
-            throw exception;
+        } catch (EmbeddingServiceUnavailableException embeddingUnavailableException) {
+            recordFailure(elapsedMillis(probeStartNanos), embeddingUnavailableException);
+            return;
         }
         recordSuccess(elapsedMillis(probeStartNanos));
     }
@@ -110,7 +107,7 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
     /**
      * Projects the latest completed embedding probe into the application health endpoint.
      *
-     * @return DOWN until a probe succeeds and after the latest probe fails; UP otherwise
+     * @return DOWN until a probe succeeds and after recognized provider unavailability; UP otherwise
      */
     @Override
     public Health health() {
@@ -174,7 +171,8 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
         }
     }
 
-    private void recordFailure(long probeDurationMillis, RuntimeException exception) {
+    private void recordFailure(
+            long probeDurationMillis, EmbeddingServiceUnavailableException embeddingUnavailableException) {
         String logSafeModelName = modelName.replace("\r", "\\r").replace("\n", "\\n");
         EmbeddingProbeSnapshot previousProbe = latestProbe;
         int consecutiveFailureCount = previousProbe.lifecycle() == EmbeddingProbeLifecycle.UNAVAILABLE
@@ -184,12 +182,12 @@ public class EmbeddingModelKeepAlive implements HealthIndicator {
                 EmbeddingProbeLifecycle.UNAVAILABLE, probeDurationMillis, 0, consecutiveFailureCount);
         if (consecutiveFailureCount == 1) {
             log.atWarn()
-                    .setCause(exception)
+                    .setCause(embeddingUnavailableException)
                     .log(() -> "event=embedding_model_probe_failed outcome=failure model=" + logSafeModelName
                             + " durationMs=" + probeDurationMillis + " consecutiveFailures=" + consecutiveFailureCount);
         } else if (consecutiveFailureCount == REPEATED_PROBE_ALERT_COUNT) {
             log.atError()
-                    .setCause(exception)
+                    .setCause(embeddingUnavailableException)
                     .log(() -> "event=embedding_model_probe_failure_loop outcome=failure model=" + logSafeModelName
                             + " durationMs=" + probeDurationMillis + " consecutiveFailures=" + consecutiveFailureCount);
         } else {
