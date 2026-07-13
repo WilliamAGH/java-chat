@@ -11,10 +11,8 @@
         type Citation,
         type ChatMessage,
     } from "../services/chat";
-    import {
-        parseMarkdown,
-        applyJavaLanguageDetection,
-    } from "../services/markdown";
+    import { applyJavaLanguageDetection } from "../services/javaLanguageDetection";
+    import { parseMarkdown } from "../services/markdown";
     import CitationPanel from "./CitationPanel.svelte";
     import GuidedLessonChatPanel from "./GuidedLessonChatPanel.svelte";
     import LessonCitations from "./LessonCitations.svelte";

@@ -1,4 +1,4 @@
-import { marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
+import { Marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 
 /**
@@ -42,6 +42,12 @@ type EnrichmentOpening = { kind: string; length: number };
 const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/;
 const FENCE_MIN_LENGTH = 3;
 const NEWLINE = "\n";
+const ASCII_DIGIT_START = 48;
+const ASCII_DIGIT_END = 57;
+const ASCII_UPPERCASE_START = 65;
+const ASCII_UPPERCASE_END = 90;
+const ASCII_LOWERCASE_START = 97;
+const ASCII_LOWERCASE_END = 122;
 
 type FenceMarker = { character: string; length: number };
 
@@ -71,9 +77,9 @@ function isFenceLanguageCharacter(character: string): boolean {
     return false;
   }
   const charCode = character.charCodeAt(0);
-  const isLowerAlpha = charCode >= 97 && charCode <= 122;
-  const isUpperAlpha = charCode >= 65 && charCode <= 90;
-  const isDigit = charCode >= 48 && charCode <= 57;
+  const isLowerAlpha = charCode >= ASCII_LOWERCASE_START && charCode <= ASCII_LOWERCASE_END;
+  const isUpperAlpha = charCode >= ASCII_UPPERCASE_START && charCode <= ASCII_UPPERCASE_END;
+  const isDigit = charCode >= ASCII_DIGIT_START && charCode <= ASCII_DIGIT_END;
   return isLowerAlpha || isUpperAlpha || isDigit || character === "-" || character === "_";
 }
 
@@ -184,11 +190,9 @@ function hasBalancedCodeFences(content: string): boolean {
   let depth = 0;
   let openChar = "";
   let openLen = 0;
-
   for (const line of content.split("\n")) {
     const match = line.match(FENCE_PATTERN);
     if (!match) continue;
-
     const fence = match[1];
     if (depth === 0) {
       // Opening fence
@@ -202,12 +206,20 @@ function hasBalancedCodeFences(content: string): boolean {
       openLen = 0;
     }
   }
-
   return depth === 0;
 }
 
 /** Enrichment close marker. */
 const ENRICHMENT_CLOSE = "}}";
+
+function hasUnmatchedOpeningBrace(enrichmentText: string): boolean {
+  let braceDepth = 0;
+  for (const character of enrichmentText) {
+    if (character === "{") braceDepth++;
+    else if (character === "}" && braceDepth > 0) braceDepth--;
+  }
+  return braceDepth > 0;
+}
 
 function readEnrichmentOpening(src: string, index: number): EnrichmentOpening | null {
   for (const kind of Object.keys(ENRICHMENT_KINDS)) {
@@ -227,7 +239,6 @@ function findEnrichmentStart(src: string): number {
       openingIndex = candidateIndex;
     }
   }
-
   let precedingIndex = openingIndex - 1;
   while (precedingIndex >= 0 && " \t\r\n".includes(src[precedingIndex])) {
     precedingIndex--;
@@ -253,11 +264,10 @@ function resolveCloseIndexFromBraceRun(src: string, runStart: number): number {
 }
 
 /** Finds the closing }} while rejecting unresolved nesting and fenced-code braces. */
-function findEnrichmentClose(src: string, startIndex: number): number {
+function findEnrichmentClose(src: string, startIndex: number, isStreaming: boolean): number {
   let inFence = false;
   let fenceChar = "";
   let fenceLen = 0;
-
   for (let cursor = startIndex; cursor < src.length - 1; cursor++) {
     // At line boundaries, check for fence delimiters
     if (cursor === startIndex || src[cursor - 1] === "\n") {
@@ -277,14 +287,19 @@ function findEnrichmentClose(src: string, startIndex: number): number {
         continue;
       }
     }
-
     if (!inFence && readEnrichmentOpening(src, cursor)) {
       return -1;
     }
-
     if (!inFence && src[cursor] === "}") {
       const closeIndex = resolveCloseIndexFromBraceRun(src, cursor);
       if (closeIndex >= 0) {
+        if (
+          isStreaming &&
+          closeIndex === cursor &&
+          hasUnmatchedOpeningBrace(src.slice(startIndex, cursor))
+        ) {
+          continue;
+        }
         return closeIndex;
       }
     }
@@ -297,7 +312,10 @@ function findEnrichmentClose(src: string, startIndex: number): number {
  * Custom marked extension for enrichment markers.
  * Parses {{kind:content}} syntax and renders as styled cards.
  */
-function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
+function createEnrichmentExtension(
+  isStreaming: boolean,
+  markdownParser: Marked,
+): TokenizerExtension & RendererExtension {
   return {
     name: "enrichment",
     level: "block",
@@ -316,15 +334,17 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 
       const contentStart = opening.length;
 
-      const closeIndex = findEnrichmentClose(src, contentStart);
+      const closeIndex = findEnrichmentClose(src, contentStart, isStreaming);
       if (closeIndex === -1) {
-        const contentEnd =
-          src.endsWith("}") && !src.endsWith(ENRICHMENT_CLOSE) ? src.length - 1 : src.length;
+        const shouldHideTrailingBrace =
+          src.endsWith("}") && !hasUnmatchedOpeningBrace(src.slice(contentStart, -1));
         return {
           type: "enrichment",
           raw: src,
           kind: opening.kind,
-          content: src.slice(contentStart, contentEnd).trim(),
+          content: src
+            .slice(contentStart, shouldHideTrailingBrace ? src.length - 1 : src.length)
+            .trim(),
           resolved: false,
         };
       }
@@ -347,7 +367,7 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 
       if (token.resolved !== true) {
         const unresolvedContent = typeof token.content === "string" ? token.content : "";
-        return marked.parse(normalizeMarkdownForStreaming(unresolvedContent), {
+        return markdownParser.parse(normalizeMarkdownForStreaming(unresolvedContent), {
           async: false,
           gfm: true,
           breaks: false,
@@ -378,7 +398,7 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
-      const innerHtml = marked.parse(normalizedContent, {
+      const innerHtml = markdownParser.parse(normalizedContent, {
         async: false,
         gfm: true,
         breaks: false, // Preserve fence detection accuracy
@@ -391,30 +411,14 @@ function createEnrichmentExtension(): TokenizerExtension & RendererExtension {
     },
   };
 }
-// Configure marked once at module load
-marked.use({
-  gfm: true,
-  breaks: true,
-  extensions: [createEnrichmentExtension()],
-});
+function createMarkdownParser(isStreaming: boolean): Marked {
+  const markdownParser = new Marked({ gfm: true, breaks: true });
+  markdownParser.use({ extensions: [createEnrichmentExtension(isStreaming, markdownParser)] });
+  return markdownParser;
+}
 
-/** Keywords indicating Java code for auto-detection. */
-const JAVA_KEYWORDS = [
-  "public",
-  "private",
-  "class",
-  "import",
-  "void",
-  "String",
-  "int",
-  "boolean",
-] as const;
-
-/** CSS class applied to detected Java code blocks for syntax highlighting. */
-const JAVA_LANGUAGE_CLASS = "language-java";
-
-/** Selector for unmarked code blocks eligible for language detection. */
-const UNMARKED_CODE_SELECTOR = "pre > code:not([class])";
+const COMPLETE_MARKDOWN_PARSER = createMarkdownParser(false);
+const STREAMING_MARKDOWN_PARSER = createMarkdownParser(true);
 
 /**
  * Parse markdown to sanitized HTML. SSR-safe - no DOM APIs used.
@@ -422,12 +426,15 @@ const UNMARKED_CODE_SELECTOR = "pre > code:not([class])";
  *
  * @throws Never throws - returns empty string on parse failure and logs error in dev mode
  */
-export function parseMarkdown(content: string | null | undefined): string {
-  if (!content) {
+export function parseMarkdown(
+  markdownText: string | null | undefined,
+  isStreaming = false,
+): string {
+  if (!markdownText) {
     return "";
   }
 
-  const normalizedContent = normalizeMarkdownForStreaming(content);
+  const normalizedContent = normalizeMarkdownForStreaming(markdownText);
 
   // DIAGNOSTIC: Log content with unbalanced fences before parsing
   if (import.meta.env.DEV) {
@@ -442,7 +449,8 @@ export function parseMarkdown(content: string | null | undefined): string {
   }
 
   try {
-    const rawHtml = marked.parse(normalizedContent, { async: false });
+    const markdownParser = isStreaming ? STREAMING_MARKDOWN_PARSER : COMPLETE_MARKDOWN_PARSER;
+    const rawHtml = markdownParser.parse(normalizedContent, { async: false });
 
     return DOMPurify.sanitize(rawHtml, {
       USE_PROFILES: { html: true },
@@ -452,33 +460,6 @@ export function parseMarkdown(content: string | null | undefined): string {
     console.error("[markdown] Failed to parse markdown content:", parseError);
     return "";
   }
-}
-
-/**
- * Auto-detect Java code blocks and add language class for highlighting.
- * Client-side only - call this in `$effect` after content is mounted.
- *
- * @param container - DOM element containing rendered markdown. Must be a valid HTMLElement.
- * @throws Never throws - logs warning if container is invalid and returns early
- */
-export function applyJavaLanguageDetection(container: HTMLElement | null | undefined): void {
-  if (!container || typeof container.querySelectorAll !== "function") {
-    if (import.meta.env.DEV) {
-      console.warn(
-        "[markdown] applyJavaLanguageDetection called with invalid container:",
-        container,
-      );
-    }
-    return;
-  }
-
-  const codeBlocks = container.querySelectorAll(UNMARKED_CODE_SELECTOR);
-  codeBlocks.forEach((code) => {
-    const text = code.textContent ?? "";
-    if (JAVA_KEYWORDS.some((kw) => text.includes(kw))) {
-      code.className = JAVA_LANGUAGE_CLASS;
-    }
-  });
 }
 
 /**
