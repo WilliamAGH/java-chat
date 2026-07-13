@@ -13,14 +13,13 @@ public record CompletionRequestConfiguration(
     /** Validates that every configuration represents an executable completion request. */
     public CompletionRequestConfiguration {
         maximumOutputTokens = Objects.requireNonNull(maximumOutputTokens, "maximumOutputTokens");
-        requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         if (maximumOutputTokens.isPresent() && maximumOutputTokens.getAsInt() <= 0) {
             throw new IllegalArgumentException("maximumOutputTokens must be positive");
         }
         if (requireJsonObject && maximumOutputTokens.isEmpty()) {
             throw new IllegalArgumentException("JSON object completions require a maximum output token budget");
         }
-        if (requestTimeout.isZero() || requestTimeout.isNegative()) {
+        if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
             throw new IllegalArgumentException("requestTimeout must be positive");
         }
     }

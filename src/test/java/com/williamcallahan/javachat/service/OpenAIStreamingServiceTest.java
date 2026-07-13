@@ -37,6 +37,7 @@ import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.Exceptions;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 /**
@@ -391,6 +393,29 @@ class OpenAIStreamingServiceTest {
 
         assertEquals(0, logCount(Level.ERROR, "LLM providers unavailable"));
         assertEquals(1, logCount(Level.WARN, "LLM providers unavailable"));
+    }
+
+    @Test
+    void invalidCompletionConfigurationFailsOnSubscription() {
+        OpenAIStreamingService streamingService = createStreamingService();
+
+        assertCompletionFailure(streamingService.complete("prompt", 0.7, 0), "maximumOutputTokens must be positive");
+        assertCompletionFailure(streamingService.complete("prompt", 0.7, -1), "maximumOutputTokens must be positive");
+        assertCompletionFailure(
+                streamingService.completeJsonObject("prompt", 0.7, 128, null), "requestTimeout must be positive");
+        assertCompletionFailure(
+                streamingService.completeJsonObject("prompt", 0.7, 128, Duration.ZERO),
+                "requestTimeout must be positive");
+        assertCompletionFailure(
+                streamingService.completeJsonObject("prompt", 0.7, 128, Duration.ofSeconds(-1)),
+                "requestTimeout must be positive");
+    }
+
+    private static void assertCompletionFailure(Mono<String> completion, String expectedFailureMessage) {
+        StepVerifier.create(completion)
+                .expectErrorMatches(failure -> failure instanceof IllegalArgumentException
+                        && expectedFailureMessage.equals(failure.getMessage()))
+                .verify();
     }
 
     private long logCount(Level level, String messageFragment) {

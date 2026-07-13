@@ -40,7 +40,8 @@ class CompletionRequestConfigurationTest {
                 IllegalArgumentException.class,
                 () -> new CompletionRequestConfiguration(OptionalInt.empty(), true, requestTimeout));
         assertThrows(
-                NullPointerException.class, () -> new CompletionRequestConfiguration(OptionalInt.empty(), false, null));
+                IllegalArgumentException.class,
+                () -> new CompletionRequestConfiguration(OptionalInt.empty(), false, null));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new CompletionRequestConfiguration(OptionalInt.empty(), false, Duration.ZERO));
