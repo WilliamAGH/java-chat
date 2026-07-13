@@ -24,6 +24,60 @@ has_boundary_whitespace() {
     [[ "$manifest_text" =~ ^[[:space:]] || "$manifest_text" =~ [[:space:]]$ ]]
 }
 
+has_manifest_control_character() {
+    local manifest_text="$1"
+    local LC_ALL=C
+    [[ "$manifest_text" == *[[:cntrl:]]* ]]
+}
+
+is_absolute_https_remote_base_url() {
+    local remote_base_url="$1"
+    if [[ "$remote_base_url" != https://* || "$remote_base_url" != */ ]]; then
+        return 1
+    fi
+    if [[ "$remote_base_url" == *[[:space:]]* || "$remote_base_url" == *\\* ]]; then
+        return 1
+    fi
+
+    local remote_authority_and_path="${remote_base_url#https://}"
+    local remote_authority="${remote_authority_and_path%%[/?#]*}"
+    if [ -z "$remote_authority" ]; then
+        return 1
+    fi
+
+    local remote_host_and_port="${remote_authority##*@}"
+    if [ -z "$remote_host_and_port" ]; then
+        return 1
+    fi
+    if [[ "$remote_host_and_port" == \[* ]]; then
+        [[ "$remote_host_and_port" =~ ^\[[0-9A-Fa-f:.]+\](:[0-9]+)?$ ]]
+        return
+    fi
+    [[ "$remote_host_and_port" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?$ ]]
+}
+
+is_normalized_relative_mirror_path() {
+    local relative_mirror_path="$1"
+    if [[ "$relative_mirror_path" == /* \
+        || "$relative_mirror_path" == */ \
+        || "$relative_mirror_path" == *//* \
+        || "$relative_mirror_path" == *\\* ]]; then
+        return 1
+    fi
+
+    local IFS='/'
+    local -a mirror_path_segments
+    read -r -a mirror_path_segments <<< "$relative_mirror_path"
+    local mirror_path_segment
+    for mirror_path_segment in "${mirror_path_segments[@]}"; do
+        if [ -z "$mirror_path_segment" ] \
+            || [ "$mirror_path_segment" = "." ] \
+            || [ "$mirror_path_segment" = ".." ]; then
+            return 1
+        fi
+    done
+}
+
 is_blank_manifest_line() {
     local manifest_line="$1"
     local LC_ALL=C
@@ -110,11 +164,27 @@ load_java_api_documentation_sources() {
             echo "Java API source manifest line $manifest_line_number has an invalid Java release" >&2
             return 1
         fi
-        if [ -z "$remoteBaseUrl" ] || [ -z "$relativeMirrorPath" ] || [ -z "$displayName" ] \
-            || has_boundary_whitespace "$remoteBaseUrl" \
-            || has_boundary_whitespace "$relativeMirrorPath" \
-            || has_boundary_whitespace "$displayName"; then
+        if [ -z "$remoteBaseUrl" ] || [ -z "$relativeMirrorPath" ] || [ -z "$displayName" ]; then
             echo "Java API source manifest line $manifest_line_number has a blank required field" >&2
+            return 1
+        fi
+        if has_boundary_whitespace "$remoteBaseUrl" \
+            || has_boundary_whitespace "$relativeMirrorPath" \
+            || has_boundary_whitespace "$displayName" \
+            || has_boundary_whitespace "$rejectRegex" \
+            || has_manifest_control_character "$remoteBaseUrl" \
+            || has_manifest_control_character "$relativeMirrorPath" \
+            || has_manifest_control_character "$displayName" \
+            || has_manifest_control_character "$rejectRegex"; then
+            echo "Java API source manifest line $manifest_line_number has invalid text fields" >&2
+            return 1
+        fi
+        if ! is_absolute_https_remote_base_url "$remoteBaseUrl"; then
+            echo "Java API source manifest line $manifest_line_number has an invalid remote base URL" >&2
+            return 1
+        fi
+        if ! is_normalized_relative_mirror_path "$relativeMirrorPath"; then
+            echo "Java API source manifest line $manifest_line_number has an invalid relative mirror path" >&2
             return 1
         fi
         if ! is_canonical_manifest_integer "$cutDirectories"; then
@@ -160,19 +230,9 @@ load_java_api_documentation_sources() {
 }
 
 append_java_api_fetch_sources() {
-    local docs_root="$1"
     local java_api_source_projection
     for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
-        local javaRelease
-        local remoteBaseUrl
-        local relativeMirrorPath
-        local displayName
-        local cutDirectories
-        local minimumHtmlFiles
-        local rejectRegex
-        local allowPartial
-        IFS='|' read -r javaRelease remoteBaseUrl relativeMirrorPath displayName cutDirectories minimumHtmlFiles rejectRegex allowPartial <<< "$java_api_source_projection"
-        DOC_SOURCES+=("$remoteBaseUrl|$docs_root/$relativeMirrorPath|$displayName|$cutDirectories|$minimumHtmlFiles|$rejectRegex|$allowPartial")
+        DOC_SOURCES+=("$java_api_source_projection")
     done
 }
 
