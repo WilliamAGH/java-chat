@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   qdrant:
     # Pin to v1.13.0 to match io.qdrant:client:1.13.0 from Spring AI 1.1.2 BOM
@@ -15,5 +14,4 @@ services:
 
 volumes:
   qdrant_storage:
-
 
