@@ -117,7 +117,7 @@ public final class DocsSourceRegistry {
      * Describes one complete Java API mirror projected from the canonical manifest.
      *
      * @param javaRelease Java release number used by retrieval provenance
-     * @param remoteBaseUrl authoritative Oracle Javadoc base URL
+     * @param remoteBaseUrl authoritative Javadoc base URL
      * @param relativeMirrorPath canonical path beneath {@code data/docs}
      * @param displayName operator-facing ingestion name
      * @param cutDirectories number of leading remote path segments removed during mirroring
@@ -140,8 +140,8 @@ public final class DocsSourceRegistry {
             if (parsedJavaRelease < 1) {
                 throw new IllegalArgumentException("Java release must be positive");
             }
-            JavaApiDocumentationManifest.requireManifestText(remoteBaseUrl, "remoteBaseUrl", false);
-            JavaApiDocumentationManifest.requireManifestText(relativeMirrorPath, "relativeMirrorPath", false);
+            JavaApiDocumentationManifest.requireHttpsRemoteBaseUrl(remoteBaseUrl);
+            JavaApiDocumentationManifest.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
             JavaApiDocumentationManifest.requireManifestText(displayName, "displayName", false);
             if (cutDirectories < 0) {
                 throw new IllegalArgumentException("Java API cut directories cannot be negative");
@@ -168,7 +168,7 @@ public final class DocsSourceRegistry {
      * @return immutable sources in manifest order
      */
     public static List<JavaApiDocumentationSource> javaApiDocumentationSources() {
-        return JAVA_API_DOCUMENTATION_SOURCES;
+        return List.copyOf(JAVA_API_DOCUMENTATION_SOURCES);
     }
 
     private static Properties loadDocsSourceProperties() {
