@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ================================
 # JAVA CHAT DOCKERFILE
 # ================================
@@ -92,9 +94,9 @@ USER appuser
 
 EXPOSE 8085
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8085}/actuator/health/liveness || exit 1
+# Gate Coolify's rolling cutover on dependencies being ready for application traffic.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --start-interval=5s --retries=3 \
+    CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["/bin/sh", "-c", "exec java \
   -XX:+IgnoreUnrecognizedVMOptions \
