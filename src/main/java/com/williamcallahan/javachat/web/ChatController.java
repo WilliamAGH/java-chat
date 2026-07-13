@@ -173,11 +173,8 @@ public class ChatController extends BaseController {
                                     statusEvents = statusEvents.concatWith(
                                             sseSupport.citationWarningStatusFlux(finalCitationWarning));
 
-                                    Flux<ServerSentEvent<String>> runtimeStreamingStatusEvents =
+                                    Flux<ServerSentEvent<String>> runtimeStreamingEvents =
                                             sseSupport.streamingNoticeEvents(streamingResult.notices());
-                                    Flux<ServerSentEvent<String>> providerChangeEvents = streamingResult
-                                            .providerChanges()
-                                            .map(provider -> sseSupport.providerEvent(provider.getName()));
 
                                     // Wrap chunks in JSON to preserve whitespace
                                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
@@ -185,16 +182,12 @@ public class ChatController extends BaseController {
                                     Flux<ServerSentEvent<String>> citationEvent =
                                             Flux.just(sseSupport.citationEvent(finalCitations));
 
-                                    // Subscribe to replayable fallback signals before the ref-counted data stream
-                                    // starts.
+                                    // Start replayable fallback protocol events before the ref-counted data stream
+                                    // so the provider and status notice arrive before fallback text.
                                     return Flux.concat(
                                             Flux.just(providerEvent),
                                             statusEvents,
-                                            Flux.merge(
-                                                    providerChangeEvents,
-                                                    runtimeStreamingStatusEvents,
-                                                    dataEvents,
-                                                    heartbeats),
+                                            Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {

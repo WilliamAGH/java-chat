@@ -95,7 +95,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
-                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty(), Flux.empty())));
+                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(
@@ -143,7 +143,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
-                        Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty(), Flux.empty())));
+                        Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
         when(streamingService.isRecoverableStreamingFailure(upstreamFailure)).thenReturn(false);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(

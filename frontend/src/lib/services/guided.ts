@@ -17,8 +17,7 @@ import {
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { fetchCitationsByEndpoint, type CitationFetchResult } from "./chat";
-import { streamSseGet } from "./sse";
-import { streamWithRetry } from "./streamRecovery";
+import { streamSse, streamSseGet } from "./sse";
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse };
 
@@ -144,16 +143,16 @@ export async function streamGuidedChat(
   message: string,
   callbacks: GuidedStreamCallbacks,
 ): Promise<void> {
-  return streamWithRetry(
+  return streamSse(
     "/api/guided/stream",
     { sessionId, slug, latest: message },
     {
-      onChunk: callbacks.onChunk,
+      onText: callbacks.onChunk,
       onStatus: callbacks.onStatus,
       onError: callbacks.onError,
       onCitations: callbacks.onCitations,
-      signal: callbacks.signal,
     },
     "guided.ts",
+    { signal: callbacks.signal },
   );
 }

@@ -10,22 +10,27 @@ vi.mock("./sse", () => {
 
 import { streamGuidedChat, streamLessonContent } from "./guided";
 
-describe("streamGuidedChat recovery", () => {
+describe("streamGuidedChat", () => {
   beforeEach(() => {
     streamSseMock.mockReset();
     streamSseGetMock.mockReset();
   });
 
-  it("retries once for recoverable invalid stream errors before any chunk", async () => {
-    streamSseMock.mockRejectedValueOnce(new Error("OverflowException: malformed response frame"));
+  it("surfaces a recoverable stream failure without replaying the POST", async () => {
+    const streamFailure = {
+      message: "OverflowException: malformed response frame",
+      details: "Malformed response frame at byte 512",
+    };
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
-      callbacks.onText("Recovered guided response");
+      callbacks.onError?.(streamFailure);
+      throw new Error(streamFailure.message);
     });
 
     const onChunk = vi.fn();
     const onStatus = vi.fn();
     const onError = vi.fn();
     const onCitations = vi.fn();
+    const streamAbortController = new AbortController();
 
     await expect(
       streamGuidedChat("guided-session-1", "intro", "Teach me streams", {
@@ -33,26 +38,33 @@ describe("streamGuidedChat recovery", () => {
         onStatus,
         onError,
         onCitations,
+        signal: streamAbortController.signal,
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("OverflowException: malformed response frame");
 
-    expect(streamSseMock).toHaveBeenCalledTimes(2);
-    expect(onStatus).toHaveBeenCalledWith(
+    expect(streamSseMock).toHaveBeenCalledTimes(1);
+    expect(streamSseMock).toHaveBeenCalledWith(
+      "/api/guided/stream",
+      { sessionId: "guided-session-1", slug: "intro", latest: "Teach me streams" },
       expect.objectContaining({
-        message: "Temporary stream issue detected",
+        onText: onChunk,
+        onStatus,
+        onError,
+        onCitations,
       }),
+      "guided.ts",
+      { signal: streamAbortController.signal },
     );
-    expect(onStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Streaming recovered",
-      }),
-    );
-    expect(onChunk).toHaveBeenCalledWith("Recovered guided response");
-    expect(onError).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(streamFailure);
   });
 
   it("does not retry for non-recoverable rate-limit errors", async () => {
-    streamSseMock.mockRejectedValueOnce(new Error("429 rate limit exceeded"));
+    streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
+      callbacks.onError?.({ message: "429 rate limit exceeded" });
+      throw new Error("429 rate limit exceeded");
+    });
 
     const onChunk = vi.fn();
     const onStatus = vi.fn();
@@ -87,6 +99,7 @@ describe("streamGuidedChat recovery", () => {
         retryable: false,
         stage: "stream",
       });
+      callbacks.onError?.({ message: "Provider stream unavailable" });
       throw new Error("Provider stream unavailable");
     });
 

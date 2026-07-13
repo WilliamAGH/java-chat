@@ -41,7 +41,7 @@ This document provides a comprehensive analysis of all parsing and markdown proc
 │   ├── ChatController.stream() → SSE events
 │   ├── normalizeDelta() - token joining/cleanup
 │   ├── UnifiedMarkdownService.process() - final markdown processing
-│   └── ChatMemoryService.addAssistant() - persistence
+│   └── ChatMemoryService.addExchange() - atomic user/assistant persistence
 │
 └── 🔄 KEY TRANSITIONS & ISSUES
     ├── Regex → AST migration (incomplete)

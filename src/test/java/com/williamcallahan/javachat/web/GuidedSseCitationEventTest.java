@@ -75,8 +75,8 @@ class GuidedSseCitationEventTest {
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .willReturn(Mono.just(new StreamingResult(
-                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, Flux.empty(), Flux.empty())));
+                .willReturn(Mono.just(
+                        new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));

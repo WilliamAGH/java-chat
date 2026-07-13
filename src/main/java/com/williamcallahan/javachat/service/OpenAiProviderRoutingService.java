@@ -174,7 +174,38 @@ public class OpenAiProviderRoutingService {
      * @return true when the failure appears transient and retryable
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
-        return throwable != null && isStreamingFallbackEligible(throwable);
+        if (throwable == null || isCallerCancellation(throwable)) {
+            return false;
+        }
+        if (throwable instanceof UnauthorizedException
+                || throwable instanceof PermissionDeniedException
+                || throwable instanceof RateLimitException
+                || throwable instanceof NotFoundException) {
+            return false;
+        }
+        if (throwable instanceof OpenAIIoException
+                || throwable instanceof SseException
+                || Exceptions.isOverflow(throwable)) {
+            return true;
+        }
+        if (throwable instanceof OpenAIServiceException serviceException) {
+            int statusCode = serviceException.statusCode();
+            return statusCode == HTTP_REQUEST_TIMEOUT
+                    || statusCode == HTTP_CONFLICT
+                    || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
+        }
+        String exceptionMessage = throwable.getMessage();
+        if (exceptionMessage == null) {
+            return false;
+        }
+        String normalizedMessage = AsciiTextNormalizer.toLowerAscii(exceptionMessage);
+        return normalizedMessage.contains("invalid stream")
+                || normalizedMessage.contains("malformed")
+                || normalizedMessage.contains("unexpected end of json input")
+                || normalizedMessage.contains("timeout")
+                || normalizedMessage.contains("temporarily unavailable")
+                || normalizedMessage.contains("connection reset")
+                || normalizedMessage.contains("connection closed");
     }
 
     boolean shouldBackoffPrimary(Throwable throwable) {

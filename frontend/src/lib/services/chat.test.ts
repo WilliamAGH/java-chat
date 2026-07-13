@@ -10,43 +10,55 @@ vi.mock("./sse", () => {
 
 import { streamChat } from "./chat";
 
-describe("streamChat recovery", () => {
+describe("streamChat", () => {
   beforeEach(() => {
     streamSseMock.mockReset();
   });
 
-  it("retries once for recoverable overflow failure before any streamed chunk", async () => {
-    streamSseMock.mockRejectedValueOnce(new Error("OverflowException: malformed response frame"));
+  it("surfaces a recoverable stream failure without replaying the POST", async () => {
+    const streamFailure = {
+      message: "OverflowException: malformed response frame",
+      details: "Malformed response frame at byte 512",
+    };
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
-      callbacks.onText("Recovered response");
+      callbacks.onError?.(streamFailure);
+      throw new Error(streamFailure.message);
     });
 
     const onChunk = vi.fn();
     const onStatus = vi.fn();
     const onError = vi.fn();
+    const streamAbortController = new AbortController();
 
     await expect(
-      streamChat("session-1", "What is new in Java 25?", onChunk, { onStatus, onError }),
-    ).resolves.toBeUndefined();
+      streamChat("session-1", "What is new in Java 25?", onChunk, {
+        onStatus,
+        onError,
+        signal: streamAbortController.signal,
+      }),
+    ).rejects.toThrow("OverflowException: malformed response frame");
 
-    expect(streamSseMock).toHaveBeenCalledTimes(2);
-    expect(onStatus).toHaveBeenCalledWith(
+    expect(streamSseMock).toHaveBeenCalledTimes(1);
+    expect(streamSseMock).toHaveBeenCalledWith(
+      "/api/chat/stream",
+      { sessionId: "session-1", latest: "What is new in Java 25?" },
       expect.objectContaining({
-        message: "Temporary stream issue detected",
+        onText: onChunk,
+        onStatus,
+        onError,
       }),
+      "chat.ts",
+      { signal: streamAbortController.signal },
     );
-    expect(onStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Streaming recovered",
-      }),
-    );
-    expect(onChunk).toHaveBeenCalledWith("Recovered response");
-    expect(onError).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(streamFailure);
   });
 
-  it("does not retry when a chunk already streamed to the UI", async () => {
+  it("does not replay after a stream has emitted a chunk", async () => {
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
       callbacks.onText("Partial answer");
+      callbacks.onError?.({ message: "OverflowException: malformed response frame" });
       throw new Error("OverflowException: malformed response frame");
     });
 
@@ -60,17 +72,12 @@ describe("streamChat recovery", () => {
 
     expect(streamSseMock).toHaveBeenCalledTimes(1);
     expect(onChunk).toHaveBeenCalledWith("Partial answer");
-    expect(onStatus).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Temporary stream issue detected",
-      }),
-    );
     expect(onError).toHaveBeenCalledWith({
       message: "OverflowException: malformed response frame",
     });
   });
 
-  it("honors backend non-retryable stream status metadata", async () => {
+  it("forwards backend non-retryable stream status metadata without replaying", async () => {
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
       callbacks.onStatus?.({
         message: "Provider returned fatal stream error",
@@ -78,6 +85,7 @@ describe("streamChat recovery", () => {
         retryable: false,
         stage: "stream",
       });
+      callbacks.onError?.({ message: "Unexpected provider failure" });
       throw new Error("Unexpected provider failure");
     });
 
@@ -96,5 +104,6 @@ describe("streamChat recovery", () => {
         retryable: false,
       }),
     );
+    expect(onError).toHaveBeenCalledWith({ message: "Unexpected provider failure" });
   });
 });
