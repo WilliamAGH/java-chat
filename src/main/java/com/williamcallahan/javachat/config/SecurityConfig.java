@@ -3,7 +3,6 @@ package com.williamcallahan.javachat.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHandler;
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfTokenCookieFilter;
-import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
@@ -31,7 +30,6 @@ public class SecurityConfig {
     private static final String LIVENESS_ENDPOINT = "/actuator/health/liveness";
     private static final String READINESS_ENDPOINT = "/actuator/health/readiness";
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
-    private static final Duration CSRF_COOKIE_MAX_AGE = Duration.ofMinutes(15L);
 
     /**
      * CORS configuration source for Spring Security filter chain integration.
@@ -89,8 +87,7 @@ public class SecurityConfig {
             HttpSecurity http, CorsConfigurationSource corsConfigurationSource, ObjectMapper objectMapper)
             throws Exception {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        csrfTokenRepository.setCookieCustomizer(
-                csrfCookie -> csrfCookie.sameSite("Lax").maxAge(CSRF_COOKIE_MAX_AGE));
+        csrfTokenRepository.setCookieCustomizer(csrfCookie -> csrfCookie.sameSite("Lax"));
         CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
         CsrfAccessDeniedHandler accessDeniedHandler = new CsrfAccessDeniedHandler(objectMapper);
 

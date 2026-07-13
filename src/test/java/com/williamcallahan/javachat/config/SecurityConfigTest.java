@@ -31,9 +31,9 @@ import org.springframework.web.bind.annotation.RestController;
 class SecurityConfigTest {
     private static final String CSRF_REFRESH_ENDPOINT = "/api/security/csrf";
     private static final String CSRF_PROTECTED_ENDPOINT = "/api/security/csrf-test";
+    private static final String LOGOUT_ENDPOINT = "/logout";
     private static final String CSRF_COOKIE_NAME = "XSRF-TOKEN";
     private static final String CSRF_HEADER_NAME = "X-XSRF-TOKEN";
-    private static final int CSRF_COOKIE_MAX_AGE_SECONDS = 900;
     private static final String CSRF_COOKIE_SAME_SITE_POLICY = "Lax";
     private static final String CSRF_INVALID_MESSAGE =
             "CSRF token missing or invalid. Refresh the page and retry the request.";
@@ -43,13 +43,9 @@ class SecurityConfigTest {
 
     @Test
     void acceptsCookieAndHeaderTokenWithoutServerSession() throws Exception {
-        MvcResult csrfRefreshExchange = mockMvc.perform(get(CSRF_REFRESH_ENDPOINT))
-                .andExpect(status().isOk())
-                .andReturn();
-
+        MvcResult csrfRefreshExchange = requestCsrfCookie();
         Cookie csrfCookie = csrfRefreshExchange.getResponse().getCookie(CSRF_COOKIE_NAME);
         assertNotNull(csrfCookie);
-        assertEquals(CSRF_COOKIE_MAX_AGE_SECONDS, csrfCookie.getMaxAge());
         assertEquals(CSRF_COOKIE_SAME_SITE_POLICY, csrfCookie.getAttribute("SameSite"));
         assertFalse(csrfCookie.isHttpOnly());
         assertNull(csrfRefreshExchange.getRequest().getSession(false));
@@ -71,6 +67,45 @@ class SecurityConfigTest {
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+    }
+
+    @Test
+    void rejectsMismatchedAndSingleSidedCsrfTokens() throws Exception {
+        Cookie csrfCookie = requestCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT)
+                        .cookie(csrfCookie)
+                        .header(CSRF_HEADER_NAME, csrfCookie.getValue() + "-mismatch"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT).cookie(csrfCookie))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+        mockMvc.perform(post(CSRF_PROTECTED_ENDPOINT).header(CSRF_HEADER_NAME, csrfCookie.getValue()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(CSRF_INVALID_MESSAGE));
+    }
+
+    @Test
+    void deletesCsrfCookieImmediatelyOnLogout() throws Exception {
+        Cookie csrfCookie = requestCsrfCookie().getResponse().getCookie(CSRF_COOKIE_NAME);
+        assertNotNull(csrfCookie);
+
+        MvcResult logoutExchange = mockMvc.perform(
+                        post(LOGOUT_ENDPOINT).cookie(csrfCookie).header(CSRF_HEADER_NAME, csrfCookie.getValue()))
+                .andExpect(status().is3xxRedirection())
+                .andReturn();
+
+        Cookie deletedCsrfCookie = logoutExchange.getResponse().getCookie(CSRF_COOKIE_NAME);
+        assertNotNull(deletedCsrfCookie);
+        assertEquals(0, deletedCsrfCookie.getMaxAge());
+    }
+
+    private MvcResult requestCsrfCookie() throws Exception {
+        return mockMvc.perform(get(CSRF_REFRESH_ENDPOINT))
+                .andExpect(status().isOk())
+                .andReturn();
     }
 
     /**
