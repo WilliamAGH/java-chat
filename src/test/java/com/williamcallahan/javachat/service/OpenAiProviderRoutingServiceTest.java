@@ -25,6 +25,9 @@ import reactor.core.Exceptions;
  */
 class OpenAiProviderRoutingServiceTest {
     private static final long PRIMARY_BACKOFF_SECONDS = 600L;
+    private static final String OPENAI_REQUEST_FAILED_MESSAGE = "Request failed";
+    private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
+    private static final String CALLER_INTERRUPTION_MESSAGE = "request interrupted by caller timeout";
 
     private OpenAiProviderRoutingService createRoutingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -40,12 +43,31 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void shouldBackoffPrimaryIgnoresCallerCancellationWrappedBySdkIo() {
+    void shouldBackoffPrimaryIgnoresWrappedCallerInterruption() {
         OpenAiProviderRoutingService routingService = createRoutingService();
-        InterruptedIOException interruptedRequest = new InterruptedIOException("request interrupted by caller timeout");
-        OpenAIIoException cancelledCompletion = new OpenAIIoException("Request failed", interruptedRequest);
 
-        assertFalse(routingService.shouldBackoffPrimary(cancelledCompletion));
+        assertFalse(routingService.shouldBackoffPrimary(wrappedCallerInterruption()));
+    }
+
+    @Test
+    void shouldBackoffPrimaryTreatsWrappedOkHttpCallTimeoutAsBackoffEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+
+        assertTrue(routingService.shouldBackoffPrimary(wrappedOkHttpCallTimeout()));
+    }
+
+    @Test
+    void streamingFallbackEligibilityTreatsWrappedOkHttpCallTimeoutAsEligible() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+
+        assertTrue(routingService.isStreamingFallbackEligible(wrappedOkHttpCallTimeout()));
+    }
+
+    @Test
+    void recoverableStreamingFailureTreatsWrappedOkHttpCallTimeoutAsRetryable() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+
+        assertTrue(routingService.isRecoverableStreamingFailure(wrappedOkHttpCallTimeout()));
     }
 
     @Test
@@ -59,10 +81,8 @@ class OpenAiProviderRoutingServiceTest {
                 rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
-        InterruptedIOException interruptedRequest = new InterruptedIOException("request interrupted by caller timeout");
-        OpenAIIoException cancelledCompletion = new OpenAIIoException("Request failed", interruptedRequest);
 
-        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, cancelledCompletion);
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedCallerInterruption());
 
         List<OpenAiProviderCandidate> availableProviders =
                 routingService.selectAvailableProviderCandidates(githubModelsClient, openAiClient);
@@ -187,5 +207,15 @@ class OpenAiProviderRoutingServiceTest {
         assertEquals(
                 RateLimitService.ApiProvider.GITHUB_MODELS,
                 availableProviders.get(0).provider());
+    }
+
+    private OpenAIIoException wrappedOkHttpCallTimeout() {
+        return new OpenAIIoException(
+                OPENAI_REQUEST_FAILED_MESSAGE, new InterruptedIOException(OK_HTTP_CALL_TIMEOUT_MESSAGE));
+    }
+
+    private OpenAIIoException wrappedCallerInterruption() {
+        return new OpenAIIoException(
+                OPENAI_REQUEST_FAILED_MESSAGE, new InterruptedIOException(CALLER_INTERRUPTION_MESSAGE));
     }
 }
