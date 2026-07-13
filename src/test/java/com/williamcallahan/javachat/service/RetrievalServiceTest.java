@@ -49,6 +49,70 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void preservesDistinctSamePageChunksForRerankingAndDeduplicatesTheirCitations() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        DocumentFactory documentFactory = mock(DocumentFactory.class);
+        AppProperties appProperties = new AppProperties();
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+
+        Document urlOnlyDocument = Document.builder()
+                .id("url-only")
+                .text("URL-only candidate")
+                .metadata("url", "https://example.org/java/reference")
+                .build();
+        Document canonicalUrlDuplicateWithoutHash = Document.builder()
+                .id("url-only-duplicate")
+                .text("URL-only duplicate candidate")
+                .metadata("url", "https://example.org//java/reference")
+                .build();
+        Document firstJavadocChunk = Document.builder()
+                .id("first-javadoc-chunk")
+                .text("First Javadoc chunk")
+                .metadata("url", "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html")
+                .metadata("hash", "first-content-hash")
+                .build();
+        Document secondJavadocChunkWithDistinctHash = Document.builder()
+                .id("second-javadoc-chunk")
+                .text("Second Javadoc chunk")
+                .metadata("url", "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html#assert(...)")
+                .metadata("hash", "second-content-hash")
+                .build();
+        Document sameContentHashWithDifferentUrl = Document.builder()
+                .id("same-content-hash")
+                .text("Duplicate content under another URL")
+                .metadata("url", "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html")
+                .metadata("hash", "first-content-hash")
+                .build();
+        List<Document> retrievalCandidates = List.of(
+                urlOnlyDocument,
+                canonicalUrlDuplicateWithoutHash,
+                firstJavadocChunk,
+                secondJavadocChunkWithDistinctHash,
+                sameContentHashWithDifferentUrl);
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
+                .thenReturn(new HybridSearchService.SearchOutcome(retrievalCandidates, List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenAnswer(rerankerInvocation -> {
+            List<Document> deduplicatedCandidates = rerankerInvocation.getArgument(1);
+            return deduplicatedCandidates;
+        });
+
+        RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Java string basics");
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
+
+        assertEquals(
+                List.of(urlOnlyDocument, firstJavadocChunk, secondJavadocChunkWithDistinctHash),
+                retrievalOutcome.documents());
+        assertEquals(2, citationOutcome.citations().size());
+        assertEquals(
+                "https://docs.oracle.com/en/java/javase/21/relnotes/21-0-2-relnotes.html",
+                citationOutcome.citations().get(1).getUrl());
+        assertEquals("First Javadoc chunk", citationOutcome.citations().get(1).getSnippet());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
     void propagatesStrictHybridSearchFailure() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
