@@ -9,7 +9,7 @@
 import {
   StreamStatusSchema,
   StreamErrorSchema,
-  StreamTextSchema,
+  TextChunkSchema,
   ProviderEventSchema,
   CitationsArraySchema,
   type StreamStatus,
@@ -150,16 +150,16 @@ function processEvent(
 
   if (normalizedSseEventType === SSE_EVENT_TEXT) {
     const parsedSseEvent = tryParseJson(rawSseEventText, source);
-    const streamTextValidation = validateWithSchema(
-      StreamTextSchema,
+    const textChunkValidation = validateWithSchema(
+      TextChunkSchema,
       parsedSseEvent,
       `${source}:text`,
     );
-    if (!streamTextValidation.success) {
+    if (!textChunkValidation.success) {
       throwInvalidSseEvent(callbacks);
     }
-    if (streamTextValidation.validated.text !== "") {
-      callbacks.onText(streamTextValidation.validated.text);
+    if (textChunkValidation.validated.text !== "") {
+      callbacks.onText(textChunkValidation.validated.text);
     }
     return;
   }
