@@ -609,7 +609,12 @@
             <!-- Lesson Header - full width with inner constraint -->
             <div class="lesson-header">
                 <div class="lesson-header-inner">
-                    <button type="button" class="back-btn" onclick={goBack}>
+                    <button
+                        type="button"
+                        class="back-btn"
+                        aria-label="All Lessons"
+                        onclick={goBack}
+                    >
                         <svg
                             viewBox="0 0 20 20"
                             fill="currentColor"

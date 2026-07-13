@@ -36,6 +36,25 @@ describe("LearnView guided chat streaming stability", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps the All Lessons back control named when its visual label is hidden on mobile", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+
+    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
+      callbacks.onChunk("# Lesson");
+    });
+    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+
+    const { findByRole } = await renderLearnView();
+    const lessonButton = await findByRole("button", { name: /test lesson/i });
+    await fireEvent.click(lessonButton);
+
+    const allLessonsButton = await findByRole("button", { name: "All Lessons" });
+    expect(allLessonsButton).toHaveAttribute("aria-label", "All Lessons");
+    expect(allLessonsButton).toHaveTextContent("All Lessons");
+  });
+
   it("keeps the guided assistant message DOM node stable when the stream completes", async () => {
     fetchTocMock.mockResolvedValue([
       { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
