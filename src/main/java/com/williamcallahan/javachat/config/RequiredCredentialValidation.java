@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * Validates that required credentials are present at startup.
@@ -17,6 +18,7 @@ import org.springframework.context.annotation.Configuration;
  * </ul>
  */
 @Configuration
+@Lazy(false)
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
     private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
