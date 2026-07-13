@@ -300,10 +300,9 @@ public record MarkdownCitation(
    - Potential conflicts in rendering
 
 4. **List Processing Complexity**
-   - Server: DOM-based list rendering in `renderInlineLists()`
-   - Client: Regex-based in `markdown-utils.js`
-   - Different trigger phrase requirements
-   - Inconsistent behavior
+   - Server: DOM-based list rendering in `renderInlineLists()` and `InlineListParser`
+   - Client: Server-authoritative HTML; no client-side list processing
+   - Consistent behavior via server AST processing
 
 #### Code Duplications
 
@@ -318,9 +317,9 @@ public record MarkdownCitation(
    - Different styling approaches
 
 3. **List Marker Detection**
-   - Server: Complex regex patterns in `fixInlineLists()`
-   - Client: Similar patterns in `normalizeInlineOrderedLists()`
-   - Logic should be unified
+   - Server: Consolidated in `OrderedMarkerScanner` (shared by `MarkdownNormalizer` and `InlineListParser`)
+   - Client: Server-authoritative rendering; minimal fallback only
+   - CommonMark-compliant with delimiter position tracking
 
 #### Outstanding Issues
 
