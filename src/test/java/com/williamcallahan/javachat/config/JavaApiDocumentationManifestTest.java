@@ -1,0 +1,106 @@
+package com.williamcallahan.javachat.config;
+
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** Verifies that JVM and Bash boundaries reject the same malformed canonical manifests. */
+class JavaApiDocumentationManifestTest {
+
+    private static final Path CANONICAL_MANIFEST_PATH =
+            Path.of("src", "main", "resources", "java-api-documentation-sources.manifest");
+    private static final Path SHELL_INTERPRETER_PATH = Path.of("scripts", "lib", "documentation_sources.sh");
+
+    @TempDir
+    Path temporaryDirectory;
+
+    @Test
+    void rejectsSharedInvalidManifestFixturesInJavaAndBash() throws IOException, InterruptedException {
+        List<String> canonicalManifestLines = Files.readAllLines(CANONICAL_MANIFEST_PATH, StandardCharsets.UTF_8);
+        List<List<String>> invalidManifestFixtures = List.of(
+                withLine(canonicalManifestLines, 0, "invalidHeader"),
+                withInsertedLine(canonicalManifestLines, 2, " "),
+                withLine(
+                        canonicalManifestLines,
+                        1,
+                        canonicalManifestLines
+                                .get(1)
+                                .substring(0, canonicalManifestLines.get(1).lastIndexOf('|'))),
+                withColumn(canonicalManifestLines, 1, 1, " https://docs.oracle.com/invalid/"),
+                withColumn(canonicalManifestLines, 1, 2, ""),
+                withColumn(canonicalManifestLines, 1, 4, "+5"),
+                withColumn(canonicalManifestLines, 1, 4, "05"),
+                withColumn(canonicalManifestLines, 1, 5, "2147483648"),
+                withColumn(canonicalManifestLines, 1, 7, "TRUE"),
+                withDuplicateRelease(canonicalManifestLines),
+                withDuplicateMirrorPath(canonicalManifestLines));
+
+        for (int fixtureIndex = 0; fixtureIndex < invalidManifestFixtures.size(); fixtureIndex++) {
+            List<String> invalidManifestLines = invalidManifestFixtures.get(fixtureIndex);
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> JavaApiDocumentationManifest.parse(invalidManifestLines),
+                    "Java accepted invalid fixture " + fixtureIndex);
+
+            Path invalidManifestPath = temporaryDirectory.resolve("invalid-manifest-" + fixtureIndex + ".manifest");
+            Files.write(invalidManifestPath, invalidManifestLines, StandardCharsets.UTF_8);
+            Process bashValidation = new ProcessBuilder(
+                            "/bin/bash",
+                            "-c",
+                            "source \"$1\"; load_java_api_documentation_sources \"$2\"",
+                            "manifest-validation",
+                            SHELL_INTERPRETER_PATH.toAbsolutePath().toString(),
+                            invalidManifestPath.toString())
+                    .redirectErrorStream(true)
+                    .start();
+            String bashOutput = new String(bashValidation.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int bashExitCode = bashValidation.waitFor();
+            assertNotEquals(0, bashExitCode, "Bash accepted invalid fixture " + fixtureIndex + ": " + bashOutput);
+        }
+    }
+
+    private static List<String> withLine(List<String> manifestLines, int lineIndex, String replacementLine) {
+        List<String> changedManifestLines = new ArrayList<>(manifestLines);
+        changedManifestLines.set(lineIndex, replacementLine);
+        return List.copyOf(changedManifestLines);
+    }
+
+    private static List<String> withInsertedLine(List<String> manifestLines, int lineIndex, String insertedLine) {
+        List<String> changedManifestLines = new ArrayList<>(manifestLines);
+        changedManifestLines.add(lineIndex, insertedLine);
+        return List.copyOf(changedManifestLines);
+    }
+
+    private static List<String> withColumn(
+            List<String> manifestLines, int lineIndex, int columnIndex, String replacementColumn) {
+        String[] sourceColumns = manifestLines.get(lineIndex).split("\\|", -1);
+        sourceColumns[columnIndex] = replacementColumn;
+        return withLine(manifestLines, lineIndex, String.join("|", sourceColumns));
+    }
+
+    private static List<String> withDuplicateRelease(List<String> manifestLines) {
+        String[] duplicateReleaseColumns = manifestLines.get(1).split("\\|", -1);
+        duplicateReleaseColumns[2] = duplicateReleaseColumns[2] + "-duplicate";
+        List<String> changedManifestLines = new ArrayList<>(manifestLines);
+        changedManifestLines.add(String.join("|", duplicateReleaseColumns));
+        return List.copyOf(changedManifestLines);
+    }
+
+    private static List<String> withDuplicateMirrorPath(List<String> manifestLines) {
+        String[] duplicateMirrorColumns = manifestLines.get(1).split("\\|", -1);
+        String[] finalSourceColumns =
+                manifestLines.get(manifestLines.size() - 1).split("\\|", -1);
+        duplicateMirrorColumns[0] = Integer.toString(Integer.parseInt(finalSourceColumns[0]) + 1);
+        List<String> changedManifestLines = new ArrayList<>(manifestLines);
+        changedManifestLines.add(String.join("|", duplicateMirrorColumns));
+        return List.copyOf(changedManifestLines);
+    }
+}

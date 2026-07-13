@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.cli;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -12,10 +14,6 @@ final class DocumentationSetCatalog {
 
     private static final String DOCSET_PDF_BOOKS_NAME = "PDF Books";
     private static final String DOCSET_PDF_BOOKS_PATH = "books";
-    private static final String DOCSET_JAVA_24_COMPLETE_NAME = "Java 24 Complete API";
-    private static final String DOCSET_JAVA_24_COMPLETE_PATH = "java/java24-complete";
-    private static final String DOCSET_JAVA_25_COMPLETE_NAME = "Java 25 Documentation";
-    private static final String DOCSET_JAVA_25_COMPLETE_PATH = "java/java25-complete";
     private static final String DOCSET_JAVA_25_RELEASE_NOTES_NAME = "Java 25 Release Notes Issues";
     private static final String DOCSET_JAVA_25_RELEASE_NOTES_PATH = "oracle/javase";
     private static final String DOCSET_IBM_JAVA_25_ARTICLE_NAME = "IBM Java 25 Overview";
@@ -40,16 +38,7 @@ final class DocumentationSetCatalog {
     private static final String DOCSET_SPRING_AI_QUICK_NAME = "Spring AI Quick";
     private static final String DOCSET_SPRING_AI_QUICK_PATH = "spring-ai";
 
-    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = List.of(
-            new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH),
-            new DocumentationSet(DOCSET_JAVA_24_COMPLETE_NAME, DOCSET_JAVA_24_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_COMPLETE_NAME, DOCSET_JAVA_25_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_JAVA_25_RELEASE_NOTES_NAME, DOCSET_JAVA_25_RELEASE_NOTES_PATH),
-            new DocumentationSet(DOCSET_IBM_JAVA_25_ARTICLE_NAME, DOCSET_IBM_JAVA_25_ARTICLE_PATH),
-            new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
-            new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
-            new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH));
+    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = buildBaseDocumentationSets();
 
     private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
             new DocumentationSet(DOCSET_JAVA_24_QUICK_NAME, DOCSET_JAVA_24_QUICK_PATH),
@@ -63,6 +52,23 @@ final class DocumentationSetCatalog {
             .toList();
 
     private DocumentationSetCatalog() {}
+
+    private static List<DocumentationSet> buildBaseDocumentationSets() {
+        List<DocumentationSet> baseDocumentationSets = new ArrayList<>();
+        baseDocumentationSets.add(new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH));
+        baseDocumentationSets.addAll(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                .map(javaApiDocumentationSource -> new DocumentationSet(
+                        javaApiDocumentationSource.displayName(), javaApiDocumentationSource.relativeMirrorPath()))
+                .toList());
+        baseDocumentationSets.addAll(List.of(
+                new DocumentationSet(DOCSET_JAVA_25_RELEASE_NOTES_NAME, DOCSET_JAVA_25_RELEASE_NOTES_PATH),
+                new DocumentationSet(DOCSET_IBM_JAVA_25_ARTICLE_NAME, DOCSET_IBM_JAVA_25_ARTICLE_PATH),
+                new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
+                new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
+                new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
+                new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH)));
+        return List.copyOf(baseDocumentationSets);
+    }
 
     static List<DocumentationSet> baseSets() {
         return BASE_DOCUMENTATION_SETS;

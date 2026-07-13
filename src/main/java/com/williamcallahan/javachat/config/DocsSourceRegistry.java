@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -17,8 +18,8 @@ import org.slf4j.LoggerFactory;
  * Provides a single place to define how locally mirrored paths map back to
  * authoritative remote URLs for citations and ingestion.
  *
- * Source of truth for remote base URLs is src/main/resources/docs-sources.properties.
- * Scripts also source the same file to avoid DRY.
+ * Complete Java API sources are governed by {@code java-api-documentation-sources.manifest};
+ * other remote base URLs are governed by {@code docs-sources.properties}.
  */
 public final class DocsSourceRegistry {
 
@@ -26,13 +27,10 @@ public final class DocsSourceRegistry {
 
     private static final String DOCS_SOURCES_RESOURCE = "/docs-sources.properties";
     private static final String LOG_DOCS_SOURCES_LOADED = "Loaded docs-sources.properties with {} entries";
-    private static final String LOG_DOCS_SOURCES_MISSING =
-            "docs-sources.properties not found on classpath; using default URL mappings";
+    private static final String LOG_DOCS_SOURCES_MISSING = "docs-sources.properties not found on classpath";
     private static final String LOG_DOCS_SOURCES_LOAD_FAILED =
-            "Failed to load docs-sources.properties (exceptionType={}) - using default URL mappings";
+            "Failed to load docs-sources.properties (exceptionType={})";
 
-    private static final String JAVA24_API_BASE_KEY = "JAVA24_API_BASE";
-    private static final String JAVA25_API_BASE_KEY = "JAVA25_API_BASE";
     private static final String ORACLE_JAVASE_BASE_KEY = "ORACLE_JAVASE_BASE";
     private static final String IBM_ARTICLES_BASE_KEY = "IBM_ARTICLES_BASE";
     private static final String JETBRAINS_IDEA_2025_09_BASE_KEY = "JETBRAINS_IDEA_2025_09_BASE";
@@ -47,8 +45,6 @@ public final class DocsSourceRegistry {
 
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
 
-    private static final String DEFAULT_JAVA24 = "https://docs.oracle.com/en/java/javase/24/docs/api/";
-    private static final String DEFAULT_JAVA25 = "https://docs.oracle.com/en/java/javase/25/docs/api/";
     private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
     private static final String DEFAULT_JETBRAINS_IDEA_2025_09_BASE = "https://blog.jetbrains.com/idea/2025/09/";
@@ -65,12 +61,6 @@ public final class DocsSourceRegistry {
     private static final String DEFAULT_SPRING_AI_API_2_BASE = "https://docs.spring.io/spring-ai/docs/2.0.x/api/";
 
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
-    private static final String LOCAL_DOCS_JAVA24 = LOCAL_DOCS_ROOT + "java24/";
-    private static final String LOCAL_DOCS_JAVA24_NESTED = LOCAL_DOCS_ROOT + "java/java24/";
-    private static final String LOCAL_DOCS_JAVA24_COMPLETE = LOCAL_DOCS_ROOT + "java/java24-complete/";
-    private static final String LOCAL_DOCS_JAVA25 = LOCAL_DOCS_ROOT + "java25/";
-    private static final String LOCAL_DOCS_JAVA25_NESTED = LOCAL_DOCS_ROOT + "java/java25/";
-    private static final String LOCAL_DOCS_JAVA25_COMPLETE = LOCAL_DOCS_ROOT + "java/java25-complete/";
     private static final String LOCAL_DOCS_SPRING_BOOT = LOCAL_DOCS_ROOT + "spring-boot/";
     private static final String LOCAL_DOCS_SPRING_BOOT_COMPLETE = LOCAL_DOCS_ROOT + "spring-boot-complete/";
     private static final String LOCAL_DOCS_SPRING_FRAMEWORK = LOCAL_DOCS_ROOT + "spring-framework/";
@@ -95,9 +85,9 @@ public final class DocsSourceRegistry {
     private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
 
     private static final Properties PROPS = loadDocsSourceProperties();
+    private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES =
+            JavaApiDocumentationManifest.load();
 
-    public static final String JAVA24_API_BASE = resolveSetting(JAVA24_API_BASE_KEY, DEFAULT_JAVA24);
-    public static final String JAVA25_API_BASE = resolveSetting(JAVA25_API_BASE_KEY, DEFAULT_JAVA25);
     public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
     public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
     public static final String JETBRAINS_IDEA_2025_09_BASE =
@@ -122,6 +112,64 @@ public final class DocsSourceRegistry {
     private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
 
     private DocsSourceRegistry() {}
+
+    /**
+     * Describes one complete Java API mirror projected from the canonical manifest.
+     *
+     * @param javaRelease Java release number used by retrieval provenance
+     * @param remoteBaseUrl authoritative Oracle Javadoc base URL
+     * @param relativeMirrorPath canonical path beneath {@code data/docs}
+     * @param displayName operator-facing ingestion name
+     * @param cutDirectories number of leading remote path segments removed during mirroring
+     * @param minimumHtmlFiles minimum accepted mirror size
+     * @param rejectRegex crawler exclusion expression, or blank when no exclusion applies
+     * @param allowPartial whether the fetcher accepts a validated partial mirror
+     */
+    public record JavaApiDocumentationSource(
+            String javaRelease,
+            String remoteBaseUrl,
+            String relativeMirrorPath,
+            String displayName,
+            int cutDirectories,
+            int minimumHtmlFiles,
+            String rejectRegex,
+            boolean allowPartial) {
+        public JavaApiDocumentationSource {
+            int parsedJavaRelease =
+                    JavaApiDocumentationManifest.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
+            if (parsedJavaRelease < 1) {
+                throw new IllegalArgumentException("Java release must be positive");
+            }
+            JavaApiDocumentationManifest.requireManifestText(remoteBaseUrl, "remoteBaseUrl", false);
+            JavaApiDocumentationManifest.requireManifestText(relativeMirrorPath, "relativeMirrorPath", false);
+            JavaApiDocumentationManifest.requireManifestText(displayName, "displayName", false);
+            if (cutDirectories < 0) {
+                throw new IllegalArgumentException("Java API cut directories cannot be negative");
+            }
+            if (minimumHtmlFiles < 1) {
+                throw new IllegalArgumentException("Java API minimum HTML files must be positive");
+            }
+            JavaApiDocumentationManifest.requireManifestText(rejectRegex, "rejectRegex", true);
+        }
+
+        /**
+         * Serializes this validated source with the canonical manifest grammar.
+         *
+         * @return exact manifest record row
+         */
+        public String toManifestRow() {
+            return JavaApiDocumentationManifest.serialize(this);
+        }
+    }
+
+    /**
+     * Returns complete Java API sources projected from the canonical manifest.
+     *
+     * @return immutable sources in manifest order
+     */
+    public static List<JavaApiDocumentationSource> javaApiDocumentationSources() {
+        return JAVA_API_DOCUMENTATION_SOURCES;
+    }
 
     private static Properties loadDocsSourceProperties() {
         final Properties docsSourceProperties = new Properties();
@@ -153,15 +201,11 @@ public final class DocsSourceRegistry {
     private static Map<String, String> buildLocalPrefixLookup() {
         final Map<String, String> prefixLookup = new LinkedHashMap<>();
 
-        // Java SE 24 API (Oracle)
-        prefixLookup.put(LOCAL_DOCS_JAVA24, JAVA24_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA24_NESTED, JAVA24_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA24_COMPLETE, JAVA24_API_BASE);
-
-        // Java SE 25 documentation (Oracle) - includes alternate local paths for backwards compatibility
-        prefixLookup.put(LOCAL_DOCS_JAVA25, JAVA25_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA25_NESTED, JAVA25_API_BASE);
-        prefixLookup.put(LOCAL_DOCS_JAVA25_COMPLETE, JAVA25_API_BASE);
+        for (JavaApiDocumentationSource javaApiDocumentationSource : JAVA_API_DOCUMENTATION_SOURCES) {
+            prefixLookup.put(
+                    LOCAL_DOCS_ROOT + javaApiDocumentationSource.relativeMirrorPath() + "/",
+                    javaApiDocumentationSource.remoteBaseUrl());
+        }
 
         // Spring Boot documentation
         prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_BASE);
