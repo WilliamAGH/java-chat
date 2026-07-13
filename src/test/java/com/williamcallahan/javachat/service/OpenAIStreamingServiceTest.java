@@ -2,10 +2,15 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.openai.client.OpenAIClient;
 import com.openai.core.http.Headers;
 import com.openai.errors.NotFoundException;
@@ -13,9 +18,13 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import reactor.core.Exceptions;
 
 /**
@@ -27,6 +36,21 @@ import reactor.core.Exceptions;
  * the routing service.</p>
  */
 class OpenAIStreamingServiceTest {
+    private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(OpenAIStreamingService.class);
+    private final ListAppender<ILoggingEvent> serviceLogEvents = new ListAppender<>();
+
+    @BeforeEach
+    void captureServiceLogs() {
+        serviceLogEvents.start();
+        serviceLogger.addAppender(serviceLogEvents);
+    }
+
+    @AfterEach
+    void stopCapturingServiceLogs() {
+        serviceLogger.detachAppender(serviceLogEvents);
+        serviceLogEvents.stop();
+        serviceLogEvents.list.clear();
+    }
 
     private OpenAiProviderRoutingService createRoutingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -172,5 +196,24 @@ class OpenAIStreamingServiceTest {
         assertEquals(
                 RateLimitService.ApiProvider.GITHUB_MODELS,
                 availableProviders.get(0).provider());
+    }
+
+    @Test
+    void unavailableStreamDefersErrorSeverityToRequestBoundary() {
+        OpenAIStreamingService streamingService = createStreamingService();
+
+        assertThrows(IllegalStateException.class, () -> streamingService
+                .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                .block());
+
+        assertEquals(0, logCount(Level.ERROR, "LLM providers unavailable"));
+        assertEquals(1, logCount(Level.WARN, "LLM providers unavailable"));
+    }
+
+    private long logCount(Level level, String messageFragment) {
+        return serviceLogEvents.list.stream()
+                .filter(loggingEvent -> loggingEvent.getLevel().equals(level))
+                .filter(loggingEvent -> loggingEvent.getFormattedMessage().contains(messageFragment))
+                .count();
     }
 }

@@ -154,7 +154,7 @@ public class OpenAIStreamingService {
                     if (availableProviders.isEmpty()) {
                         String unavailableReason =
                                 "LLM providers unavailable - active provider is rate limited or misconfigured";
-                        log.error("[LLM] {}", unavailableReason);
+                        log.warn("[LLM] {}", unavailableReason);
                         return Mono.<StreamingResult>error(new IllegalStateException(unavailableReason));
                     }
 
@@ -262,22 +262,22 @@ public class OpenAIStreamingService {
                             return Mono.just(extractTextFromResponse(completion));
                         } catch (RuntimeException completionException) {
                             lastProviderFailure = completionException;
-                            log.error(
-                                    "[LLM] Complete failed (providerId={})",
-                                    activeProvider.ordinal(),
-                                    completionException);
                             providerRoutingService.recordProviderFailure(activeProvider, completionException);
 
                             boolean hasNextProvider = providerIndex + 1 < availableProviders.size();
                             if (hasNextProvider
                                     && providerRoutingService.isCompletionFallbackEligible(completionException)) {
                                 log.warn(
-                                        "[LLM] Falling back to secondary provider after complete failure "
+                                        "[LLM] Complete attempt failed; falling back to secondary provider "
                                                 + "(providerId={}, exceptionType={})",
                                         activeProvider.ordinal(),
                                         completionException.getClass().getSimpleName());
                                 continue;
                             }
+                            log.error(
+                                    "[LLM] Complete failed (providerId={})",
+                                    activeProvider.ordinal(),
+                                    completionException);
                             return Mono.error(completionException);
                         }
                     }
@@ -387,7 +387,6 @@ public class OpenAIStreamingService {
                     rateLimitService.recordSuccess(activeProvider);
                 })
                 .doOnError(exception -> {
-                    log.error("[LLM] Streaming failed (providerId={})", activeProvider.ordinal(), exception);
                     providerRoutingService.recordProviderFailure(activeProvider, exception);
                 });
     }
