@@ -53,5 +53,16 @@ class JavaApiDocumentationSourceParityTest {
                 .toList();
         assertEquals(manifestSourceRows, actualJavaProjections);
         assertEquals(manifestSourceRows, actualScriptProjections);
+
+        Path fetchProjectionTestPath =
+                Path.of("scripts", "test_java_api_fetch_projection.sh").toAbsolutePath();
+        ProcessBuilder fetchProjectionTestCommand = new ProcessBuilder("/bin/bash", fetchProjectionTestPath.toString());
+        fetchProjectionTestCommand.redirectErrorStream(true);
+        Process fetchProjectionTestProcess = fetchProjectionTestCommand.start();
+        String fetchProjectionTestOutput =
+                new String(fetchProjectionTestProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int fetchProjectionTestExitCode = fetchProjectionTestProcess.waitFor();
+
+        assertEquals(0, fetchProjectionTestExitCode, fetchProjectionTestOutput);
     }
 }

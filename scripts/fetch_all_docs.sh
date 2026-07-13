@@ -4,8 +4,6 @@
 # This script fetches all required documentation (configured Java APIs, Spring ecosystem)
 # and ensures no redundant downloads by checking existing files
 
-set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=lib/shell_bootstrap.sh
@@ -18,9 +16,6 @@ source "$SCRIPT_DIR/lib/documentation_sources.sh"
 # Centralized source definitions
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
 JAVA_API_SOURCES_MANIFEST="$SCRIPT_DIR/../src/main/resources/java-api-documentation-sources.manifest"
-if [ -f "$RES_PROPS" ]; then
-  preserve_process_env_then_source_file "$RES_PROPS"
-fi
 DOCS_ROOT="$SCRIPT_DIR/../data/docs"
 LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
 
@@ -29,35 +24,39 @@ INCLUDE_QUICK="${INCLUDE_QUICK:-false}"
 CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
-for arg in "$@"; do
-    case $arg in
-        --include-quick)
-            INCLUDE_QUICK="true"
-            ;;
-        --no-clean)
-            CLEAN_INCOMPLETE="false"
-            ;;
-        --force)
-            FORCE_REFRESH="true"
-            ;;
-        --list-java-api-sources)
-            LIST_JAVA_API_SOURCES="true"
-            ;;
-        --help|-h)
-            echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources]"
-            echo "  --include-quick : Also refresh small 'quick' doc mirrors"
-            echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
-            echo "  --force         : Refresh even when mirrors look complete"
-            echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $arg"
-            echo "Use --help for usage information"
-            exit 1
-            ;;
-    esac
-done
+
+parse_fetch_arguments() {
+    local fetch_argument
+    for fetch_argument in "$@"; do
+        case $fetch_argument in
+            --include-quick)
+                INCLUDE_QUICK="true"
+                ;;
+            --no-clean)
+                CLEAN_INCOMPLETE="false"
+                ;;
+            --force)
+                FORCE_REFRESH="true"
+                ;;
+            --list-java-api-sources)
+                LIST_JAVA_API_SOURCES="true"
+                ;;
+            --help|-h)
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources]"
+                echo "  --include-quick : Also refresh small 'quick' doc mirrors"
+                echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
+                echo "  --force         : Refresh even when mirrors look complete"
+                echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $fetch_argument"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
 
 extract_meta_version() {
     local file_path="$1"
@@ -178,7 +177,10 @@ validate_fetch_result() {
         return 1
     fi
 
-    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
+    if [ "$fetched_html_count" -eq 0 ]; then
+        log "${RED}✗ $name fetch produced no HTML files${NC}"
+        return 1
+    fi
     if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
         if [ "$partial_mirror_allowed" = "true" ]; then
             log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
@@ -187,6 +189,7 @@ validate_fetch_result() {
             return 1
         fi
     fi
+    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
     return 0
 }
 
@@ -385,9 +388,12 @@ fetch_documentation_source() {
     fetch_docs "$documentation_source_url" "$mirror_directory" "$documentation_source_name" "$cut_directories" "$minimum_html_files" "$reject_regex" "$partial_mirror_allowed"
 }
 
-if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    return 0
+run_documentation_fetch() {
+set -euo pipefail
+if [ -f "$RES_PROPS" ]; then
+    preserve_process_env_then_source_file "$RES_PROPS"
 fi
+parse_fetch_arguments "$@"
 
 # Documentation sources configuration
 # Format: URL|TARGET_DIR|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
@@ -528,3 +534,8 @@ if [ "$TOTAL_FAILED" -gt 0 ]; then
     exit 1
 fi
 echo "Next step: Run 'make run' or './scripts/process_all_to_qdrant.sh' to process and upload to Qdrant"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    run_documentation_fetch "$@"
+fi

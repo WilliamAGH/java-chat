@@ -47,6 +47,15 @@ for java_api_source_index in "${!JAVA_API_SOURCE_PROJECTIONS[@]}"; do
         fail_java_api_fetch_projection_test "Java API fetch projection at index $java_api_source_index must contain exactly seven fields"
     fi
 
+    manifest_projection_without_release="${manifest_projection#*|}"
+    expected_remote_base_url="${manifest_projection_without_release%%|*}"
+    manifest_projection_after_remote_base_url="${manifest_projection_without_release#*|}"
+    expected_relative_mirror_path="${manifest_projection_after_remote_base_url%%|*}"
+    expected_fetch_projection="$expected_remote_base_url|$TEST_DOCS_ROOT/$expected_relative_mirror_path|${manifest_projection_after_remote_base_url#*|}"
+    if [ "$documentation_fetch_projection" != "$expected_fetch_projection" ]; then
+        fail_java_api_fetch_projection_test "Java API fetch projection at index $java_api_source_index diverged from the canonical manifest row"
+    fi
+
     fetch_execution_arguments=()
     fetch_documentation_source "$documentation_fetch_projection" > /dev/null
     if [ "${#fetch_execution_arguments[@]}" -ne 7 ]; then
@@ -76,6 +85,14 @@ source "$FETCH_SCRIPT"
 log() {
     :
 }
+
+count_html_files() {
+    printf '0\n'
+}
+
+if validate_fetch_result 0 "$TEST_DOCS_ROOT/empty-partial" "Empty partial mirror" 10 true; then
+    fail_java_api_fetch_projection_test "allowPartial=true accepted an empty mirror"
+fi
 
 count_html_files() {
     printf '5\n'
