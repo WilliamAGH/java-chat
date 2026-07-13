@@ -37,6 +37,14 @@ public class OpenAiProviderRoutingService {
     private static final String PROVIDER_SETTING_GITHUB_MODELS_ALT = "github-models";
     private static final String PROVIDER_SETTING_GITHUB = "github";
 
+    /**
+     * Identifies the whole-call timeout message emitted by OkHttp 4.12 {@code RealCall.timeoutExit}.
+     *
+     * <p>OpenAI Java 4.16 wraps the corresponding {@link InterruptedIOException} in an
+     * {@link OpenAIIoException}, which is a provider failure rather than caller cancellation.</p>
+     */
+    private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
+
     private static final int HTTP_REQUEST_TIMEOUT = 408;
     private static final int HTTP_CONFLICT = 409;
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
@@ -306,8 +314,9 @@ public class OpenAiProviderRoutingService {
                 Thread.currentThread().interrupt();
                 return true;
             }
-            if (cancellationCandidate instanceof InterruptedIOException
-                    && !(cancellationCandidate instanceof SocketTimeoutException)) {
+            if (cancellationCandidate instanceof InterruptedIOException interruptedIoException
+                    && !(interruptedIoException instanceof SocketTimeoutException)
+                    && !isOkHttpCallTimeout(interruptedIoException)) {
                 return true;
             }
             String cancellationMessage = cancellationCandidate.getMessage();
@@ -318,6 +327,11 @@ public class OpenAiProviderRoutingService {
             cancellationCandidate = cancellationCandidate.getCause();
         }
         return false;
+    }
+
+    private static boolean isOkHttpCallTimeout(InterruptedIOException interruptedIoException) {
+        return interruptedIoException.getClass().equals(InterruptedIOException.class)
+                && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(interruptedIoException.getMessage());
     }
 
     private boolean isPrimaryInBackoff() {
