@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
 import com.williamcallahan.javachat.model.Citation;
@@ -9,7 +10,6 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
@@ -145,7 +145,7 @@ public class GuidedLearningController extends BaseController {
                     return Flux.merge(dataStream.map(sseSupport::textEvent), sseSupport.heartbeats(dataStream));
                 })
                 .onErrorResume(error -> {
-                    if (OpenAiStreamingFailureException.findInCauseChain(error).isEmpty()) {
+                    if (ReportedStreamingFailure.findInCauseChain(error).isEmpty()) {
                         log.atError()
                                 .setMessage("Guided lesson content stream error")
                                 .addKeyValue(
@@ -306,8 +306,8 @@ public class GuidedLearningController extends BaseController {
                             .doOnComplete(() -> chatMemory.addAssistant(sessionId, fullResponse.toString()));
                 })
                 .onErrorResume(error -> {
-                    Optional<OpenAiStreamingFailureException> terminalFailureContext =
-                            OpenAiStreamingFailureException.findInCauseChain(error);
+                    Optional<ReportedStreamingFailure> terminalFailureContext =
+                            ReportedStreamingFailure.findInCauseChain(error);
                     if (terminalFailureContext.isEmpty()) {
                         log.atError()
                                 .setMessage("Guided streaming error")
@@ -323,7 +323,7 @@ public class GuidedLearningController extends BaseController {
                                 .log();
                     }
                     Throwable upstreamFailure = terminalFailureContext
-                            .map(OpenAiStreamingFailureException::getCause)
+                            .map(ReportedStreamingFailure::upstreamFailure)
                             .orElse(error);
                     boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
                     return sseSupport.streamErrorEvent(

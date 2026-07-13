@@ -16,14 +16,12 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.openai.errors.InternalServerException;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
@@ -80,7 +78,7 @@ class GuidedLearningControllerStreamingFailureTest {
 
     @Test
     void guidedChatDoesNotEmitDuplicateErrorForTerminalStreamingFailure() {
-        OpenAiStreamingFailureException terminalFailure = terminalFailure();
+        ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
@@ -103,7 +101,7 @@ class GuidedLearningControllerStreamingFailureTest {
 
     @Test
     void guidedLessonContentDoesNotEmitDuplicateErrorForTerminalStreamingFailure() {
-        OpenAiStreamingFailureException terminalFailure = terminalFailure();
+        ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
         when(guidedLearningService.getCachedLessonMarkdown(LESSON_SLUG)).thenReturn(Optional.empty());
         when(guidedLearningService.streamLessonContent(LESSON_SLUG)).thenReturn(Flux.error(terminalFailure));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
@@ -148,10 +146,8 @@ class GuidedLearningControllerStreamingFailureTest {
         assertFalse(controllerAlert.toString().contains(UPSTREAM_SECRET_MESSAGE));
     }
 
-    private static OpenAiStreamingFailureException terminalFailure() {
-        OpenAiStreamingFailureException terminalFailure = mock(OpenAiStreamingFailureException.class);
-        when(terminalFailure.getCause()).thenReturn(mock(InternalServerException.class));
-        return terminalFailure;
+    private static ReportedTerminalStreamingFailure terminalFailure() {
+        return new ReportedTerminalStreamingFailure(new IllegalStateException("upstream failure"));
     }
 
     private long controllerErrorCount() {

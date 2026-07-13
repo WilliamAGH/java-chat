@@ -17,17 +17,18 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.InternalServerException;
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,11 +62,10 @@ class ChatControllerStreamingFailureTest {
 
     @Test
     void terminalGatewayTimeoutDoesNotEmitDuplicateControllerError() {
-        OpenAiStreamingFailureException terminalFailure = mock(OpenAiStreamingFailureException.class);
         InternalServerException upstreamFailure = mock(InternalServerException.class);
         when(upstreamFailure.statusCode()).thenReturn(504);
         when(upstreamFailure.getMessage()).thenReturn(UPSTREAM_SECRET_MESSAGE);
-        when(terminalFailure.getCause()).thenReturn(upstreamFailure);
+        ReportedTerminalStreamingFailure terminalFailure = new ReportedTerminalStreamingFailure(upstreamFailure);
         List<ServerSentEvent<String>> streamEvents = streamFailure(terminalFailure, true);
 
         assertFalse(streamEvents.isEmpty());
@@ -139,5 +139,19 @@ class ChatControllerStreamingFailureTest {
         assertTrue(controllerAlert.getKeyValuePairs().stream()
                 .anyMatch(structuredField ->
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
+    }
+}
+
+/** Supplies a generic already-reported terminal failure to every web-boundary regression test. */
+final class ReportedTerminalStreamingFailure extends RuntimeException implements ReportedStreamingFailure {
+
+    ReportedTerminalStreamingFailure(Throwable upstreamFailure) {
+        super("terminal streaming failure", Objects.requireNonNull(upstreamFailure, "upstreamFailure"));
+    }
+
+    /** Returns the provider failure that outer web boundaries should classify without re-reporting. */
+    @Override
+    public Throwable upstreamFailure() {
+        return Objects.requireNonNull(getCause(), "upstreamFailure");
     }
 }

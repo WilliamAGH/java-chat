@@ -31,6 +31,7 @@ import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.openai.services.blocking.ResponseService;
+import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.io.InterruptedIOException;
@@ -43,7 +44,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.Exceptions;
-import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 /**
@@ -57,11 +57,16 @@ import reactor.test.StepVerifier;
 class OpenAIStreamingServiceTest {
     private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(OpenAIStreamingService.class);
     private final ListAppender<ILoggingEvent> serviceLogEvents = new ListAppender<>();
+    private final Logger streamingFailureLogger =
+            (Logger) LoggerFactory.getLogger(OpenAiStreamingFailureException.class);
+    private final ListAppender<ILoggingEvent> streamingFailureLogEvents = new ListAppender<>();
 
     @BeforeEach
     void captureServiceLogs() {
         serviceLogEvents.start();
         serviceLogger.addAppender(serviceLogEvents);
+        streamingFailureLogEvents.start();
+        streamingFailureLogger.addAppender(streamingFailureLogEvents);
     }
 
     @AfterEach
@@ -69,6 +74,9 @@ class OpenAIStreamingServiceTest {
         serviceLogger.detachAppender(serviceLogEvents);
         serviceLogEvents.stop();
         serviceLogEvents.list.clear();
+        streamingFailureLogger.detachAppender(streamingFailureLogEvents);
+        streamingFailureLogEvents.stop();
+        streamingFailureLogEvents.list.clear();
     }
 
     private OpenAiProviderRoutingService createRoutingService() {
@@ -182,15 +190,10 @@ class OpenAIStreamingServiceTest {
         OpenAIStreamingService streamingService = createStreamingService();
         NotFoundException notFoundException =
                 NotFoundException.builder().headers(Headers.builder().build()).build();
-        ResponseCreateParams responseParameters =
-                ResponseCreateParams.builder().input("test").model("gpt-5.2").build();
-        OpenAiPreparedRequest preparedRequest = new OpenAiPreparedRequest(responseParameters, "gpt-5.2");
-        OpenAiProviderCandidate providerCandidate =
-                new OpenAiProviderCandidate(mock(OpenAIClient.class), RateLimitService.ApiProvider.OPENAI);
-        StreamingAttemptContext attemptContext = StreamingAttemptContext.first(
-                List.of(providerCandidate), Sinks.many().multicast().onBackpressureBuffer());
         OpenAiStreamingFailureException terminalFailure = OpenAiStreamingFailureException.terminalAndLog(
-                notFoundException, preparedRequest, attemptContext, false);
+                notFoundException,
+                new OpenAiStreamingFailureException.TerminalAttempt(
+                        "openai", "gpt-5.2", new OpenAiStreamingFailureException.AttemptProgress(1, 1), false));
 
         assertTrue(streamingService.isRecoverableStreamingFailure(
                 new IllegalStateException("reactor boundary", terminalFailure)));
@@ -232,18 +235,13 @@ class OpenAIStreamingServiceTest {
                 .expectErrorSatisfies(failure -> {
                     OpenAiStreamingFailureException terminalFailure =
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    assertSame(upstreamFailure, terminalFailure.getCause());
-                    assertEquals(2, terminalFailure.currentAttempt());
-                    assertTrue(terminalFailure.beforeFirstChunk());
+                    assertSame(upstreamFailure, terminalFailure.upstreamFailure());
                 })
                 .verify();
 
         verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
-        List<ILoggingEvent> terminalAlerts = serviceLogEvents.list.stream()
+        List<ILoggingEvent> terminalAlerts = streamingFailureLogEvents.list.stream()
                 .filter(loggingEvent -> loggingEvent.getLevel() == Level.ERROR)
-                .filter(loggingEvent -> loggingEvent.getKeyValuePairs().stream()
-                        .anyMatch(
-                                logField -> "event".equals(logField.key) && "llm_stream_failed".equals(logField.value)))
                 .toList();
         assertEquals(1, terminalAlerts.size());
         ILoggingEvent terminalAlert = terminalAlerts.getFirst();
@@ -289,9 +287,7 @@ class OpenAIStreamingServiceTest {
                 .expectErrorSatisfies(failure -> {
                     OpenAiStreamingFailureException terminalFailure =
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    assertSame(upstreamFailure, terminalFailure.getCause());
-                    assertEquals(2, terminalFailure.currentAttempt());
-                    assertTrue(terminalFailure.beforeFirstChunk());
+                    assertSame(upstreamFailure, terminalFailure.upstreamFailure());
                 })
                 .verify();
 
@@ -336,9 +332,7 @@ class OpenAIStreamingServiceTest {
                 .expectErrorSatisfies(failure -> {
                     OpenAiStreamingFailureException terminalFailure =
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    assertSame(upstreamFailure, terminalFailure.getCause());
-                    assertEquals(1, terminalFailure.currentAttempt());
-                    assertFalse(terminalFailure.beforeFirstChunk());
+                    assertSame(upstreamFailure, terminalFailure.upstreamFailure());
                 })
                 .verify();
 

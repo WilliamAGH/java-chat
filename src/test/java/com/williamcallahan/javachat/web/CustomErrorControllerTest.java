@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,7 +18,6 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.ConsoleAppender;
 import ch.qos.logback.core.read.ListAppender;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -164,7 +162,8 @@ class CustomErrorControllerTest {
 
     @Test
     void logsAlreadyReportedTerminalStreamingFailureAtWarnWithoutException() throws Exception {
-        OpenAiStreamingFailureException terminalFailure = mock(OpenAiStreamingFailureException.class);
+        ReportedTerminalStreamingFailure terminalFailure =
+                new ReportedTerminalStreamingFailure(new IllegalStateException("upstream failure"));
         IllegalStateException dispatchFailure = new IllegalStateException("dispatch failed", terminalFailure);
 
         mockMvc.perform(errorRequest(HttpStatus.INTERNAL_SERVER_ERROR, "/api/chat")

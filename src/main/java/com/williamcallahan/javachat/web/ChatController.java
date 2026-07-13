@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
@@ -9,7 +10,6 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.StructuredLogValue;
@@ -199,10 +199,10 @@ public class ChatController extends BaseController {
                             "Streaming service unavailable", "OpenAI streaming service is not ready");
                 })
                 .onErrorResume(error -> {
-                    Optional<OpenAiStreamingFailureException> terminalFailureContext =
-                            OpenAiStreamingFailureException.findInCauseChain(error);
+                    Optional<ReportedStreamingFailure> terminalFailureContext =
+                            ReportedStreamingFailure.findInCauseChain(error);
                     Throwable upstreamError = terminalFailureContext
-                            .map(OpenAiStreamingFailureException::getCause)
+                            .map(ReportedStreamingFailure::upstreamFailure)
                             .orElse(error);
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
                     String diagnostics = upstreamError instanceof Exception exception

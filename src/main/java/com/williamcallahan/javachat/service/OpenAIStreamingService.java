@@ -12,6 +12,8 @@ import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseOutputText;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextDeltaEvent;
+import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException;
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import com.williamcallahan.javachat.web.SseConstants;
@@ -316,8 +318,8 @@ public class OpenAIStreamingService {
      * @return true when fallback conditions indicate transient failure
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
-        Throwable upstreamFailure = OpenAiStreamingFailureException.findInCauseChain(throwable)
-                .map(OpenAiStreamingFailureException::getCause)
+        Throwable upstreamFailure = ReportedStreamingFailure.findInCauseChain(throwable)
+                .map(ReportedStreamingFailure::upstreamFailure)
                 .orElse(throwable);
         return providerRoutingService.isRecoverableStreamingFailure(upstreamFailure);
     }
@@ -349,7 +351,13 @@ public class OpenAIStreamingService {
                             || emittedTextChunk.get()
                             || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
                         return Flux.error(OpenAiStreamingFailureException.terminalAndLog(
-                                streamingFailure, preparedStreamingRequest, attemptContext, emittedTextChunk.get()));
+                                streamingFailure,
+                                new OpenAiStreamingFailureException.TerminalAttempt(
+                                        activeProvider.getName(),
+                                        preparedStreamingRequest.modelId(),
+                                        new OpenAiStreamingFailureException.AttemptProgress(
+                                                attemptContext.currentAttempt(), attemptContext.maxAttempts()),
+                                        emittedTextChunk.get())));
                     }
 
                     StreamingAttemptContext nextAttempt = attemptContext.withNextAttempt();

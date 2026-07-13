@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.domain.errors.ApiResponse;
-import com.williamcallahan.javachat.service.OpenAiStreamingFailureException;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.RequestDispatcher;
@@ -112,8 +112,7 @@ public class CustomErrorController implements ErrorController {
         String safeRequestId = safeLogField(request.getRequestId());
         String source = safeLogField(request.getAttribute(RequestDispatcher.ERROR_SERVLET_NAME));
         boolean terminalStreamFailureAlreadyLogged = exception instanceof Throwable requestFailure
-                && OpenAiStreamingFailureException.findInCauseChain(requestFailure)
-                        .isPresent();
+                && ReportedStreamingFailure.findInCauseChain(requestFailure).isPresent();
 
         LoggingEventBuilder requestFailureLog = log.atLevel(resolveFailureLogLevel(
                         statusCode, isApiRequest(requestUri), terminalStreamFailureAlreadyLogged))
