@@ -1,16 +1,20 @@
 package com.williamcallahan.javachat;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.service.EmbeddingModelKeepAlive;
 import io.qdrant.client.QdrantClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,6 +50,14 @@ class JavaChatApplicationTests {
 
     @MockitoBean
     QdrantClient qdrantClient;
+
+    @MockitoBean
+    EmbeddingModelKeepAlive embeddingModelKeepAlive;
+
+    @BeforeEach
+    void reportEmbeddingDependencyUnavailable() {
+        when(embeddingModelKeepAlive.health()).thenReturn(Health.down().build());
+    }
 
     @Test
     void contextLoads() {}
