@@ -29,6 +29,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.44.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",

@@ -21,9 +21,12 @@ COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-# Copy source files and build
+# Copy source files, validate, test, and build
 COPY frontend/ .
-RUN npm run build
+COPY .gitignore /app/.ignore
+COPY Dockerfile /app/Dockerfile
+COPY docs/getting-started.md /app/docs/getting-started.md
+RUN npm run validate && npm run test && npm run build
 
 # ================================
 # BACKEND BUILD STAGE
@@ -95,7 +98,7 @@ USER appuser
 EXPOSE 8085
 
 # Gate Coolify's rolling cutover on dependencies being ready for application traffic.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --start-interval=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["/bin/sh", "-c", "exec java \
