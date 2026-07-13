@@ -27,12 +27,10 @@
 
     <!-- Application loggers -->
     <logger name="com.williamcallahan.javachat" level="INFO"/>
-    <logger name="com.williamcallahan.javachat.logging.ProcessingLogger" level="DEBUG"/>
-    <logger name="com.williamcallahan.javachat.service" level="DEBUG"/>
     
     <!-- Spring framework loggers -->
     <logger name="org.springframework.web" level="INFO"/>
-    <logger name="org.springframework.ai" level="DEBUG"/>
+    <logger name="org.springframework.ai" level="INFO"/>
     
     <!-- Qdrant client logger -->
     <logger name="io.qdrant" level="ERROR"/>
