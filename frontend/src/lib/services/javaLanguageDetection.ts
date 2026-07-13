@@ -1,5 +1,5 @@
 /** Keywords indicating Java code for auto-detection. */
-const JAVA_KEYWORDS = [
+const JAVA_KEYWORDS = new Set<string>([
   "public",
   "private",
   "class",
@@ -8,13 +8,42 @@ const JAVA_KEYWORDS = [
   "String",
   "int",
   "boolean",
-] as const;
+]);
+
+/** Java's identifier-ignorable ISO control character ranges. */
+const JAVA_IDENTIFIER_IGNORABLE_CONTROL_RANGES = "\\u0000-\\u0008\\u000E-\\u001B\\u007F-\\u009F";
+
+/** Matches Java identifier parts, including identifier-ignorable characters. */
+const JAVA_IDENTIFIER_PART_PATTERN = new RegExp(
+  `[\\p{ID_Continue}\\p{Sc}\\p{Cf}${JAVA_IDENTIFIER_IGNORABLE_CONTROL_RANGES}]`,
+  "u",
+);
 
 /** CSS class applied to detected Java code blocks for syntax highlighting. */
 const JAVA_LANGUAGE_CLASS = "language-java";
 
 /** Selector for unmarked code blocks eligible for language detection. */
 const UNMARKED_CODE_SELECTOR = "pre > code:not([class])";
+
+/** Determines whether the code text contains a standalone Java keyword token. */
+function containsJavaKeyword(codeText: string): boolean {
+  let javaIdentifier = "";
+
+  for (const codeCharacter of codeText) {
+    if (JAVA_IDENTIFIER_PART_PATTERN.test(codeCharacter)) {
+      javaIdentifier += codeCharacter;
+      continue;
+    }
+
+    if (JAVA_KEYWORDS.has(javaIdentifier)) {
+      return true;
+    }
+
+    javaIdentifier = "";
+  }
+
+  return JAVA_KEYWORDS.has(javaIdentifier);
+}
 
 /** Adds Java highlighting metadata to unmarked code blocks that contain Java keywords. */
 export function applyJavaLanguageDetection(container: HTMLElement | null | undefined): void {
@@ -31,7 +60,7 @@ export function applyJavaLanguageDetection(container: HTMLElement | null | undef
   const codeBlocks = container.querySelectorAll(UNMARKED_CODE_SELECTOR);
   codeBlocks.forEach((codeBlock) => {
     const codeText = codeBlock.textContent ?? "";
-    if (JAVA_KEYWORDS.some((javaKeyword) => codeText.includes(javaKeyword))) {
+    if (containsJavaKeyword(codeText)) {
       codeBlock.className = JAVA_LANGUAGE_CLASS;
     }
   });

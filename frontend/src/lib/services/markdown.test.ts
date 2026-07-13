@@ -189,29 +189,47 @@ describe("applyJavaLanguageDetection", () => {
     expect(code.className).toBe("");
   });
 
-  it("detects various Java keywords", () => {
-    const javaKeywords = [
-      "public",
-      "private",
-      "class",
-      "import",
-      "void",
-      "String",
-      "int",
-      "boolean",
+  it("detects Java keywords at identifier boundaries", () => {
+    const javaKeywordBoundarySnippets = [
+      "int[] greetingCounts = { 1 };",
+      'String.valueOf("hello");',
     ];
 
-    for (const keyword of javaKeywords) {
+    for (const javaKeywordBoundarySnippet of javaKeywordBoundarySnippets) {
       const container = document.createElement("div");
       const pre = document.createElement("pre");
       const code = document.createElement("code");
-      code.textContent = `${keyword} something`;
+      code.textContent = javaKeywordBoundarySnippet;
       pre.appendChild(code);
       container.appendChild(pre);
 
       applyJavaLanguageDetection(container);
 
       expect(code.className).toBe("language-java");
+    }
+  });
+
+  it("does not classify keyword substrings or identifier continuations as Java", () => {
+    const nonJavaSnippets = [
+      'print("hello")',
+      "const point = { horizontal: 1 };",
+      'const hint = "tip";',
+      'const publication = "article";',
+      'const republic = "state";',
+      'const public\uFEFFation = "article";',
+    ];
+
+    for (const nonJavaSnippet of nonJavaSnippets) {
+      const container = document.createElement("div");
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.textContent = nonJavaSnippet;
+      pre.appendChild(code);
+      container.appendChild(pre);
+
+      applyJavaLanguageDetection(container);
+
+      expect(code.className).toBe("");
     }
   });
 });
