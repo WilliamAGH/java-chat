@@ -12,6 +12,8 @@ source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
 source "$SCRIPT_DIR/lib/env_loader.sh"
 # shellcheck source=lib/documentation_sources.sh
 source "$SCRIPT_DIR/lib/documentation_sources.sh"
+# shellcheck source=lib/documentation_fetch_metadata.sh
+source "$SCRIPT_DIR/lib/documentation_fetch_metadata.sh"
 
 # Centralized source definitions
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
@@ -24,6 +26,7 @@ INCLUDE_QUICK="${INCLUDE_QUICK:-false}"
 CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
+DOCUMENTATION_FETCH_PARTIAL_STATUS=2
 
 parse_fetch_arguments() {
     local fetch_argument
@@ -56,21 +59,6 @@ parse_fetch_arguments() {
                 ;;
         esac
     done
-}
-
-extract_meta_version() {
-    local file_path="$1"
-    if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
-        echo ""
-        return 0
-    fi
-    local line
-    line="$(grep -E '<meta name="version" content="[^"]+"' "$file_path" 2>/dev/null | head -n 1 || true)"
-    if [ -z "$line" ]; then
-        echo ""
-        return 0
-    fi
-    echo "$line" | sed -E 's/.*content="([^"]+)".*/\1/'
 }
 
 quarantine_incomplete_dir() {
@@ -152,14 +140,15 @@ quarantine_versioned_reference_subdirs() {
 }
 
 # Validates a wget fetch result: checks exit code, counts HTML files, and
-# enforces the minimum-files threshold.  Returns 0 on success, 1 on failure.
+# enforces the minimum-files threshold. Returns 0 on success, 2 for a retained
+# partial mirror, and 1 for any other failure.
 #
 # Arguments:
 #   $1 - wget exit code
 #   $2 - target directory (for HTML count)
 #   $3 - human-readable name
 #   $4 - minimum required HTML files (0 = no minimum)
-#   $5 - whether a validated partial mirror is accepted
+#   $5 - whether a nonempty partial mirror is retained for incremental reruns
 validate_fetch_result() {
     local wget_exit_code="$1"
     local target_dir="$2"
@@ -184,6 +173,7 @@ validate_fetch_result() {
     if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
         if [ "$partial_mirror_allowed" = "true" ]; then
             log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
+            return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
         else
             log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
             return 1
@@ -252,7 +242,7 @@ fetch_oracle_javadoc_seed() {
 #   $4 - --cut-dirs value
 #   $5 - minimum required HTML files
 #   $6 - reject regex (optional)
-#   $7 - whether a validated partial mirror is accepted
+#   $7 - whether a nonempty partial mirror is retained for incremental reruns
 fetch_docs_mirror() {
     local url="$1"
     local target_dir="$2"
@@ -307,7 +297,7 @@ fetch_docs_mirror() {
 #   $4 - --cut-dirs value
 #   $5 - minimum required HTML files
 #   $6 - reject regex (optional)
-#   $7 - whether a validated partial mirror is accepted
+#   $7 - whether a nonempty partial mirror is retained for incremental reruns
 fetch_docs() {
     local url="$1"
     local target_dir="$2"
@@ -449,6 +439,7 @@ echo "[$(date)] Starting consolidated documentation fetch" > "$LOG_FILE"
 
 # Statistics
 TOTAL_FETCHED=0
+TOTAL_PARTIAL=0
 TOTAL_FAILED=0
 
 echo ""
@@ -460,8 +451,14 @@ for documentation_source_projection in "${DOC_SOURCES[@]}"; do
     if fetch_documentation_source "$documentation_source_projection"; then
         TOTAL_FETCHED=$((TOTAL_FETCHED + 1))
     else
-        TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
+        documentation_fetch_status=$?
+        if [ "$documentation_fetch_status" -eq "$DOCUMENTATION_FETCH_PARTIAL_STATUS" ]; then
+            TOTAL_PARTIAL=$((TOTAL_PARTIAL + 1))
+            log "${YELLOW}Partial documentation source preserved; completion remains blocked${NC}"
+        else
+            TOTAL_FAILED=$((TOTAL_FAILED + 1))
+            log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
+        fi
     fi
 done
 
@@ -471,66 +468,24 @@ echo "Documentation Fetch Summary"
 echo "=============================================="
 log "📊 Statistics:"
 log "  - Newly fetched: $TOTAL_FETCHED"
+log "  - Partial: $TOTAL_PARTIAL"
 log "  - Failed: $TOTAL_FAILED"
 log "  - Include quick mirrors: $INCLUDE_QUICK"
 log "  - Clean incomplete mirrors: $CLEAN_INCOMPLETE"
 
-# Count total files
-TOTAL_HTML=$(find "$DOCS_ROOT" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')
-TOTAL_FILES=$(find "$DOCS_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')
-
-SPRING_BOOT_REFERENCE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-boot-complete/reference/index.html")"
-SPRING_FRAMEWORK_REFERENCE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-framework-complete/reference/index.html")"
-SPRING_AI_REFERENCE_STABLE_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-ai-reference/reference/index.html")"
-SPRING_AI_REFERENCE_2_VERSION="$(extract_meta_version "$DOCS_ROOT/spring-ai-reference-2/reference/2.0/index.html")"
-JAVA_JAVADOC_VERSIONS_METADATA="$(render_java_javadoc_versions_metadata "$DOCS_ROOT")"
-JAVA_COMPLETE_DIRECTORIES_METADATA="$(render_java_complete_directories_metadata "$DOCS_ROOT")"
-
-log "  - Total HTML files: $TOTAL_HTML"
-log "  - Total files: $TOTAL_FILES"
-log "  - Documentation root: $DOCS_ROOT"
-
 echo ""
-if [ "$TOTAL_FAILED" -eq 0 ]; then
-    log "${GREEN}✅ Documentation fetch complete!${NC}"
-else
+if [ "$TOTAL_FAILED" -gt 0 ]; then
     log "${RED}✗ Documentation fetch failed for $TOTAL_FAILED source(s)${NC}"
+elif [ "$TOTAL_PARTIAL" -gt 0 ]; then
+    log "${YELLOW}⚠ Documentation fetch remains partial for $TOTAL_PARTIAL source(s)${NC}"
+else
+    log "${GREEN}✅ Documentation fetch complete!${NC}"
 fi
 log "Check log for details: $LOG_FILE"
 
-# Create a marker file with fetch metadata
-METADATA_FILE="$DOCS_ROOT/.fetch_metadata.json"
-cat > "$METADATA_FILE" << EOF
-{
-  "last_fetch": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "statistics": {
-    "newly_fetched": $TOTAL_FETCHED,
-    "failed": $TOTAL_FAILED,
-    "total_html_files": $TOTAL_HTML,
-    "total_files": $TOTAL_FILES
-  },
-  "versions": {
-$JAVA_JAVADOC_VERSIONS_METADATA,
-    "spring_boot_reference": "$SPRING_BOOT_REFERENCE_VERSION",
-    "spring_framework_reference": "$SPRING_FRAMEWORK_REFERENCE_VERSION",
-    "spring_ai_reference_stable": "$SPRING_AI_REFERENCE_STABLE_VERSION",
-    "spring_ai_reference_2": "$SPRING_AI_REFERENCE_2_VERSION"
-  },
-  "directories": {
-$JAVA_COMPLETE_DIRECTORIES_METADATA,
-    "spring_boot_complete": "$(find "$DOCS_ROOT/spring-boot-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "spring_framework_complete": "$(find "$DOCS_ROOT/spring-framework-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "spring_ai_reference_stable": "$(find "$DOCS_ROOT/spring-ai-reference" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "spring_ai_reference_2": "$(find "$DOCS_ROOT/spring-ai-reference-2" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "spring_ai_api_stable": "$(find "$DOCS_ROOT/spring-ai-api-stable" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
-    "spring_ai_api_2": "$(find "$DOCS_ROOT/spring-ai-api-2" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')"
-  }
-}
-EOF
-
-log "Metadata saved to: $METADATA_FILE"
+write_documentation_fetch_metadata
 echo ""
-if [ "$TOTAL_FAILED" -gt 0 ]; then
+if [ "$TOTAL_FAILED" -gt 0 ] || [ "$TOTAL_PARTIAL" -gt 0 ]; then
     exit 1
 fi
 echo "Next step: Run 'make run' or './scripts/process_all_to_qdrant.sh' to process and upload to Qdrant"

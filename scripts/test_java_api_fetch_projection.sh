@@ -98,12 +98,30 @@ count_html_files() {
     printf '5\n'
 }
 
-if ! validate_fetch_result 0 "$TEST_DOCS_ROOT/partial" "Partial mirror" 10 true; then
-    fail_java_api_fetch_projection_test "allowPartial=true rejected a validated below-minimum mirror"
+partial_validation_status=0
+if validate_fetch_result 0 "$TEST_DOCS_ROOT/partial" "Partial mirror" 10 true; then
+    fail_java_api_fetch_projection_test "allowPartial=true reported a below-minimum mirror as complete"
+else
+    partial_validation_status=$?
+fi
+if [ "$partial_validation_status" -ne "$DOCUMENTATION_FETCH_PARTIAL_STATUS" ]; then
+    fail_java_api_fetch_projection_test "allowPartial=true did not return the partial fetch status"
 fi
 if validate_fetch_result 0 "$TEST_DOCS_ROOT/complete-required" "Complete mirror" 10 false; then
     fail_java_api_fetch_projection_test "allowPartial=false accepted a below-minimum mirror"
 fi
+
+count_html_files() {
+    printf '10\n'
+}
+
+if ! validate_fetch_result 0 "$TEST_DOCS_ROOT/complete-partial-allowed" "Complete partial-allowed mirror" 10 true; then
+    fail_java_api_fetch_projection_test "allowPartial=true rejected a complete mirror"
+fi
+
+count_html_files() {
+    printf '5\n'
+}
 
 quarantine_capture_file="$TEST_DOCS_ROOT/quarantine.log"
 quarantine_incomplete_dir() {
@@ -175,4 +193,4 @@ if [ "$(cat "$oracle_validation_capture_file")" != "true" ]; then
     fail_java_api_fetch_projection_test "Oracle Javadoc validation dropped the partial-mirror policy"
 fi
 
-printf 'PASS: Java API fetch projections retain all fields and enforce partial-mirror policy.\n'
+printf 'PASS: Java API fetch projections preserve partial mirrors without reporting completion.\n'
