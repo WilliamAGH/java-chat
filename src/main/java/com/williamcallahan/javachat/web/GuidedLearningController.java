@@ -43,6 +43,9 @@ import reactor.core.publisher.Flux;
 @PreAuthorize("permitAll()")
 public class GuidedLearningController extends BaseController {
     private static final int MAX_GUIDED_LOG_FIELD_LENGTH = 256;
+    private static final String GUIDED_CHAT_STREAM_ERROR_MESSAGE = "Streaming error";
+    private static final String GUIDED_CHAT_STREAM_ERROR_DETAILS =
+            "The response stream encountered an error. Please try again.";
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 
     /** Timeout for synchronous lesson content generation operations. */
@@ -322,14 +325,9 @@ public class GuidedLearningController extends BaseController {
                                 .addKeyValue("exceptionType", error.getClass().getSimpleName())
                                 .log();
                     }
-                    Throwable upstreamFailure = terminalFailureContext
-                            .map(ReportedStreamingFailure::upstreamFailure)
-                            .orElse(error);
                     boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
                     return sseSupport.streamErrorEvent(
-                            "Streaming error: " + upstreamFailure.getClass().getSimpleName(),
-                            "The response stream encountered an error. Please try again.",
-                            retryable);
+                            GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable);
                 });
     }
 
