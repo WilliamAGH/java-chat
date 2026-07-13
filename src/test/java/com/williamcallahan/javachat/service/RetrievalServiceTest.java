@@ -115,23 +115,25 @@ class RetrievalServiceTest {
     }
 
     @Test
-    void preservesDistinctUnmappedLocalDocumentsWithoutContentHashes() {
+    void keepsDistinctUnmappedLocalDocumentsAndRedactsTheirCitations() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
         DocumentFactory documentFactory = mock(DocumentFactory.class);
         AppProperties appProperties = new AppProperties();
         RetrievalService retrievalService =
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, documentFactory);
+        String firstUnmappedLocalUrl = "file:///unmapped/first.html";
+        String secondUnmappedLocalUrl = "file:///unmapped/second.html";
 
         Document firstUnmappedLocalDocument = Document.builder()
                 .id("first-unmapped-local")
                 .text("First local document")
-                .metadata("url", "file:///unmapped/first.html")
+                .metadata("url", firstUnmappedLocalUrl)
                 .build();
         Document secondUnmappedLocalDocument = Document.builder()
                 .id("second-unmapped-local")
                 .text("Second local document")
-                .metadata("url", "file:///unmapped/second.html")
+                .metadata("url", secondUnmappedLocalUrl)
                 .build();
         List<Document> retrievalCandidates = List.of(firstUnmappedLocalDocument, secondUnmappedLocalDocument);
         when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))
@@ -142,8 +144,20 @@ class RetrievalServiceTest {
         });
 
         RetrievalService.RetrievalOutcome retrievalOutcome = retrievalService.retrieveOutcome("Local documentation");
+        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(retrievalOutcome.documents());
+        String redactedLocalCitationUrl = DocsSourceRegistry.normalizeDocUrl(firstUnmappedLocalUrl);
 
         assertEquals(retrievalCandidates, retrievalOutcome.documents());
+        assertEquals(2, citationOutcome.citations().size());
+        assertEquals(
+                List.of(redactedLocalCitationUrl, redactedLocalCitationUrl),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertTrue(citationOutcome.citations().stream()
+                .map(citation -> citation.getUrl())
+                .noneMatch(citationUrl -> citationUrl.contains("/unmapped/")));
+        assertEquals(0, citationOutcome.failedConversionCount());
     }
 
     @Test
