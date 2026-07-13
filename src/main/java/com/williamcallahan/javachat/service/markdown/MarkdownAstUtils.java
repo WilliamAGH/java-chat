@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import com.vladsch.flexmark.ast.LinkRef;
 import com.vladsch.flexmark.util.ast.Node;
 
 /**
@@ -11,16 +12,24 @@ final class MarkdownAstUtils {
     private static final int MAX_CITATION_MARKER_DIGITS = 3;
 
     static void stripInlineCitationMarkers(Node root) {
-        for (Node childNode = root.getFirstChild(); childNode != null; childNode = childNode.getNext()) {
+        for (Node markdownNode = root.getFirstChild(); markdownNode != null; ) {
+            Node nextMarkdownNode = markdownNode.getNext();
             // Skip code blocks/spans and links entirely
-            if (childNode instanceof com.vladsch.flexmark.ast.Code) continue;
-            if (childNode instanceof com.vladsch.flexmark.ast.FencedCodeBlock) continue;
-            if (childNode instanceof com.vladsch.flexmark.ast.IndentedCodeBlock) continue;
-            if (childNode instanceof com.vladsch.flexmark.ast.Link) {
-                stripInlineCitationMarkers(childNode);
+            if (markdownNode instanceof com.vladsch.flexmark.ast.Code
+                    || markdownNode instanceof com.vladsch.flexmark.ast.FencedCodeBlock
+                    || markdownNode instanceof com.vladsch.flexmark.ast.IndentedCodeBlock
+                    || markdownNode instanceof com.vladsch.flexmark.ast.Link) {
+                markdownNode = nextMarkdownNode;
                 continue;
             }
-            if (childNode instanceof com.vladsch.flexmark.ast.Text textNode) {
+            if (markdownNode instanceof LinkRef linkReference) {
+                if (isUnresolvedCitationReference(linkReference)) {
+                    linkReference.unlink();
+                }
+                markdownNode = nextMarkdownNode;
+                continue;
+            }
+            if (markdownNode instanceof com.vladsch.flexmark.ast.Text textNode) {
                 CharSequence nodeChars = textNode.getChars();
                 String rawText = nodeChars.toString();
                 String cleanedText = removeBracketNumbers(rawText);
@@ -28,10 +37,16 @@ final class MarkdownAstUtils {
                     textNode.setChars(com.vladsch.flexmark.util.sequence.BasedSequence.of(cleanedText));
                 }
             }
-            if (childNode.hasChildren()) {
-                stripInlineCitationMarkers(childNode);
+            if (markdownNode.hasChildren()) {
+                stripInlineCitationMarkers(markdownNode);
             }
+            markdownNode = nextMarkdownNode;
         }
+    }
+
+    private static boolean isUnresolvedCitationReference(LinkRef linkReference) {
+        return !linkReference.isDefined()
+                && removeBracketNumbers(linkReference.getChars().toString()).isEmpty();
     }
 
     private static String removeBracketNumbers(String text) {

@@ -20,19 +20,17 @@ class MarkdownAstUtilsTest {
         MarkdownAstUtils.stripInlineCitationMarkers(markdownDocument);
 
         String renderedHtml = HtmlRenderer.builder().build().render(markdownDocument);
-        assertFalse(renderedHtml.contains("[123]"), describeAstNodes(markdownDocument));
+        assertFalse(renderedHtml.contains("[123]"));
         assertTrue(renderedHtml.contains("[1234]"));
     }
 
-    private static String describeAstNodes(Node markdownDocument) {
-        StringBuilder nodeDescription = new StringBuilder();
-        for (Node descendant : markdownDocument.getDescendants()) {
-            nodeDescription
-                    .append(descendant.getClass().getSimpleName())
-                    .append(':')
-                    .append(descendant.getChars())
-                    .append('\n');
-        }
-        return nodeDescription.toString();
+    @Test
+    void stripInlineCitationMarkers_preservesDefinedNumericReferenceLinks() {
+        Node markdownDocument = Parser.builder().build().parse("[123]\n\n[123]: https://example.com");
+
+        MarkdownAstUtils.stripInlineCitationMarkers(markdownDocument);
+
+        String renderedHtml = HtmlRenderer.builder().build().render(markdownDocument);
+        assertTrue(renderedHtml.contains("href=\"https://example.com\""));
     }
 }
