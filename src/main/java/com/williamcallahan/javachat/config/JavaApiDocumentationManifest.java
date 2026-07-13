@@ -25,6 +25,7 @@ final class JavaApiDocumentationManifest {
     private static final String MANIFEST_RESOURCE = "/java-api-documentation-sources.manifest";
     private static final String MANIFEST_DELIMITER = "|";
     private static final String MANIFEST_DELIMITER_REGEX = "\\|";
+    private static final int MINIMUM_MANIFEST_LINE_COUNT = 2;
     private static final Pattern CANONICAL_UNSIGNED_INTEGER = Pattern.compile("(?:0|[1-9][0-9]*)");
 
     private JavaApiDocumentationManifest() {}
@@ -51,7 +52,7 @@ final class JavaApiDocumentationManifest {
     }
 
     static List<JavaApiDocumentationSource> parse(List<String> manifestLines) {
-        if (manifestLines.size() < 2) {
+        if (manifestLines.size() < MINIMUM_MANIFEST_LINE_COUNT) {
             throw new IllegalStateException("Canonical Java API documentation source manifest has no records");
         }
         validateHeader(manifestLines.get(0));
