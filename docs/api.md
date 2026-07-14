@@ -14,11 +14,11 @@ Request body:
 
 SSE event types (see `SseConstants`):
 
-- `status` → `{"message":"...","details":"..."}`
-- `provider` → `{"provider":"GitHub Models"}` (the configured provider selected for this request)
+- `status` → `{"message":"...","details":"...","provider":"...","code":"...","retryable":bool,"stage":"...","attempt":int,"maxAttempts":int}` (only `message` is required; all others nullable)
+- `provider` → `{"provider":"..."}` (emitted before fallback status events)
 - `text` → `{"text":"..."}`
 - `citation` → JSON array of citations
-- `error` → `{"message":"...","details":"..."}`
+- `error` → `{"message":"...","details":"...","provider":"...","code":"...","retryable":bool,"stage":"...","attempt":int,"maxAttempts":int}` (only `message` is required; all others nullable)
 
 Example:
 
