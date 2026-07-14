@@ -88,7 +88,7 @@ make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_E
 
 | Flag | Effect |
 |---|---|
-| `--doc-sets=...` | Comma-separated doc set IDs or paths to process (see [doc set filtering](#doc-set-filtering)) |
+| `--doc-sets=...` | Comma-separated doc set paths (or IDs for non-Java sets) to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
 ## GitHub repository ingestion
@@ -118,14 +118,14 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 
 ### Doc set filtering
 
-Limit ingestion to specific doc sets by ID or path:
+Limit ingestion to specific doc sets by path. Non-Java sets also accept short IDs (hyphenated paths); Java API sets require the exact canonical path from the listing command:
 
 ```bash
 # Complete Java API paths: copy relativeMirrorPath from the listing command
 ./scripts/fetch_all_docs.sh --list-java-api-sources
 DOCS_SETS=relative/path/from/listing make process-doc-sets
 
-# Non-Java example
+# Non-Java example (accepts ID or path)
 ./scripts/process_all_to_qdrant.sh --doc-sets=spring-boot-complete
 ```
 
