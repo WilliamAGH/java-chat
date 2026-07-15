@@ -98,7 +98,7 @@ USER appuser
 
 EXPOSE 8085
 
-# Gate Coolify's rolling cutover on dependencies being ready for application traffic.
+# Gate Coolify's rolling cutover on the JVM accepting traffic; external dependencies report separately.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 
