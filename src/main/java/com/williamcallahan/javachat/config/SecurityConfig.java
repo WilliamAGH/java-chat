@@ -29,6 +29,7 @@ public class SecurityConfig {
     private static final String HEALTH_ENDPOINT = "/actuator/health";
     private static final String LIVENESS_ENDPOINT = "/actuator/health/liveness";
     private static final String READINESS_ENDPOINT = "/actuator/health/readiness";
+    private static final String DEPENDENCIES_ENDPOINT = "/actuator/health/dependencies";
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
 
     /**
@@ -63,7 +64,11 @@ public class SecurityConfig {
         http.securityMatcher(EndpointRequest.toAnyEndpoint())
                 .cors(c -> c.configurationSource(corsConfigurationSource))
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
-                                HEALTH_ENDPOINT, LIVENESS_ENDPOINT, READINESS_ENDPOINT, PROMETHEUS_ENDPOINT)
+                                HEALTH_ENDPOINT,
+                                LIVENESS_ENDPOINT,
+                                READINESS_ENDPOINT,
+                                DEPENDENCIES_ENDPOINT,
+                                PROMETHEUS_ENDPOINT)
                         .permitAll()
                         .anyRequest()
                         .denyAll())

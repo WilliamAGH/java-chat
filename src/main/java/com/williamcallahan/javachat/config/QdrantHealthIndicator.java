@@ -1,8 +1,10 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.service.ExternalServiceHealth;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.boot.actuate.health.Status;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,14 +22,19 @@ public class QdrantHealthIndicator implements HealthIndicator {
     private static final String DETAIL_KEY_NEXT_CHECK_IN = "nextCheckIn";
 
     private final ExternalServiceHealth externalServiceHealth;
+    private final ObjectProvider<QdrantIndexInitializer> indexInitializerProvider;
 
     /**
      * Creates the health indicator with a reference to the external service health monitor.
      *
      * @param externalServiceHealth the service health monitor
+     * @param indexInitializerProvider provides initialization state outside the test profile
      */
-    public QdrantHealthIndicator(ExternalServiceHealth externalServiceHealth) {
+    public QdrantHealthIndicator(
+            ExternalServiceHealth externalServiceHealth,
+            ObjectProvider<QdrantIndexInitializer> indexInitializerProvider) {
         this.externalServiceHealth = externalServiceHealth;
+        this.indexInitializerProvider = indexInitializerProvider;
     }
 
     /**
@@ -42,6 +49,14 @@ public class QdrantHealthIndicator implements HealthIndicator {
     public Health health() {
         // Trigger retry checks when unhealthy and backoff has elapsed.
         externalServiceHealth.triggerRetryIfDue(ExternalServiceHealth.SERVICE_QDRANT);
+
+        QdrantIndexInitializer indexInitializer = indexInitializerProvider.getIfAvailable();
+        if (indexInitializer != null) {
+            Health initializationHealth = indexInitializer.initializationHealth();
+            if (!Status.UP.equals(initializationHealth.getStatus())) {
+                return initializationHealth;
+            }
+        }
 
         ExternalServiceHealth.HealthSnapshot healthSnapshot =
                 externalServiceHealth.getHealthSnapshot(ExternalServiceHealth.SERVICE_QDRANT);
