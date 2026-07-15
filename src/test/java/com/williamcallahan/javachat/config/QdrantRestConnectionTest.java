@@ -50,16 +50,21 @@ class QdrantRestConnectionTest {
     @Test
     void candidateRestBaseUrls_withoutTlsAndDefaultPort_returnsDeduplicated() {
         QdrantRestConnection connection = newConnection("localhost", 6334, false);
-        assertIterableEquals(
-                List.of("http://localhost:6333", "http://localhost:6334"), connection.candidateRestBaseUrls());
+        assertIterableEquals(List.of("http://localhost:6333"), connection.candidateRestBaseUrls());
     }
 
     @Test
-    void candidateRestBaseUrls_withDockerPort_includesRestAndGrpcFallback() {
+    void candidateRestBaseUrls_withDockerPort_excludesGrpcEndpoint() {
         QdrantRestConnection connection = newConnection("localhost", 8086, false);
         assertIterableEquals(
-                List.of("http://localhost:6333", "http://localhost:8087", "http://localhost:8086"),
-                connection.candidateRestBaseUrls());
+                List.of("http://localhost:6333", "http://localhost:8087"), connection.candidateRestBaseUrls());
+    }
+
+    @Test
+    void candidateRestBaseUrls_withConfiguredRestPort_keepsRestFallback() {
+        QdrantRestConnection connection = newConnection("localhost", 7444, false);
+        assertIterableEquals(
+                List.of("http://localhost:6333", "http://localhost:7444"), connection.candidateRestBaseUrls());
     }
 
     @Test

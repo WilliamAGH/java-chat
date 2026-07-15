@@ -36,7 +36,7 @@ class QdrantIndexInitializerTest {
     private static final int EMBEDDING_DIMENSIONS = 1_536;
     private static final int MISMATCHED_COLLECTION_DIMENSIONS = 768;
     private static final String QDRANT_REST_BASE_URL = "http://qdrant.test:6333";
-    private static final String QDRANT_FALLBACK_BASE_URL = "http://qdrant.test:6334";
+    private static final String QDRANT_FALLBACK_BASE_URL = "http://qdrant.test:7444";
 
     private final Logger initializerLogger = (Logger) LoggerFactory.getLogger(QdrantIndexInitializer.class);
     private final ListAppender<ILoggingEvent> initializerEvents = new ListAppender<>();
@@ -87,22 +87,13 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void confirmedMissingCollectionIsCreatedButServerFailureRemainsRetryable() {
+    void defaultRestNotFoundCreatesWithoutProbingConfiguredGrpcPort() {
         InitializerHarness initializerHarness = newInitializer(true, 6334);
         String firstCollectionUrl =
                 collectionUrl(initializerHarness.collectionName().get(0));
         initializerHarness
                 .qdrantServer()
                 .expect(once(), requestTo(firstCollectionUrl))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        initializerHarness
-                .qdrantServer()
-                .expect(
-                        once(),
-                        requestTo(collectionUrl(
-                                QDRANT_FALLBACK_BASE_URL,
-                                initializerHarness.collectionName().get(0))))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
         initializerHarness
@@ -148,7 +139,7 @@ class QdrantIndexInitializerTest {
 
     @Test
     void mixedMissingAndTransportFailureDoesNotCreateCollection() {
-        InitializerHarness initializerHarness = newInitializer(true, 6334);
+        InitializerHarness initializerHarness = newInitializer(true, 7444);
         String collectionName = initializerHarness.collectionName().get(0);
         initializerHarness
                 .qdrantServer()
@@ -173,7 +164,7 @@ class QdrantIndexInitializerTest {
 
     @Test
     void fallbackCandidateSuccessWinsAndValidationUsesThatBase() {
-        InitializerHarness initializerHarness = newInitializer(true, 6334);
+        InitializerHarness initializerHarness = newInitializer(true, 7444);
         List<String> collectionName = initializerHarness.collectionName();
         initializerHarness
                 .qdrantServer()

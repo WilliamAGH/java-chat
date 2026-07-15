@@ -204,7 +204,7 @@ public class QdrantIndexInitializer {
                 log.info("[QDRANT] Collection present (collection={}, base={})", collection, baseUrl);
                 return new CollectionEndpoint(baseUrl, true);
             } catch (HttpClientErrorException.NotFound notFoundException) {
-                // Keep probing: creation is safe only when every candidate confirms absence.
+                log.debug("[QDRANT] Collection missing on candidate (collection={}, base={})", collection, baseUrl);
             } catch (RestClientResponseException responseException) {
                 RuntimeException failure =
                         classifyHttpFailure("look up Qdrant collection '" + collection + "'", responseException);
@@ -482,12 +482,14 @@ public class QdrantIndexInitializer {
 
     private record CollectionEndpoint(String baseUrl, boolean exists) {}
 
+    /** Initialization lifecycle. */
     private enum QdrantInitializationState {
         PENDING,
         READY,
         FAILED
     }
 
+    /** Signals a transient Qdrant failure. */
     private static final class QdrantUnavailableException extends RuntimeException {
         private QdrantUnavailableException(String message, RuntimeException cause) {
             super(message, cause);

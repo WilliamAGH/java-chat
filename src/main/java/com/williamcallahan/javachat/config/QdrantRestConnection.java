@@ -84,8 +84,8 @@ public class QdrantRestConnection {
      * Returns candidate REST base URLs ordered by likelihood, for discovery scenarios.
      *
      * <p>Under TLS the canonical URL is sufficient. Without TLS the list includes the
-     * default REST port, the mapped port, and the raw configured port as fallback so
-     * that the caller can probe multiple endpoints when the exact port is uncertain.
+     * default REST port and the mapped REST port. The raw configured port is excluded
+     * when it is a gRPC endpoint because REST probes cannot establish collection state there.
      *
      * @return ordered, deduplicated list of candidate base URLs
      */
@@ -96,7 +96,6 @@ public class QdrantRestConnection {
         LinkedHashSet<String> candidates = new LinkedHashSet<>();
         candidates.add(buildBaseUrl(HTTP_SCHEME, QDRANT_REST_PORT));
         candidates.add(buildBaseUrl(HTTP_SCHEME, mapGrpcPortToRestPort(configuredPort)));
-        candidates.add(buildBaseUrl(HTTP_SCHEME, configuredPort));
         return List.copyOf(candidates);
     }
 
