@@ -31,7 +31,7 @@ version = "0.0.1-SNAPSHOT"
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(libs.versions.java.get().toInt())
-        vendor = JvmVendorSpec.ADOPTIUM
+        vendor = JvmVendorSpec.BELLSOFT
     }
 }
 

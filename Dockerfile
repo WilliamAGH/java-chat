@@ -5,7 +5,7 @@
 # ================================
 # Multi-stage build for Frontend and Backend
 # Switched to Debian/Ubuntu-based images to resolve Alpine network issues
-# All images sourced from public.ecr.aws to avoid Docker Hub rate limits
+# Node is sourced from public.ecr.aws; Liberica Java images come from BellSoft's Docker Hub repositories
 # Note: Requires DOCKER_BUILDKIT=1 for cache mount support
 
 # ================================
@@ -31,7 +31,7 @@ RUN npm run validate && npm run test && npm run build
 # ================================
 # BACKEND BUILD STAGE
 # ================================
-FROM public.ecr.aws/docker/library/eclipse-temurin:25-jdk AS builder
+FROM bellsoft/liberica-openjdk-debian:25.0.3-11 AS builder
 ARG SOURCE_COMMIT=unknown
 WORKDIR /app
 
@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 # ================================
 # RUNTIME STAGE
 # ================================
-FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre AS runtime
+FROM bellsoft/liberica-openjre-debian:25.0.3-11 AS runtime
 ARG SOURCE_COMMIT=unknown
 LABEL io.iocloudhost.logs.owner=split
 

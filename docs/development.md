@@ -8,7 +8,7 @@ This project uses a reproducible build system across macOS/Linux local dev and C
 
 #### Prerequisites
 
-The project is configured to use **Gradle Toolchains** with **Temurin JDK 25** for build-time determinism.
+The project is configured to use **Gradle Toolchains** with **BellSoft Liberica JDK 25** for build-time determinism.
 
 ##### Option 1: Using mise (recommended)
 
@@ -42,9 +42,9 @@ asdf install
 
 #### How It Works
 
-1. **`.tool-versions` file** pins `java = temurin 25` (or your desired version).
+1. **`.tool-versions` file** pins `java liberica-25.0.3+11` using asdf's whitespace-delimited syntax.
 2. **Gradle Wrapper** (`./gradlew`) pins Gradle 9.2.1.
-3. **Gradle Toolchains** auto-downloads Temurin JDK 25 if missing (enabled by Foojay resolver in `settings.gradle.kts`).
+3. **Gradle Toolchains** auto-downloads BellSoft Liberica JDK 25 if missing (enabled by Foojay resolver in `settings.gradle.kts`).
 4. **Result**: Consistent Java version across:
    - Shell commands (`./gradlew build`, `java -version`)
    - IntelliJ "Gradle JVM" setting
@@ -53,7 +53,7 @@ asdf install
 #### Verifying Setup
 
 ```bash
-# Check Java version (should be Temurin 25.x.x)
+# Check Java version (should be BellSoft Liberica 25.0.3)
 java -version
 
 # Verify Gradle uses correct toolchain
@@ -79,7 +79,7 @@ make hooks              # installs hook shims into .git/hooks/
 The `.github/workflows/build.yml` workflow:
 
 - Runs on **ubuntu-24.04** (pinned, not `-latest`)
-- Uses `actions/setup-java@v5` with `distribution: temurin` + `java-version: 25`
+- Uses `actions/setup-java@v5` with `distribution: liberica` + `java-version-file: .tool-versions`
 - Logs Java, Gradle, and OS versions for drift detection
 - Uploads test/lint reports on failure
 
@@ -95,7 +95,7 @@ plugins {
 }
 ```
 
-This enables **auto-download** of Temurin JDK if missing. Without it, Gradle fails to find the toolchain.
+This enables **auto-download** of BellSoft Liberica JDK if missing. Without it, Gradle fails to find the toolchain.
 
 #### `build.gradle.kts` (Toolchain Vendor)
 
@@ -103,12 +103,12 @@ This enables **auto-download** of Temurin JDK if missing. Without it, Gradle fai
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
-        vendor = JvmVendorSpec.ADOPTIUM  // Explicitly specify Temurin
+        vendor = JvmVendorSpec.BELLSOFT  // Explicitly specify BellSoft Liberica
     }
 }
 ```
 
-The explicit vendor removes ambiguity: Gradle will prefer Temurin JDK 25 over other vendors.
+The explicit vendor removes ambiguity: Gradle will prefer BellSoft Liberica JDK 25 over other vendors.
 
 #### `gradle.properties` (Daemon & Caching)
 
@@ -127,9 +127,9 @@ Enables:
 
 ### Docker
 
-The `Dockerfile` uses `eclipse-temurin:25-jdk` (build) and `eclipse-temurin:25-jre` (runtime), sourced from `public.ecr.aws` (not Docker Hub).
+The `Dockerfile` uses BellSoft's Debian-based Liberica JDK and JRE images, pinned to release `25.0.3-11`.
 
-**Future optimization**: Pin images by SHA256 digest for byte-for-byte reproducibility (e.g., `eclipse-temurin:25-jdk@sha256:abc...`). Trade-off: maintenance burden vs. max determinism.
+**Future optimization**: Pin images by SHA256 digest for byte-for-byte reproducibility. Trade-off: maintenance burden vs. max determinism.
 
 ---
 
@@ -137,37 +137,40 @@ The `Dockerfile` uses `eclipse-temurin:25-jdk` (build) and `eclipse-temurin:25-j
 
 ### The Limitation
 
-**Gradle Toolchains cannot pin patch-level JDK versions** (e.g., 25.0.3). It can only pin major version (25) + vendor (Temurin).
+**Gradle Toolchains cannot pin patch-level JDK versions** (e.g., 25.0.3). It can only pin major version (25) + vendor (BellSoft).
 
 Example:
-- ✅ **Supported**: Java 25 + Temurin
-- ❌ **NOT supported**: Java 25.0.3 + Temurin
+- ✅ **Supported**: Java 25 + BellSoft
+- ❌ **NOT supported**: Java 25.0.3 + BellSoft
 
 ### Strategy
 
-1. **Local dev**: Patch version determined by `mise`/`asdf` + Foojay resolver.
-2. **CI/CD**: GitHub Actions logs exact Java patch version:
+1. **Local dev**: `.tool-versions` pins the exact BellSoft Liberica release for `mise` and `asdf`.
+2. **CI/CD**: GitHub Actions reads that same pin and logs the exact Java patch version:
    ```text
    java -version
-   # Output: openjdk version "25.0.3" 2024-XX-XX
+   # Output starts with: openjdk version "25.0.3"
    ```
 3. **When to bump patch**: Patch updates to JDK are **intentional commits**. Never rely on automatic patch upgrades.
 
-### Intentional Patch Bumping
+### Reproducing the Current Pin
 
-When you want to upgrade from 25.0.3 → 25.0.4:
+Use the exact release identifiers shown below. When BellSoft publishes a newer Java 25 update, update both spellings together: mise/asdf uses `+` before the build number, while BellSoft's container tag uses `-`.
 
 ```bash
 # Update local version manager
-mise use java@temurin 25.0.4  # or asdf local java temurin-25.0.4
+mise use --path .tool-versions java@liberica-25.0.3+11
 
 # Update .tool-versions
 cat .tool-versions
-# java = temurin 25.0.4
+# java liberica-25.0.3+11
+
+# Keep both Dockerfile Java images on the corresponding 25.0.3-11 tag
+rg 'liberica-openj(dk|re)-debian' Dockerfile
 
 # Verify CI picks it up
 git add .tool-versions
-git commit -m "Bump JDK patch: 25.0.3 → 25.0.4"
+git commit -m "Pin BellSoft Liberica JDK 25.0.3+11"
 ```
 
 CI will log the new patch version, and you'll have an audit trail.
@@ -206,7 +209,7 @@ make compose-down
 
 #### "gradle: command not found"
 - Run `mise install` or `asdf install` to set `JAVA_HOME`
-- Verify: `echo $JAVA_HOME` should point to a Temurin 25 JDK
+- Verify: `echo $JAVA_HOME` should point to a BellSoft Liberica 25 JDK
 
 #### Gradle downloads JDK every time
 - Ensure `settings.gradle.kts` has Foojay resolver (added in `0.8.0`)
@@ -215,7 +218,7 @@ make compose-down
 #### IntelliJ doesn't pick up Java version
 - Open IntelliJ settings → Build, Execution, Deployment → Gradle
 - Set "Gradle JVM" to "Use JAVA_HOME"
-- Set "Project SDK" to Temurin 25 (or refresh if it's auto-detected)
+- Set "Project SDK" to BellSoft Liberica 25 (or refresh if it's auto-detected)
 
 #### CI build fails but local works
 - Check CI logs for Java version (e.g., `java -version`)
@@ -228,6 +231,6 @@ make compose-down
 
 - [Gradle Toolchains](https://docs.gradle.org/current/userguide/toolchains.html)
 - [Foojay Resolver Convention](https://plugins.gradle.org/plugin/org.gradle.toolchains.foojay-resolver-convention)
-- [Eclipse Temurin JDK](https://adoptium.net/)
+- [BellSoft Liberica JDK](https://bell-sw.com/libericajdk/)
 - [mise version manager](https://mise.jdx.dev/)
 - [asdf version manager](https://asdf-vm.com/)

@@ -55,11 +55,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       
-      - name: Set up Temurin JDK
+      - name: Set up Liberica JDK
         uses: actions/setup-java@v5
         with:
-          distribution: temurin
-          java-version: 25
+          distribution: liberica
+          java-version-file: .tool-versions
           cache: gradle
       
       - name: Log system & Java info (drift detection)
