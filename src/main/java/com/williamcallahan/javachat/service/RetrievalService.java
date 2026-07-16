@@ -325,7 +325,11 @@ public class RetrievalService {
     }
 
     /**
-     * Keeps redacted display URLs from merging citations for separate unresolved local sources.
+     * Preserves final anchors while retaining opaque identities for unresolved local sources.
+     *
+     * <p>Unresolved local paths share a redacted display URL, so their fragmentless raw paths remain
+     * distinct. All resolvable sources use their final citation URLs so member and page anchors identify
+     * separate citations.</p>
      */
     private static String citationIdentityFor(String rawUrl, String citationUrl) {
         String trimmedRawUrl = rawUrl.trim();
@@ -334,7 +338,7 @@ public class RetrievalService {
                         .isEmpty()) {
             return fragmentlessCitationSourceUrl(trimmedRawUrl);
         }
-        return fragmentlessCitationSourceUrl(citationUrl);
+        return citationUrl;
     }
 
     /**

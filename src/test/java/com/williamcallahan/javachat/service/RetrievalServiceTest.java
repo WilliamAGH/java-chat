@@ -50,7 +50,7 @@ class RetrievalServiceTest {
     }
 
     @Test
-    void preservesDistinctSamePageChunksForRerankingAndDeduplicatesTheirCitations() {
+    void preservesDistinctSamePageChunksForRerankingAndRetainsDistinctAnchoredCitations() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
         DocumentFactory documentFactory = mock(DocumentFactory.class);
@@ -108,9 +108,84 @@ class RetrievalServiceTest {
         assertEquals(
                 List.of(urlOnlyDocument, firstJavadocChunk, secondJavadocChunkWithDistinctHash),
                 retrievalOutcome.documents());
-        assertEquals(2, citationOutcome.citations().size());
+        assertEquals(3, citationOutcome.citations().size());
         assertEquals(stringJavadocUrl, citationOutcome.citations().get(1).getUrl());
         assertEquals("First Javadoc chunk", citationOutcome.citations().get(1).getSnippet());
+        assertEquals(
+                stringJavadocUrl + "#assert(...)",
+                citationOutcome.citations().get(2).getUrl());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsCollapsesDocumentsResolvedToTheSameJavadocMemberAnchor() {
+        String stringJavadocUrl = javaLangStringJavadocUrl();
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitations(List.of(
+                        javadocCitationDocument("first-substring-chunk", "substring(int,int)"),
+                        javadocCitationDocument("duplicate-substring-chunk", "substring(int,int)")));
+
+        assertEquals(
+                List.of(stringJavadocUrl + "#substring(int,int)"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsRetainsDocumentsResolvedToDistinctJavadocMemberAnchors() {
+        String stringJavadocUrl = javaLangStringJavadocUrl();
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitations(List.of(
+                        javadocCitationDocument("substring-chunk", "substring(int,int)"),
+                        javadocCitationDocument("char-at-chunk", "charAt(int)")));
+
+        assertEquals(
+                List.of(stringJavadocUrl + "#substring(int,int)", stringJavadocUrl + "#charAt(int)"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsCollapsesFragmentlessDocumentsFromTheSamePage() {
+        String stringJavadocUrl = javaLangStringJavadocUrl();
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitations(List.of(
+                        javadocCitationDocument("first-class-overview-chunk", "Class overview"),
+                        javadocCitationDocument("duplicate-class-overview-chunk", "Class overview")));
+
+        assertEquals(
+                List.of(stringJavadocUrl),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsRetainsDistinctPdfPageAnchors() {
+        String pdfCitationUrl = "https://example.test/books/Reference.pdf";
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitations(List.of(
+                        Document.builder()
+                                .id("first-pdf-page-chunk")
+                                .text("First PDF page")
+                                .metadata("url", pdfCitationUrl + "#page=1")
+                                .build(),
+                        Document.builder()
+                                .id("second-pdf-page-chunk")
+                                .text("Second PDF page")
+                                .metadata("url", pdfCitationUrl + "#page=2")
+                                .build()));
+
+        assertEquals(
+                List.of(pdfCitationUrl + "#page=1", pdfCitationUrl + "#page=2"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
         assertEquals(0, citationOutcome.failedConversionCount());
     }
 
@@ -207,6 +282,28 @@ class RetrievalServiceTest {
         assertEquals(1, citationOutcome.failedConversionCount());
         assertEquals("String", citationOutcome.citations().get(0).getTitle());
         assertTrue(citationOutcome.citations().get(0).getUrl().contains("docs.oracle.com"));
+    }
+
+    private static RetrievalService citationService() {
+        return new RetrievalService(
+                mock(HybridSearchService.class),
+                new AppProperties(),
+                mock(RerankerService.class),
+                mock(DocumentFactory.class));
+    }
+
+    private static Document javadocCitationDocument(String documentId, String sourceText) {
+        return Document.builder()
+                .id(documentId)
+                .text(sourceText)
+                .metadata("url", javaLangStringJavadocUrl())
+                .metadata("package", "java.lang")
+                .build();
+    }
+
+    private static String javaLangStringJavadocUrl() {
+        return DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                + "java.base/java/lang/String.html";
     }
 
     /**
