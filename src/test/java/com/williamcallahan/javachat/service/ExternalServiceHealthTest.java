@@ -5,11 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -17,18 +16,51 @@ import org.junit.jupiter.api.Test;
  */
 class ExternalServiceHealthTest {
 
-    @Test
-    void serviceStatus_marksUnhealthyWithoutDurationOverflow() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        AtomicInteger consecutiveFailures = readConsecutiveFailures(serviceStatus);
-        consecutiveFailures.set(62);
+    private static final int HEALTH_BACKOFF_OVERFLOW_FAILURE_COUNT = 63;
+    private static final Duration HEALTH_SNAPSHOT_CHECKING_OFFSET = Duration.ofMinutes(2);
+    private static final String HEALTH_CHECK_IN_PROGRESS_MESSAGE = "Unhealthy (checking now...)";
 
+    @Test
+    void computeBackoffDuration_capsBeforeDurationOverflow() throws ReflectiveOperationException {
+        Object serviceStatus = newServiceStatus();
+        Method computeBackoffDurationMethod =
+                serviceStatus.getClass().getDeclaredMethod("computeBackoffDuration", int.class);
+        computeBackoffDurationMethod.setAccessible(true);
+
+        Duration currentBackoff =
+                (Duration) computeBackoffDurationMethod.invoke(serviceStatus, HEALTH_BACKOFF_OVERFLOW_FAILURE_COUNT);
+        assertEquals(Duration.ofDays(1), currentBackoff);
+    }
+
+    @Test
+    void healthSnapshot_keepsMessageAlignedWithPublishedHealthState() throws ReflectiveOperationException {
+        Object serviceStatus = newServiceStatus();
+        Method markHealthyMethod = serviceStatus.getClass().getDeclaredMethod("markHealthy");
+        markHealthyMethod.setAccessible(true);
         Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
         markUnhealthyMethod.setAccessible(true);
-        markUnhealthyMethod.invoke(serviceStatus);
+        Method resetMethod = serviceStatus.getClass().getDeclaredMethod("reset");
+        resetMethod.setAccessible(true);
+        Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
+        tryStartCheckMethod.setAccessible(true);
 
-        Duration currentBackoff = readCurrentBackoff(serviceStatus);
-        assertEquals(Duration.ofDays(1), currentBackoff);
+        markHealthyMethod.invoke(serviceStatus);
+        assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
+
+        markUnhealthyMethod.invoke(serviceStatus);
+        assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
+
+        resetMethod.invoke(serviceStatus);
+        assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
+
+        boolean checkStarted = (boolean) tryStartCheckMethod.invoke(serviceStatus, Instant.now());
+        assertTrue(checkStarted);
+        ExternalServiceHealth.HealthSnapshot activeCheckSnapshot = readHealthSnapshot(serviceStatus, Instant.now());
+        assertEquals(HEALTH_CHECK_IN_PROGRESS_MESSAGE, activeCheckSnapshot.message());
+        assertEquals(Optional.of(Duration.ZERO), activeCheckSnapshot.timeUntilNextCheck());
+        assertHealthMessageAgreement(activeCheckSnapshot);
+        assertHealthMessageAgreement(
+                readHealthSnapshot(serviceStatus, Instant.now().plus(HEALTH_SNAPSHOT_CHECKING_OFFSET)));
     }
 
     @Test
@@ -130,15 +162,22 @@ class ExternalServiceHealthTest {
         return constructor.newInstance();
     }
 
-    private AtomicInteger readConsecutiveFailures(Object serviceStatus) throws ReflectiveOperationException {
-        Field consecutiveFailuresField = serviceStatus.getClass().getDeclaredField("consecutiveFailures");
-        consecutiveFailuresField.setAccessible(true);
-        return (AtomicInteger) consecutiveFailuresField.get(serviceStatus);
+    private ExternalServiceHealth.HealthSnapshot readHealthSnapshot(Object serviceStatus, Instant snapshotTime)
+            throws ReflectiveOperationException {
+        Method healthSnapshotMethod =
+                serviceStatus.getClass().getDeclaredMethod("healthSnapshot", String.class, Instant.class);
+        healthSnapshotMethod.setAccessible(true);
+        return (ExternalServiceHealth.HealthSnapshot)
+                healthSnapshotMethod.invoke(serviceStatus, ExternalServiceHealth.SERVICE_QDRANT, snapshotTime);
     }
 
     private Duration readCurrentBackoff(Object serviceStatus) throws ReflectiveOperationException {
-        Field currentBackoffField = serviceStatus.getClass().getDeclaredField("currentBackoff");
-        currentBackoffField.setAccessible(true);
-        return (Duration) currentBackoffField.get(serviceStatus);
+        Method currentBackoffMethod = serviceStatus.getClass().getDeclaredMethod("currentBackoff");
+        currentBackoffMethod.setAccessible(true);
+        return (Duration) currentBackoffMethod.invoke(serviceStatus);
+    }
+
+    private void assertHealthMessageAgreement(ExternalServiceHealth.HealthSnapshot healthSnapshot) {
+        assertEquals(healthSnapshot.isHealthy(), healthSnapshot.message().startsWith("Healthy"));
     }
 }

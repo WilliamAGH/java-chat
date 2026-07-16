@@ -11,8 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -118,7 +117,7 @@ public class ExternalServiceHealth {
      */
     public boolean isHealthy(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
-        return status == null || status.isHealthy.get();
+        return status == null || status.isHealthy();
     }
 
     /**
@@ -130,7 +129,7 @@ public class ExternalServiceHealth {
      */
     public void triggerRetryIfDue(String serviceName) {
         ServiceStatus status = serviceStatuses.get(serviceName);
-        if (status == null || status.isHealthy.get()) {
+        if (status == null || status.isHealthy()) {
             return;
         }
         if (status.shouldRetryNow(Instant.now()) && SERVICE_QDRANT.equals(serviceName)) {
@@ -149,28 +148,7 @@ public class ExternalServiceHealth {
         if (status == null) {
             return new HealthSnapshot(serviceName, true, UNKNOWN_SERVICE_MSG, null);
         }
-
-        String message;
-        Duration timeUntilNextCheck = null;
-
-        if (status.isHealthy.get()) {
-            message = String.format(
-                    HEALTHY_MSG_TEMPLATE, formatDuration(Duration.between(status.lastCheck, Instant.now())));
-        } else {
-            timeUntilNextCheck = Duration.between(Instant.now(), status.lastCheck.plus(status.currentBackoff));
-
-            if (timeUntilNextCheck.isNegative()) {
-                message = status.isCheckInProgress() ? UNHEALTHY_CHECKING_MSG : UNHEALTHY_RETRY_DUE_MSG;
-                timeUntilNextCheck = Duration.ZERO;
-            } else {
-                message = String.format(
-                        UNHEALTHY_NEXT_CHECK_TEMPLATE,
-                        status.consecutiveFailures.get(),
-                        formatDuration(timeUntilNextCheck));
-            }
-        }
-
-        return new HealthSnapshot(serviceName, status.isHealthy.get(), message, timeUntilNextCheck);
+        return status.healthSnapshot(serviceName, Instant.now());
     }
 
     /**
@@ -182,7 +160,7 @@ public class ExternalServiceHealth {
         if (status == null) {
             return;
         }
-        if (status.isHealthy.get()) {
+        if (status.isHealthy()) {
             checkQdrantHealth();
             return;
         }
@@ -222,14 +200,14 @@ public class ExternalServiceHealth {
                                         "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
                                         healthCheckFailure.getClass().getSimpleName(),
                                         healthCheckFailure.getMessage(),
-                                        formatDuration(status.currentBackoff));
+                                        formatDuration(status.currentBackoff()));
                             });
         } catch (RuntimeException connectivityException) {
             status.markUnhealthy();
             log.warn(
                     "[HEALTH] Qdrant connectivity check failed before subscription (exception type: {}) - Will retry in {}",
                     connectivityException.getClass().getSimpleName(),
-                    formatDuration(status.currentBackoff),
+                    formatDuration(status.currentBackoff()),
                     connectivityException);
         }
     }
@@ -284,7 +262,7 @@ public class ExternalServiceHealth {
                                 log.warn(
                                         "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
                                         healthCheckFailure.getClass().getSimpleName(),
-                                        formatDuration(status.currentBackoff));
+                                        formatDuration(status.currentBackoff()));
                             },
                             () -> {
                                 status.markHealthy();
@@ -297,7 +275,7 @@ public class ExternalServiceHealth {
             log.warn(
                     "[HEALTH] Qdrant health check failed before subscription (exception type: {}) - Will retry in {}",
                     healthCheckException.getClass().getSimpleName(),
-                    formatDuration(status.currentBackoff),
+                    formatDuration(status.currentBackoff()),
                     healthCheckException);
         }
     }
@@ -333,7 +311,7 @@ public class ExternalServiceHealth {
         }
     }
 
-    private String formatDuration(Duration duration) {
+    private static String formatDuration(Duration duration) {
         if (duration.isNegative()) {
             return "0m";
         }
@@ -355,57 +333,85 @@ public class ExternalServiceHealth {
      * Internal class to track service status with exponential backoff
      */
     private static class ServiceStatus {
-        final AtomicBoolean isHealthy = new AtomicBoolean(false);
-        final AtomicBoolean checkInProgress = new AtomicBoolean(false);
-        final AtomicInteger consecutiveFailures = new AtomicInteger(0);
-        volatile Instant lastCheck = Instant.now();
-        volatile Duration currentBackoff = INITIAL_CHECK_INTERVAL;
+        private final AtomicReference<ServiceHealthState> healthState =
+                new AtomicReference<>(new ServiceHealthState(false, false, 0, Instant.now(), INITIAL_CHECK_INTERVAL));
 
         ServiceStatus() {}
 
         void markHealthy() {
-            isHealthy.set(true);
-            consecutiveFailures.set(0);
-            currentBackoff = HEALTHY_CHECK_INTERVAL;
-            lastCheck = Instant.now();
-            checkInProgress.set(false);
+            healthState.set(new ServiceHealthState(true, false, 0, Instant.now(), HEALTHY_CHECK_INTERVAL));
         }
 
         void markUnhealthy() {
-            isHealthy.set(false);
-            int failures = consecutiveFailures.incrementAndGet();
-
-            currentBackoff = computeBackoffDuration(failures);
-            lastCheck = Instant.now();
-            checkInProgress.set(false);
+            healthState.updateAndGet(currentState -> {
+                int failureCount = currentState.consecutiveFailures() + 1;
+                Instant observedCompletionTime = Instant.now();
+                Instant checkCompletionTime = observedCompletionTime.isBefore(currentState.lastCheck())
+                        ? currentState.lastCheck()
+                        : observedCompletionTime;
+                return new ServiceHealthState(
+                        false, false, failureCount, checkCompletionTime, computeBackoffDuration(failureCount));
+            });
         }
 
         void reset() {
-            isHealthy.set(false);
-            consecutiveFailures.set(0);
-            currentBackoff = INITIAL_CHECK_INTERVAL;
-            lastCheck = Instant.EPOCH; // Force immediate check
-            checkInProgress.set(false);
+            healthState.set(new ServiceHealthState(false, false, 0, Instant.EPOCH, INITIAL_CHECK_INTERVAL));
         }
 
         boolean tryStartCheck(Instant checkStartTime) {
-            if (!checkInProgress.compareAndSet(false, true)) {
-                return false;
+            while (true) {
+                ServiceHealthState currentState = healthState.get();
+                if (currentState.checkInProgress()) {
+                    return false;
+                }
+                ServiceHealthState checkingState = currentState.withCheckStarted(checkStartTime);
+                if (healthState.compareAndSet(currentState, checkingState)) {
+                    return true;
+                }
             }
-            lastCheck = checkStartTime;
-            return true;
         }
 
         boolean shouldRetryNow(Instant evaluationTime) {
-            if (checkInProgress.get()) {
+            ServiceHealthState currentState = healthState.get();
+            if (currentState.checkInProgress()) {
                 return false;
             }
-            Instant nextCheck = lastCheck.plus(currentBackoff);
+            Instant nextCheck = currentState.lastCheck().plus(currentState.currentBackoff());
             return !evaluationTime.isBefore(nextCheck);
         }
 
-        boolean isCheckInProgress() {
-            return checkInProgress.get();
+        boolean isHealthy() {
+            return healthState.get().healthy();
+        }
+
+        Duration currentBackoff() {
+            return healthState.get().currentBackoff();
+        }
+
+        HealthSnapshot healthSnapshot(String serviceName, Instant snapshotTime) {
+            ServiceHealthState currentState = healthState.get();
+            if (currentState.healthy()) {
+                String healthyMessage = String.format(
+                        HEALTHY_MSG_TEMPLATE, formatDuration(Duration.between(currentState.lastCheck(), snapshotTime)));
+                return new HealthSnapshot(serviceName, true, healthyMessage, null);
+            }
+            if (currentState.checkInProgress()) {
+                return new HealthSnapshot(serviceName, false, UNHEALTHY_CHECKING_MSG, Duration.ZERO);
+            }
+
+            Duration timeUntilNextCheck =
+                    Duration.between(snapshotTime, currentState.lastCheck().plus(currentState.currentBackoff()));
+            String unhealthyMessage;
+            if (timeUntilNextCheck.isNegative()) {
+                unhealthyMessage = UNHEALTHY_RETRY_DUE_MSG;
+                timeUntilNextCheck = Duration.ZERO;
+            } else {
+                unhealthyMessage = String.format(
+                        UNHEALTHY_NEXT_CHECK_TEMPLATE,
+                        currentState.consecutiveFailures(),
+                        formatDuration(timeUntilNextCheck));
+            }
+            return new HealthSnapshot(serviceName, false, unhealthyMessage, timeUntilNextCheck);
         }
 
         private Duration computeBackoffDuration(int failureCount) {
@@ -423,6 +429,18 @@ public class ExternalServiceHealth {
                 resolvedBackoff = doubledBackoff;
             }
             return resolvedBackoff;
+        }
+
+        private record ServiceHealthState(
+                boolean healthy,
+                boolean checkInProgress,
+                int consecutiveFailures,
+                Instant lastCheck,
+                Duration currentBackoff) {
+
+            private ServiceHealthState withCheckStarted(Instant checkStartTime) {
+                return new ServiceHealthState(healthy, true, consecutiveFailures, checkStartTime, currentBackoff);
+            }
         }
     }
 
