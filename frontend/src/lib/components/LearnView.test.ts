@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
 
+type GuidedCitationFetchResult = Awaited<
+  ReturnType<typeof import("../services/guided").fetchGuidedLessonCitations>
+>;
+
 const fetchTocMock = vi.fn();
 const streamLessonContentMock = vi.fn();
 const fetchGuidedLessonCitationsMock = vi.fn();
@@ -183,6 +187,31 @@ describe("LearnView guided chat streaming stability", () => {
     ).toBeNull();
   });
 
+  it("shows the provider selected for the active guided stream", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamCallbacks.onChunk("# Lesson");
+    });
+    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        callbacks.onProvider?.({ provider: "GitHub Models" });
+        return new Promise<void>(() => {});
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+
+    expect(await learnView.findAllByText("Provider: GitHub Models")).not.toHaveLength(0);
+  });
+
   it("clears the new-updates indicator when clearing chat", async () => {
     fetchTocMock.mockResolvedValue([
       { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
@@ -324,5 +353,79 @@ describe("LearnView guided chat streaming stability", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(abortSignalsByStream[0]?.aborted ?? false).toBe(true);
+  });
+
+  it("ignores stale citations when the same lesson is reselected", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamCallbacks.onChunk("# Lesson");
+    });
+    const firstCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
+    const currentCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
+    fetchGuidedLessonCitationsMock
+      .mockReturnValueOnce(firstCitationRequest.promise)
+      .mockReturnValueOnce(currentCitationRequest.promise);
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(1));
+
+    await fireEvent.click(learnView.getByRole("button", { name: "All Lessons" }));
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(2));
+
+    currentCitationRequest.resolve({
+      success: true,
+      citations: [{ url: "https://example.com/current", title: "Current Source" }],
+    });
+    await fireEvent.click(await learnView.findByRole("button", { name: /1 source/i }));
+    expect(await learnView.findByText("Current Source")).toBeInTheDocument();
+
+    firstCitationRequest.resolve({
+      success: true,
+      citations: [{ url: "https://example.com/stale", title: "Stale Source" }],
+    });
+    await tick();
+
+    expect(learnView.queryByText("Stale Source")).toBeNull();
+    expect(learnView.getByText("Current Source")).toBeInTheDocument();
+  });
+
+  it("aborts lesson and guided streams when the view unmounts", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    let lessonStreamSignal: AbortSignal | undefined;
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamSignal = lessonStreamCallbacks.signal;
+      return new Promise<void>((resolve) => {
+        lessonStreamSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    let guidedStreamSignal: AbortSignal | undefined;
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        guidedStreamSignal = callbacks.signal;
+        return new Promise<void>((resolve) => {
+          guidedStreamSignal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(lessonStreamSignal).toBeDefined());
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+    await vi.waitFor(() => expect(guidedStreamSignal).toBeDefined());
+
+    learnView.unmount();
+
+    expect(lessonStreamSignal?.aborted).toBe(true);
+    expect(guidedStreamSignal?.aborted).toBe(true);
   });
 });

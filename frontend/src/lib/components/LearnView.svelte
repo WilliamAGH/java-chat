@@ -1,6 +1,8 @@
 <script lang="ts">
     import {
         fetchTOC,
+        fetchGuidedLessonCitations,
+        streamLessonContent,
         streamGuidedChat,
         type GuidedLesson,
     } from "../services/guided";
@@ -9,13 +11,17 @@
         type Citation,
         type ChatMessage,
     } from "../services/chat";
+    import { applyJavaLanguageDetection } from "../services/javaLanguageDetection";
+    import { parseMarkdown } from "../services/markdown";
     import CitationPanel from "./CitationPanel.svelte";
-    import GuidedLessonCatalog from "./GuidedLessonCatalog.svelte";
-    import GuidedLessonContentPanel from "./GuidedLessonContentPanel.svelte";
     import GuidedLessonHeader from "./GuidedLessonHeader.svelte";
     import GuidedLessonChatPanel from "./GuidedLessonChatPanel.svelte";
+    import LessonCitations from "./LessonCitations.svelte";
     import MessageBubble from "./MessageBubble.svelte";
+    import ThinkingIndicator from "./ThinkingIndicator.svelte";
     import MobileChatDrawer from "./MobileChatDrawer.svelte";
+    import { deduplicateCitations } from "../utils/url";
+    import { highlightCodeBlocks } from "../utils/highlight";
     import { generateSessionId } from "../utils/session";
     import { createChatMessageId } from "../utils/chatMessageId";
     import { createStreamingState } from "../composables/createStreamingState.svelte";
@@ -26,7 +32,16 @@
     let loadingTOC = $state(true);
     let tocError = $state<string | null>(null);
 
+    // Lesson state
     let selectedLesson = $state<GuidedLesson | null>(null);
+    let lessonMarkdown = $state("");
+    let lessonError = $state<string | null>(null);
+    let loadingLesson = $state(false);
+
+    // Lesson-level citations (sources for the lesson topic)
+    let lessonCitations = $state<Citation[]>([]);
+    let lessonCitationsError = $state<string | null>(null);
+    let lessonCitationsLoaded = $state(false);
 
     /** Chat message type enriched with streamed citations. */
     interface MessageWithCitations extends ChatMessage {
@@ -44,9 +59,12 @@
     // Streaming state from composable (immediate status clear for LearnView)
     const streaming = createStreamingState();
 
-    // Cleanup scroll anchor on unmount
+    // Cleanup active streams, timers, and scroll state on unmount
     $effect(() => {
         return () => {
+            cancelInFlightGuidedChatStream();
+            cancelInFlightLessonContentStream();
+            streaming.cleanup();
             scrollAnchor.cleanup();
         };
     });
@@ -79,12 +97,18 @@
         }
     });
 
+    // Element refs
+    let lessonContentEl: HTMLElement | null = $state(null);
+    let lessonContentPanelEl: HTMLElement | null = $state(null);
+
     // Session IDs per lesson for backend conversation isolation
     // Each lesson gets its own session ID to prevent conversation bleeding across topics
     const sessionIdsByLesson = new Map<string, string>();
 
     let guidedChatAbortController: AbortController | null = null;
     let guidedChatStreamVersion = 0;
+    let lessonContentAbortController: AbortController | null = null;
+    let lessonContentStreamVersion = 0;
 
     /**
      * Gets or creates a session ID for a specific lesson.
@@ -109,6 +133,19 @@
         activeStreamingMessageId = null;
     }
 
+    function cancelInFlightLessonContentStream(): void {
+        lessonContentStreamVersion++;
+        if (lessonContentAbortController) {
+            lessonContentAbortController.abort();
+            lessonContentAbortController = null;
+        }
+    }
+
+    // Rendered lesson content - SSR-safe parsing without DOM operations
+    let renderedLesson = $derived(
+        lessonMarkdown ? parseMarkdown(lessonMarkdown) : "",
+    );
+
     // Load TOC on mount
     $effect(() => {
         loadTOC();
@@ -131,16 +168,145 @@
         }
     }
 
-    function selectLesson(lesson: GuidedLesson): void {
-        if (selectedLesson?.slug !== lesson.slug) {
-            scrollAnchor.reset();
-        }
+    async function selectLesson(lesson: GuidedLesson): Promise<void> {
+        const targetSlug = lesson.slug;
+        cancelInFlightLessonContentStream();
+        scrollAnchor.reset();
+        const activeLessonContentStreamVersion = lessonContentStreamVersion;
+        lessonContentAbortController = new AbortController();
+        const lessonContentAbortSignal = lessonContentAbortController.signal;
+
+        // Save current chat history before switching lessons
         if (selectedLesson && messages.length > 0) {
             chatHistoryByLesson.set(selectedLesson.slug, [...messages]);
         }
+
+        // Reset state atomically before async operation
         selectedLesson = lesson;
+        loadingLesson = true;
+        lessonMarkdown = "";
+        lessonError = null;
+        lessonCitations = [];
+        lessonCitationsError = null;
+        lessonCitationsLoaded = false;
         isChatDrawerOpen = false;
+
+        // Restore chat history for this lesson if it exists
         messages = chatHistoryByLesson.get(lesson.slug) ?? [];
+
+        try {
+            let hasReceivedLessonChunk = false;
+            await streamLessonContent(lesson.slug, {
+                signal: lessonContentAbortSignal,
+                onChunk: (lessonChunk) => {
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+                    lessonMarkdown += lessonChunk;
+                    if (!hasReceivedLessonChunk) {
+                        hasReceivedLessonChunk = true;
+                        loadingLesson = false;
+                    }
+                },
+                onError: (streamError) => {
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+                    lessonError = streamError.message;
+                },
+            });
+
+            if (selectedLesson?.slug !== targetSlug) return;
+            if (
+                lessonContentStreamVersion !== activeLessonContentStreamVersion
+            )
+                return;
+            if (lessonContentAbortSignal.aborted) return;
+
+            // Fetch citations for the lesson topic (Think Java-only, with explicit error tracking)
+            fetchGuidedLessonCitations(lesson.slug)
+                .then((result) => {
+                    // Guard against stale citation response
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+
+                    // Preserve scroll position before updating citations
+                    const scrollTop = lessonContentPanelEl?.scrollTop ?? 0;
+
+                    if (result.success) {
+                        lessonCitations = deduplicateCitations(
+                            result.citations,
+                        );
+                    } else {
+                        lessonCitationsError = result.error;
+                    }
+                    lessonCitationsLoaded = true;
+
+                    // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
+                    requestAnimationFrame(() => {
+                        if (selectedLesson?.slug !== targetSlug) return;
+                        if (
+                            lessonContentStreamVersion !==
+                            activeLessonContentStreamVersion
+                        )
+                            return;
+                        if (lessonContentAbortSignal.aborted) return;
+                        if (lessonContentPanelEl && scrollTop > 0) {
+                            lessonContentPanelEl.scrollTop = scrollTop;
+                        }
+                    });
+                })
+                .catch((error) => {
+                    // Guard against stale citation error
+                    if (selectedLesson?.slug !== targetSlug) return;
+                    if (
+                        lessonContentStreamVersion !==
+                        activeLessonContentStreamVersion
+                    )
+                        return;
+                    if (lessonContentAbortSignal.aborted) return;
+                    lessonCitationsError =
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to load lesson sources";
+                    lessonCitationsLoaded = true;
+                });
+        } catch (error) {
+            if (selectedLesson?.slug !== targetSlug) return;
+            if (
+                lessonContentStreamVersion !== activeLessonContentStreamVersion
+            )
+                return;
+            if (lessonContentAbortSignal.aborted) return;
+            lessonError =
+                error instanceof Error
+                    ? error.message
+                    : "Failed to load lesson";
+            lessonMarkdown = "";
+        } finally {
+            if (
+                selectedLesson?.slug === targetSlug &&
+                lessonContentStreamVersion === activeLessonContentStreamVersion
+            ) {
+                loadingLesson = false;
+            }
+            if (lessonContentStreamVersion === activeLessonContentStreamVersion) {
+                lessonContentAbortController = null;
+            }
+        }
     }
 
     function goBack(): void {
@@ -149,9 +315,16 @@
             chatHistoryByLesson.set(selectedLesson.slug, [...messages]);
         }
 
+        // Cancel any in-flight stream
         cancelInFlightGuidedChatStream();
+        cancelInFlightLessonContentStream();
         isChatDrawerOpen = false;
         selectedLesson = null;
+        lessonMarkdown = "";
+        lessonError = null;
+        lessonCitations = [];
+        lessonCitationsError = null;
+        lessonCitationsLoaded = false;
         messages = [];
     }
 
@@ -308,6 +481,13 @@
                         if (abortSignal.aborted) return;
                         streaming.updateStatus(status);
                     },
+                    onProvider: (providerEvent) => {
+                        if (selectedLesson?.slug !== streamLessonSlug) return;
+                        if (guidedChatStreamVersion !== activeStreamVersion)
+                            return;
+                        if (abortSignal.aborted) return;
+                        streaming.updateProvider(providerEvent);
+                    },
                     onCitations: (citations) => {
                         // Guard: ignore citations if user navigated away
                         if (selectedLesson?.slug !== streamLessonSlug) return;
@@ -363,17 +543,98 @@
         }
     }
 
+    // Apply Java language detection and highlight code blocks after lesson content renders
+    // Uses shared utility with cancellation support
+    $effect(() => {
+        const contentElement = lessonContentEl;
+        if (!renderedLesson || !contentElement) return;
+
+        let isCancelled = false;
+
+        // Apply Java language detection before highlighting (client-side DOM operation)
+        applyJavaLanguageDetection(contentElement);
+
+        highlightCodeBlocks(contentElement).catch((highlightError) => {
+            if (!isCancelled) {
+                console.warn(
+                    "[LearnView] Code highlighting failed:",
+                    highlightError,
+                );
+            }
+        });
+
+        // Cleanup function runs when effect re-runs or component unmounts
+        return () => {
+            isCancelled = true;
+        };
+    });
 </script>
 
 <div class="learn-view">
     {#if !selectedLesson}
-        <GuidedLessonCatalog
-            {lessons}
-            isLoading={loadingTOC}
-            errorMessage={tocError}
-            onRetry={loadTOC}
-            onSelect={selectLesson}
-        />
+        <!-- TOC View -->
+        <div class="toc-container">
+            <div class="toc-inner">
+                <div class="toc-header">
+                    <h1 class="toc-title">
+                        <span class="title-serif">Learn</span>
+                        <span class="title-accent">Java</span>
+                    </h1>
+                    <p class="toc-subtitle">
+                        Learn Java programming interactively with live lessons,
+                        real documentation, and AI. Select a topic to begin!
+                    </p>
+                </div>
+
+                {#if loadingTOC}
+                    <div class="loading-state">
+                        <ThinkingIndicator statusMessage="Loading lessons" />
+                    </div>
+                {:else if tocError}
+                    <div class="error-state">
+                        <p>{tocError}</p>
+                        <button
+                            type="button"
+                            class="retry-btn"
+                            onclick={loadTOC}>Try Again</button
+                        >
+                    </div>
+                {:else}
+                    <div class="lessons-grid">
+                        {#each lessons as lesson, index (lesson.slug)}
+                            <button
+                                type="button"
+                                class="lesson-card"
+                                onclick={() => selectLesson(lesson)}
+                                style:animation-delay="{index * 50}ms"
+                            >
+                                <span class="lesson-number">{index + 1}</span>
+                                <div class="lesson-info">
+                                    <span class="lesson-title"
+                                        >{lesson.title}</span
+                                    >
+                                    <span class="lesson-summary"
+                                        >{lesson.summary}</span
+                                    >
+                                </div>
+                                <svg
+                                    class="lesson-arrow"
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        fill-rule="evenodd"
+                                        d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z"
+                                        clip-rule="evenodd"
+                                    />
+                                </svg>
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
+        </div>
     {:else}
         <!-- Lesson View -->
         <div class="lesson-container">
@@ -384,7 +645,41 @@
 
             <!-- Two-column layout: Content + Chat (desktop) -->
             <div class="lesson-layout">
-                <GuidedLessonContentPanel lesson={selectedLesson} />
+                <!-- Lesson Content Panel -->
+                <div
+                    class="lesson-content-panel"
+                    bind:this={lessonContentPanelEl}
+                >
+                    {#if loadingLesson}
+                        <div class="loading-state">
+                            <ThinkingIndicator statusMessage="Loading lesson" />
+                        </div>
+                    {:else if lessonError}
+                        <div class="error-state">
+                            <p>{lessonError}</p>
+                            <button
+                                type="button"
+                                class="retry-btn"
+                                onclick={() =>
+                                    selectedLesson &&
+                                    selectLesson(selectedLesson)}
+                            >
+                                Try Again
+                            </button>
+                        </div>
+                    {:else}
+                        <div class="lesson-content" bind:this={lessonContentEl}>
+                            {@html renderedLesson}
+                        </div>
+
+                        <LessonCitations
+                            citations={lessonCitations}
+                            loaded={lessonCitationsLoaded}
+                            error={lessonCitationsError}
+                            slug={selectedLesson.slug}
+                        />
+                    {/if}
+                </div>
 
                 <!-- Chat Panel (Desktop only) -->
                 <GuidedLessonChatPanel
@@ -453,6 +748,170 @@
         overflow: hidden;
     }
 
+    /* TOC Container */
+    .toc-container {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: var(--space-8);
+    }
+
+    .toc-inner {
+        max-width: 720px;
+        width: 100%;
+    }
+
+    .toc-header {
+        text-align: center;
+        margin-bottom: var(--space-10);
+    }
+
+    .toc-title {
+        font-size: var(--text-4xl);
+        font-weight: 400;
+        line-height: var(--leading-tight);
+        margin-bottom: var(--space-4);
+    }
+
+    .title-serif {
+        font-family: var(--font-serif);
+        color: var(--color-text-secondary);
+    }
+
+    .title-accent {
+        font-family: var(--font-sans);
+        font-weight: 600;
+        color: var(--color-accent);
+    }
+
+    .toc-subtitle {
+        font-size: var(--text-lg);
+        line-height: var(--leading-relaxed);
+        color: var(--color-text-secondary);
+    }
+
+    /* Lessons Grid */
+    .lessons-grid {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    .lesson-card {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        padding: var(--space-4) var(--space-5);
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        text-align: left;
+        transition: all var(--duration-fast) var(--ease-out);
+        animation: fade-in-up var(--duration-normal) var(--ease-out) backwards;
+    }
+
+    /* Hover effects only for devices with hover capability */
+    @media (hover: hover) and (pointer: fine) {
+        .lesson-card:hover {
+            background: var(--color-bg-tertiary);
+            border-color: var(--color-border-default);
+            transform: translateX(4px);
+        }
+
+        .lesson-card:hover .lesson-arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    .lesson-number {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        background: var(--color-accent-subtle);
+        border: 1px solid var(--color-accent-muted);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-accent);
+    }
+
+    .lesson-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 0;
+    }
+
+    .lesson-title {
+        font-size: var(--text-base);
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .lesson-summary {
+        font-size: var(--text-sm);
+        color: var(--color-text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .lesson-arrow {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        color: var(--color-accent);
+        opacity: 0.6; /* Default visible for touch devices */
+        transition: all var(--duration-fast) var(--ease-out);
+    }
+
+    /* Only hide arrow by default on hover-capable devices */
+    @media (hover: hover) and (pointer: fine) {
+        .lesson-arrow {
+            opacity: 0;
+            transform: translateX(-8px);
+        }
+    }
+
+    /* Loading/Error States */
+    .loading-state,
+    .error-state {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-4);
+        padding: var(--space-12);
+        color: var(--color-text-secondary);
+    }
+
+    .retry-btn {
+        padding: var(--space-2) var(--space-4);
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition: background var(--duration-fast) var(--ease-out);
+    }
+
+    .retry-btn:hover {
+        background: var(--color-accent-hover);
+    }
+
+    /* Lesson Container */
     .lesson-container {
         flex: 1;
         display: flex;
@@ -461,25 +920,166 @@
         position: relative;
     }
 
+    /* Two-column Layout */
     .lesson-layout {
         flex: 1;
         display: grid;
         grid-template-columns: 1fr 460px;
         grid-template-rows: 1fr;
         overflow: hidden;
-        min-height: 0;
-        max-height: 100%;
+        min-height: 0; /* Critical for flex-in-grid scrolling */
+        max-height: 100%; /* Prevent grid from expanding beyond parent */
     }
 
+    /* Lesson Content Panel */
+    .lesson-content-panel {
+        position: relative; /* For absolute positioning of loading state */
+        min-height: 0; /* Critical for grid/flex scrolling */
+        overflow-y: auto;
+        overflow-anchor: none; /* Prevent browser scroll anchoring when citations load */
+        padding: var(--space-6);
+    }
+
+    .lesson-content {
+        max-width: 720px;
+        margin: 0 auto;
+        font-size: var(--text-base);
+        line-height: var(--leading-relaxed);
+        color: var(--color-text-primary);
+    }
+
+    .lesson-content :global(h1),
+    .lesson-content :global(h2),
+    .lesson-content :global(h3) {
+        font-family: var(--font-serif);
+        font-weight: 500;
+        margin: var(--space-8) 0 var(--space-4);
+        letter-spacing: var(--tracking-tight);
+    }
+
+    .lesson-content :global(h1:first-child),
+    .lesson-content :global(h2:first-child) {
+        margin-top: 0;
+    }
+
+    .lesson-content :global(h1) {
+        font-size: var(--text-2xl);
+    }
+    .lesson-content :global(h2) {
+        font-size: var(--text-xl);
+    }
+    .lesson-content :global(h3) {
+        font-size: var(--text-lg);
+    }
+
+    .lesson-content :global(p) {
+        margin: 0 0 var(--space-4);
+    }
+
+    .lesson-content :global(ul),
+    .lesson-content :global(ol) {
+        margin: 0 0 var(--space-4);
+        padding-left: var(--space-6);
+    }
+
+    .lesson-content :global(li) {
+        margin-bottom: var(--space-2);
+    }
+
+    .lesson-content :global(pre) {
+        margin: var(--space-4) 0;
+        padding: var(--space-4);
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        overflow-x: auto;
+        font-size: var(--text-sm);
+    }
+
+    .lesson-content :global(pre code) {
+        background: none;
+        padding: 0;
+        border: none;
+    }
+
+    .lesson-content :global(code:not(pre code)) {
+        padding: 0.125em 0.375em;
+        background: var(--color-bg-tertiary);
+        border-radius: var(--radius-sm);
+        font-size: 0.9em;
+    }
+
+    .lesson-content :global(blockquote) {
+        margin: var(--space-4) 0;
+        padding: var(--space-3) var(--space-4);
+        border-left: 3px solid var(--color-accent);
+        background: var(--color-surface-subtle);
+        border-radius: 0 var(--radius-md) var(--radius-md) 0;
+        font-style: italic;
+        color: var(--color-text-secondary);
+    }
+
+    /* Intermediate breakpoint: narrower chat panel on medium screens */
     @media (max-width: 1280px) and (min-width: 1025px) {
         .lesson-layout {
             grid-template-columns: 1fr 400px;
         }
     }
 
+    /* Responsive: Stack on smaller screens with flexible heights */
     @media (max-width: 1024px) {
+        /* Lesson content takes full height on mobile */
         .lesson-layout {
             display: block;
+        }
+
+        .lesson-content-panel {
+            height: 100%;
+            border-right: none;
+            border-bottom: none;
+            overflow-y: auto;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .toc-container {
+            padding: var(--space-4);
+        }
+
+        .toc-title {
+            font-size: var(--text-2xl);
+        }
+
+        .toc-subtitle {
+            font-size: var(--text-base);
+        }
+
+        .lesson-content-panel {
+            padding: var(--space-4);
+        }
+    }
+
+    @media (max-width: 640px) {
+        .toc-header {
+            margin-bottom: var(--space-6);
+        }
+
+        .lesson-card {
+            padding: var(--space-3) var(--space-4);
+        }
+
+        .lesson-number {
+            width: 28px;
+            height: 28px;
+            font-size: var(--text-xs);
+        }
+
+        .lesson-title {
+            font-size: var(--text-sm);
+        }
+
+        .lesson-summary {
+            font-size: var(--text-xs);
         }
     }
 </style>

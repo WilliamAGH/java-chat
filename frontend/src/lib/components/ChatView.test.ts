@@ -99,6 +99,18 @@ describe("ChatView streaming stability", () => {
     expect(await findByText("Citations could not be loaded")).toBeTruthy();
   });
 
+  it("shows the provider selected for the active stream", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, _onChunk, options) => {
+      options?.onProvider?.({ provider: "OpenAI" });
+      return new Promise<void>(() => {});
+    });
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    expect(await renderedChatView.findByText("Provider: OpenAI")).toBeTruthy();
+  });
+
   it("aborts the active chat stream when the view unmounts", async () => {
     let activeChatStreamSignal: AbortSignal | undefined;
     streamChatMock.mockImplementation(async (_sessionId, _message, _onChunk, options) => {

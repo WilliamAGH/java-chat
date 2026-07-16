@@ -5,7 +5,7 @@
  * with optional timer-based status message persistence.
  */
 
-import type { StreamStatus } from "../validation/schemas";
+import type { ProviderEvent, StreamStatus } from "../validation/schemas";
 
 /** Configuration options for streaming state behavior. */
 export interface StreamingStateOptions {
@@ -33,6 +33,8 @@ export interface StreamingState {
   startStream: () => void;
   /** Updates status message and optional details. */
   updateStatus: (status: StreamStatus) => void;
+  /** Records the provider selected for the active stream. */
+  updateProvider: (providerEvent: ProviderEvent) => void;
   /** Marks stream as complete and schedules status clearing. */
   finishStream: () => void;
   /** Immediately resets all state (cancels any pending timers). */
@@ -80,6 +82,8 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
   let isStreaming = $state(false);
   let statusMessage = $state("");
   let statusDetails = $state("");
+  let statusDescription = $state("");
+  let selectedProviderName = $state("");
 
   // Timer for delayed status clearing
   let statusClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +99,15 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     cancelStatusTimer();
     statusMessage = "";
     statusDetails = "";
+    statusDescription = "";
+    selectedProviderName = "";
+  }
+
+  function refreshStatusDetails(): void {
+    const providerDescription = selectedProviderName ? `Provider: ${selectedProviderName}` : "";
+    statusDetails = [statusDescription, providerDescription]
+      .filter((streamDescription) => streamDescription.length > 0)
+      .join(" · ");
   }
 
   function clearStatusDelayed(): void {
@@ -129,11 +142,19 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
       isStreaming = true;
       statusMessage = "";
       statusDetails = "";
+      statusDescription = "";
+      selectedProviderName = "";
     },
 
     updateStatus(status: StreamStatus) {
       statusMessage = status.message;
-      statusDetails = status.details ?? "";
+      statusDescription = status.details ?? "";
+      refreshStatusDetails();
+    },
+
+    updateProvider(providerEvent: ProviderEvent) {
+      selectedProviderName = providerEvent.provider;
+      refreshStatusDetails();
     },
 
     finishStream() {
@@ -146,6 +167,8 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
       isStreaming = false;
       statusMessage = "";
       statusDetails = "";
+      statusDescription = "";
+      selectedProviderName = "";
     },
 
     cleanup() {

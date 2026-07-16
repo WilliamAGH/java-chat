@@ -136,6 +136,10 @@
                         if (!isActiveChatStream(chatStreamController)) return;
                         streaming.updateStatus(streamStatus);
                     },
+                    onProvider: (providerEvent) => {
+                        if (!isActiveChatStream(chatStreamController)) return;
+                        streaming.updateProvider(providerEvent);
+                    },
                     onError: (streamError) => {
                         if (!isActiveChatStream(chatStreamController)) return;
                         streaming.updateStatus(streamError);
