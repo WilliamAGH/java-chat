@@ -1,6 +1,9 @@
 package com.williamcallahan.javachat.web;
 
 import static org.hamcrest.Matchers.contains;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -17,6 +20,8 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -72,5 +77,18 @@ class GuidedLearningControllerTest {
                 .andExpect(jsonPath("$.hints", contains("Hint")))
                 .andExpect(jsonPath("$.reminders", contains("Remember")))
                 .andExpect(jsonPath("$.background", contains("Background")));
+    }
+
+    @Test
+    void lesson_not_found_removes_control_characters_from_exception_message() {
+        String hostileSlug = "intro\nERROR: forged log entry";
+        given(guidedLearningService.getLesson(hostileSlug)).willReturn(Optional.empty());
+
+        Exception requestFailure = assertThrows(
+                Exception.class, () -> mockMvc.perform(get("/api/guided/lesson").param("slug", hostileSlug)));
+
+        NoSuchElementException lessonNotFound =
+                assertInstanceOf(NoSuchElementException.class, requestFailure.getCause());
+        assertEquals("Unknown lesson slug: intro?ERROR: forged log entry", lessonNotFound.getMessage());
     }
 }

@@ -102,7 +102,9 @@ public class GuidedLearningController extends BaseController {
     public GuidedLesson lesson(@RequestParam("slug") String slug) {
         return guidedService
                 .getLesson(slug)
-                .orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: " + slug));
+                .orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: "
+                        + StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                .text()));
     }
 
     /**
