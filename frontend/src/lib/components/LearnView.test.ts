@@ -6,6 +6,10 @@ const fetchTocMock = vi.fn();
 const streamLessonContentMock = vi.fn();
 const fetchGuidedLessonCitationsMock = vi.fn();
 const streamGuidedChatMock = vi.fn();
+const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
+const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
+const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
+const ANY_NEW_UPDATES_INDICATOR_NAME = /jump to/i;
 
 vi.mock("../services/guided", async () => {
   const actualGuidedService =
@@ -24,6 +28,58 @@ async function renderLearnView() {
   return render(LearnViewComponent);
 }
 
+function configureGuidedChatWithPendingStream() {
+  streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+    lessonStreamCallbacks.onChunk("# Lesson");
+  });
+  fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+  streamGuidedChatMock.mockImplementation(async () => new Promise<void>(() => {}));
+}
+
+function makeDesktopMessagesContainerAppearScrolledAway(messagesContainer: HTMLElement) {
+  Object.defineProperties(messagesContainer, {
+    scrollTop: { configurable: true, value: 0, writable: true },
+    scrollHeight: {
+      configurable: true,
+      value: OFFSCREEN_MESSAGES_SCROLL_HEIGHT,
+    },
+    clientHeight: {
+      configurable: true,
+      value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+    },
+  });
+}
+
+async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegExp) {
+  configureGuidedChatWithPendingStream();
+
+  const learnView = await renderLearnView();
+  const initialLessonButton = await learnView.findByRole("button", {
+    name: initialLessonName,
+  });
+  await fireEvent.click(initialLessonButton);
+  await tick();
+
+  const messagesContainer = learnView.container.querySelector<HTMLElement>(
+    ".chat-panel--desktop .messages-container",
+  );
+  if (!messagesContainer) {
+    throw new Error("Expected the desktop messages container to be rendered");
+  }
+  makeDesktopMessagesContainerAppearScrolledAway(messagesContainer);
+
+  vi.useFakeTimers();
+  const messageInput = learnView.getByLabelText("Message input");
+  if (!(messageInput instanceof HTMLTextAreaElement)) {
+    throw new Error("Expected message input element to be a textarea");
+  }
+  await fireEvent.input(messageInput, { target: { value: "Hi" } });
+  await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+  await tick();
+
+  return learnView;
+}
+
 describe("LearnView guided chat streaming stability", () => {
   beforeEach(() => {
     fetchTocMock.mockReset();
@@ -33,6 +89,7 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -124,6 +181,54 @@ describe("LearnView guided chat streaming stability", () => {
     expect(
       container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
     ).toBeNull();
+  });
+
+  it("clears the new-updates indicator when clearing chat", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => "",
+      }),
+    );
+
+    const learnView = await openLessonWithPendingNewUpdatesIndicator(/test lesson/i);
+
+    await vi.runAllTimersAsync();
+    await tick();
+
+    expect(learnView.getByRole("button", { name: NEW_UPDATES_INDICATOR_NAME })).toBeInTheDocument();
+
+    await fireEvent.click(learnView.getByRole("button", { name: "Clear chat" }));
+    await tick();
+
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+  });
+
+  it("clears the new-updates indicator when switching lessons", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Intro Lesson", summary: "Lesson summary", keywords: [] },
+      {
+        slug: "classes",
+        title: "Classes Lesson",
+        summary: "Classes summary",
+        keywords: [],
+      },
+    ]);
+
+    const learnView = await openLessonWithPendingNewUpdatesIndicator(/intro lesson/i);
+
+    await fireEvent.click(learnView.getByRole("button", { name: "All Lessons" }));
+    await fireEvent.click(learnView.getByRole("button", { name: /classes lesson/i }));
+    await vi.runAllTimersAsync();
+    await tick();
+
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
   });
 
   it("cancels the guided stream and clears messages without late writes after clear chat", async () => {
