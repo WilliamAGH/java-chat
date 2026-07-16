@@ -70,7 +70,7 @@ public class SseSupport {
      * Filters empty chunks and applies the standard streaming configuration.
      *
      * @param source the raw content flux from the streaming service
-     * @param chunkConsumer consumer called for each non-empty chunk (typically for accumulation)
+     * @param chunkConsumer consumer called only for coalesced chunks that survive the overflow strategy
      * @return a shared flux configured for SSE streaming
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
@@ -78,13 +78,13 @@ public class SseSupport {
                 .bufferTimeout(STREAM_CHUNK_COALESCE_MAX_ITEMS, Duration.ofMillis(STREAM_CHUNK_COALESCE_WINDOW_MS))
                 .filter(chunkBatch -> !chunkBatch.isEmpty())
                 .map(chunkBatch -> String.join("", chunkBatch))
-                .doOnNext(chunk -> chunkConsumer.accept(chunk))
                 // Keep buffering bounded and drop oldest coalesced chunks under sustained
                 // downstream pressure to avoid unbounded memory growth.
                 .onBackpressureBuffer(
                         STREAM_BACKPRESSURE_BUFFER_CAPACITY,
                         this::recordDroppedCoalescedChunk,
                         BufferOverflowStrategy.DROP_OLDEST)
+                .doOnNext(chunk -> chunkConsumer.accept(chunk))
                 // Two subscribers consume this stream in controllers:
                 // 1) text event emission, 2) heartbeat termination signal.
                 // refCount(2) preserves their rendezvous and disconnects upstream when both cancel.
@@ -259,9 +259,8 @@ public class SseSupport {
     /**
      * Projects runtime streaming notices into their SSE protocol events.
      *
-     * <p>Provider-fallback notices emit the fallback provider before their status event. One
-     * subscription to the replayed notice flux owns both projections, while {@code concatMap}
-     * keeps each notice's protocol events ordered and non-interleaved.</p>
+     * <p>One subscription to the notice flux owns the projection, while {@code concatMap}
+     * keeps protocol events ordered and non-interleaved.</p>
      *
      * @param notices flux of streaming notices from the provider
      * @return flux of ordered ServerSentEvents with provider and status payloads
@@ -280,9 +279,6 @@ public class SseSupport {
                 .attempt(streamingNotice.attempt())
                 .maxAttempts(streamingNotice.maxAttempts())
                 .build());
-        if (STATUS_CODE_STREAM_PROVIDER_FALLBACK.equals(streamingNotice.code())) {
-            return Flux.just(providerEvent(streamingNotice.provider()), noticeStatusEvent);
-        }
         return Flux.just(noticeStatusEvent);
     }
 

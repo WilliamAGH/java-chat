@@ -17,11 +17,9 @@ import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailu
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
-import com.williamcallahan.javachat.web.SseConstants;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -30,23 +28,21 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 /**
  * Streams and completes chat responses using OpenAI-compatible providers.
  *
- * <p>This service orchestrates SDK transport, provider retries before first token,
- * and SSE-facing runtime notices while delegating provider policy and request
- * construction to focused collaborators.</p>
+ * <p>This service orchestrates single-provider SDK transport and terminal failure
+ * reporting while delegating provider selection and request construction to focused
+ * collaborators.</p>
  */
 @Service
 public class OpenAIStreamingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAIStreamingService.class);
 
-    private static final String STREAM_STATUS_CODE_PROVIDER_FALLBACK =
-            SseConstants.STATUS_CODE_STREAM_PROVIDER_FALLBACK;
-    private static final String STREAM_STAGE_STREAM = SseConstants.STATUS_STAGE_STREAM;
+    private static final String PROVIDER_UNAVAILABLE_MESSAGE =
+            "LLM providers unavailable - active provider is rate limited or misconfigured";
 
     /** GitHub Models client when configured. */
     private OpenAIClient clientPrimary;
@@ -75,14 +71,7 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
     private long streamingRequestTimeoutSeconds;
 
-    /**
-     * LLM-gateway priority class sent as the {@code X-Tier} header on live chat
-     * turns. The gateway queue treats untagged requests as {@code default}
-     * (priority 5, zero reserved slots), which can starve live traffic behind
-     * batch jobs; {@code production-z} is java-chat's recognized live tier.
-     * Background/batch callers must use {@code batch} instead. Harmless on
-     * non-gateway upstreams (OpenAI direct, GitHub Models), which ignore it.
-     */
+    /** Sends live chat through the gateway's production tier; batch callers use {@code batch}. */
     @Value("${LLM_GATEWAY_TIER:production-z}")
     private String llmGatewayTier;
 
@@ -91,7 +80,7 @@ public class OpenAIStreamingService {
      *
      * @param rateLimitService provider rate-limit state tracker
      * @param requestFactory request payload and truncation builder
-     * @param providerRoutingService provider ordering and fallback classifier
+     * @param providerRoutingService provider ordering and failure classifier
      * @param streamingFailureReporter terminal provider-failure boundary
      */
     public OpenAIStreamingService(
@@ -142,45 +131,37 @@ public class OpenAIStreamingService {
     }
 
     /**
-     * Streams a response using a structured prompt with bounded retries before first text.
+     * Streams a response from the configured provider.
      *
      * @param structuredPrompt typed prompt segments
      * @param temperature response temperature
-     * @return stream result including text chunks, selected provider, and notices
+     * @return stream result including text chunks, the selected provider, and no fallback notices
      */
     public Mono<StreamingResult> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
         log.debug("Starting OpenAI stream with structured prompt");
 
         return Mono.<StreamingResult>defer(() -> {
-                    List<OpenAiProviderCandidate> availableProviders =
-                            providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
-                    if (availableProviders.isEmpty()) {
-                        String unavailableReason =
-                                "LLM providers unavailable - active provider is rate limited or misconfigured";
-                        log.warn("[LLM] {}", unavailableReason);
-                        return Mono.<StreamingResult>error(new IllegalStateException(unavailableReason));
+                    Optional<OpenAiProviderCandidate> selectedProvider =
+                            providerRoutingService.selectConfiguredProviderCandidate(clientPrimary, clientSecondary);
+                    if (selectedProvider.isEmpty()) {
+                        log.warn("[LLM] {}", PROVIDER_UNAVAILABLE_MESSAGE);
+                        return Mono.<StreamingResult>error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
                     }
 
-                    OpenAiProviderCandidate initialProvider = availableProviders.get(0);
-                    // Routing selects two candidates, so one pre-text fallback signal is sufficient.
-                    Sinks.Many<StreamingNotice> noticeSink =
-                            Sinks.many().replay().limit(1);
-                    StreamingAttemptContext attemptContext =
-                            StreamingAttemptContext.first(availableProviders, noticeSink);
-                    Flux<String> contentFlux = executeStreamingWithPreTextRetry(
-                                    structuredPrompt, temperature, attemptContext)
-                            .doFinally(ignoredSignalType -> noticeSink.tryEmitComplete());
-                    return Mono.just(new StreamingResult(contentFlux, initialProvider.provider(), noticeSink.asFlux()));
+                    OpenAiProviderCandidate providerCandidate = selectedProvider.orElseThrow();
+                    Flux<String> contentFlux =
+                            executeStreamingWithSelectedProvider(structuredPrompt, temperature, providerCandidate);
+                    return Mono.just(new StreamingResult(contentFlux, providerCandidate.provider(), Flux.empty()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
-     * Sends a non-streaming completion request to the best available provider.
+     * Sends a non-streaming completion request to the first available provider.
      *
      * @param prompt completion prompt
      * @param temperature response temperature
-     * @return completion text from the first successful provider attempt
+     * @return completion text from the selected provider
      */
     public Mono<String> complete(String prompt, double temperature) {
         return executeCompletion(prompt, temperature, CompletionRequestConfiguration.defaultText());
@@ -192,7 +173,7 @@ public class OpenAIStreamingService {
      * @param prompt completion prompt
      * @param temperature response temperature
      * @param maximumOutputTokens maximum output tokens needed by this caller
-     * @return completion text from the first successful provider attempt
+     * @return completion text from the selected provider
      */
     public Mono<String> complete(String prompt, double temperature, int maximumOutputTokens) {
         return Mono.defer(() -> executeCompletion(
@@ -205,7 +186,7 @@ public class OpenAIStreamingService {
      * @param prompt completion prompt
      * @param temperature response temperature
      * @param maximumOutputTokens maximum output tokens needed by this caller
-     * @return completion text from the first provider honoring the JSON contract
+     * @return completion text from the selected provider honoring the JSON contract
      */
     public Mono<String> completeJsonObject(String prompt, double temperature, int maximumOutputTokens) {
         return completeJsonObject(
@@ -219,7 +200,7 @@ public class OpenAIStreamingService {
      * @param temperature response temperature
      * @param maximumOutputTokens maximum output tokens needed by this caller
      * @param requestTimeout whole-request timeout owned by this caller
-     * @return completion text from the first provider honoring the JSON contract
+     * @return completion text from the selected provider honoring the JSON contract
      */
     public Mono<String> completeJsonObject(
             String prompt, double temperature, int maximumOutputTokens, Duration requestTimeout) {
@@ -230,58 +211,37 @@ public class OpenAIStreamingService {
     private Mono<String> executeCompletion(
             String prompt, double temperature, CompletionRequestConfiguration configuration) {
         return Mono.<String>defer(() -> {
-                    List<OpenAiProviderCandidate> availableProviders =
-                            providerRoutingService.selectAvailableProviderCandidates(clientPrimary, clientSecondary);
-                    if (availableProviders.isEmpty()) {
-                        String unavailableReason =
-                                "LLM providers unavailable - active provider is rate limited or misconfigured";
-                        log.error("[LLM] {}", unavailableReason);
-                        return Mono.error(new IllegalStateException(unavailableReason));
+                    Optional<OpenAiProviderCandidate> selectedProvider =
+                            providerRoutingService.selectConfiguredProviderCandidate(clientPrimary, clientSecondary);
+                    if (selectedProvider.isEmpty()) {
+                        log.error("[LLM] {}", PROVIDER_UNAVAILABLE_MESSAGE);
+                        return Mono.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
                     }
 
-                    RuntimeException lastProviderFailure = null;
-                    for (int providerIndex = 0; providerIndex < availableProviders.size(); providerIndex++) {
-                        OpenAiProviderCandidate providerCandidate = availableProviders.get(providerIndex);
-                        RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
-
-                        ResponseCreateParams requestParameters =
-                                buildCompletionRequest(prompt, temperature, activeProvider, configuration);
-                        try {
-                            log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
-                            RequestOptions requestOptions = RequestOptions.builder()
-                                    .timeout(completeTimeout(configuration.requestTimeout()))
-                                    .build();
-                            Response completion =
-                                    providerCandidate.client().responses().create(requestParameters, requestOptions);
-                            rateLimitService.recordSuccess(activeProvider);
-                            log.debug("[LLM] Complete succeeded (providerId={})", activeProvider.ordinal());
-                            return Mono.just(extractTextFromResponse(completion));
-                        } catch (RuntimeException completionException) {
-                            lastProviderFailure = completionException;
-                            providerRoutingService.recordProviderFailure(activeProvider, completionException);
-
-                            boolean hasNextProvider = providerIndex + 1 < availableProviders.size();
-                            if (hasNextProvider
-                                    && providerRoutingService.isCompletionFallbackEligible(completionException)) {
-                                log.warn(
-                                        "[LLM] Complete attempt failed; falling back to secondary provider "
-                                                + "(providerId={}, exceptionType={})",
-                                        activeProvider.ordinal(),
-                                        completionException.getClass().getSimpleName());
-                                continue;
-                            }
-                            log.error(
-                                    "[LLM] Complete failed (providerId={})",
-                                    activeProvider.ordinal(),
-                                    completionException);
-                            return Mono.error(completionException);
-                        }
+                    OpenAiProviderCandidate providerCandidate = selectedProvider.orElseThrow();
+                    RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
+                    ResponseCreateParams requestParameters =
+                            buildCompletionRequest(prompt, temperature, activeProvider, configuration);
+                    RequestOptions requestOptions = RequestOptions.builder()
+                            .timeout(completeTimeout(configuration.requestTimeout()))
+                            .build();
+                    if (!rateLimitService.tryReserveRequest(activeProvider)) {
+                        return Mono.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
                     }
 
-                    if (lastProviderFailure != null) {
-                        return Mono.error(lastProviderFailure);
+                    try {
+                        log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
+                        Response completion =
+                                providerCandidate.client().responses().create(requestParameters, requestOptions);
+                        rateLimitService.recordSuccess(activeProvider);
+                        log.debug("[LLM] Complete succeeded (providerId={})", activeProvider.ordinal());
+                        return Mono.just(extractTextFromResponse(completion));
+                    } catch (RuntimeException completionException) {
+                        providerRoutingService.recordProviderFailure(activeProvider, completionException);
+                        log.error(
+                                "[LLM] Complete failed (providerId={})", activeProvider.ordinal(), completionException);
+                        return Mono.error(completionException);
                     }
-                    return Mono.error(new IllegalStateException("No provider attempt was executed for completion"));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -309,10 +269,10 @@ public class OpenAIStreamingService {
     }
 
     /**
-     * Returns whether a streaming failure is likely recoverable with a retry.
+     * Returns whether a streaming failure is transient at the request boundary.
      *
      * @param throwable streaming failure
-     * @return true when fallback conditions indicate transient failure
+     * @return true when the failure category is transient
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
         Throwable upstreamFailure = ReportedStreamingFailure.findInCauseChain(throwable)
@@ -321,69 +281,40 @@ public class OpenAIStreamingService {
         return providerRoutingService.isRecoverableStreamingFailure(upstreamFailure);
     }
 
-    private Flux<String> executeStreamingWithPreTextRetry(
-            StructuredPrompt structuredPrompt, double temperature, StreamingAttemptContext attemptContext) {
-        OpenAiProviderCandidate providerCandidate = attemptContext.currentProvider();
-        RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
+    private Flux<String> executeStreamingWithSelectedProvider(
+            StructuredPrompt structuredPrompt, double temperature, OpenAiProviderCandidate selectedProvider) {
+        RateLimitService.ApiProvider activeProvider = selectedProvider.provider();
         OpenAiPreparedRequest preparedStreamingRequest =
                 requestFactory.prepareStreamingRequest(structuredPrompt, temperature, activeProvider);
-        AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
 
         log.info(
-                "[LLM] Streaming started (structured, providerId={}, attempt={}/{}, model={})",
+                "[LLM] Streaming started (structured, providerId={}, model={})",
                 activeProvider.ordinal(),
-                attemptContext.currentAttempt(),
-                attemptContext.maxAttempts(),
                 preparedStreamingRequest.modelId());
 
-        return executeStreamingRequest(
-                        providerCandidate.client(), preparedStreamingRequest.responseParams(), activeProvider)
-                .doOnNext(textChunk -> {
-                    if (!textChunk.isEmpty()) {
-                        emittedTextChunk.set(true);
-                    }
-                })
-                .onErrorResume(streamingFailure -> {
-                    if (!attemptContext.hasNextAttempt()
-                            || emittedTextChunk.get()
-                            || !providerRoutingService.isStreamingFallbackEligible(streamingFailure)) {
+        return Flux.defer(() -> {
+            if (!rateLimitService.tryReserveRequest(activeProvider)) {
+                return Flux.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
+            }
+            AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
+            return executeStreamingRequest(
+                            selectedProvider.client(), preparedStreamingRequest.responseParams(), activeProvider)
+                    .doOnNext(textChunk -> {
+                        if (!textChunk.isEmpty()) {
+                            emittedTextChunk.set(true);
+                        }
+                    })
+                    .onErrorResume(streamingFailure -> {
                         return Flux.error(streamingFailureReporter.reportTerminalFailure(
                                 streamingFailure,
                                 new StreamingFailureReporter.TerminalAttempt(
                                         activeProvider.getName(),
                                         preparedStreamingRequest.modelId(),
-                                        attemptContext.currentAttempt(),
-                                        attemptContext.maxAttempts(),
+                                        1,
+                                        1,
                                         emittedTextChunk.get())));
-                    }
-
-                    StreamingAttemptContext nextAttempt = attemptContext.withNextAttempt();
-                    OpenAiProviderCandidate retryProvider = nextAttempt.currentProvider();
-                    log.warn(
-                            "[LLM] Retrying with providerId={} before first chunk "
-                                    + "(failedProviderId={}, attempt={}/{}, exceptionType={})",
-                            retryProvider.provider().ordinal(),
-                            activeProvider.ordinal(),
-                            nextAttempt.currentAttempt(),
-                            nextAttempt.maxAttempts(),
-                            streamingFailure.getClass().getSimpleName());
-
-                    emitStreamingNotice(
-                            attemptContext.noticeSink(),
-                            StreamingNotice.builder(
-                                            "Retrying stream with provider", STREAM_STATUS_CODE_PROVIDER_FALLBACK)
-                                    .diagnosticContext("The API returned an invalid or transient streaming response. "
-                                            + "Retrying before any response text was emitted.")
-                                    .retryable(true)
-                                    .origin(new StreamingNoticeOrigin(
-                                            retryProvider.provider().getName(),
-                                            STREAM_STAGE_STREAM,
-                                            nextAttempt.currentAttempt(),
-                                            nextAttempt.maxAttempts()))
-                                    .build());
-
-                    return executeStreamingWithPreTextRetry(structuredPrompt, temperature, nextAttempt);
-                });
+                    });
+        });
     }
 
     private Flux<String> executeStreamingRequest(
@@ -474,12 +405,5 @@ public class OpenAIStreamingService {
      */
     public boolean isAvailable() {
         return isAvailable && (clientPrimary != null || clientSecondary != null);
-    }
-
-    private void emitStreamingNotice(Sinks.Many<StreamingNotice> noticeSink, StreamingNotice streamingNotice) {
-        Sinks.EmitResult emitResult = noticeSink.tryEmitNext(streamingNotice);
-        if (emitResult.isFailure()) {
-            log.debug("Failed to emit streaming notice (emitResult={})", emitResult);
-        }
     }
 }

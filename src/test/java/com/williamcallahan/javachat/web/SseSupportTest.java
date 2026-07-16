@@ -1,7 +1,10 @@
 package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
+import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
+import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,11 +17,15 @@ import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import reactor.test.subscriber.TestSubscriber;
 
 /**
  * Verifies SSE stream preparation semantics used by streaming chat controllers.
  */
 class SseSupportTest {
+
+    private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
+    private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
 
     @Test
     void prepareDataStreamPublishesAllChunksToBothSubscribers() {
@@ -43,6 +50,38 @@ class SseSupportTest {
         assertEquals(expectedContent, firstSubscriberContent, "First subscriber should receive full stream content");
         assertEquals(expectedContent, secondSubscriberContent, "Second subscriber should receive full stream content");
         assertEquals(expectedContent, consumedContent, "Chunk consumer should observe full stream content");
+    }
+
+    @Test
+    void prepareDataStreamAccumulatesOnlyChunksDeliveredAfterBackpressureOverflow() {
+        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        int coalescedChunkCount = (STREAM_BACKPRESSURE_BUFFER_CAPACITY * BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER) + 1;
+        int rawChunkCount = coalescedChunkCount * STREAM_CHUNK_COALESCE_MAX_ITEMS;
+        List<String> accumulatedChunks = new CopyOnWriteArrayList<>();
+        Flux<String> preparedStream = sseSupport.prepareDataStream(
+                Flux.range(0, rawChunkCount).map(rawChunkIndex -> "chunk-" + rawChunkIndex), accumulatedChunks::add);
+        TestSubscriber<String> textSubscriber =
+                TestSubscriber.builder().initialRequest(0).build();
+        TestSubscriber<String> heartbeatSubscriber =
+                TestSubscriber.builder().initialRequest(0).build();
+
+        preparedStream.subscribe(textSubscriber);
+        preparedStream.subscribe(heartbeatSubscriber);
+
+        textSubscriber.request(Long.MAX_VALUE);
+        heartbeatSubscriber.request(Long.MAX_VALUE);
+        textSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
+        heartbeatSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
+
+        List<String> deliveredChunks = textSubscriber.getReceivedOnNext();
+        assertTrue(textSubscriber.isTerminatedComplete());
+        assertTrue(heartbeatSubscriber.isTerminatedComplete());
+        assertFalse(deliveredChunks.isEmpty());
+        assertTrue(
+                deliveredChunks.size() < coalescedChunkCount,
+                "The bounded buffer should discard coalesced chunks when both subscribers have no demand");
+        assertEquals(deliveredChunks, heartbeatSubscriber.getReceivedOnNext());
+        assertEquals(deliveredChunks, accumulatedChunks);
     }
 
     @Test
