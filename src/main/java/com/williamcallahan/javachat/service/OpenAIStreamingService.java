@@ -45,10 +45,10 @@ public class OpenAIStreamingService {
             "LLM providers unavailable - active provider is rate limited or misconfigured";
 
     /** GitHub Models client when configured. */
-    private OpenAIClient clientPrimary;
+    private OpenAIClient githubModelsClient;
 
     /** OpenAI-compatible client when configured. */
-    private OpenAIClient clientSecondary;
+    private OpenAIClient openAiClient;
 
     private volatile boolean isAvailable;
     private final RateLimitService rateLimitService;
@@ -107,22 +107,22 @@ public class OpenAIStreamingService {
             initializeOpenAiClient();
         }
 
-        this.isAvailable = configuredProviderClient() != null;
+        this.isAvailable = providerRoutingService.hasConfiguredProviderClient(githubModelsClient, openAiClient);
         if (!this.isAvailable) {
             log.warn(
                     "Configured chat provider has no matching API credential - OpenAI streaming will not be available");
         } else {
             log.info(
                     "OpenAI streaming available (githubModelsConfigured={}, openAiCompatibleConfigured={})",
-                    clientPrimary != null,
-                    clientSecondary != null);
+                    githubModelsClient != null,
+                    openAiClient != null);
         }
     }
 
     private void initializeGithubModelsClient() {
         if (githubToken != null && !githubToken.isBlank()) {
             log.info("Initializing OpenAI client with GitHub Models endpoint");
-            this.clientPrimary = createClient(githubToken, githubModelsBaseUrl);
+            this.githubModelsClient = createClient(githubToken, githubModelsBaseUrl);
             log.info("OpenAI client initialized successfully with GitHub Models");
         }
     }
@@ -130,7 +130,7 @@ public class OpenAIStreamingService {
     private void initializeOpenAiClient() {
         if (openaiApiKey != null && !openaiApiKey.isBlank()) {
             log.info("Initializing OpenAI client with OpenAI API");
-            this.clientSecondary = createClient(openaiApiKey, openaiBaseUrl);
+            this.openAiClient = createClient(openaiApiKey, openaiBaseUrl);
             log.info("OpenAI client initialized successfully with OpenAI API");
         }
     }
@@ -138,8 +138,8 @@ public class OpenAIStreamingService {
     /** Closes OpenAI clients during application shutdown. */
     @PreDestroy
     public void shutdown() {
-        closeClientSafely(clientPrimary, "primary");
-        closeClientSafely(clientSecondary, "secondary");
+        closeClientSafely(githubModelsClient, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        closeClientSafely(openAiClient, RateLimitService.ApiProvider.OPENAI.getName());
     }
 
     /**
@@ -153,17 +153,15 @@ public class OpenAIStreamingService {
         log.debug("Starting OpenAI stream with structured prompt");
 
         return Mono.<StreamingResult>defer(() -> {
-                    Optional<OpenAiProviderCandidate> selectedProvider =
-                            providerRoutingService.selectConfiguredProviderCandidate(clientPrimary, clientSecondary);
-                    if (selectedProvider.isEmpty()) {
+                    if (!providerRoutingService.hasConfiguredProviderClient(githubModelsClient, openAiClient)) {
                         log.warn("[LLM] {}", PROVIDER_UNAVAILABLE_MESSAGE);
                         return Mono.<StreamingResult>error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
                     }
 
-                    OpenAiProviderCandidate providerCandidate = selectedProvider.orElseThrow();
-                    Flux<String> contentFlux =
-                            executeStreamingWithSelectedProvider(structuredPrompt, temperature, providerCandidate);
-                    return Mono.just(new StreamingResult(contentFlux, providerCandidate.provider()));
+                    RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
+                    Flux<String> responseTextChunks =
+                            executeStreamingWithConfiguredProvider(structuredPrompt, temperature, configuredProvider);
+                    return Mono.just(new StreamingResult(responseTextChunks, configuredProvider));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -223,35 +221,27 @@ public class OpenAIStreamingService {
     private Mono<String> executeCompletion(
             String prompt, double temperature, CompletionRequestConfiguration configuration) {
         return Mono.<String>defer(() -> {
-                    Optional<OpenAiProviderCandidate> selectedProvider =
-                            providerRoutingService.selectConfiguredProviderCandidate(clientPrimary, clientSecondary);
-                    if (selectedProvider.isEmpty()) {
-                        log.error("[LLM] {}", PROVIDER_UNAVAILABLE_MESSAGE);
-                        return Mono.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
-                    }
-
-                    OpenAiProviderCandidate providerCandidate = selectedProvider.orElseThrow();
-                    RateLimitService.ApiProvider activeProvider = providerCandidate.provider();
+                    RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
                     ResponseCreateParams requestParameters =
-                            buildCompletionRequest(prompt, temperature, activeProvider, configuration);
+                            buildCompletionRequest(prompt, temperature, configuredProvider, configuration);
                     RequestOptions requestOptions = RequestOptions.builder()
                             .timeout(completeTimeout(configuration.requestTimeout()))
                             .build();
-                    if (!rateLimitService.tryReserveRequest(activeProvider)) {
-                        return Mono.error(new ConfiguredProviderTemporarilyUnavailableException(activeProvider));
-                    }
+                    OpenAiProviderCandidate providerAdmission = requireConfiguredProviderAdmission();
 
                     try {
-                        log.info("[LLM] Complete started (providerId={})", activeProvider.ordinal());
+                        log.info("[LLM] Complete started (providerId={})", configuredProvider.ordinal());
                         Response completion =
-                                providerCandidate.client().responses().create(requestParameters, requestOptions);
-                        rateLimitService.recordSuccess(activeProvider);
-                        log.debug("[LLM] Complete succeeded (providerId={})", activeProvider.ordinal());
+                                providerAdmission.client().responses().create(requestParameters, requestOptions);
+                        rateLimitService.recordSuccess(configuredProvider);
+                        log.debug("[LLM] Complete succeeded (providerId={})", configuredProvider.ordinal());
                         return Mono.just(extractTextFromResponse(completion));
                     } catch (RuntimeException completionException) {
-                        providerRoutingService.recordProviderFailure(activeProvider, completionException);
+                        providerRoutingService.recordProviderFailure(configuredProvider, completionException);
                         log.error(
-                                "[LLM] Complete failed (providerId={})", activeProvider.ordinal(), completionException);
+                                "[LLM] Complete failed (providerId={})",
+                                configuredProvider.ordinal(),
+                                completionException);
                         return Mono.error(completionException);
                     }
                 })
@@ -293,24 +283,21 @@ public class OpenAIStreamingService {
         return providerRoutingService.isRecoverableStreamingFailure(upstreamFailure);
     }
 
-    private Flux<String> executeStreamingWithSelectedProvider(
-            StructuredPrompt structuredPrompt, double temperature, OpenAiProviderCandidate selectedProvider) {
-        RateLimitService.ApiProvider activeProvider = selectedProvider.provider();
+    private Flux<String> executeStreamingWithConfiguredProvider(
+            StructuredPrompt structuredPrompt, double temperature, RateLimitService.ApiProvider configuredProvider) {
         OpenAiPreparedRequest preparedStreamingRequest =
-                requestFactory.prepareStreamingRequest(structuredPrompt, temperature, activeProvider);
+                requestFactory.prepareStreamingRequest(structuredPrompt, temperature, configuredProvider);
 
         log.info(
                 "[LLM] Streaming started (structured, providerId={}, model={})",
-                activeProvider.ordinal(),
+                configuredProvider.ordinal(),
                 preparedStreamingRequest.modelId());
 
         return Flux.defer(() -> {
-            if (!rateLimitService.tryReserveRequest(activeProvider)) {
-                return Flux.error(new ConfiguredProviderTemporarilyUnavailableException(activeProvider));
-            }
+            OpenAiProviderCandidate providerAdmission = requireConfiguredProviderAdmission();
             AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
             return executeStreamingRequest(
-                            selectedProvider.client(), preparedStreamingRequest.responseParams(), activeProvider)
+                            providerAdmission.client(), preparedStreamingRequest.responseParams(), configuredProvider)
                     .doOnNext(textChunk -> {
                         if (!textChunk.isEmpty()) {
                             emittedTextChunk.set(true);
@@ -320,7 +307,7 @@ public class OpenAIStreamingService {
                         return Flux.error(streamingFailureReporter.reportTerminalFailure(
                                 streamingFailure,
                                 new StreamingFailureReporter.TerminalAttempt(
-                                        activeProvider.getName(),
+                                        configuredProvider.getName(),
                                         preparedStreamingRequest.modelId(),
                                         1,
                                         1,
@@ -416,14 +403,12 @@ public class OpenAIStreamingService {
      * @return true when the configured provider client is initialized
      */
     public boolean isAvailable() {
-        return isAvailable && configuredProviderClient() != null;
+        return isAvailable && providerRoutingService.hasConfiguredProviderClient(githubModelsClient, openAiClient);
     }
 
-    private OpenAIClient configuredProviderClient() {
-        return switch (providerRoutingService.configuredProvider()) {
-            case GITHUB_MODELS -> clientPrimary;
-            case OPENAI -> clientSecondary;
-            case LOCAL -> null;
-        };
+    private OpenAiProviderCandidate requireConfiguredProviderAdmission() {
+        return providerRoutingService
+                .admitConfiguredProviderRequest(githubModelsClient, openAiClient)
+                .orElseThrow(() -> new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
     }
 }

@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
-import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
@@ -63,13 +62,17 @@ public class OpenAiProviderRoutingService {
      * @param rateLimitService provider rate-limit state tracker
      * @param configuredProviderBackoffSeconds backoff duration after configured-provider transient failure
      * @param configuredProviderSetting configured provider name
-     * @throws IllegalArgumentException when the configured provider is blank or unsupported
+     * @throws IllegalArgumentException when the backoff is not positive or the configured provider is unsupported
      */
     public OpenAiProviderRoutingService(
             RateLimitService rateLimitService,
             @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}") long configuredProviderBackoffSeconds,
             @Value("${LLM_PRIMARY_PROVIDER:github_models}") String configuredProviderSetting) {
         this.rateLimitService = rateLimitService;
+        if (configuredProviderBackoffSeconds <= 0) {
+            throw new IllegalArgumentException(
+                    "LLM_PRIMARY_BACKOFF_SECONDS must be positive; received " + configuredProviderBackoffSeconds + ".");
+        }
         this.configuredProviderBackoffSeconds = configuredProviderBackoffSeconds;
         this.configuredProvider = resolveConfiguredProvider(configuredProviderSetting);
         this.configuredProviderBackoffUntilEpochMs = 0L;
@@ -85,23 +88,36 @@ public class OpenAiProviderRoutingService {
     }
 
     /**
-     * Resolves the configured provider when its client, rate limit, and backoff permit dispatch.
+     * Returns whether the configured provider has a client available for dispatch.
      *
      * @param githubModelsClient GitHub Models client when configured
      * @param openAiClient OpenAI client when configured
-     * @return the configured provider candidate when it is currently callable
-     * @throws ConfiguredProviderTemporarilyUnavailableException when configured-provider backoff or rate limiting
-     *     denies request admission
+     * @return true when the client matching the configured provider is present
      */
-    public Optional<OpenAiProviderCandidate> selectConfiguredProviderCandidate(
+    public boolean hasConfiguredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
+        return configuredProviderClient(githubModelsClient, openAiClient) != null;
+    }
+
+    /**
+     * Atomically admits one request to the configured provider immediately before SDK dispatch.
+     *
+     * <p>The synchronized cooldown check and rate-limit reservation form the single admission
+     * boundary for both streaming and completion requests.</p>
+     *
+     * @param githubModelsClient GitHub Models client when configured
+     * @param openAiClient OpenAI client when configured
+     * @return the admitted configured-provider candidate, or empty when its client is missing
+     * @throws ConfiguredProviderTemporarilyUnavailableException when cooldown or rate limiting denies admission
+     */
+    public synchronized Optional<OpenAiProviderCandidate> admitConfiguredProviderRequest(
             OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
-        OpenAIClient configuredClient = providerClient(configuredProvider, githubModelsClient, openAiClient);
+        OpenAIClient configuredClient = configuredProviderClient(githubModelsClient, openAiClient);
         if (configuredClient == null) {
             log.warn("Configured provider client is unavailable (providerId={})", configuredProvider.ordinal());
             return Optional.empty();
         }
         OpenAiProviderCandidate providerCandidate = new OpenAiProviderCandidate(configuredClient, configuredProvider);
-        requireProviderCandidateAvailability(providerCandidate);
+        requireConfiguredProviderAdmission();
         return Optional.of(providerCandidate);
     }
 
@@ -111,7 +127,7 @@ public class OpenAiProviderRoutingService {
      * @param provider provider that failed
      * @param throwable failure raised by SDK or transport
      */
-    public void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
+    public synchronized void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
         if (throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
             rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
@@ -170,35 +186,27 @@ public class OpenAiProviderRoutingService {
         if (isCallerCancellation(throwable)) {
             return false;
         }
-        return isRateLimit(throwable)
-                || throwable instanceof OpenAIIoException
-                || throwable instanceof UnauthorizedException
-                || throwable instanceof PermissionDeniedException
-                || throwable instanceof InternalServerException
-                || throwable instanceof NotFoundException
-                || isServerError(throwable);
+        return isRateLimit(throwable) || throwable instanceof OpenAIIoException || isServerError(throwable);
     }
 
-    private OpenAIClient providerClient(
-            RateLimitService.ApiProvider provider, OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
-        return switch (provider) {
+    private OpenAIClient configuredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
+        return switch (configuredProvider) {
             case GITHUB_MODELS -> githubModelsClient;
             case OPENAI -> openAiClient;
             case LOCAL -> null;
         };
     }
 
-    private void requireProviderCandidateAvailability(OpenAiProviderCandidate providerCandidate) {
-        RateLimitService.ApiProvider provider = providerCandidate.provider();
+    private void requireConfiguredProviderAdmission() {
         if (isConfiguredProviderInBackoff()) {
-            log.warn("Configured provider unavailable (backoff active, providerId={})", provider.ordinal());
-            throw new ConfiguredProviderTemporarilyUnavailableException(provider);
+            log.warn("Configured provider unavailable (backoff active, providerId={})", configuredProvider.ordinal());
+            throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
         }
-        if (rateLimitService.isProviderAvailable(provider)) {
+        if (rateLimitService.tryReserveRequest(configuredProvider)) {
             return;
         }
-        log.warn("Provider unavailable (rate limited, providerId={})", provider.ordinal());
-        throw new ConfiguredProviderTemporarilyUnavailableException(provider);
+        log.warn("Configured provider admission denied (providerId={})", configuredProvider.ordinal());
+        throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
     }
 
     private static RateLimitService.ApiProvider resolveConfiguredProvider(String configuredProviderSetting) {
@@ -263,8 +271,7 @@ public class OpenAiProviderRoutingService {
     }
 
     private void markConfiguredProviderBackoff() {
-        long backoffEndsAt =
-                System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, configuredProviderBackoffSeconds));
+        long backoffEndsAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(configuredProviderBackoffSeconds);
         this.configuredProviderBackoffUntilEpochMs = backoffEndsAt;
         long backoffSecondsRemaining =
                 Math.max(1, TimeUnit.MILLISECONDS.toSeconds(backoffEndsAt - System.currentTimeMillis()));

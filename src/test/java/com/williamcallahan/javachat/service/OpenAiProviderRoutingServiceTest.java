@@ -16,6 +16,7 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import java.io.InterruptedIOException;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 
@@ -25,7 +26,7 @@ import reactor.core.Exceptions;
  * <p>This suite targets routing directly so streaming transport tests remain focused on stream behavior.</p>
  */
 class OpenAiProviderRoutingServiceTest {
-    private static final long PRIMARY_BACKOFF_SECONDS = 600L;
+    private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
     private static final String OPENAI_REQUEST_FAILED_MESSAGE = "Request failed";
     private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
     private static final String CALLER_INTERRUPTION_MESSAGE = "request interrupted by caller timeout";
@@ -33,7 +34,9 @@ class OpenAiProviderRoutingServiceTest {
     private OpenAiProviderRoutingService createRoutingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         return new OpenAiProviderRoutingService(
-                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+                rateLimitService,
+                CONFIGURED_PROVIDER_BACKOFF_SECONDS,
+                RateLimitService.ApiProvider.GITHUB_MODELS.getName());
     }
 
     @Test
@@ -65,33 +68,49 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void callerCancellationKeepsConfiguredPrimaryProviderEligible() {
+    void callerCancellationKeepsConfiguredProviderEligible() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
         OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
+                rateLimitService, CONFIGURED_PROVIDER_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
         routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedCallerInterruption());
 
         OpenAiProviderCandidate configuredProvider = routingService
-                .selectConfiguredProviderCandidate(githubModelsClient, openAiClient)
+                .admitConfiguredProviderRequest(githubModelsClient, openAiClient)
                 .orElseThrow();
         assertEquals(RateLimitService.ApiProvider.OPENAI, configuredProvider.provider());
     }
 
     @Test
-    void shouldBackoffConfiguredProviderTreats401AsBackoffEligible() {
-        OpenAiProviderRoutingService routingService = createRoutingService();
+    void permanentProviderFailuresDoNotCreateRetryableCooldown() {
         Headers headers = Headers.builder().build();
-        UnauthorizedException unauthorized =
-                UnauthorizedException.builder().headers(headers).build();
+        List<RuntimeException> permanentProviderFailures = List.of(
+                UnauthorizedException.builder().headers(headers).build(),
+                PermissionDeniedException.builder().headers(headers).build(),
+                NotFoundException.builder().headers(headers).build());
 
-        assertTrue(routingService.shouldBackoffConfiguredProvider(unauthorized));
+        for (RuntimeException permanentProviderFailure : permanentProviderFailures) {
+            RateLimitService rateLimitService = mock(RateLimitService.class);
+            when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+                    .thenReturn(true);
+            OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
+            OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, permanentProviderFailure);
+
+            OpenAiProviderCandidate providerAdmission = routingService
+                    .admitConfiguredProviderRequest(githubModelsClient, null)
+                    .orElseThrow();
+            assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, providerAdmission.provider());
+            assertFalse(routingService.shouldBackoffConfiguredProvider(permanentProviderFailure));
+            assertFalse(routingService.isRecoverableStreamingFailure(permanentProviderFailure));
+        }
     }
 
     @Test
@@ -102,16 +121,6 @@ class OpenAiProviderRoutingServiceTest {
                 RateLimitException.builder().headers(headers).build();
 
         assertTrue(routingService.shouldBackoffConfiguredProvider(rateLimit));
-    }
-
-    @Test
-    void shouldBackoffConfiguredProviderTreats404AsBackoffEligible() {
-        OpenAiProviderRoutingService routingService = createRoutingService();
-        Headers headers = Headers.builder().build();
-        NotFoundException notFoundException =
-                NotFoundException.builder().headers(headers).build();
-
-        assertTrue(routingService.shouldBackoffConfiguredProvider(notFoundException));
     }
 
     @Test
@@ -161,10 +170,10 @@ class OpenAiProviderRoutingServiceTest {
     @Test
     void gatewayTimeoutBackoffMakesNextConfiguredProviderRequestRetryable() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
         OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
+                rateLimitService, CONFIGURED_PROVIDER_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         InternalServerException gatewayTimeout = InternalServerException.builder()
                 .statusCode(504)
@@ -175,21 +184,21 @@ class OpenAiProviderRoutingServiceTest {
 
         ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
                 ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.selectConfiguredProviderCandidate(null, openAiClient));
+                () -> routingService.admitConfiguredProviderRequest(null, openAiClient));
 
         assertEquals(RateLimitService.ApiProvider.OPENAI, temporaryFailure.provider());
         assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
     }
 
     @Test
-    void primaryBackoffDoesNotRouteToAlternateProvider() {
+    void configuredProviderBackoffDoesNotRouteToAlternateProvider() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
         OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
+                rateLimitService, CONFIGURED_PROVIDER_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
@@ -197,20 +206,20 @@ class OpenAiProviderRoutingServiceTest {
 
         assertThrows(
                 ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.selectConfiguredProviderCandidate(githubModelsClient, openAiClient));
+                () -> routingService.admitConfiguredProviderRequest(githubModelsClient, openAiClient));
     }
 
     @Test
     void rateLimitAdmissionDenialIsRetryable() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(false);
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
         ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
                 ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.selectConfiguredProviderCandidate(githubModelsClient, null));
+                () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
 
         assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, temporaryFailure.provider());
         assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
@@ -220,7 +229,8 @@ class OpenAiProviderRoutingServiceTest {
     void rejectsBlankProviderConfigurationDuringConstruction() {
         IllegalArgumentException configurationFailure = assertThrows(
                 IllegalArgumentException.class,
-                () -> new OpenAiProviderRoutingService(mock(RateLimitService.class), PRIMARY_BACKOFF_SECONDS, "   "));
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class), CONFIGURED_PROVIDER_BACKOFF_SECONDS, "   "));
 
         assertEquals(
                 "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received a blank value.",
@@ -232,11 +242,26 @@ class OpenAiProviderRoutingServiceTest {
         IllegalArgumentException configurationFailure = assertThrows(
                 IllegalArgumentException.class,
                 () -> new OpenAiProviderRoutingService(
-                        mock(RateLimitService.class), PRIMARY_BACKOFF_SECONDS, "unsupported-provider"));
+                        mock(RateLimitService.class), CONFIGURED_PROVIDER_BACKOFF_SECONDS, "unsupported-provider"));
 
         assertEquals(
                 "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received 'unsupported-provider'.",
                 configurationFailure.getMessage());
+    }
+
+    @Test
+    void rejectsNonPositiveBackoffConfigurationDuringConstruction() {
+        IllegalArgumentException zeroBackoffFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class), 0, RateLimitService.ApiProvider.OPENAI.getName()));
+        IllegalArgumentException negativeBackoffFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class), -1, RateLimitService.ApiProvider.OPENAI.getName()));
+
+        assertEquals("LLM_PRIMARY_BACKOFF_SECONDS must be positive; received 0.", zeroBackoffFailure.getMessage());
+        assertEquals("LLM_PRIMARY_BACKOFF_SECONDS must be positive; received -1.", negativeBackoffFailure.getMessage());
     }
 
     private OpenAIIoException wrappedOkHttpCallTimeout() {
@@ -251,6 +276,8 @@ class OpenAiProviderRoutingServiceTest {
 
     private OpenAiProviderRoutingService createRoutingService(RateLimitService rateLimitService) {
         return new OpenAiProviderRoutingService(
-                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+                rateLimitService,
+                CONFIGURED_PROVIDER_BACKOFF_SECONDS,
+                RateLimitService.ApiProvider.GITHUB_MODELS.getName());
     }
 }
