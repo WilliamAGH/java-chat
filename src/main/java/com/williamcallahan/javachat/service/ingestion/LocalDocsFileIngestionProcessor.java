@@ -35,7 +35,6 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    private static final String API_PATH_SEGMENT = "${app.ingestion.api-path-segment:/api/}";
 
     private final FileContentServices content;
     private final IngestionStorageServices storage;
@@ -181,7 +180,7 @@ public class LocalDocsFileIngestionProcessor {
                 String html = fileOps.readTextFile(file);
                 org.jsoup.nodes.Document doc = Jsoup.parse(html);
                 title = Optional.ofNullable(doc.title()).orElse("");
-                bodyText = url.contains(API_PATH_SEGMENT)
+                bodyText = JavaPackageExtractor.isJavaApiUrl(url)
                         ? htmlExtractor.extractJavaApiContent(doc)
                         : htmlExtractor.extractCleanContent(doc);
                 packageName = JavaPackageExtractor.extractPackage(url, bodyText);

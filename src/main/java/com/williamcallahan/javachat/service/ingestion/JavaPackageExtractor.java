@@ -10,10 +10,24 @@ import java.util.Objects;
  * often appears in the URL path or in a "Package ..." heading in the page text.</p>
  */
 public final class JavaPackageExtractor {
-    private static final String API_PATH_SEGMENT = "/api/";
+    private static final String JAVA_API_PATH_SEGMENT = "/api/";
     private static final int PACKAGE_EXTRACTION_SNIPPET_LENGTH = 100;
 
     private JavaPackageExtractor() {}
+
+    /**
+     * Identifies URLs whose paths point to Java API documentation.
+     *
+     * <p>The same path discriminator selects the structured Javadoc extractor and derives package
+     * metadata, so those behaviors cannot drift between local and remote ingestion.</p>
+     *
+     * @param url source URL
+     * @return {@code true} when the URL contains the Java API path segment
+     */
+    public static boolean isJavaApiUrl(String url) {
+        Objects.requireNonNull(url, "url");
+        return url.contains(JAVA_API_PATH_SEGMENT);
+    }
 
     /**
      * Attempts to derive a package name from the URL and extracted page text.
@@ -26,8 +40,8 @@ public final class JavaPackageExtractor {
         Objects.requireNonNull(url, "url");
         Objects.requireNonNull(bodyText, "bodyText");
 
-        if (url.contains(API_PATH_SEGMENT)) {
-            int apiPathOffset = url.indexOf(API_PATH_SEGMENT) + API_PATH_SEGMENT.length();
+        if (isJavaApiUrl(url)) {
+            int apiPathOffset = url.indexOf(JAVA_API_PATH_SEGMENT) + JAVA_API_PATH_SEGMENT.length();
             String pathAfterApi = url.substring(apiPathOffset);
             String[] pathSegments = pathAfterApi.split("/");
             StringBuilder packageBuilder = new StringBuilder();

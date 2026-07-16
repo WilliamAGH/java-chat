@@ -30,7 +30,6 @@ import org.springframework.stereotype.Service;
 public class DocsIngestionService {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
-    private static final String API_PATH_SEGMENT = "/api/";
     private static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(30);
 
     private final String rootUrl;
@@ -92,7 +91,7 @@ public class DocsIngestionService {
 
             String title = Optional.ofNullable(doc.title()).orElse("");
             Document extractionDoc = doc.clone();
-            String bodyText = url.contains(API_PATH_SEGMENT)
+            String bodyText = JavaPackageExtractor.isJavaApiUrl(url)
                     ? htmlExtractor.extractJavaApiContent(extractionDoc)
                     : htmlExtractor.extractCleanContent(extractionDoc);
             String packageName = JavaPackageExtractor.extractPackage(url, bodyText);
