@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.openai.errors.OpenAIInvalidDataException;
 import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
 import com.openai.models.ResponseFormatJsonObject;
@@ -9,10 +10,13 @@ import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 /**
@@ -22,10 +26,15 @@ import org.springframework.stereotype.Service;
  * and reasoning options consistent between streaming and non-streaming calls.</p>
  */
 @Service
-public class OpenAiRequestFactory {
+@Lazy(false)
+public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
     private static final int GPT5_COMPLETION_OUTPUT_TOKEN_BUDGET = 4000;
+    private static final String OPENAI_REASONING_EFFORT_ENVIRONMENT_VARIABLE = "OPENAI_REASONING_EFFORT";
+    private static final String KNOWN_OPENAI_REASONING_EFFORTS = Arrays.stream(ReasoningEffort.Known.values())
+            .map(knownReasoningEffort -> AsciiTextNormalizer.toLowerAscii(knownReasoningEffort.name()))
+            .collect(Collectors.joining(", "));
 
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
@@ -55,7 +64,7 @@ public class OpenAiRequestFactory {
     private final PromptTruncator promptTruncator;
     private final String openaiModel;
     private final String githubModelsChatModel;
-    private final String reasoningEffortSetting;
+    private final Optional<ReasoningEffort> reasoningEffort;
 
     /**
      * Creates a request factory with model-id and truncation settings from application properties.
@@ -65,6 +74,7 @@ public class OpenAiRequestFactory {
      * @param openaiModel configured OpenAI model id
      * @param githubModelsChatModel configured GitHub Models model id
      * @param reasoningEffortSetting optional reasoning effort for GPT-5 family models
+     * @throws IllegalArgumentException if the reasoning effort is not recognized by the OpenAI SDK
      */
     public OpenAiRequestFactory(
             Chunker chunker,
@@ -76,7 +86,7 @@ public class OpenAiRequestFactory {
         this.promptTruncator = promptTruncator;
         this.openaiModel = openaiModel;
         this.githubModelsChatModel = githubModelsChatModel;
-        this.reasoningEffortSetting = reasoningEffortSetting;
+        this.reasoningEffort = resolveReasoningEffort(reasoningEffortSetting);
     }
 
     /**
@@ -226,9 +236,8 @@ public class OpenAiRequestFactory {
         if (gpt5Family) {
             log.debug("Using GPT-5 family configuration for model: {}", normalizedModelId);
 
-            resolveReasoningEffort()
-                    .ifPresent(effort ->
-                            builder.reasoning(Reasoning.builder().effort(effort).build()));
+            reasoningEffort.ifPresent(effort ->
+                    builder.reasoning(Reasoning.builder().effort(effort).build()));
         } else if (!reasoningModel && Double.isFinite(temperature)) {
             builder.temperature(temperature);
         }
@@ -265,10 +274,25 @@ public class OpenAiRequestFactory {
         return normalizedModelId.substring(providerSeparatorIndex + 1);
     }
 
-    private Optional<ReasoningEffort> resolveReasoningEffort() {
+    private static Optional<ReasoningEffort> resolveReasoningEffort(String reasoningEffortSetting) {
         if (reasoningEffortSetting == null || reasoningEffortSetting.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim())));
+
+        ReasoningEffort configuredReasoningEffort =
+                ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+        try {
+            configuredReasoningEffort.known();
+        } catch (OpenAIInvalidDataException e) {
+            throw new IllegalArgumentException(
+                    "Invalid "
+                            + OPENAI_REASONING_EFFORT_ENVIRONMENT_VARIABLE
+                            + " value '"
+                            + reasoningEffortSetting
+                            + "'. Valid values: "
+                            + KNOWN_OPENAI_REASONING_EFFORTS,
+                    e);
+        }
+        return Optional.of(configuredReasoningEffort);
     }
 }

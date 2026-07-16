@@ -1,16 +1,92 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.openai.models.ReasoningEffort;
 import com.openai.models.responses.ResponseCreateParams;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Lazy;
 
 /**
- * Verifies provider-aware model normalization for OpenAI-compatible request payloads.
+ * Verifies startup configuration and provider-aware OpenAI-compatible request construction.
  */
 class OpenAiRequestFactoryTest {
+
+    @Test
+    void reasoningEffortValidationRunsDuringStartupDespiteGlobalLazyInitialization() {
+        Lazy lazyConfiguration = OpenAiRequestFactory.class.getAnnotation(Lazy.class);
+
+        assertNotNull(lazyConfiguration);
+        assertFalse(lazyConfiguration.value());
+    }
+
+    @Test
+    void invalidReasoningEffortFailsLazyApplicationStartup() {
+        SpringApplication application = new SpringApplication(OpenAiRequestFactoryStartupConfiguration.class);
+        application.setWebApplicationType(WebApplicationType.NONE);
+        application.setLazyInitialization(true);
+        application.setLogStartupInfo(false);
+        application.setRegisterShutdownHook(false);
+
+        RuntimeException startupFailure =
+                assertThrows(RuntimeException.class, () -> application.run("--OPENAI_REASONING_EFFORT=hgh"));
+
+        IllegalArgumentException configurationFailure = findConfigurationFailure(startupFailure);
+        assertTrue(configurationFailure.getMessage().contains("Invalid OPENAI_REASONING_EFFORT value 'hgh'"));
+    }
+
+    @Test
+    void reasoningEffortConfigurationIsCaseInsensitive() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("HIGH");
+
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.buildCompletionRequest("Explain Java streams", 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(
+                ReasoningEffort.HIGH,
+                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
+    }
+
+    @Test
+    void reasoningEffortConfigurationTrimsSurroundingWhitespace() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("\t high \n");
+
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.buildCompletionRequest("Explain Java streams", 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertEquals(
+                ReasoningEffort.HIGH,
+                reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
+    }
+
+    @Test
+    void invalidReasoningEffortConfigurationFailsBeforeARequestIsBuilt() {
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, () -> createRequestFactory("hgh"));
+
+        assertTrue(configurationFailure.getMessage().contains("Invalid OPENAI_REASONING_EFFORT value 'hgh'"));
+        assertTrue(configurationFailure.getMessage().contains("Valid values:"));
+    }
+
+    @Test
+    void blankReasoningEffortConfigurationOmitsReasoning() {
+        OpenAiRequestFactory requestFactory = createRequestFactory(" \t\n ");
+
+        ResponseCreateParams reasoningRequestParams =
+                requestFactory.buildCompletionRequest("Explain Java streams", 0.4, RateLimitService.ApiProvider.OPENAI);
+
+        assertTrue(reasoningRequestParams.reasoning().isEmpty());
+    }
 
     @Test
     void buildCompletionRequestPrefixesGitHubModelWhenProviderPrefixIsMissing() {
@@ -121,5 +197,37 @@ class OpenAiRequestFactoryTest {
         String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
         assertTrue(truncatedPrompt.startsWith("[Context truncated due to GPT-5 8K input limit]"));
         assertTrue(truncatedPrompt.length() < prompt.length());
+    }
+
+    private OpenAiRequestFactory createRequestFactory(String reasoningEffortSetting) {
+        return new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), "gpt-5.2", "openai/gpt-5", reasoningEffortSetting);
+    }
+
+    private IllegalArgumentException findConfigurationFailure(RuntimeException startupFailure) {
+        Throwable failureCause = startupFailure;
+        while (failureCause != null) {
+            if (failureCause instanceof IllegalArgumentException configurationFailure) {
+                return configurationFailure;
+            }
+            failureCause = failureCause.getCause();
+        }
+        throw new AssertionError("Expected an IllegalArgumentException in the startup failure chain", startupFailure);
+    }
+
+    /** Supplies the minimum graph needed to verify eager startup validation. */
+    @Configuration(proxyBeanMethods = false)
+    @Import(OpenAiRequestFactory.class)
+    static class OpenAiRequestFactoryStartupConfiguration {
+
+        @Bean
+        Chunker chunker() {
+            return new Chunker();
+        }
+
+        @Bean
+        PromptTruncator promptTruncator() {
+            return new PromptTruncator();
+        }
     }
 }
