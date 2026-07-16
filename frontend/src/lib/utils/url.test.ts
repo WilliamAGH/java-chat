@@ -3,6 +3,7 @@ import {
   sanitizeUrl,
   buildFullUrl,
   deduplicateCitations,
+  FALLBACK_SOURCE_LABEL,
   getCitationType,
   getDisplaySource,
 } from "./url";
@@ -31,7 +32,12 @@ const PDF_CITATION_URL_CASES = [
   {
     scenario: "a percent-encoded filename",
     citationUrl: "https://example.com/Think%20Java.pdf#page=1",
-    expectedSourceLabel: "Think%20Java",
+    expectedSourceLabel: "Think Java",
+  },
+  {
+    scenario: "the live citation's literal-space filename and page fragment",
+    citationUrl: "/pdfs/Think Java - 2nd Edition Book.pdf#page=42",
+    expectedSourceLabel: "Think Java 2nd Edition Book",
   },
   {
     scenario: "a file URL",
@@ -171,5 +177,9 @@ describe("getDisplaySource", () => {
     expect(getDisplaySource("not-a-url")).toBe("Source");
     expect(getDisplaySource("")).toBe("Source");
     expect(getDisplaySource(null)).toBe("Source");
+  });
+
+  it("returns the fallback label for malformed percent-encoded PDF filenames", () => {
+    expect(getDisplaySource("https://example.com/Think%ZZJava.pdf")).toBe(FALLBACK_SOURCE_LABEL);
   });
 });

@@ -12,6 +12,15 @@ const SINGLE_CITATION: Citation[] = [
   },
 ];
 
+const LIVE_PDF_CITATION: Citation[] = [
+  {
+    url: "/pdfs/Think Java - 2nd Edition Book.pdf",
+    anchor: "page=42",
+    title: "Think Java: How to Think Like a Computer Scientist",
+    snippet: "Think Java 2nd Edition Book",
+  },
+];
+
 describe("CitationPanel", () => {
   // The prototype polyfill lives in src/test/setup.ts; spying here captures calls
   // from the panel revealing the expanded list inside its scroll container.
@@ -61,5 +70,20 @@ describe("CitationPanel", () => {
     await tick();
 
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses a decoded PDF source label without changing the citation href or page anchor", async () => {
+    const { getByRole } = render(CitationPanel, {
+      props: { citations: LIVE_PDF_CITATION },
+    });
+
+    await fireEvent.click(getByRole("button", { name: /1 source/i }));
+    await tick();
+
+    const citationLink = getByRole("link", {
+      name: /Think Java: How to Think Like a Computer Scientist.*Think Java 2nd Edition Book/,
+    });
+    expect(citationLink).not.toHaveAccessibleName(/%20/);
+    expect(citationLink).toHaveAttribute("href", "/pdfs/Think Java - 2nd Edition Book.pdf#page=42");
   });
 });

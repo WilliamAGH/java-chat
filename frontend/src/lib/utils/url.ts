@@ -135,7 +135,13 @@ export function getDisplaySource(url: string | undefined | null): string {
   if (citationPathname?.toLowerCase().endsWith(PDF_EXTENSION)) {
     const segments = citationPathname.split(LOCAL_PATH_PREFIX);
     const filename = segments[segments.length - 1];
-    const cleanName = filename
+    let decodedFilename: string;
+    try {
+      decodedFilename = decodeURIComponent(filename);
+    } catch {
+      return FALLBACK_SOURCE_LABEL;
+    }
+    const cleanName = decodedFilename
       .replace(/\.pdf$/i, "")
       .replace(/[-_]/g, " ")
       .replace(/\s+/g, " ")
