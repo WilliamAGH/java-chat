@@ -89,13 +89,10 @@ public class RateLimitState {
             resetTime = Instant.now().plus(windowDuration);
         }
 
-        state.rateLimitedUntil = resetTime;
-        state.consecutiveFailures.incrementAndGet();
-        state.totalFailures.incrementAndGet();
-        state.lastFailure = Instant.now();
+        state.recordRateLimit(resetTime, Instant.now());
 
         safeSaveState();
-        log.info("[{}] Rate limited until {}", sanitizeLogValue(provider), state.rateLimitedUntil);
+        log.info("[{}] Rate limited until {}", sanitizeLogValue(provider), state.getRateLimitedUntil());
     }
 
     /**
@@ -117,17 +114,13 @@ public class RateLimitState {
             return true;
         }
 
-        if (state.rateLimitedUntil != null && Instant.now().isBefore(state.rateLimitedUntil)) {
-            return false;
-        }
-
-        // Clear rate limit if it has expired
-        if (state.rateLimitedUntil != null && Instant.now().isAfter(state.rateLimitedUntil)) {
-            state.rateLimitedUntil = null;
+        ProviderState.RateLimitWindowEvaluation rateLimitWindowEvaluation =
+                state.evaluateRateLimitWindow(Instant.now());
+        if (rateLimitWindowEvaluation == ProviderState.RateLimitWindowEvaluation.EXPIRED) {
             safeSaveState();
         }
 
-        return true;
+        return rateLimitWindowEvaluation != ProviderState.RateLimitWindowEvaluation.RATE_LIMITED;
     }
 
     /**
@@ -135,11 +128,16 @@ public class RateLimitState {
      */
     public Duration getRemainingWaitTime(String provider) {
         ProviderState state = providerStates.get(provider);
-        if (state == null || state.rateLimitedUntil == null) {
+        if (state == null) {
             return Duration.ZERO;
         }
 
-        Duration remaining = Duration.between(Instant.now(), state.rateLimitedUntil);
+        Instant rateLimitedUntil = state.getRateLimitedUntil();
+        if (rateLimitedUntil == null) {
+            return Duration.ZERO;
+        }
+
+        Duration remaining = Duration.between(Instant.now(), rateLimitedUntil);
         return remaining.isNegative() ? Duration.ZERO : remaining;
     }
 
@@ -300,24 +298,49 @@ public class RateLimitState {
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderState {
-        private volatile Instant rateLimitedUntil;
+        /** Describes the provider's rate-limit window at a single atomic evaluation point. */
+        enum RateLimitWindowEvaluation {
+            AVAILABLE,
+            RATE_LIMITED,
+            EXPIRED
+        }
+
+        private Instant rateLimitedUntil;
         private volatile Instant lastSuccess;
         private volatile Instant lastFailure;
         private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
         private final AtomicLong totalSuccesses = new AtomicLong(0);
         private final AtomicLong totalFailures = new AtomicLong(0);
 
+        synchronized void recordRateLimit(Instant rateLimitDeadline, Instant failedAt) {
+            rateLimitedUntil = rateLimitDeadline;
+            consecutiveFailures.incrementAndGet();
+            totalFailures.incrementAndGet();
+            lastFailure = failedAt;
+        }
+
+        synchronized RateLimitWindowEvaluation evaluateRateLimitWindow(Instant checkedAt) {
+            if (rateLimitedUntil == null) {
+                return RateLimitWindowEvaluation.AVAILABLE;
+            }
+            if (checkedAt.isBefore(rateLimitedUntil)) {
+                return RateLimitWindowEvaluation.RATE_LIMITED;
+            }
+            rateLimitedUntil = null;
+            return RateLimitWindowEvaluation.EXPIRED;
+        }
+
         /**
          * Returns the timestamp when the provider becomes available again.
          */
-        public Instant getRateLimitedUntil() {
+        public synchronized Instant getRateLimitedUntil() {
             return rateLimitedUntil;
         }
 
         /**
          * Sets the timestamp when the provider becomes available again.
          */
-        public void setRateLimitedUntil(Instant rateLimitedUntil) {
+        public synchronized void setRateLimitedUntil(Instant rateLimitedUntil) {
             this.rateLimitedUntil = rateLimitedUntil;
         }
 
