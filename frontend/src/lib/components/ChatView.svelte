@@ -25,6 +25,7 @@
     let messages = $state<MessageWithCitations[]>([]);
     let messagesContainer: HTMLElement | null = $state(null);
     let activeStreamingMessageId = $state<string | null>(null);
+    let activeChatStreamController: AbortController | null = null;
 
     // Scroll indicator for new off-screen content during streaming
     const scrollAnchor = createScrollAnchor();
@@ -37,9 +38,24 @@
     // Streaming state from composable (with 800ms status persistence)
     const streaming = createStreamingState({ statusClearDelayMs: 800 });
 
-    // Cleanup timers on unmount
+    function cancelInFlightChatStream(): void {
+        activeChatStreamController?.abort();
+        activeChatStreamController = null;
+    }
+
+    function isActiveChatStream(
+        chatStreamController: AbortController,
+    ): boolean {
+        return (
+            activeChatStreamController === chatStreamController &&
+            !chatStreamController.signal.aborted
+        );
+    }
+
+    // Cleanup the active stream and timers on unmount
     $effect(() => {
         return () => {
+            cancelInFlightChatStream();
             streaming.cleanup();
             scrollAnchor.cleanup();
         };
@@ -96,12 +112,14 @@
     async function executeChatStream(
         userQuery: string,
         assistantMessageId: string,
+        chatStreamController: AbortController,
     ): Promise<void> {
         try {
             await streamChat(
                 sessionId,
                 userQuery,
                 (chunk) => {
+                    if (!isActiveChatStream(chatStreamController)) return;
                     ensureAssistantMessage(assistantMessageId);
                     updateAssistantMessage(
                         assistantMessageId,
@@ -113,9 +131,17 @@
                     scrollAnchor.onContentAdded();
                 },
                 {
-                    onStatus: streaming.updateStatus,
-                    onError: streaming.updateStatus,
+                    signal: chatStreamController.signal,
+                    onStatus: (streamStatus) => {
+                        if (!isActiveChatStream(chatStreamController)) return;
+                        streaming.updateStatus(streamStatus);
+                    },
+                    onError: (streamError) => {
+                        if (!isActiveChatStream(chatStreamController)) return;
+                        streaming.updateStatus(streamError);
+                    },
                     onCitations: (citations) => {
+                        if (!isActiveChatStream(chatStreamController)) return;
                         ensureAssistantMessage(assistantMessageId);
                         updateAssistantMessage(
                             assistantMessageId,
@@ -128,6 +154,7 @@
                 },
             );
         } catch (error) {
+            if (!isActiveChatStream(chatStreamController)) return;
             const errorMessage =
                 error instanceof Error
                     ? error.message
@@ -145,6 +172,9 @@
         if (!message.trim() || streaming.isStreaming) return;
 
         const userQuery = message.trim();
+        cancelInFlightChatStream();
+        const chatStreamController = new AbortController();
+        activeChatStreamController = chatStreamController;
 
         // Add user message
         messages = [
@@ -157,24 +187,33 @@
             },
         ];
 
-        // Scroll once when user sends - no auto-scroll during streaming
-        await scrollAnchor.scrollOnce();
-
-        // Start streaming
-        streaming.startStream();
-        activeStreamingMessageId = createChatMessageId("chat", sessionId);
-
-        // Track new message for scroll indicator (counts messages, not chunks)
-        scrollAnchor.onNewMessageStarted();
-
         try {
-            const assistantMessageId = activeStreamingMessageId;
-            if (!assistantMessageId) return;
-            await executeChatStream(userQuery, assistantMessageId);
+            // Scroll once when user sends - no auto-scroll during streaming
+            await scrollAnchor.scrollOnce();
+            if (!isActiveChatStream(chatStreamController)) return;
+
+            // Start streaming
+            streaming.startStream();
+            const assistantMessageId = createChatMessageId("chat", sessionId);
+            activeStreamingMessageId = assistantMessageId;
+
+            // Track new message for scroll indicator (counts messages, not chunks)
+            scrollAnchor.onNewMessageStarted();
+
+            await executeChatStream(
+                userQuery,
+                assistantMessageId,
+                chatStreamController,
+            );
         } finally {
-            streaming.finishStream();
-            activeStreamingMessageId = null;
-            // No final scroll - user maintains their position
+            if (activeChatStreamController === chatStreamController) {
+                activeChatStreamController = null;
+                if (!chatStreamController.signal.aborted) {
+                    streaming.finishStream();
+                    activeStreamingMessageId = null;
+                    // No final scroll - user maintains their position
+                }
+            }
         }
     }
 
