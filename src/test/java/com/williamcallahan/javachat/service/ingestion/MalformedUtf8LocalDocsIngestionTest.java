@@ -1,0 +1,108 @@
+package com.williamcallahan.javachat.service.ingestion;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
+import com.williamcallahan.javachat.service.ChunkProcessingService;
+import com.williamcallahan.javachat.service.ContentHasher;
+import com.williamcallahan.javachat.service.FileOperationsService;
+import com.williamcallahan.javachat.service.HtmlContentExtractor;
+import com.williamcallahan.javachat.service.HybridVectorService;
+import com.williamcallahan.javachat.service.LocalStoreService;
+import com.williamcallahan.javachat.service.PdfContentExtractor;
+import com.williamcallahan.javachat.service.ProgressTracker;
+import com.williamcallahan.javachat.service.QdrantCollectionRouter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
+
+/** Proves invalid UTF-8 becomes an observable local-ingestion failure before storage. */
+class MalformedUtf8LocalDocsIngestionTest {
+
+    private static final String NON_UTF8_HTML = "<html><body>caf\u00e9</body></html>";
+    private static final String FILE_FINGERPRINT = "malformed-utf8-fingerprint";
+    private static final String UTF8_DIAGNOSTIC_HINT = "file encoding issue - not valid UTF-8";
+
+    private final Logger ingestionProcessorLogger =
+            (Logger) LoggerFactory.getLogger(LocalDocsFileIngestionProcessor.class);
+    private final ListAppender<ILoggingEvent> ingestionProcessorEvents = new ListAppender<>();
+    private boolean ingestionProcessorLoggerAdditive;
+
+    @BeforeEach
+    void captureIngestionProcessorEvents() {
+        ingestionProcessorLoggerAdditive = ingestionProcessorLogger.isAdditive();
+        ingestionProcessorLogger.setAdditive(false);
+        ingestionProcessorEvents.start();
+        ingestionProcessorLogger.addAppender(ingestionProcessorEvents);
+    }
+
+    @AfterEach
+    void stopCapturingIngestionProcessorEvents() {
+        ingestionProcessorLogger.detachAppender(ingestionProcessorEvents);
+        ingestionProcessorLogger.setAdditive(ingestionProcessorLoggerAdditive);
+        ingestionProcessorEvents.stop();
+    }
+
+    @Test
+    void shouldRejectMalformedUtf8BeforeChunkingOrIndexing(@TempDir Path temporaryDirectory) throws IOException {
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path malformedHtmlFile = localDocsRoot.resolve("malformed.html");
+        Files.createDirectories(localDocsRoot);
+        Files.writeString(malformedHtmlFile, NON_UTF8_HTML, StandardCharsets.ISO_8859_1);
+
+        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        LocalStoreService localStoreService = mock(LocalStoreService.class);
+        when(localStoreService.computeFileContentFingerprint(malformedHtmlFile)).thenReturn(FILE_FINGERPRINT);
+        when(localStoreService.readFileIngestionRecord(anyString())).thenReturn(Optional.empty());
+
+        LocalDocsFileIngestionProcessor ingestionProcessor = new LocalDocsFileIngestionProcessor(
+                new FileContentServices(
+                        new HtmlContentExtractor(),
+                        mock(PdfContentExtractor.class),
+                        new FileOperationsService(),
+                        mock(PdfTitleExtractor.class),
+                        new HtmlContentGuard(),
+                        mock(IngestionQuarantineService.class)),
+                new IngestionStorageServices(
+                        hybridVectorService,
+                        chunkProcessingService,
+                        mock(ContentHasher.class),
+                        localStoreService,
+                        new QdrantCollectionRouter()),
+                mock(ProgressTracker.class),
+                new IngestionProvenanceDeriver(),
+                new LocalIngestionFailureFactory(),
+                mock(IngestedFilePruneService.class));
+
+        LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, malformedHtmlFile);
+
+        assertFalse(processingOutcome.processed());
+        IngestionLocalFailure ingestionFailure = processingOutcome.failure().orElseThrow();
+        assertEquals(malformedHtmlFile.toString(), ingestionFailure.filePath());
+        assertEquals("html-read", ingestionFailure.phase());
+        assertTrue(ingestionFailure.details().contains("MalformedInputException"));
+        assertTrue(ingestionFailure.details().contains(UTF8_DIAGNOSTIC_HINT));
+        assertTrue(ingestionProcessorEvents.list.stream()
+                .anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR
+                        && logEvent.getFormattedMessage().contains("MalformedInputException")));
+        verifyNoInteractions(chunkProcessingService, hybridVectorService);
+    }
+}
