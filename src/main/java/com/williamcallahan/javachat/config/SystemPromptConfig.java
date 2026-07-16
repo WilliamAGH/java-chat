@@ -1,6 +1,6 @@
 package com.williamcallahan.javachat.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import java.util.Objects;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -11,13 +11,15 @@ import org.springframework.context.annotation.Configuration;
 public class SystemPromptConfig {
 
     private static final String JDK_VERSION_PLACEHOLDER = "__JDK_VERSION__";
+    private static final String MARKER_PROSE_LINE_PLACEHOLDER = "__MARKER_PROSE_LINE_CLAUSE__";
+    private static final String MARKER_CODE_BOUNDARY_PLACEHOLDER = "__MARKER_CODE_BOUNDARY_CLAUSE__";
+    private static final String JAVA_FENCE_VALIDITY_PLACEHOLDER = "__JAVA_FENCE_VALIDITY_CLAUSE__";
     static final String MARKER_PROSE_LINE_CLAUSE = "Put each enrichment marker only on its own prose line.";
     static final String MARKER_CODE_BOUNDARY_CLAUSE =
             "Never place an enrichment marker inside inline code or a fenced code block; put it before or after the fence.";
     static final String JAVA_FENCE_VALIDITY_CLAUSE =
             "A fenced `java` block contains syntactically valid Java that compiles with its stated imports and context. Use real APIs appropriate to the response context; never invent API names, method signatures, or type arguments.";
-    private static final String CORE_PROMPT_TEMPLATE =
-            """
+    private static final String CORE_PROMPT_TEMPLATE = """
             You are a Java learning assistant focused on Java __JDK_VERSION__ and current stable JDK releases.
 
             ## Default Environment
@@ -56,9 +58,9 @@ public class SystemPromptConfig {
             - {{warning:Text here}} for common pitfalls to avoid
 
             ### Marker and Code Boundaries
-            - %s
-            - %s
-            - %s
+            - __MARKER_PROSE_LINE_CLAUSE__
+            - __MARKER_CODE_BOUNDARY_CLAUSE__
+            - __JAVA_FENCE_VALIDITY_CLAUSE__
 
             Integrate these markers naturally throughout your prose. Don't group them at the end.
 
@@ -74,10 +76,22 @@ public class SystemPromptConfig {
             - If a feature became final before the active Java version context, treat it as a standard language feature without version caveats
             - The active Java version context is the user-stated version when provided; otherwise use the default (__JDK_VERSION__)
             - If the user explicitly states an older Java version, apply version-appropriate warnings (e.g., preview features in that version)
-            """.formatted(MARKER_PROSE_LINE_CLAUSE, MARKER_CODE_BOUNDARY_CLAUSE, JAVA_FENCE_VALIDITY_CLAUSE);
+            """.replace(
+                    MARKER_PROSE_LINE_PLACEHOLDER, MARKER_PROSE_LINE_CLAUSE)
+            .replace(MARKER_CODE_BOUNDARY_PLACEHOLDER, MARKER_CODE_BOUNDARY_CLAUSE)
+            .replace(JAVA_FENCE_VALIDITY_PLACEHOLDER, JAVA_FENCE_VALIDITY_CLAUSE);
 
-    @Value("${DOCS_JDK_VERSION:25}")
-    private String jdkVersion;
+    private final String jdkVersion;
+
+    /**
+     * Creates prompt configuration from the validated application-properties owner.
+     *
+     * @param appProperties canonical application configuration
+     */
+    public SystemPromptConfig(AppProperties appProperties) {
+        this.jdkVersion = Integer.toString(
+                Objects.requireNonNull(appProperties, "appProperties").getDocs().getJdkVersion());
+    }
 
     /**
      * Core system prompt shared by all models (OpenAI, GitHub Models, etc.)
