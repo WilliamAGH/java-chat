@@ -375,22 +375,27 @@ function createEnrichmentExtension(
       }
 
       const kind = typeof token.kind === "string" ? token.kind : "";
-      const contentToRender = typeof token.content === "string" ? token.content : "";
-      const meta = ENRICHMENT_KINDS[kind];
-      if (!meta) {
+      const enrichmentMarkdown = typeof token.content === "string" ? token.content : "";
+      const enrichmentPresentation = ENRICHMENT_KINDS[kind];
+      if (!enrichmentPresentation) {
         return token.raw;
       }
+      if (enrichmentMarkdown.length === 0) {
+        return "";
+      }
 
-      const normalizedContent = normalizeMarkdownForStreaming(contentToRender);
+      const normalizedEnrichmentMarkdown = normalizeMarkdownForStreaming(enrichmentMarkdown);
 
       // DIAGNOSTIC: Log enrichment content to identify malformed markdown
       if (import.meta.env.DEV) {
-        const hasFences = normalizedContent.includes("```") || normalizedContent.includes("~~~");
-        const isBalanced = hasBalancedCodeFences(normalizedContent);
+        const hasFences =
+          normalizedEnrichmentMarkdown.includes("```") ||
+          normalizedEnrichmentMarkdown.includes("~~~");
+        const isBalanced = hasBalancedCodeFences(normalizedEnrichmentMarkdown);
         if (hasFences && !isBalanced) {
           console.warn("[markdown] Unbalanced code fences in enrichment:", {
             kind,
-            content: normalizedContent,
+            content: normalizedEnrichmentMarkdown,
             raw: token.raw,
           });
         }
@@ -398,14 +403,14 @@ function createEnrichmentExtension(
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
-      const innerHtml = markdownParser.parse(normalizedContent, {
+      const innerHtml = markdownParser.parse(normalizedEnrichmentMarkdown, {
         async: false,
         gfm: true,
         breaks: false, // Preserve fence detection accuracy
       });
 
       return `<div class="inline-enrichment ${kind}" data-enrichment-type="${kind}">
-  <div class="inline-enrichment-header">${meta.icon}<span>${meta.title}</span></div>
+  <div class="inline-enrichment-header">${enrichmentPresentation.icon}<span>${enrichmentPresentation.title}</span></div>
   <div class="enrichment-text">${innerHtml}</div>
 </div>`;
     },
@@ -424,7 +429,7 @@ const STREAMING_MARKDOWN_PARSER = createMarkdownParser(true);
  * Parse markdown to sanitized HTML. SSR-safe - no DOM APIs used.
  * Uses DOMPurify for sanitization. Use this in `$derived` for reactive markdown rendering.
  *
- * @throws Never throws - returns empty string on parse failure and logs error in dev mode
+ * @throws Never throws - returns escaped source text on parse failure
  */
 export function parseMarkdown(
   markdownText: string | null | undefined,
@@ -458,7 +463,7 @@ export function parseMarkdown(
     });
   } catch (parseError) {
     console.error("[markdown] Failed to parse markdown content:", parseError);
-    return "";
+    return escapeHtml(markdownText);
   }
 }
 

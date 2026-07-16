@@ -119,7 +119,7 @@ class EnrichmentPlaceholderizer {
             boolean isStartOfLine = (cursor == 0) || (markdown.charAt(cursor - 1) == '\n');
 
             // Check for fence markers at start of line
-            if (isStartOfLine) {
+            if (isStartOfLine && !fenceTracker.isInsideInlineCode()) {
                 CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, cursor);
                 if (marker != null) {
                     if (!fenceTracker.isInsideFence()) {
@@ -141,7 +141,7 @@ class EnrichmentPlaceholderizer {
             if (!fenceTracker.isInsideFence()) {
                 CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, cursor);
                 if (backtickRun != null) {
-                    fenceTracker.processCharacter(markdown, cursor, isStartOfLine);
+                    fenceTracker.processBacktickRun(markdown, cursor);
                     for (int offset = 0; offset < backtickRun.length(); offset++) {
                         outputBuilder.append(markdown.charAt(cursor + offset));
                     }
@@ -244,7 +244,7 @@ class EnrichmentPlaceholderizer {
         while (scanIndex < markdown.length()) {
             boolean isStartOfLine = (scanIndex == startIndex) || (markdown.charAt(scanIndex - 1) == '\n');
 
-            if (isStartOfLine) {
+            if (isStartOfLine && !fenceTracker.isInsideInlineCode()) {
                 CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, scanIndex);
                 if (marker != null) {
                     if (!fenceTracker.isInsideFence()) {
@@ -261,7 +261,7 @@ class EnrichmentPlaceholderizer {
                 CodeFenceStateTracker.BacktickRun backtickRun =
                         CodeFenceStateTracker.scanBacktickRun(markdown, scanIndex);
                 if (backtickRun != null) {
-                    fenceTracker.processCharacter(markdown, scanIndex, isStartOfLine);
+                    fenceTracker.processBacktickRun(markdown, scanIndex);
                     scanIndex += backtickRun.length();
                     continue;
                 }
@@ -299,13 +299,13 @@ class EnrichmentPlaceholderizer {
         return runStart + (runLength - MARKER_END.length());
     }
 
-    private MarkdownEnrichment createEnrichment(EnrichmentKind kind, String content, int absolutePosition) {
+    private MarkdownEnrichment createEnrichment(EnrichmentKind kind, String enrichmentMarkdown, int absolutePosition) {
         return switch (kind) {
-            case HINT -> Hint.create(content, absolutePosition);
-            case WARNING -> Warning.create(content, absolutePosition);
-            case BACKGROUND -> Background.create(content, absolutePosition);
-            case EXAMPLE -> Example.create(content, absolutePosition);
-            case REMINDER -> Reminder.create(content, absolutePosition);
+            case HINT -> Hint.create(enrichmentMarkdown, absolutePosition);
+            case WARNING -> Warning.create(enrichmentMarkdown, absolutePosition);
+            case BACKGROUND -> Background.create(enrichmentMarkdown, absolutePosition);
+            case EXAMPLE -> Example.create(enrichmentMarkdown, absolutePosition);
+            case REMINDER -> Reminder.create(enrichmentMarkdown, absolutePosition);
         };
     }
 
@@ -320,19 +320,19 @@ class EnrichmentPlaceholderizer {
             return null;
         }
 
-        String content =
-                context.markdown.substring(contentStartIndex, closingIndex).trim();
+        String enrichmentMarkdown =
+                context.markdown.substring(contentStartIndex, closingIndex).strip();
         int consumedLength = (closingIndex + 2) - openingIndex;
 
-        if (content.isEmpty()) {
+        if (MarkdownEnrichment.isBlankEnrichmentText(enrichmentMarkdown)) {
             return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
         }
 
-        MarkdownEnrichment enrichment = createEnrichment(kind, content, absolutePosition);
+        MarkdownEnrichment enrichment = createEnrichment(kind, enrichmentMarkdown, absolutePosition);
         context.enrichments.add(enrichment);
 
         String placeholderId = PLACEHOLDER_PREFIX + UUID.randomUUID().toString().replace("-", "");
-        context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, content));
+        context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, enrichmentMarkdown));
         context.outputBuilder.append(placeholderId);
 
         return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);

@@ -7,8 +7,8 @@ package com.williamcallahan.javachat.domain.markdown;
 public record Hint(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
 
     public Hint {
-        if (content == null || content.trim().isEmpty()) {
-            throw new IllegalArgumentException("Hint content cannot be null or empty");
+        if (MarkdownEnrichment.isBlankEnrichmentText(content)) {
+            throw new IllegalArgumentException("Hint content cannot be null or blank");
         }
         if (priority == null) {
             throw new IllegalArgumentException("Hint priority cannot be null");

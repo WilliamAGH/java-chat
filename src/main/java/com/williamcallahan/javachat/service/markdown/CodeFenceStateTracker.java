@@ -8,8 +8,9 @@ package com.williamcallahan.javachat.service.markdown;
  * and {@link MarkdownNormalizer} require identical fence-tracking logic to avoid
  * processing markers inside code regions.</p>
  *
- * <p>Usage: call {@link #processCharacter(String, int, boolean)} for each character position,
- * then check {@link #isInsideCode()} before processing enrichment markers or list normalization.</p>
+ * <p>Callers own positional fence recognition because attached and start-of-line fences have
+ * different normalization rules. After scanning a backtick run outside a fence, callers use
+ * {@link #processBacktickRun(String, int)} to update only inline-code state.</p>
  */
 final class CodeFenceStateTracker {
 
@@ -136,50 +137,29 @@ final class CodeFenceStateTracker {
     }
 
     /**
-     * Processes a character position to update fence and inline code state.
+     * Updates inline-code state for the backtick run at the supplied position.
+     *
+     * <p>Fence transitions remain explicit through {@link #enterFence(char, int)} and
+     * {@link #exitFence()} so a fence-like run inside inline code cannot open a fenced block.</p>
      *
      * @param text the full markdown text
-     * @param cursor current position in the text
-     * @param isStartOfLine whether this position is at the start of a line
-     * @return the number of characters consumed (0 if no state change, &gt;0 if fence/backtick run was processed)
+     * @param cursor current backtick-run position in the text
      */
-    int processCharacter(String text, int cursor, boolean isStartOfLine) {
-        // Check for fence markers at start of line
-        if (isStartOfLine) {
-            FenceMarker marker = scanFenceMarker(text, cursor);
-            if (marker != null) {
-                if (!inFence) {
-                    inFence = true;
-                    fenceChar = marker.character();
-                    fenceLength = marker.length();
-                } else if (marker.character() == fenceChar && marker.length() >= fenceLength) {
-                    inFence = false;
-                    fenceChar = 0;
-                    fenceLength = 0;
-                }
-                return marker.length();
-            }
+    void processBacktickRun(String text, int cursor) {
+        if (inFence) {
+            return;
         }
-
-        // Track inline code spans outside fenced code
-        if (!inFence) {
-            BacktickRun backtickRun = scanBacktickRun(text, cursor);
-            if (backtickRun != null) {
-                if (!inInlineCode && !hasClosingBacktickRun(text, cursor, backtickRun.length())) {
-                    return backtickRun.length();
-                }
-                if (!inInlineCode) {
-                    inInlineCode = true;
-                    inlineBacktickLength = backtickRun.length();
-                } else if (backtickRun.length() == inlineBacktickLength) {
-                    inInlineCode = false;
-                    inlineBacktickLength = 0;
-                }
-                return backtickRun.length();
-            }
+        BacktickRun backtickRun = scanBacktickRun(text, cursor);
+        if (backtickRun == null || (!inInlineCode && !hasClosingBacktickRun(text, cursor, backtickRun.length()))) {
+            return;
         }
-
-        return 0;
+        if (!inInlineCode) {
+            inInlineCode = true;
+            inlineBacktickLength = backtickRun.length();
+        } else if (backtickRun.length() == inlineBacktickLength) {
+            inInlineCode = false;
+            inlineBacktickLength = 0;
+        }
     }
 
     /**

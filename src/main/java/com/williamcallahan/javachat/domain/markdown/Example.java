@@ -7,8 +7,8 @@ package com.williamcallahan.javachat.domain.markdown;
 public record Example(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
 
     public Example {
-        if (content == null || content.trim().isEmpty()) {
-            throw new IllegalArgumentException("Example content cannot be null or empty");
+        if (MarkdownEnrichment.isBlankEnrichmentText(content)) {
+            throw new IllegalArgumentException("Example content cannot be null or blank");
         }
         if (priority == null) {
             throw new IllegalArgumentException("Example priority cannot be null");

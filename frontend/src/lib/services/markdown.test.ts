@@ -37,6 +37,23 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain('data-enrichment-type="hint"');
   });
 
+  it("does not render cards for Unicode-whitespace-only enrichment text", () => {
+    const unicodeBlankEnrichmentTexts = [
+      "\u3000",
+      "\u2003",
+      "\u00a0",
+      "\ufeff",
+      " \t\u00a0\u2003\u3000\n",
+    ];
+
+    for (const blankEnrichmentText of unicodeBlankEnrichmentTexts) {
+      const renderedHtml = parseMarkdown(`{{hint:${blankEnrichmentText}}}`);
+
+      expect(renderedHtml).not.toContain("inline-enrichment");
+      expect(renderedHtml).not.toContain("Helpful Hints");
+    }
+  });
+
   it("preserves trailing content brace when enrichment closes with }}}", () => {
     const markdown = "{{example: try (var scope = open()) { doWork(); }}}";
     const renderedHtml = parseMarkdown(markdown);

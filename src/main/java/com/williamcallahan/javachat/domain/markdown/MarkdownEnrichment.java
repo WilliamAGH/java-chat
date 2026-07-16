@@ -33,10 +33,26 @@ public sealed interface MarkdownEnrichment permits Hint, Warning, Background, Ex
     int position();
 
     /**
-     * Checks if this enrichment has non-empty content.
-     * @return true if content is not empty
+     * Reports whether enrichment text would render without a visible character.
+     *
+     * <p>{@link String#isBlank()} intentionally excludes non-breaking spaces such as U+00A0.
+     * Enrichment cards also treat Unicode separator characters recognized by
+     * {@link Character#isSpaceChar(int)} as blank.</p>
+     *
+     * @return {@code true} for null, empty, Java-whitespace-only, or Unicode-space-only text
      */
-    default boolean hasContent() {
-        return content() != null && !content().trim().isEmpty();
+    static boolean isBlankEnrichmentText(String enrichmentText) {
+        return enrichmentText == null
+                || enrichmentText.codePoints().allMatch(MarkdownEnrichment::isWhitespaceOrSpaceCharacter);
+    }
+
+    private static boolean isWhitespaceOrSpaceCharacter(int codePoint) {
+        return Character.isWhitespace(codePoint)
+                || Character.isSpaceChar(codePoint)
+                || isZeroWidthNoBreakSpace(codePoint);
+    }
+
+    private static boolean isZeroWidthNoBreakSpace(int codePoint) {
+        return codePoint == '\uFEFF';
     }
 }

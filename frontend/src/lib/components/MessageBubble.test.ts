@@ -48,4 +48,21 @@ describe("MessageBubble", () => {
 
     expect(getByRole("button", { name: /refresh and retry/i })).toBeInTheDocument();
   });
+
+  it("does not expose a Unicode-blank enrichment marker as fallback text", () => {
+    const { container } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-blank-enrichment",
+          role: "assistant",
+          messageText: "{{hint:\u3000}}",
+          timestamp: 1,
+        },
+        index: 0,
+      },
+    });
+
+    expect(container.textContent).not.toContain("{{hint:");
+    expect(container.querySelector(".inline-enrichment")).toBeNull();
+  });
 });

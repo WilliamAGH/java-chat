@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +57,20 @@ class EnrichmentPlaceholderizerTest {
     }
 
     @Test
+    void shouldDiscardUnicodeWhitespaceOnlyEnrichmentBeforeCreatingPlaceholder() {
+        String markdown = "{{hint: \t\u00A0\u2003\u3000\n}}";
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String processedMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+
+        assertTrue(processedMarkdown.isEmpty(), "Blank marker should be consumed without rendered text");
+        assertTrue(enrichments.isEmpty(), "Blank marker should not create a domain enrichment");
+        assertTrue(placeholders.isEmpty(), "Blank marker should not create a render placeholder");
+    }
+
+    @Test
     void shouldIgnoreEnrichmentInsideInlineCode() {
         String markdown = "Use `{{hint: inline}}` to show markers.";
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
@@ -66,5 +81,33 @@ class EnrichmentPlaceholderizerTest {
 
         assertFalse(processedMarkdown.contains("ENRICHMENT_"), "Inline code should not be placeholderized");
         assertTrue(processedMarkdown.contains("`{{hint: inline}}`"), "Inline code markers should remain intact");
+    }
+
+    @Test
+    void shouldProcessEnrichmentAfterMultilineInlineCodeContainingFenceLikeBackticks() {
+        String markdown = String.join("\n", "`code", "```java", "more` {{hint: visible}}");
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+
+        assertTrue(placeholderMarkdown.contains("ENRICHMENT_"));
+        assertEquals(1, enrichments.size());
+        assertEquals(1, placeholders.size());
+    }
+
+    @Test
+    void shouldProcessEnrichmentContainingMultilineInlineCodeWithFenceLikeBackticks() {
+        String markdown = String.join("\n", "{{hint: `code", "```java", "more`}}");
+        List<MarkdownEnrichment> enrichments = new ArrayList<>();
+        Map<String, String> placeholders = new HashMap<>();
+
+        String placeholderMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments(markdown, enrichments, placeholders);
+
+        assertTrue(placeholderMarkdown.contains("ENRICHMENT_"));
+        assertEquals(1, enrichments.size());
+        assertEquals(1, placeholders.size());
     }
 }

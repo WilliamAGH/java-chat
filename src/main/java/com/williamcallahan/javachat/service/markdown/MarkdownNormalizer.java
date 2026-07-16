@@ -6,7 +6,8 @@ package com.williamcallahan.javachat.service.markdown;
 final class MarkdownNormalizer {
     private MarkdownNormalizer() {}
 
-    private static final int INDENTED_CODE_BLOCK_SPACES = 4;
+    private static final int LIST_CONTINUATION_INDENTATION_SPACES = 4;
+    private static final int MAX_COMMONMARK_FENCE_INDENTATION_SPACES = 3;
 
     // Normalize: preserve fences; convert "1) " to "1. " outside fences so Flexmark sees OLs
     static String preNormalizeForListsAndFences(String markdownText) {
@@ -62,7 +63,7 @@ final class MarkdownNormalizer {
                 CodeFenceStateTracker.BacktickRun backtickRun =
                         CodeFenceStateTracker.scanBacktickRun(markdownText, cursor);
                 if (backtickRun != null) {
-                    fenceTracker.processCharacter(markdownText, cursor, isStartOfLine);
+                    fenceTracker.processBacktickRun(markdownText, cursor);
                     appendBacktickRun(normalizedBuilder, markdownText, cursor, backtickRun.length());
                     cursor += backtickRun.length();
                     continue;
@@ -101,8 +102,9 @@ final class MarkdownNormalizer {
             int lineEndIndex = cursor;
             String line = markdownText.substring(lineStartIndex, lineEndIndex);
             String trimmed = line.stripLeading();
+            boolean wasInsideFence = fenceTracker.isInsideFence();
 
-            CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(trimmed, 0);
+            CodeFenceStateTracker.FenceMarker marker = scanFenceMarkerAtCommonMarkIndentation(line);
             if (marker != null) {
                 if (!fenceTracker.isInsideFence()) {
                     fenceTracker.enterFence(marker.character(), marker.length());
@@ -112,12 +114,15 @@ final class MarkdownNormalizer {
             }
 
             boolean isHeader = !fenceTracker.isInsideFence() && isNumericHeader(trimmed);
+            boolean isFenceContentLine = wasInsideFence || fenceTracker.isInsideFence();
 
             if (isHeader) {
                 inNumericHeader = true;
                 normalizedBuilder.append(line);
-            } else if (inNumericHeader && shouldIndentContinuationLine(trimmed)) {
-                normalizedBuilder.append(" ".repeat(INDENTED_CODE_BLOCK_SPACES)).append(line);
+            } else if (inNumericHeader && (isFenceContentLine || shouldIndentContinuationLine(trimmed))) {
+                normalizedBuilder
+                        .append(" ".repeat(LIST_CONTINUATION_INDENTATION_SPACES))
+                        .append(line);
             } else {
                 normalizedBuilder.append(line);
             }
@@ -152,6 +157,22 @@ final class MarkdownNormalizer {
         char firstChar = trimmedLine.charAt(0);
         boolean unorderedMarker = firstChar == '-' || firstChar == '*' || firstChar == '+' || firstChar == '•';
         return !unorderedMarker && !startsWithOrderedMarker(trimmedLine);
+    }
+
+    /**
+     * Recognizes only fences allowed by CommonMark's three-space indentation allowance.
+     *
+     * <p>Four or more leading spaces are code content and cannot close an active fence.</p>
+     */
+    private static CodeFenceStateTracker.FenceMarker scanFenceMarkerAtCommonMarkIndentation(String line) {
+        int fenceMarkerIndex = 0;
+        while (fenceMarkerIndex < line.length() && line.charAt(fenceMarkerIndex) == ' ') {
+            fenceMarkerIndex++;
+        }
+        if (fenceMarkerIndex > MAX_COMMONMARK_FENCE_INDENTATION_SPACES) {
+            return null;
+        }
+        return CodeFenceStateTracker.scanFenceMarker(line, fenceMarkerIndex);
     }
 
     private static boolean isNumericHeader(String trimmedLine) {

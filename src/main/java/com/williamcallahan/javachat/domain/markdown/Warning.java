@@ -7,8 +7,8 @@ package com.williamcallahan.javachat.domain.markdown;
 public record Warning(String content, EnrichmentPriority priority, int position) implements MarkdownEnrichment {
 
     public Warning {
-        if (content == null || content.trim().isEmpty()) {
-            throw new IllegalArgumentException("Warning content cannot be null or empty");
+        if (MarkdownEnrichment.isBlankEnrichmentText(content)) {
+            throw new IllegalArgumentException("Warning content cannot be null or blank");
         }
         if (priority == null) {
             throw new IllegalArgumentException("Warning priority cannot be null");
