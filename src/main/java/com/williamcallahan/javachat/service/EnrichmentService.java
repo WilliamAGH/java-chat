@@ -3,6 +3,9 @@ package com.williamcallahan.javachat.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
 import org.slf4j.Logger;
@@ -16,6 +19,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class EnrichmentService {
     private static final Logger logger = LoggerFactory.getLogger(EnrichmentService.class);
+    private static final double ENRICHMENT_TEMPERATURE = 0.7;
+
+    /** Accommodates hidden reasoning while leaving room for the bounded enrichment JSON object. */
+    private static final int ENRICHMENT_OUTPUT_TOKEN_BUDGET = 4_000;
 
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper objectMapper;
@@ -25,13 +32,18 @@ public class EnrichmentService {
      */
     public EnrichmentService(ObjectMapper objectMapper, OpenAIStreamingService openAIStreamingService) {
         this.objectMapper = objectMapper.copy();
+        this.objectMapper
+                .coercionConfigFor(LogicalType.Textual)
+                .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail)
+                .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail);
         this.openAIStreamingService = openAIStreamingService;
     }
 
     /**
      * Builds enrichment metadata for a user query and JDK version using context snippets.
      */
-    @Cacheable(value = "enrichment-cache", key = "#userQuery + ':' + #jdkVersion")
+    @Cacheable("enrichment-cache")
     public Enrichment enrich(String userQuery, String jdkVersion, List<String> contextSnippets) {
         logger.debug("EnrichmentService.enrich called");
         StringBuilder prompt = new StringBuilder();
@@ -58,58 +70,32 @@ public class EnrichmentService {
             throw new IllegalStateException("OpenAIStreamingService unavailable for enrichment");
         }
 
-        String json = openAIStreamingService.complete(prompt.toString(), 0.7).block();
-        if (json == null || json.isBlank()) {
+        String enrichmentJson = openAIStreamingService
+                .completeJsonObject(prompt.toString(), ENRICHMENT_TEMPERATURE, ENRICHMENT_OUTPUT_TOKEN_BUDGET)
+                .block();
+        if (enrichmentJson == null || enrichmentJson.isBlank()) {
             throw new IllegalStateException("LLM returned empty enrichment response");
         }
 
-        String cleanedJson = cleanJson(json);
         try {
-            Enrichment parsed = objectMapper
+            Enrichment enrichment = objectMapper
                     .reader()
-                    .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                     .forType(Enrichment.class)
-                    .readValue(cleanedJson);
+                    .readValue(enrichmentJson);
 
-            if (parsed.getJdkVersion() == null || parsed.getJdkVersion().isBlank()) {
-                parsed.setJdkVersion(jdkVersion);
+            if (enrichment.getJdkVersion() == null || enrichment.getJdkVersion().isBlank()) {
+                enrichment.setJdkVersion(jdkVersion);
             }
-            if (parsed.getHints() == null) parsed.setHints(List.of());
-            if (parsed.getReminders() == null) parsed.setReminders(List.of());
-            if (parsed.getBackground() == null) parsed.setBackground(List.of());
-            return parsed.sanitized();
+            if (enrichment.getHints() == null) enrichment.setHints(List.of());
+            if (enrichment.getReminders() == null) enrichment.setReminders(List.of());
+            if (enrichment.getBackground() == null) enrichment.setBackground(List.of());
+            return enrichment.sanitized();
         } catch (JsonProcessingException jsonParseException) {
             throw new IllegalStateException(
                     "LLM enrichment response was not valid JSON: " + jsonParseException.getMessage(),
                     jsonParseException);
         }
-    }
-
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        String trimmedJson = raw.trim();
-        if (trimmedJson.startsWith("```")) {
-            int firstBrace = trimmedJson.indexOf('{');
-            int lastBrace = trimmedJson.lastIndexOf('}');
-            if (firstBrace >= 0 && lastBrace >= firstBrace) {
-                return trimmedJson.substring(firstBrace, lastBrace + 1);
-            }
-            int firstNewline = trimmedJson.indexOf('\n');
-            if (firstNewline >= 0) {
-                trimmedJson = trimmedJson.substring(firstNewline + 1);
-            }
-            int lastFence = trimmedJson.lastIndexOf("```");
-            if (lastFence >= 0) {
-                trimmedJson = trimmedJson.substring(0, lastFence).trim();
-            }
-        }
-        if (!trimmedJson.startsWith("{")) {
-            int firstBrace = trimmedJson.indexOf('{');
-            int lastBrace = trimmedJson.lastIndexOf('}');
-            if (firstBrace >= 0 && lastBrace >= firstBrace) {
-                return trimmedJson.substring(firstBrace, lastBrace + 1);
-            }
-        }
-        return trimmedJson;
     }
 }
