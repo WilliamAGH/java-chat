@@ -1,112 +1,116 @@
 package com.williamcallahan.javachat.support;
 
+import io.grpc.Status;
 import java.util.Locale;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 
 /**
  * Classifies retrieval errors and logs user-facing context without leaking raw error payloads.
  */
 public final class RetrievalErrorClassifier {
+
+    /** Owns the stable diagnostic label and vector-store retry policy for each failure category. */
+    private enum RetrievalErrorCategory {
+        NOT_FOUND("404 Not Found", false),
+        UNAUTHORIZED("401 Unauthorized", false),
+        FORBIDDEN("403 Forbidden", false),
+        RATE_LIMITED("429 Rate Limited", true),
+        CONNECTION_ERROR("Connection Error", true),
+        EMBEDDING_SERVICE_UNAVAILABLE("Embedding Service Unavailable", false),
+        UNKNOWN("Unknown Error", false);
+
+        private final String errorLabel;
+        private final boolean retryableVectorStoreFailure;
+
+        RetrievalErrorCategory(String errorLabel, boolean retryableVectorStoreFailure) {
+            this.errorLabel = errorLabel;
+            this.retryableVectorStoreFailure = retryableVectorStoreFailure;
+        }
+    }
+
     private RetrievalErrorClassifier() {}
 
     /**
-     * Determine a stable error category based on exception messages and causes.
+     * Determines a stable error category from exception types, messages, and causes.
      *
-     * @param error failure encountered during retrieval
+     * @param failure failure encountered during retrieval
      * @return normalized error category label
      */
-    public static String determineErrorType(Throwable error) {
-        StringBuilder messageBuilder = new StringBuilder();
-        Throwable current = error;
+    public static String determineErrorType(Throwable failure) {
+        return classify(failure).errorLabel;
+    }
+
+    private static RetrievalErrorCategory classify(Throwable failure) {
+        StringBuilder failureMessageBuilder = new StringBuilder();
+        boolean timeoutExceptionFound = false;
+        boolean retryableGrpcStatusFound = isRetryableGrpcStatus(failure);
+        Throwable current = failure;
         while (current != null) {
-            String currentMessage = current.getMessage();
-            if (currentMessage != null && !currentMessage.isBlank()) {
-                if (messageBuilder.length() > 0) {
-                    messageBuilder.append(' ');
+            timeoutExceptionFound |= current instanceof TimeoutException;
+
+            String currentFailureMessage = current.getMessage();
+            if (currentFailureMessage != null && !currentFailureMessage.isBlank()) {
+                if (failureMessageBuilder.length() > 0) {
+                    failureMessageBuilder.append(' ');
                 }
-                messageBuilder.append(currentMessage);
+                failureMessageBuilder.append(currentFailureMessage);
             }
             current = current.getCause();
         }
 
-        String message = messageBuilder.toString().toLowerCase(Locale.ROOT);
+        String combinedFailureMessage = failureMessageBuilder.toString().toLowerCase(Locale.ROOT);
 
-        if (message.contains("404") || message.contains("not found")) {
-            return "404 Not Found";
-        } else if (message.contains("401") || message.contains("unauthorized")) {
-            return "401 Unauthorized";
-        } else if (message.contains("403") || message.contains("forbidden")) {
-            return "403 Forbidden";
-        } else if (message.contains("429") || message.contains("too many requests")) {
-            return "429 Rate Limited";
-        } else if (message.contains("connection") || message.contains("timeout")) {
-            return "Connection Error";
-        } else if (message.contains("embedding")
-                && (message.contains("unavailable")
-                        || message.contains("unreachable")
-                        || message.contains("provider"))) {
-            return "Embedding Service Unavailable";
+        if (combinedFailureMessage.contains("404") || combinedFailureMessage.contains("not found")) {
+            return RetrievalErrorCategory.NOT_FOUND;
+        } else if (combinedFailureMessage.contains("401") || combinedFailureMessage.contains("unauthorized")) {
+            return RetrievalErrorCategory.UNAUTHORIZED;
+        } else if (combinedFailureMessage.contains("403") || combinedFailureMessage.contains("forbidden")) {
+            return RetrievalErrorCategory.FORBIDDEN;
+        } else if (combinedFailureMessage.contains("429") || combinedFailureMessage.contains("too many requests")) {
+            return RetrievalErrorCategory.RATE_LIMITED;
+        } else if (timeoutExceptionFound || retryableGrpcStatusFound || combinedFailureMessage.contains("connection")) {
+            return RetrievalErrorCategory.CONNECTION_ERROR;
+        } else if (combinedFailureMessage.contains("embedding")
+                && (combinedFailureMessage.contains("unavailable")
+                        || combinedFailureMessage.contains("unreachable")
+                        || combinedFailureMessage.contains("provider"))) {
+            return RetrievalErrorCategory.EMBEDDING_SERVICE_UNAVAILABLE;
         }
-        return "Unknown Error";
+        return RetrievalErrorCategory.UNKNOWN;
     }
 
     /**
-     * Determines whether the exception is a transient Qdrant/vector store error that should trigger fallback.
+     * Determines whether the failure is a transient Qdrant/vector store error that should be retried.
      *
      * <p>Transient errors include connection issues, timeouts, and service unavailability (503).
-     * Non-transient errors like invalid UUID format or programming errors should NOT trigger fallback
+     * Non-transient errors like invalid UUID format or programming errors should NOT be retried
      * as they indicate bugs that need fixing.
      *
-     * @param error the exception to classify
-     * @return true if the error is transient and fallback is appropriate
+     * @param failure exception to classify
+     * @return true if the failure is transient and a retry is appropriate
      */
-    public static boolean isTransientVectorStoreError(Throwable error) {
-        String errorType = determineErrorType(error);
+    public static boolean isTransientVectorStoreError(Throwable failure) {
+        return classify(failure).retryableVectorStoreFailure;
+    }
 
-        // Connection errors and rate limits are transient
-        if ("Connection Error".equals(errorType) || "429 Rate Limited".equals(errorType)) {
-            return true;
+    /**
+     * Identifies gRPC transport failures eligible for the shared vector-store retry path.
+     *
+     * <p>{@link Status#fromThrowable(Throwable)} locates wrapped gRPC status exceptions.
+     * {@link Status.Code#RESOURCE_EXHAUSTED} remains non-retryable because it can represent
+     * quota or capacity pressure rather than a transport interruption.</p>
+     */
+    private static boolean isRetryableGrpcStatus(Throwable failure) {
+        if (failure == null) {
+            return false;
         }
 
-        // Check for specific Qdrant/gRPC error patterns in exception chain
-        Throwable current = error;
-        while (current != null) {
-            String exceptionName = current.getClass().getName().toLowerCase(Locale.ROOT);
-            String message = current.getMessage();
-            String lowerMessage = message != null ? message.toLowerCase(Locale.ROOT) : "";
-
-            // gRPC errors from Qdrant client
-            if (exceptionName.contains("grpc") || exceptionName.contains("qdrant")) {
-                // Service unavailable, deadline exceeded are transient
-                if (lowerMessage.contains("unavailable")
-                        || lowerMessage.contains("deadline exceeded")
-                        || lowerMessage.contains("resource exhausted")) {
-                    return true;
-                }
-            }
-
-            // ExecutionException wrapping gRPC failures
-            if (current instanceof java.util.concurrent.ExecutionException) {
-                // Check the cause for gRPC issues
-                Throwable cause = current.getCause();
-                if (cause != null) {
-                    String causeName = cause.getClass().getName().toLowerCase(Locale.ROOT);
-                    if (causeName.contains("statusruntimeexception")) {
-                        return true; // gRPC status errors are typically transient
-                    }
-                }
-            }
-
-            // IllegalArgumentException for UUID parsing is NOT transient (programming error)
-            if (current instanceof IllegalArgumentException && lowerMessage.contains("uuid")) {
-                return false;
-            }
-
-            current = current.getCause();
-        }
-
-        // Default: unknown errors are not assumed to be transient
-        return false;
+        Status.Code grpcStatusCode = Status.fromThrowable(failure).getCode();
+        return switch (grpcStatusCode) {
+            case DEADLINE_EXCEEDED, UNAVAILABLE -> true;
+            default -> false;
+        };
     }
 
     /**
