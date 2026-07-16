@@ -154,6 +154,15 @@ class ComprehensiveListFormattingTest {
     }
 
     @Test
+    void testLastInlineItemKeepsAbbreviationBeforeTrailingProse() {
+        String input = "Key roles: 1. Team 2. Led by Dr. Smith. Read the handbook.";
+        String html = markdownService.processStructured(input).html();
+
+        assertTrue(html.contains("<li>Led by Dr. Smith</li>"), "Abbreviation remains in the list item");
+        assertTrue(html.contains("<p>Read the handbook.</p>"), "Trailing prose remains a paragraph");
+    }
+
+    @Test
     void testDirectAttachmentToPunctuation() {
         String input = "See below:1.First item.2.Second item!3.Third item";
         String html = markdownService.processStructured(input).html();

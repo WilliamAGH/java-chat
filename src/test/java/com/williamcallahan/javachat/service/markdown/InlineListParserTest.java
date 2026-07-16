@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -174,5 +175,47 @@ class InlineListParserTest {
         assertNotNull(conversion);
         assertEquals("Second", conversion.primaryListElement().child(1).text());
         assertEquals("After the list wraps up", conversion.trailingText());
+    }
+
+    @Test
+    void tryConvert_keepsCommonAbbreviationsInLastListItem() {
+        List<String> lastItemTexts = List.of(
+                "Led by Dr. Smith",
+                "Led by Mr. Smith",
+                "Led by Ms. Smith",
+                "Review e.g. the guide",
+                "Review i.e. the clarification",
+                "Compare vs. the baseline",
+                "Ask (e.g. the guide)");
+
+        for (String lastItemText : lastItemTexts) {
+            InlineListParser.Conversion conversion = InlineListParser.tryConvert("1. First 2. " + lastItemText);
+
+            assertNotNull(conversion, lastItemText);
+            assertEquals(lastItemText, conversion.primaryListElement().child(1).text(), lastItemText);
+            assertEquals("", conversion.trailingText(), lastItemText);
+        }
+    }
+
+    @Test
+    void tryConvert_extractsTrailingTextAfterAbbreviation() {
+        InlineListParser.Conversion conversion =
+                InlineListParser.tryConvert("1. First 2. Led by Dr. Smith. Read the guide.");
+
+        assertNotNull(conversion);
+        assertEquals(
+                "Led by Dr. Smith", conversion.primaryListElement().child(1).text());
+        assertEquals("Read the guide.", conversion.trailingText());
+    }
+
+    @Test
+    void tryConvert_treatsCorporateSuffixAsSentenceTerminal() {
+        InlineListParser.Conversion conversion =
+                InlineListParser.tryConvert("1. First 2. Visit Example Inc. Read the guide.");
+
+        assertNotNull(conversion);
+        assertEquals(
+                "Visit Example Inc", conversion.primaryListElement().child(1).text());
+        assertEquals("Read the guide.", conversion.trailingText());
     }
 }
