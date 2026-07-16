@@ -90,6 +90,8 @@ public class OpenAiProviderRoutingService {
      * @param githubModelsClient GitHub Models client when configured
      * @param openAiClient OpenAI client when configured
      * @return the configured provider candidate when it is currently callable
+     * @throws ConfiguredProviderTemporarilyUnavailableException when configured-provider backoff or rate limiting
+     *     denies request admission
      */
     public Optional<OpenAiProviderCandidate> selectConfiguredProviderCandidate(
             OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
@@ -99,7 +101,8 @@ public class OpenAiProviderRoutingService {
             return Optional.empty();
         }
         OpenAiProviderCandidate providerCandidate = new OpenAiProviderCandidate(configuredClient, configuredProvider);
-        return isProviderCandidateAvailable(providerCandidate) ? Optional.of(providerCandidate) : Optional.empty();
+        requireProviderCandidateAvailability(providerCandidate);
+        return Optional.of(providerCandidate);
     }
 
     /**
@@ -128,6 +131,9 @@ public class OpenAiProviderRoutingService {
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
         if (throwable == null || isCallerCancellation(throwable)) {
             return false;
+        }
+        if (throwable instanceof ConfiguredProviderTemporarilyUnavailableException) {
+            return true;
         }
         if (throwable instanceof UnauthorizedException
                 || throwable instanceof PermissionDeniedException
@@ -182,17 +188,17 @@ public class OpenAiProviderRoutingService {
         };
     }
 
-    private boolean isProviderCandidateAvailable(OpenAiProviderCandidate providerCandidate) {
+    private void requireProviderCandidateAvailability(OpenAiProviderCandidate providerCandidate) {
         RateLimitService.ApiProvider provider = providerCandidate.provider();
         if (isConfiguredProviderInBackoff()) {
             log.warn("Configured provider unavailable (backoff active, providerId={})", provider.ordinal());
-            return false;
+            throw new ConfiguredProviderTemporarilyUnavailableException(provider);
         }
         if (rateLimitService.isProviderAvailable(provider)) {
-            return true;
+            return;
         }
         log.warn("Provider unavailable (rate limited, providerId={})", provider.ordinal());
-        return false;
+        throw new ConfiguredProviderTemporarilyUnavailableException(provider);
     }
 
     private static RateLimitService.ApiProvider resolveConfiguredProvider(String configuredProviderSetting) {

@@ -266,7 +266,7 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void deniedPrimaryReservationTerminatesStreamingAndCompletionBeforeAnyClientDispatch() {
+    void deniedPrimaryReservationTerminatesStreamingAndCompletionAsRetryableBeforeAnyClientDispatch() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
@@ -288,10 +288,16 @@ class OpenAIStreamingServiceTest {
         StepVerifier.create(streamingService
                         .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
-                .expectError(IllegalStateException.class)
+                .expectErrorSatisfies(failure -> {
+                    assertInstanceOf(ConfiguredProviderTemporarilyUnavailableException.class, failure);
+                    assertTrue(streamingService.isRecoverableStreamingFailure(failure));
+                })
                 .verify();
         StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectError(IllegalStateException.class)
+                .expectErrorSatisfies(failure -> {
+                    assertInstanceOf(ConfiguredProviderTemporarilyUnavailableException.class, failure);
+                    assertTrue(streamingService.isRecoverableStreamingFailure(failure));
+                })
                 .verify();
 
         verify(rateLimitService, times(2)).tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS);
@@ -436,10 +442,11 @@ class OpenAIStreamingServiceTest {
     void unavailableStreamDefersErrorSeverityToRequestBoundary() {
         OpenAIStreamingService streamingService = createStreamingService();
 
-        assertThrows(IllegalStateException.class, () -> streamingService
+        IllegalStateException unavailableFailure = assertThrows(IllegalStateException.class, () -> streamingService
                 .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                 .block());
 
+        assertFalse(streamingService.isRecoverableStreamingFailure(unavailableFailure));
         assertEquals(0, logCount(Level.ERROR, "LLM providers unavailable"));
         assertEquals(1, logCount(Level.WARN, "LLM providers unavailable"));
     }

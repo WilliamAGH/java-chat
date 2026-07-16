@@ -238,7 +238,7 @@ public class OpenAIStreamingService {
                             .timeout(completeTimeout(configuration.requestTimeout()))
                             .build();
                     if (!rateLimitService.tryReserveRequest(activeProvider)) {
-                        return Mono.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
+                        return Mono.error(new ConfiguredProviderTemporarilyUnavailableException(activeProvider));
                     }
 
                     try {
@@ -306,7 +306,7 @@ public class OpenAIStreamingService {
 
         return Flux.defer(() -> {
             if (!rateLimitService.tryReserveRequest(activeProvider)) {
-                return Flux.error(new IllegalStateException(PROVIDER_UNAVAILABLE_MESSAGE));
+                return Flux.error(new ConfiguredProviderTemporarilyUnavailableException(activeProvider));
             }
             AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
             return executeStreamingRequest(

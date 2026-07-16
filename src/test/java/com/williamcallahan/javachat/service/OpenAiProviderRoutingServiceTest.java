@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.openai.client.OpenAIClient;
 import com.openai.core.http.Headers;
+import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.PermissionDeniedException;
@@ -158,19 +159,26 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void primaryBackoffMakesConfiguredProviderUnavailable() {
+    void gatewayTimeoutBackoffMakesNextConfiguredProviderRequestRetryable() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
         OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
                 rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.OPENAI.getName());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
+        InternalServerException gatewayTimeout = InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .build();
 
-        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeout);
 
-        assertTrue(routingService
-                .selectConfiguredProviderCandidate(null, openAiClient)
-                .isEmpty());
+        ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
+                ConfiguredProviderTemporarilyUnavailableException.class,
+                () -> routingService.selectConfiguredProviderCandidate(null, openAiClient));
+
+        assertEquals(RateLimitService.ApiProvider.OPENAI, temporaryFailure.provider());
+        assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
     }
 
     @Test
@@ -187,9 +195,25 @@ class OpenAiProviderRoutingServiceTest {
 
         routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
 
-        assertTrue(routingService
-                .selectConfiguredProviderCandidate(githubModelsClient, openAiClient)
-                .isEmpty());
+        assertThrows(
+                ConfiguredProviderTemporarilyUnavailableException.class,
+                () -> routingService.selectConfiguredProviderCandidate(githubModelsClient, openAiClient));
+    }
+
+    @Test
+    void rateLimitAdmissionDenialIsRetryable() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.isProviderAvailable(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(false);
+        OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+
+        ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
+                ConfiguredProviderTemporarilyUnavailableException.class,
+                () -> routingService.selectConfiguredProviderCandidate(githubModelsClient, null));
+
+        assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, temporaryFailure.provider());
+        assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
     }
 
     @Test
@@ -223,5 +247,10 @@ class OpenAiProviderRoutingServiceTest {
     private OpenAIIoException wrappedCallerInterruption() {
         return new OpenAIIoException(
                 OPENAI_REQUEST_FAILED_MESSAGE, new InterruptedIOException(CALLER_INTERRUPTION_MESSAGE));
+    }
+
+    private OpenAiProviderRoutingService createRoutingService(RateLimitService rateLimitService) {
+        return new OpenAiProviderRoutingService(
+                rateLimitService, PRIMARY_BACKOFF_SECONDS, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
     }
 }
