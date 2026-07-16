@@ -100,15 +100,11 @@ public class OpenAIStreamingService {
      */
     @PostConstruct
     public void initializeClient() {
-        if (githubToken != null && !githubToken.isBlank()) {
-            log.info("Initializing OpenAI client with GitHub Models endpoint");
-            this.clientPrimary = createClient(githubToken, githubModelsBaseUrl);
-            log.info("OpenAI client initialized successfully with GitHub Models");
-        }
-        if (openaiApiKey != null && !openaiApiKey.isBlank()) {
-            log.info("Initializing OpenAI client with OpenAI API");
-            this.clientSecondary = createClient(openaiApiKey, openaiBaseUrl);
-            log.info("OpenAI client initialized successfully with OpenAI API");
+        RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
+        if (configuredProvider == RateLimitService.ApiProvider.GITHUB_MODELS) {
+            initializeGithubModelsClient();
+        } else if (configuredProvider == RateLimitService.ApiProvider.OPENAI) {
+            initializeOpenAiClient();
         }
 
         this.isAvailable = configuredProviderClient() != null;
@@ -120,6 +116,22 @@ public class OpenAIStreamingService {
                     "OpenAI streaming available (githubModelsConfigured={}, openAiCompatibleConfigured={})",
                     clientPrimary != null,
                     clientSecondary != null);
+        }
+    }
+
+    private void initializeGithubModelsClient() {
+        if (githubToken != null && !githubToken.isBlank()) {
+            log.info("Initializing OpenAI client with GitHub Models endpoint");
+            this.clientPrimary = createClient(githubToken, githubModelsBaseUrl);
+            log.info("OpenAI client initialized successfully with GitHub Models");
+        }
+    }
+
+    private void initializeOpenAiClient() {
+        if (openaiApiKey != null && !openaiApiKey.isBlank()) {
+            log.info("Initializing OpenAI client with OpenAI API");
+            this.clientSecondary = createClient(openaiApiKey, openaiBaseUrl);
+            log.info("OpenAI client initialized successfully with OpenAI API");
         }
     }
 

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -54,6 +55,12 @@ import reactor.test.StepVerifier;
  * suite stays focused on SDK transport and stream-facing behavior.</p>
  */
 class OpenAIStreamingServiceTest {
+    private static final String CONFIGURED_PROVIDER_API_KEY = "configured-provider-api-key";
+    private static final String STALE_UNSELECTED_PROVIDER_API_KEY = "stale-unselected-provider-api-key";
+    private static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
+    private static final String GITHUB_MODELS_BASE_URL = "https://models.github.ai/inference/v1";
+    private static final String INVALID_UNSELECTED_PROVIDER_BASE_URL = " ";
+
     private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(OpenAIStreamingService.class);
     private final ListAppender<ILoggingEvent> serviceLogEvents = new ListAppender<>();
     private final Logger streamingFailureLogger =
@@ -108,6 +115,38 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "isAvailable", true);
 
         assertFalse(streamingService.isAvailable());
+    }
+
+    @Test
+    void initializationIgnoresInvalidGithubModelsSettingsWhenOpenAiIsConfigured() {
+        OpenAIStreamingService streamingService = createStreamingService(RateLimitService.ApiProvider.OPENAI);
+        ReflectionTestUtils.setField(streamingService, "openaiApiKey", CONFIGURED_PROVIDER_API_KEY);
+        ReflectionTestUtils.setField(streamingService, "openaiBaseUrl", OPENAI_BASE_URL);
+        ReflectionTestUtils.setField(streamingService, "githubToken", STALE_UNSELECTED_PROVIDER_API_KEY);
+        ReflectionTestUtils.setField(streamingService, "githubModelsBaseUrl", INVALID_UNSELECTED_PROVIDER_BASE_URL);
+
+        try {
+            assertDoesNotThrow(streamingService::initializeClient);
+            assertTrue(streamingService.isAvailable());
+        } finally {
+            streamingService.shutdown();
+        }
+    }
+
+    @Test
+    void initializationIgnoresInvalidOpenAiSettingsWhenGithubModelsIsConfigured() {
+        OpenAIStreamingService streamingService = createStreamingService(RateLimitService.ApiProvider.GITHUB_MODELS);
+        ReflectionTestUtils.setField(streamingService, "githubToken", CONFIGURED_PROVIDER_API_KEY);
+        ReflectionTestUtils.setField(streamingService, "githubModelsBaseUrl", GITHUB_MODELS_BASE_URL);
+        ReflectionTestUtils.setField(streamingService, "openaiApiKey", STALE_UNSELECTED_PROVIDER_API_KEY);
+        ReflectionTestUtils.setField(streamingService, "openaiBaseUrl", INVALID_UNSELECTED_PROVIDER_BASE_URL);
+
+        try {
+            assertDoesNotThrow(streamingService::initializeClient);
+            assertTrue(streamingService.isAvailable());
+        } finally {
+            streamingService.shutdown();
+        }
     }
 
     @Test
