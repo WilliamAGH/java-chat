@@ -2,23 +2,23 @@ package com.williamcallahan.javachat.web;
 
 /**
  * Request body for chat streaming endpoint.
- * Supports both "message" (API/curl) and "latest" (web UI) field names for the user query.
  *
  * @param sessionId Optional session identifier for conversation continuity
- * @param message The user's chat message (preferred field name for API clients)
- * @param latest The user's chat message (alternative field name used by web UI)
+ * @param latest The user's chat message
  */
-public record ChatStreamRequest(String sessionId, String message, String latest) {
+public record ChatStreamRequest(String sessionId, String latest) {
     private static final String GENERATED_SESSION_PREFIX = "chat-";
+    private static final String LATEST_QUERY_REQUIRED_MESSAGE = "Latest query is required";
 
     /**
-     * Returns the user query, preferring "message" over "latest" field.
+     * Creates a request whose canonical query contains non-whitespace text.
+     *
+     * @throws IllegalArgumentException when the latest query is null or blank
      */
-    public String userQuery() {
-        if (message != null && !message.isEmpty()) {
-            return message;
+    public ChatStreamRequest {
+        if (latest == null || latest.isBlank()) {
+            throw new IllegalArgumentException(LATEST_QUERY_REQUIRED_MESSAGE);
         }
-        return latest != null ? latest : "";
     }
 
     /**

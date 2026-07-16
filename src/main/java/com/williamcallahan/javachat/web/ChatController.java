@@ -112,7 +112,7 @@ public class ChatController extends BaseController {
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
         String sessionId = request.resolvedSessionId();
-        String userQuery = request.userQuery();
+        String latest = request.latest();
 
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
@@ -126,7 +126,7 @@ public class ChatController extends BaseController {
                     // Pass model hint to optimize RAG for token-constrained models
                     ChatService.StructuredPromptOutcome promptOutcome =
                             chatService.buildStructuredPromptWithContextOutcome(
-                                    history, userQuery, ModelConfiguration.DEFAULT_MODEL);
+                                    history, latest, ModelConfiguration.DEFAULT_MODEL);
 
                     // Use OpenAI streaming only (legacy fallback removed)
                     if (openAIStreamingService.isAvailable()) {
@@ -189,7 +189,7 @@ public class ChatController extends BaseController {
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {
-                                    chatMemory.addExchange(sessionId, userQuery, fullResponse.toString());
+                                    chatMemory.addExchange(sessionId, latest, fullResponse.toString());
                                     PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                                 });
                     }

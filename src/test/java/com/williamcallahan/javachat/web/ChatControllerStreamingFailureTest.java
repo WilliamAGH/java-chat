@@ -130,7 +130,7 @@ class ChatControllerStreamingFailureTest {
                         Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
         when(streamingService.isRecoverableStreamingFailure(streamingFailure)).thenReturn(retryable);
 
-        return chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY, null), new MockHttpServletResponse())
+        return chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
                 .collectList()
                 .block();
     }
