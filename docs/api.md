@@ -15,6 +15,7 @@ Request body:
 SSE event types (see `SseConstants`):
 
 - `status` → `{"message":"...","details":"..."}`
+- `provider` → `{"provider":"GitHub Models"}` (the configured provider selected for this request)
 - `text` → `{"text":"..."}`
 - `citation` → JSON array of citations
 - `error` → `{"message":"...","details":"..."}`

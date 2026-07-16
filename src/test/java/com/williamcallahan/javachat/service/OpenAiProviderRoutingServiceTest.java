@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -18,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 
 /**
- * Verifies provider ordering, primary backoff, and failure classification policy.
+ * Verifies configured-provider validation, backoff, and failure classification policy.
  *
  * <p>This suite targets routing directly so streaming transport tests remain focused on stream behavior.</p>
  */
@@ -35,24 +36,24 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void shouldBackoffPrimaryTreatsSdkIoAsBackoffEligible() {
+    void shouldBackoffConfiguredProviderTreatsSdkIoAsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
-        assertTrue(routingService.shouldBackoffPrimary(new OpenAIIoException("io")));
+        assertTrue(routingService.shouldBackoffConfiguredProvider(new OpenAIIoException("io")));
     }
 
     @Test
-    void shouldBackoffPrimaryIgnoresWrappedCallerInterruption() {
+    void shouldBackoffConfiguredProviderIgnoresWrappedCallerInterruption() {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
-        assertFalse(routingService.shouldBackoffPrimary(wrappedCallerInterruption()));
+        assertFalse(routingService.shouldBackoffConfiguredProvider(wrappedCallerInterruption()));
     }
 
     @Test
-    void shouldBackoffPrimaryTreatsWrappedOkHttpCallTimeoutAsBackoffEligible() {
+    void shouldBackoffConfiguredProviderTreatsWrappedOkHttpCallTimeoutAsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
-        assertTrue(routingService.shouldBackoffPrimary(wrappedOkHttpCallTimeout()));
+        assertTrue(routingService.shouldBackoffConfiguredProvider(wrappedOkHttpCallTimeout()));
     }
 
     @Test
@@ -83,40 +84,40 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void shouldBackoffPrimaryTreats401AsBackoffEligible() {
+    void shouldBackoffConfiguredProviderTreats401AsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();
         UnauthorizedException unauthorized =
                 UnauthorizedException.builder().headers(headers).build();
 
-        assertTrue(routingService.shouldBackoffPrimary(unauthorized));
+        assertTrue(routingService.shouldBackoffConfiguredProvider(unauthorized));
     }
 
     @Test
-    void shouldBackoffPrimaryTreats429AsBackoffEligible() {
+    void shouldBackoffConfiguredProviderTreats429AsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();
         RateLimitException rateLimit =
                 RateLimitException.builder().headers(headers).build();
 
-        assertTrue(routingService.shouldBackoffPrimary(rateLimit));
+        assertTrue(routingService.shouldBackoffConfiguredProvider(rateLimit));
     }
 
     @Test
-    void shouldBackoffPrimaryTreats404AsBackoffEligible() {
+    void shouldBackoffConfiguredProviderTreats404AsBackoffEligible() {
         OpenAiProviderRoutingService routingService = createRoutingService();
         Headers headers = Headers.builder().build();
         NotFoundException notFoundException =
                 NotFoundException.builder().headers(headers).build();
 
-        assertTrue(routingService.shouldBackoffPrimary(notFoundException));
+        assertTrue(routingService.shouldBackoffConfiguredProvider(notFoundException));
     }
 
     @Test
-    void shouldBackoffPrimaryDoesNotBackoffOnGenericRuntime() {
+    void shouldBackoffConfiguredProviderDoesNotBackoffOnGenericRuntime() {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
-        assertFalse(routingService.shouldBackoffPrimary(new IllegalArgumentException("no")));
+        assertFalse(routingService.shouldBackoffConfiguredProvider(new IllegalArgumentException("no")));
     }
 
     @Test
@@ -189,6 +190,29 @@ class OpenAiProviderRoutingServiceTest {
         assertTrue(routingService
                 .selectConfiguredProviderCandidate(githubModelsClient, openAiClient)
                 .isEmpty());
+    }
+
+    @Test
+    void rejectsBlankProviderConfigurationDuringConstruction() {
+        IllegalArgumentException configurationFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(mock(RateLimitService.class), PRIMARY_BACKOFF_SECONDS, "   "));
+
+        assertEquals(
+                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received a blank value.",
+                configurationFailure.getMessage());
+    }
+
+    @Test
+    void rejectsUnknownProviderConfigurationDuringConstruction() {
+        IllegalArgumentException configurationFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class), PRIMARY_BACKOFF_SECONDS, "unsupported-provider"));
+
+        assertEquals(
+                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received 'unsupported-provider'.",
+                configurationFailure.getMessage());
     }
 
     private OpenAIIoException wrappedOkHttpCallTimeout() {

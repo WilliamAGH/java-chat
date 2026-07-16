@@ -14,6 +14,7 @@ import {
   type Citation,
   type GuidedLesson,
   type LessonContentResponse,
+  type ProviderEvent,
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { fetchCitationsByEndpoint, type CitationFetchResult } from "./chat";
@@ -27,6 +28,7 @@ export interface GuidedStreamCallbacks {
   onStatus?: (status: StreamStatus) => void;
   onError?: (error: StreamError) => void;
   onCitations?: (citations: Citation[]) => void;
+  onProvider?: (provider: ProviderEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -151,6 +153,7 @@ export async function streamGuidedChat(
       onStatus: callbacks.onStatus,
       onError: callbacks.onError,
       onCitations: callbacks.onCitations,
+      onProvider: callbacks.onProvider,
     },
     "guided.ts",
     { signal: callbacks.signal },

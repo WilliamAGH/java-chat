@@ -16,7 +16,7 @@ Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) and supports:
 - **GitHub Models** via `GITHUB_TOKEN`
 - **OpenAI** via `OPENAI_API_KEY`
 
-Provider order is controlled by `LLM_PRIMARY_PROVIDER` (default `github_models`). When both keys are present, eligible failures can fail over to the configured secondary provider before the first streamed token; failures that are not eligible for failover are surfaced to the client.
+`LLM_PRIMARY_PROVIDER` selects the only provider used for chat: `github_models` (the default when unset) or `openai`. An explicitly blank or unsupported value fails application startup. Credential, rate-limit, and upstream failures are surfaced; Java Chat never dispatches a request to another provider.
 
 Common variables:
 
@@ -25,9 +25,10 @@ Common variables:
 - `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
+- `OPENAI_MODEL` (default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
 - `OPENAI_REASONING_EFFORT` (optional, GPT‑5 family; case-insensitive and trimmed). Unknown SDK values fail application startup. Supported subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call while provider gateways own first-output and inter-output deadlines)
+- `LLM_PRIMARY_BACKOFF_SECONDS` (default `600`; temporarily disables the selected provider after an eligible failure)
 
 ### Researchly shared gateway
 
@@ -40,7 +41,7 @@ OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
 OPENAI_MODEL=gemma-4-26b-a4b
 ```
 
-`gemma-4-26b-a4b` is the gateway's regular Gemma alias and may fail over across the providers configured for it. Gateway-side routing is separate from Java Chat's `LLM_PRIMARY_PROVIDER` ordering. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
+`gemma-4-26b-a4b` is the gateway's regular Gemma alias. Java Chat sends the request only to its configured `openai` provider; any routing inside the gateway is outside Java Chat. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
 
 ### Provider notes
 
@@ -51,7 +52,7 @@ OPENAI_MODEL=gemma-4-26b-a4b
 
 ### Rate limiting
 
-- If you hit `429` errors on GitHub Models, either wait and retry or set `OPENAI_API_KEY` as an additional provider.
+- If GitHub Models returns `429`, wait until the configured provider is available. To use OpenAI instead, explicitly set `LLM_PRIMARY_PROVIDER=openai`, provide `OPENAI_API_KEY`, and restart the application.
 
 ## Embeddings
 

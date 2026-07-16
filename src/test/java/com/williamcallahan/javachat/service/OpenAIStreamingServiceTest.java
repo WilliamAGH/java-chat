@@ -79,13 +79,35 @@ class OpenAIStreamingServiceTest {
     }
 
     private OpenAIStreamingService createStreamingService() {
+        return createStreamingService(RateLimitService.ApiProvider.GITHUB_MODELS);
+    }
+
+    private OpenAIStreamingService createStreamingService(RateLimitService.ApiProvider configuredProvider) {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiProviderRoutingService providerRoutingService =
+                new OpenAiProviderRoutingService(rateLimitService, 600, configuredProvider.getName());
         return new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
+    }
+
+    @Test
+    void availabilityRejectsOpenAiCredentialForConfiguredGithubModelsProvider() {
+        OpenAIStreamingService streamingService = createStreamingService(RateLimitService.ApiProvider.GITHUB_MODELS);
+        ReflectionTestUtils.setField(streamingService, "clientSecondary", mock(OpenAIClient.class));
+        ReflectionTestUtils.setField(streamingService, "isAvailable", true);
+
+        assertFalse(streamingService.isAvailable());
+    }
+
+    @Test
+    void availabilityRejectsGithubModelsCredentialForConfiguredOpenAiProvider() {
+        OpenAIStreamingService streamingService = createStreamingService(RateLimitService.ApiProvider.OPENAI);
+        ReflectionTestUtils.setField(streamingService, "clientPrimary", mock(OpenAIClient.class));
+        ReflectionTestUtils.setField(streamingService, "isAvailable", true);
+
+        assertFalse(streamingService.isAvailable());
     }
 
     @Test
@@ -278,7 +300,6 @@ class OpenAIStreamingServiceTest {
                     assertSame(githubModelsFailure, terminalFailure.upstreamFailure());
                 })
                 .verify();
-        StepVerifier.create(streamingResult.notices()).verifyComplete();
         verify(githubModelsResponseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
         verify(rateLimitService).tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS);
         verify(rateLimitService, never()).tryReserveRequest(RateLimitService.ApiProvider.OPENAI);

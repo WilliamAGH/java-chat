@@ -171,21 +171,17 @@ public class ChatController extends BaseController {
                                     statusEvents = statusEvents.concatWith(
                                             sseSupport.citationWarningStatusFlux(finalCitationWarning));
 
-                                    Flux<ServerSentEvent<String>> runtimeStreamingEvents =
-                                            sseSupport.streamingNoticeEvents(streamingResult.notices());
-
                                     // Wrap chunks in JSON to preserve whitespace
                                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
                                     Flux<ServerSentEvent<String>> citationEvent =
                                             Flux.just(sseSupport.citationEvent(finalCitations));
 
-                                    // Start replayable fallback protocol events before the ref-counted data stream
-                                    // so the provider and status notice arrive before fallback text.
+                                    // Start selected-provider and status events before the ref-counted data stream.
                                     return Flux.concat(
                                             Flux.just(providerEvent),
                                             statusEvents,
-                                            Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
+                                            Flux.merge(dataEvents, heartbeats),
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {

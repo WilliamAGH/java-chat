@@ -80,7 +80,7 @@ public class OpenAIStreamingService {
      *
      * @param rateLimitService provider rate-limit state tracker
      * @param requestFactory request payload and truncation builder
-     * @param providerRoutingService provider ordering and failure classifier
+     * @param providerRoutingService configured-provider selection and failure classifier
      * @param streamingFailureReporter terminal provider-failure boundary
      */
     public OpenAIStreamingService(
@@ -111,10 +111,10 @@ public class OpenAIStreamingService {
             log.info("OpenAI client initialized successfully with OpenAI API");
         }
 
-        this.isAvailable = (clientPrimary != null) || (clientSecondary != null);
+        this.isAvailable = configuredProviderClient() != null;
         if (!this.isAvailable) {
             log.warn(
-                    "No API credentials found (GITHUB_TOKEN or OPENAI_API_KEY) - OpenAI streaming will not be available");
+                    "Configured chat provider has no matching API credential - OpenAI streaming will not be available");
         } else {
             log.info(
                     "OpenAI streaming available (githubModelsConfigured={}, openAiCompatibleConfigured={})",
@@ -135,7 +135,7 @@ public class OpenAIStreamingService {
      *
      * @param structuredPrompt typed prompt segments
      * @param temperature response temperature
-     * @return stream result including text chunks, the selected provider, and no fallback notices
+     * @return stream result including text chunks and the selected provider
      */
     public Mono<StreamingResult> streamResponse(StructuredPrompt structuredPrompt, double temperature) {
         log.debug("Starting OpenAI stream with structured prompt");
@@ -151,13 +151,13 @@ public class OpenAIStreamingService {
                     OpenAiProviderCandidate providerCandidate = selectedProvider.orElseThrow();
                     Flux<String> contentFlux =
                             executeStreamingWithSelectedProvider(structuredPrompt, temperature, providerCandidate);
-                    return Mono.just(new StreamingResult(contentFlux, providerCandidate.provider(), Flux.empty()));
+                    return Mono.just(new StreamingResult(contentFlux, providerCandidate.provider()));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
-     * Sends a non-streaming completion request to the first available provider.
+     * Sends a non-streaming completion request to the configured provider.
      *
      * @param prompt completion prompt
      * @param temperature response temperature
@@ -401,9 +401,17 @@ public class OpenAIStreamingService {
     /**
      * Check if the OpenAI streaming service is properly configured and available.
      *
-     * @return true when at least one provider client is configured
+     * @return true when the configured provider client is initialized
      */
     public boolean isAvailable() {
-        return isAvailable && (clientPrimary != null || clientSecondary != null);
+        return isAvailable && configuredProviderClient() != null;
+    }
+
+    private OpenAIClient configuredProviderClient() {
+        return switch (providerRoutingService.configuredProvider()) {
+            case GITHUB_MODELS -> clientPrimary;
+            case OPENAI -> clientSecondary;
+            case LOCAL -> null;
+        };
     }
 }

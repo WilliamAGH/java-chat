@@ -6,8 +6,12 @@ const HTTP_SERVICE_UNAVAILABLE_STATUS = 503;
 const FETCH_FAILURE_MESSAGE = "Network request failed";
 const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
 const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
-const STATUS_EVENT_MESSAGE = "Switching to an available provider";
-const STATUS_EVENT_PROVIDER = "openai";
+const STATUS_EVENT_MESSAGE = "Some citations could not be loaded";
+const STATUS_EVENT_DETAILS = "Citations could not be loaded";
+const STATUS_EVENT_CODE = "citation.partial-failure";
+const STATUS_EVENT_RETRYABLE = false;
+const STATUS_EVENT_STAGE = "citation";
+const SELECTED_PROVIDER_NAME = "OpenAI";
 const MISSING_STREAM_BODY_MESSAGE = "No response body";
 
 function createSseStreamResponse(sseWireText: string): Response {
@@ -235,14 +239,14 @@ describe("streamSse payload validation", () => {
     expect(onText).toHaveBeenCalledWith("Hello");
   });
 
-  it("preserves provider from a valid wire-format status event", async () => {
+  it("preserves a valid structured status event", async () => {
     vi.stubGlobal(
       "fetch",
       vi
         .fn()
         .mockResolvedValue(
           createSseStreamResponse(
-            `event: status\ndata: {"message":"${STATUS_EVENT_MESSAGE}","provider":"${STATUS_EVENT_PROVIDER}"}\n\n`,
+            `event: status\ndata: {"message":"${STATUS_EVENT_MESSAGE}","details":"${STATUS_EVENT_DETAILS}","code":"${STATUS_EVENT_CODE}","retryable":${STATUS_EVENT_RETRYABLE},"stage":"${STATUS_EVENT_STAGE}"}\n\n`,
           ),
         ),
     );
@@ -255,8 +259,32 @@ describe("streamSse payload validation", () => {
     expect(onStatus).toHaveBeenCalledOnce();
     expect(onStatus).toHaveBeenCalledWith({
       message: STATUS_EVENT_MESSAGE,
-      provider: STATUS_EVENT_PROVIDER,
+      details: STATUS_EVENT_DETAILS,
+      code: STATUS_EVENT_CODE,
+      retryable: STATUS_EVENT_RETRYABLE,
+      stage: STATUS_EVENT_STAGE,
     });
+  });
+
+  it("dispatches the selected provider from a valid provider event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          createSseStreamResponse(
+            `event: provider\ndata: {"provider":"${SELECTED_PROVIDER_NAME}"}\n\n`,
+          ),
+        ),
+    );
+    const onText = vi.fn();
+    const onProvider = vi.fn();
+
+    await streamSse("/api/test/stream", {}, { onText, onProvider }, "sse.test.ts");
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(onProvider).toHaveBeenCalledOnce();
+    expect(onProvider).toHaveBeenCalledWith({ provider: SELECTED_PROVIDER_NAME });
   });
 
   it("rejects legacy raw text payloads", async () => {

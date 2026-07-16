@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.OpenAiProviderRoutingService;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +15,7 @@ import org.springframework.context.annotation.Lazy;
  * <p>Fails fast with a clear error message instead of allowing the application to start
  * and deferring failure to the first request. Validates:
  * <ul>
- *   <li>At least one LLM API key ({@code GITHUB_TOKEN} or {@code OPENAI_API_KEY}) is configured.</li>
+ *   <li>The API key required by the selected LLM provider is configured.</li>
  *   <li>When Qdrant TLS is enabled, a Qdrant API key is present.</li>
  * </ul>
  */
@@ -21,32 +23,31 @@ import org.springframework.context.annotation.Lazy;
 @Lazy(false)
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
-    private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
-    private static final String OPENAI_API_KEY_PROPERTY = "${OPENAI_API_KEY:}";
     private static final String QDRANT_USE_TLS_PROPERTY = "${spring.ai.vectorstore.qdrant.use-tls:false}";
     private static final String QDRANT_API_KEY_PROPERTY = "${spring.ai.vectorstore.qdrant.api-key:}";
-    private static final String MISSING_LLM_API_KEY_MESSAGE =
-            "No LLM API key configured. Set GITHUB_TOKEN or OPENAI_API_KEY environment variable.";
+    private static final String MISSING_GITHUB_MODELS_API_KEY_MESSAGE =
+            "Selected LLM provider github_models requires GITHUB_TOKEN.";
+    private static final String MISSING_OPENAI_API_KEY_MESSAGE =
+            "Selected LLM provider openai requires OPENAI_API_KEY.";
     private static final String MISSING_QDRANT_API_KEY_MESSAGE = "Qdrant TLS is enabled but "
             + "spring.ai.vectorstore.qdrant.api-key is not set. "
             + "Set SPRING_AI_VECTORSTORE_QDRANT_API_KEY or QDRANT_API_KEY for authenticated access.";
     private static final String REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE = "Required credential validation passed";
 
-    private final String githubToken;
-
-    private final String openaiApiKey;
+    private final OpenAIStreamingService streamingService;
+    private final OpenAiProviderRoutingService providerRoutingService;
 
     private final boolean qdrantTlsEnabled;
 
     private final String qdrantApiKey;
 
     RequiredCredentialValidation(
-            @Value(GITHUB_TOKEN_PROPERTY) String githubToken,
-            @Value(OPENAI_API_KEY_PROPERTY) String openaiApiKey,
+            OpenAIStreamingService streamingService,
+            OpenAiProviderRoutingService providerRoutingService,
             @Value(QDRANT_USE_TLS_PROPERTY) boolean qdrantTlsEnabled,
             @Value(QDRANT_API_KEY_PROPERTY) String qdrantApiKey) {
-        this.githubToken = githubToken;
-        this.openaiApiKey = openaiApiKey;
+        this.streamingService = streamingService;
+        this.providerRoutingService = providerRoutingService;
         this.qdrantTlsEnabled = qdrantTlsEnabled;
         this.qdrantApiKey = qdrantApiKey;
     }
@@ -54,16 +55,13 @@ public class RequiredCredentialValidation {
     /**
      * Validates required credentials and halts startup if critical keys are missing.
      *
-     * @throws IllegalStateException if no LLM key is configured, or if Qdrant TLS is enabled
-     *     without an API key
+     * @throws IllegalStateException if the selected LLM provider has no matching key, or if
+     *     Qdrant TLS is enabled without an API key
      */
     @PostConstruct
     public void validateRequiredCredentials() {
-        boolean githubTokenPresent = githubToken != null && !githubToken.isBlank();
-        boolean openaiKeyPresent = openaiApiKey != null && !openaiApiKey.isBlank();
-
-        if (!githubTokenPresent && !openaiKeyPresent) {
-            throw new IllegalStateException(MISSING_LLM_API_KEY_MESSAGE);
+        if (!streamingService.isAvailable()) {
+            throw new IllegalStateException(missingSelectedProviderCredentialMessage());
         }
 
         if (qdrantTlsEnabled && (qdrantApiKey == null || qdrantApiKey.isBlank())) {
@@ -71,5 +69,13 @@ public class RequiredCredentialValidation {
         }
 
         log.info(REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE);
+    }
+
+    private String missingSelectedProviderCredentialMessage() {
+        return switch (providerRoutingService.configuredProvider()) {
+            case GITHUB_MODELS -> MISSING_GITHUB_MODELS_API_KEY_MESSAGE;
+            case OPENAI -> MISSING_OPENAI_API_KEY_MESSAGE;
+            case LOCAL -> throw new IllegalStateException("Chat API configuration does not support the local provider");
+        };
     }
 }

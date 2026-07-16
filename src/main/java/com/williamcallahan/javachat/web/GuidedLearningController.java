@@ -298,15 +298,12 @@ public class GuidedLearningController extends BaseController {
 
                                 Flux<ServerSentEvent<String>> statusEvents =
                                         sseSupport.citationWarningStatusFlux(finalCitationWarning);
-                                Flux<ServerSentEvent<String>> runtimeStreamingEvents =
-                                        sseSupport.streamingNoticeEvents(streamingResult.notices());
 
-                                // Start replayable fallback protocol events before the ref-counted data stream so
-                                // the provider and status notice arrive before fallback text.
+                                // Start selected-provider and status events before the ref-counted data stream.
                                 return Flux.concat(
                                         Flux.just(providerEvent),
                                         statusEvents,
-                                        Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
+                                        Flux.merge(dataEvents, heartbeats),
                                         citationEvent);
                             })
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));

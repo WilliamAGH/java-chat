@@ -133,10 +133,7 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
 
     updateStatus(status: StreamStatus) {
       statusMessage = status.message;
-      const providerDescription = status.provider ? `Provider: ${status.provider}` : "";
-      statusDetails = [status.details ?? "", providerDescription]
-        .filter((statusDescription) => statusDescription.length > 0)
-        .join(" · ");
+      statusDetails = status.details ?? "";
     },
 
     finishStream() {

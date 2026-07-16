@@ -7,7 +7,7 @@ import java.util.Objects;
  * Couples an OpenAI-compatible client with the provider metadata used for routing decisions.
  *
  * @param client client instance used to execute requests
- * @param provider provider identity used for rate-limit and fallback decisions
+ * @param provider provider identity used for rate-limit and failure decisions
  */
 record OpenAiProviderCandidate(OpenAIClient client, RateLimitService.ApiProvider provider) {
     OpenAiProviderCandidate {

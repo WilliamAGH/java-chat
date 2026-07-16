@@ -10,6 +10,7 @@ import {
   type StreamStatus,
   type StreamError,
   type Citation,
+  type ProviderEvent,
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from "./csrf";
@@ -30,6 +31,7 @@ export interface StreamChatOptions {
   onStatus?: (status: StreamStatus) => void;
   onError?: (error: StreamError) => void;
   onCitations?: (citations: Citation[]) => void;
+  onProvider?: (provider: ProviderEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -60,6 +62,7 @@ export async function streamChat(
       onStatus: options.onStatus,
       onError: options.onError,
       onCitations: options.onCitations,
+      onProvider: options.onProvider,
     },
     "chat.ts",
     { signal: options.signal },

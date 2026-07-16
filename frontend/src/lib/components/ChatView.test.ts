@@ -82,12 +82,11 @@ describe("ChatView streaming stability", () => {
     expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
   });
 
-  it("shows the active fallback provider from structured stream status", async () => {
+  it("shows structured retrieval status details", async () => {
     streamChatMock.mockImplementation(async (_sessionId, _message, _onChunk, options) => {
       options?.onStatus?.({
-        message: "Retrying stream with provider",
-        details: "The first provider failed before response text.",
-        provider: "fallback-provider",
+        message: "Some citations could not be loaded",
+        details: "Citations could not be loaded",
       });
       return new Promise<void>(() => {});
     });
@@ -96,7 +95,8 @@ describe("ChatView streaming stability", () => {
     const { findByText } = renderedChatView;
     await sendChatMessage(renderedChatView, "Explain records");
 
-    expect(await findByText(/Provider: fallback-provider/)).toBeTruthy();
+    expect(await findByText("Some citations could not be loaded")).toBeTruthy();
+    expect(await findByText("Citations could not be loaded")).toBeTruthy();
   });
 
   it("aborts the active chat stream when the view unmounts", async () => {

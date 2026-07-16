@@ -5,7 +5,6 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
-import com.williamcallahan.javachat.service.StreamingNotice;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
@@ -243,8 +242,7 @@ public class SseSupport {
     }
 
     /**
-     * Creates a provider event indicating which LLM provider is handling the request.
-     * Surfaces provider transparency to end-users per the no-silent-fallback policy.
+     * Creates a provider event identifying the LLM provider selected for the request.
      *
      * @param providerName the name of the LLM provider (e.g., "OpenAI", "GitHub Models")
      * @return ServerSentEvent with provider metadata payload
@@ -254,32 +252,6 @@ public class SseSupport {
                 .event(EVENT_PROVIDER)
                 .data(jsonSerialize(new ProviderPayload(providerName)))
                 .build();
-    }
-
-    /**
-     * Projects runtime streaming notices into their SSE protocol events.
-     *
-     * <p>One subscription to the notice flux owns the projection, while {@code concatMap}
-     * keeps protocol events ordered and non-interleaved.</p>
-     *
-     * @param notices flux of streaming notices from the provider
-     * @return flux of ordered ServerSentEvents with provider and status payloads
-     */
-    public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<StreamingNotice> notices) {
-        return notices.concatMap(this::streamingNoticeEventSequence);
-    }
-
-    private Flux<ServerSentEvent<String>> streamingNoticeEventSequence(StreamingNotice streamingNotice) {
-        ServerSentEvent<String> noticeStatusEvent = statusEvent(SseEventPayload.builder(streamingNotice.summary())
-                .details(streamingNotice.diagnosticContext())
-                .code(streamingNotice.code())
-                .retryable(streamingNotice.retryable())
-                .provider(streamingNotice.provider())
-                .stage(streamingNotice.stage())
-                .attempt(streamingNotice.attempt())
-                .maxAttempts(streamingNotice.maxAttempts())
-                .build());
-        return Flux.just(noticeStatusEvent);
     }
 
     /**
@@ -326,17 +298,9 @@ public class SseSupport {
     /**
      * Payload record for status and error SSE events.
      * Event-type distinction is handled by the SSE event type string, not by the payload record.
-     * Use {@link #builder(String)} to construct — avoids 8-param positional calls with null padding.
+     * Use {@link #builder(String)} to construct — avoids positional calls with null padding.
      */
-    public record SseEventPayload(
-            String message,
-            String details,
-            String code,
-            Boolean retryable,
-            String provider,
-            String stage,
-            Integer attempt,
-            Integer maxAttempts) {
+    public record SseEventPayload(String message, String details, String code, Boolean retryable, String stage) {
 
         /** Creates a builder with the required message field. */
         public static Builder builder(String message) {
@@ -349,10 +313,7 @@ public class SseSupport {
             private String details;
             private String code;
             private Boolean retryable;
-            private String provider;
             private String stage;
-            private Integer attempt;
-            private Integer maxAttempts;
 
             private Builder(String message) {
                 this.message = message;
@@ -392,17 +353,6 @@ public class SseSupport {
             }
 
             /**
-             * Sets the provider identifier that emitted the event.
-             *
-             * @param provider provider identifier for event attribution
-             * @return this builder instance
-             */
-            public Builder provider(String provider) {
-                this.provider = provider;
-                return this;
-            }
-
-            /**
              * Sets the pipeline stage associated with this status or error event.
              *
              * @param stage pipeline stage identifier
@@ -413,31 +363,9 @@ public class SseSupport {
                 return this;
             }
 
-            /**
-             * Sets the current retry attempt number for this event.
-             *
-             * @param attempt current attempt index (1-based)
-             * @return this builder instance
-             */
-            public Builder attempt(Integer attempt) {
-                this.attempt = attempt;
-                return this;
-            }
-
-            /**
-             * Sets the maximum allowed retry attempts for this event sequence.
-             *
-             * @param maxAttempts configured retry-attempt ceiling
-             * @return this builder instance
-             */
-            public Builder maxAttempts(Integer maxAttempts) {
-                this.maxAttempts = maxAttempts;
-                return this;
-            }
-
             /** Builds the immutable payload record. */
             public SseEventPayload build() {
-                return new SseEventPayload(message, details, code, retryable, provider, stage, attempt, maxAttempts);
+                return new SseEventPayload(message, details, code, retryable, stage);
             }
         }
     }
