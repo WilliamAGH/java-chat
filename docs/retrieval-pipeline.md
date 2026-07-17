@@ -177,9 +177,9 @@ Each document is presented as `[index] title | url` followed by the first 500 ch
 
 ### Response parsing
 
-1. Prefer fenced code blocks, then find first `{...}` via brace-depth tracking
-2. Deserialize to `RerankOrderResponse(List<Integer> order)`
-3. Map indices back to original documents; skip null/out-of-range indices
+1. Deserialize the full payload to `RerankOrderResponse(List<Integer> order)` with `FAIL_ON_UNKNOWN_PROPERTIES` and `FAIL_ON_TRAILING_TOKENS` (no prose, no fences, no extra fields)
+2. Require `order` to be a complete permutation of `0..n-1`: size must equal the document count, no nulls, duplicates, or out-of-range indices; otherwise throw `RerankParsingException`
+3. Map indices back to original documents in the permuted order
 4. Limit output to `searchReturnK` (default 6)
 
 ### Caching
