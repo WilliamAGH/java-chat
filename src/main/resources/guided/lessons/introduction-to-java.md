@@ -1,23 +1,39 @@
-Java is a versatile, high-level programming language that is widely used for building applications across different platforms. Understanding Java begins with grasping what a program is and how it operates. A program is essentially a set of instructions written in a specific programming language to perform a task. In Java, these instructions are encapsulated in source code files, which must be compiled into bytecode before they can be executed by the Java Virtual Machine (JVM).
+Java is a language for turning a precise sequence of instructions into a running program. You write source code, the Java tools check and compile it, and the Java runtime starts the program on the Java Virtual Machine (JVM).
 
-Here are some key points about Java programs:
-*   **Source Code**: Java programs are written in plain text files with a `.java` extension.
-*   **Compilation**: The Java Compiler (javac) translates source code into bytecode, stored in `.class` files.
-*   **Execution**: The Java Virtual Machine (JVM) executes the bytecode, allowing the program to run on any machine with a JVM installed.
+## The Java 25 starting point
 
-Here's a simple example of a "Hello, World!" program in Java:
+This guided track uses Java 25's compact source file form for early examples. It lets a small program begin with a `main` method, so you can focus on instructions before learning class-related structure. Java still runs the program with the same Java tools used for larger applications.
+
+## Run your first program
+
+Save this code in a file named `HelloJava.java`:
 
 ```java
-// HelloWorld.java
-public class HelloWorld {
-    public static void main(String[] args) {
-        // Print a greeting to the console
-        System.out.println("Hello, World!"); // Output: Hello, World!
-    }
+void main() {
+    IO.println("Hello, Java!");
 }
 ```
 
-To run this program, follow these steps:
-1.  Write the code in a file named `HelloWorld.java`.
-2.  Open a terminal and compile the program using `javac HelloWorld.java`.
-3.  Execute the compiled bytecode with `java HelloWorld`.
+Then run the source file from a terminal:
+
+```sh
+java HelloJava.java
+```
+
+The source-code launcher compiles that file for this run and starts it. `IO.println` writes a line of text to the terminal.
+
+## Read the program
+
+- `main` is the entry point: Java starts executing the program there.
+- Parentheses hold a method's input list. This `main` method does not need input yet, so the parentheses are empty.
+- Curly braces mark the body of the method: the instructions Java should execute.
+- A semicolon ends the `IO.println` statement.
+- Text inside double quotes is a `String` literal. Java prints the characters between the quotes, not the quote marks themselves.
+
+The file is source code. Java checks its grammar and types before it runs it. If you miss a semicolon or write an unknown name, Java reports where it found the problem instead of guessing what you meant.
+
+## Build a useful habit
+
+Make one small change, run the program, and inspect the exact output. For example, change the greeting to include your name, then add a second `IO.println` call below the first one. Programs execute statements in order, from the top of the method body to the bottom.
+
+Later lessons introduce variables, decisions, repetition, methods, and explicit classes. The compact form is an on-ramp: the programming ideas you learn here continue to work when a program grows.

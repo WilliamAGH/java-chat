@@ -68,6 +68,7 @@ src/main/resources/static/assets/
 tmp/
 bin/
 dogfood-output/
+lesson-curation-work/
 
 ### Build artifacts (root level) ###
 BOOT-INF/
