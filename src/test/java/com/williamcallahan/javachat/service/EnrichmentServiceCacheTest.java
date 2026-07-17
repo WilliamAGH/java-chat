@@ -37,6 +37,7 @@ class EnrichmentServiceCacheTest {
     private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 256;
     private static final long TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 120L;
+    private static final String TEST_OPENAI_EMBEDDING_BASE_URL = "https://api.openai.com";
     private static final int ENRICHMENT_CACHE_MISS_COMPLETION_COUNT = 2;
 
     @Test
@@ -90,6 +91,8 @@ class EnrichmentServiceCacheTest {
             llmProperties.setEnrichmentOutputTokenBudget(TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET);
             llmProperties.setRerankerOutputTokenBudget(TEST_RERANKER_OUTPUT_TOKEN_BUDGET);
             llmProperties.setConfiguredProviderBackoffSeconds(TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+            appProperties.getEmbeddings().setOpenAiBaseUrl(TEST_OPENAI_EMBEDDING_BASE_URL);
+            appProperties.getEmbeddings().setOpenAiModel("");
             return appProperties;
         }
     }
