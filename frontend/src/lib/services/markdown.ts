@@ -429,7 +429,11 @@ const STREAMING_MARKDOWN_PARSER = createMarkdownParser(true);
  * Parse markdown to sanitized HTML. SSR-safe - no DOM APIs used.
  * Uses DOMPurify for sanitization. Use this in `$derived` for reactive markdown rendering.
  *
- * @throws Never throws - returns escaped source text on parse failure
+ * @param markdownText - The markdown content to parse. Null/undefined returns empty string.
+ * @param isStreaming - When true, handles incomplete enrichment markers gracefully during
+ *   streaming (e.g., "{{hint: some text}" without closing braces). Defaults to false.
+ * @returns Sanitized HTML string, or empty string on null/undefined input or parse failure.
+ * @throws Never throws - returns empty string on parse failure and logs error in dev mode
  */
 export function parseMarkdown(
   markdownText: string | null | undefined,
