@@ -41,7 +41,7 @@ asdf install
 
 ```bash
 cp .env.example .env
-# edit .env and set GITHUB_TOKEN or OPENAI_API_KEY
+# edit .env: select LLM_PRIMARY_PROVIDER and set its matching credential
 make compose-up   # optional local Qdrant
 make dev
 ```

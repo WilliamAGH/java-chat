@@ -25,16 +25,10 @@ This document provides a comprehensive analysis of all parsing and markdown proc
 │       └── postProcessHtml() - DOM manipulation
 │
 ├── 🌐 CLIENT-SIDE PROCESSING
-│   ├── chat.html streaming logic
-│   │   ├── formatText() - server-first, client-fallback
-│   │   ├── clientMarkdownFallback() - minimal parser
-│   │   └── preserveEnrichments() - mirror server placeholders
-│   │
-│   └── markdown-utils.js (MU namespace)
-│       ├── normalizeInlineOrderedLists() - list marker fixing
-│       ├── promoteLikelyJavaBlocks() - code fence promotion
-│       ├── applyInlineEnrichments() - DOM enrichment rendering
-│       └── createCitationPill() - citation UI components
+│   └── Svelte frontend (frontend/src/lib/)
+│       ├── markdown.ts - parseMarkdown() with DOMPurify sanitization
+│       ├── javaLanguageDetection.ts - auto-detect Java code blocks
+│       └── AssistantMarkdownBody.svelte - streaming-aware markdown rendering
 │
 ├── 📊 STREAMING FLOW (GPT-5.2 → User)
 │   ├── ChatService.streamAnswer() → Flux<String> (uses OpenAIStreamingService)
@@ -146,52 +140,36 @@ Return ProcessedMarkdown
 
 ### 2. Client-Side Processing Components
 
-#### chat.html Streaming Logic
+#### Svelte Frontend Markdown Processing
 
-**File**: `src/main/resources/static/chat.html`
+**File**: `frontend/src/lib/services/markdown.ts`
 
-**Streaming Flow**:
-```
-User Input
-    ↓
-fetch('/api/chat/stream')
-    ↓
-SSE Event Processing
-    ↓
-Buffer tokens (10 tokens/100ms)
-    ↓
-normalizeDelta() - clean token joins
-    ↓
-formatText() - markdown processing
-    ↓
-DOM updates with debouncing
-    ↓
-Final UnifiedMarkdownService.process()
-```
+**Purpose**: Client-side markdown parsing with DOMPurify sanitization for the Svelte frontend.
 
 **Key Functions**:
-- `formatText()` - Tries server processing first, falls back to client
-- `clientMarkdownFallback()` - Minimal client parser
-- `preserveEnrichments()` - Mirrors server placeholder system
-- `upgradeCodeBlocks()` - Safe code block enhancement
+- `parseMarkdown(markdownText, isStreaming)` - Main entry point, parses markdown to sanitized HTML
+- `escapeHtml()` - Safe HTML escaping for inline code
+- `createEnrichmentExtension()` - Custom marked extension for `{{type:content}}` markers
 
-#### markdown-utils.js (MU)
+**Streaming-Aware Parsing**:
+- Uses separate `COMPLETE_MARKDOWN_PARSER` and `STREAMING_MARKDOWN_PARSER` instances
+- `isStreaming` flag enables graceful handling of incomplete enrichment markers
+- DOMPurify sanitization for XSS protection
 
-**File**: `src/main/resources/static/js/markdown-utils.js`
+**Java Language Detection**:
 
-**Purpose**: Shared utilities for consistent markdown processing across views.
+**File**: `frontend/src/lib/services/javaLanguageDetection.ts`
 
-**Key Functions**:
-- `normalizeInlineOrderedLists()` - Fixes list markers in prose
-- `promoteLikelyJavaBlocks()` - Promotes Java code to fenced blocks
-- `applyInlineEnrichments()` - Renders enrichment cards
-- `createCitationPill()` - Citation UI components
-- `createCitationsRow()` - Citation collections
+- `applyJavaLanguageDetection()` - Auto-detects Java code in unmarked blocks
+- Adds `language-java` class for syntax highlighting
 
-**List Processing**:
-- Supports: `1. 2. 3.`, `i. ii. iii.`, `a. b. c.`, `- * + • → ▸ ◆ □ ▪`
-- Requires trigger phrases: `:`, `such as`, `include`, etc.
-- Handles nested lists with colon notation
+**Component Integration**:
+
+**File**: `frontend/src/lib/components/AssistantMarkdownBody.svelte`
+
+- Renders assistant message markdown with streaming support
+- Applies Java language detection and syntax highlighting
+- Shows streaming cursor animation during message assembly
 
 ### 3. Streaming and GPT-5.2 Processing
 
@@ -233,11 +211,11 @@ ChatMemory persistence
 4. Structured citations and enrichments extracted
 5. HTML rendering with proper escaping
 
-**Client-Side**:
+**Client-Side (Svelte)**:
 1. SSE event processing
-2. Progressive markdown rendering
-3. Enrichment card injection
-4. Code syntax highlighting
+2. Progressive markdown rendering via `parseMarkdown()`
+3. Enrichment card injection (client-side enrichment extension)
+4. Code syntax highlighting (Prism.js)
 5. Citation pill rendering
 
 ### 4. Data Structures and Types
@@ -300,10 +278,9 @@ public record MarkdownCitation(
    - Potential conflicts in rendering
 
 4. **List Processing Complexity**
-   - Server: DOM-based list rendering in `renderInlineLists()`
-   - Client: Regex-based in `markdown-utils.js`
-   - Different trigger phrase requirements
-   - Inconsistent behavior
+   - Server: DOM-based list rendering in `renderInlineLists()` and `InlineListParser`
+   - Client: Server-authoritative HTML; no client-side list processing
+   - Consistent behavior via server AST processing
 
 #### Code Duplications
 
@@ -318,9 +295,9 @@ public record MarkdownCitation(
    - Different styling approaches
 
 3. **List Marker Detection**
-   - Server: Complex regex patterns in `fixInlineLists()`
-   - Client: Similar patterns in `normalizeInlineOrderedLists()`
-   - Logic should be unified
+   - Server: Consolidated in `OrderedMarkerScanner` (shared by `MarkdownNormalizer` and `InlineListParser`)
+   - Client: Server-authoritative rendering; minimal fallback only
+   - CommonMark-compliant with delimiter position tracking
 
 #### Outstanding Issues
 
@@ -503,20 +480,21 @@ GPT-5.2 (tokens)
 
 ### What processes what, where, and when
 
-- Markdown: server authoritative (`UnifiedMarkdownService.process`) during streaming flushes and once at completion; client fallback only if server unavailable.
-- Code blocks: server pre-normalizes/AST → `<pre><code class="language-...">`; client adds classes if missing + copy + highlight.
-- HTML: server escapes raw HTML and adds structural classes (no regex); client only injects returned HTML and creates DOM components.
-- Paragraphs: soft=`\n` (space in paragraphs), hard=`<br />`; server may split long paragraphs; client doesn’t re-paragraph.
-- Streaming: server buffers (10/100ms) → SSE; client debounces and calls structured render; server processes once more on completion for persistence.
+- Markdown (server-side endpoints): server processes via `UnifiedMarkdownService.process` for REST endpoints; returns HTML with citations/enrichments.
+- Markdown (Svelte frontend): client-side `parseMarkdown()` with DOMPurify; streaming-aware enrichment handling; no server round-trip during streaming.
+- Code blocks: server pre-normalizes/AST → `<pre><code class="language-...">`; client adds Java language detection + Prism highlight.
+- HTML: server escapes raw HTML and adds structural classes; client sanitizes with DOMPurify.
+- Paragraphs: soft=`\n` (space in paragraphs), hard=`<br />`; server may split long paragraphs; client doesn't re-paragraph.
+- Streaming: server buffers (10/100ms) → SSE; Svelte client renders progressively with `parseMarkdown(markdownText, true)`; server processes once more on completion for persistence.
 
-### Server vs Client boundaries (single source of truth)
+### Server vs Client boundaries
 
-- Server (authoritative)
-  - Markdown-to-HTML rendering, enrichment card generation, inline list normalization, code fence normalization, XSS escaping, final persisted representation.
+- Server (REST endpoints)
+  - Markdown-to-HTML rendering for API consumers, enrichment card generation, inline list normalization, code fence normalization, XSS escaping, final persisted representation.
 
-- Client (presentation-only)
-  - Streaming assembly, debounced asks to server for HTML, syntax highlighting, copy buttons, citation pills for inline anchors, gentle UX flourishes (cursor, loading dots).
-  - Minimal, conservative fallback markdown shaping only when server endpoints fail.
+- Svelte Client (frontend)
+  - Streaming SSE assembly, client-side markdown rendering via `parseMarkdown()`, enrichment extension processing, syntax highlighting, copy buttons, citation pills, UX flourishes (cursor, loading dots).
+  - Two parser modes: streaming (graceful incomplete markers) and complete (strict parsing).
 
 ### Known issues, duplications, and rough edges
 

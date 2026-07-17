@@ -71,7 +71,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 - `wget --mirror --timestamping` skips files that haven't changed on the server.
 - Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
 - Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
-- Oracle Javadoc uses a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Manifest-governed Java API sources (those with a `javaRelease` field) use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
 
 ---
 
@@ -96,7 +96,7 @@ make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_E
 
 | Flag | Effect |
 |---|---|
-| `--doc-sets=...` | Comma-separated doc set IDs or paths to process (see [doc set filtering](#doc-set-filtering)) |
+| `--doc-sets=...` | Comma-separated doc set paths (or IDs for non-Java sets) to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
 ## GitHub repository ingestion
@@ -126,7 +126,7 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 
 ### Doc set filtering
 
-Limit ingestion to specific doc sets by ID or path:
+Limit ingestion to specific doc sets by path. Non-Java sets also accept short IDs (hyphenated paths); Java API sets require the exact canonical path from the listing command:
 
 ```bash
 # Copy relativeMirrorPath from either canonical listing command
@@ -187,7 +187,7 @@ Each collection has two named vector spaces:
 
 ### Collection auto-creation
 
-On startup (non-test profile), `QdrantIndexInitializer` ensures all four collections exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). Dimension mismatches cause startup failure.
+On startup (non-test profile), `QdrantIndexInitializer` ensures all four collections exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). Reachable schema or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup.
 
 ### Environment variables
 
