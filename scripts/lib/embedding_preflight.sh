@@ -16,6 +16,31 @@ normalize_embedding_probe_endpoint() {
     esac
 }
 
+# Reads a non-secret embedding setting from the application configuration that owns it.
+read_embedding_application_property() {
+    local property_name="$1"
+    local application_properties_file="${PROJECT_ROOT:-}/src/main/resources/application.properties"
+
+    if [ -z "${PROJECT_ROOT:-}" ] || [ ! -f "$application_properties_file" ]; then
+        echo "Embedding application properties are unavailable: $application_properties_file" >&2
+        return 1
+    fi
+
+    awk -F '=' -v expected_property_name="$property_name" '
+        $0 !~ /^[[:space:]]*#/ && $1 == expected_property_name {
+            configured_value = $0
+            sub(/^[^=]*=/, "", configured_value)
+            sub(/\r$/, "", configured_value)
+            print configured_value
+            found_property = 1
+            exit
+        }
+        END {
+            exit found_property ? 0 : 1
+        }
+    ' "$application_properties_file"
+}
+
 resolve_embedding_probe_configuration() {
     local provider_label_ref="$1"
     local endpoint_ref="$2"
@@ -26,16 +51,29 @@ resolve_embedding_probe_configuration() {
     local resolved_endpoint=""
     local resolved_model_name=""
     local resolved_api_key=""
+    local remote_embedding_server_url
+    local remote_embedding_model
+    local open_ai_embedding_base_url
+    local open_ai_embedding_model
 
-    if [ -n "${REMOTE_EMBEDDING_SERVER_URL:-}" ] && [ -n "${REMOTE_EMBEDDING_API_KEY:-}" ]; then
+    if ! remote_embedding_server_url="$(read_embedding_application_property "app.remote-embedding.server-url")" \
+        || ! remote_embedding_model="$(read_embedding_application_property "app.remote-embedding.model")" \
+        || ! open_ai_embedding_base_url="$(read_embedding_application_property "app.embeddings.open-ai-base-url")" \
+        || ! open_ai_embedding_model="$(read_embedding_application_property "app.embeddings.open-ai-model")"; then
+        return 1
+    fi
+
+    if [ -n "$remote_embedding_server_url" ] || [ -n "${REMOTE_EMBEDDING_API_KEY:-}" ]; then
         resolved_provider_label="remote_openai_compatible"
-        resolved_endpoint="$(normalize_embedding_probe_endpoint "${REMOTE_EMBEDDING_SERVER_URL}")"
-        resolved_model_name="${REMOTE_EMBEDDING_MODEL_NAME:-}"
+        if [ -n "$remote_embedding_server_url" ]; then
+            resolved_endpoint="$(normalize_embedding_probe_endpoint "$remote_embedding_server_url")"
+        fi
+        resolved_model_name="$remote_embedding_model"
         resolved_api_key="${REMOTE_EMBEDDING_API_KEY:-}"
     elif [ -n "${OPENAI_API_KEY:-}" ]; then
         resolved_provider_label="openai_embeddings"
-        resolved_endpoint="$(normalize_embedding_probe_endpoint "${OPENAI_EMBEDDING_BASE_URL:-https://api.openai.com/v1}")"
-        resolved_model_name="${REMOTE_EMBEDDING_MODEL_NAME:-text-embedding-qwen3-embedding-8b}"
+        resolved_endpoint="$(normalize_embedding_probe_endpoint "$open_ai_embedding_base_url")"
+        resolved_model_name="$open_ai_embedding_model"
         resolved_api_key="${OPENAI_API_KEY:-}"
     fi
 
@@ -161,16 +199,19 @@ check_embedding_server() {
     local embedding_endpoint=""
     local embedding_model=""
     local embedding_key=""
-    resolve_embedding_probe_configuration provider_label embedding_endpoint embedding_model embedding_key
+    if ! resolve_embedding_probe_configuration provider_label embedding_endpoint embedding_model embedding_key; then
+        $log_fn "${RED}Embedding application configuration is unavailable${NC}"
+        return 1
+    fi
 
     if [ -z "$embedding_endpoint" ] || [ -z "$embedding_model" ] || [ -z "$embedding_key" ]; then
         $log_fn "${RED}Remote embedding provider not fully configured${NC}"
-        $log_fn "${YELLOW}Set REMOTE_EMBEDDING_SERVER_URL + REMOTE_EMBEDDING_API_KEY + REMOTE_EMBEDDING_MODEL_NAME, or OPENAI_API_KEY${NC}"
+        $log_fn "${YELLOW}Configure app.remote-embedding.server-url plus REMOTE_EMBEDDING_API_KEY, or OPENAI_API_KEY plus app.embeddings.open-ai-model${NC}"
         return 1
     fi
     if [[ "$embedding_endpoint" == *"models.github.ai"* ]]; then
         $log_fn "${RED}Invalid embedding endpoint: GitHub Models does not provide embeddings API${NC}"
-        $log_fn "${YELLOW}Use REMOTE_EMBEDDING_SERVER_URL (OpenAI-compatible embeddings provider) or OPENAI_EMBEDDING_BASE_URL for a provider that supports /v1/embeddings${NC}"
+        $log_fn "${YELLOW}Use app.remote-embedding.server-url or app.embeddings.open-ai-base-url for a provider that supports /v1/embeddings${NC}"
         return 1
     fi
 

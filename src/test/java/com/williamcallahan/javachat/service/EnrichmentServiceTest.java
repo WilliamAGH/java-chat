@@ -14,27 +14,38 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import reactor.core.publisher.Mono;
 
 /** Verifies enrichment responses honor the strict structured-output boundary. */
+@SpringJUnitConfig(JacksonAutoConfiguration.class)
 class EnrichmentServiceTest {
     private static final String ENRICHMENT_USER_QUERY = "How does List.copyOf work?";
     private static final String ENRICHMENT_JDK_VERSION = "25";
     private static final List<String> ENRICHMENT_CONTEXT_SNIPPETS =
             List.of("List.copyOf returns an unmodifiable list.");
+    private static final double TEST_ENRICHMENT_TEMPERATURE = 0.4;
+    private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
 
     private OpenAIStreamingService openAIStreamingService;
     private EnrichmentService enrichmentService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         openAIStreamingService = mock(OpenAIStreamingService.class);
         when(openAIStreamingService.isAvailable()).thenReturn(true);
-        enrichmentService = new EnrichmentService(new ObjectMapper(), openAIStreamingService);
+        enrichmentService =
+                new EnrichmentService(objectMapper, openAIStreamingService, configuredEnrichmentProperties());
     }
 
     @Test
@@ -94,6 +105,20 @@ class EnrichmentServiceTest {
     }
 
     @Test
+    void enrichRejectsDuplicateResponseFields() {
+        when(openAIStreamingService.completeJsonObject(anyString(), anyDouble(), anyInt()))
+                .thenReturn(Mono.just("{\"hints\":[\"first\"],\"hints\":[\"second\"]}"));
+
+        IllegalStateException jsonContractFailure = assertThrows(
+                IllegalStateException.class,
+                () -> enrichmentService.enrich(
+                        ENRICHMENT_USER_QUERY, ENRICHMENT_JDK_VERSION, ENRICHMENT_CONTEXT_SNIPPETS));
+
+        assertTrue(jsonContractFailure.getMessage().startsWith("LLM enrichment response was not valid JSON:"));
+        assertInstanceOf(JsonProcessingException.class, jsonContractFailure.getCause());
+    }
+
+    @Test
     void enrichRejectsTrailingTokensAndScalarCoercion() {
         List<String> invalidEnrichmentJsonValues = List.of(
                 "{\"hints\":[\"tip\"]} trailing",
@@ -113,5 +138,12 @@ class EnrichmentServiceTest {
             assertTrue(jsonContractFailure.getMessage().startsWith("LLM enrichment response was not valid JSON:"));
             assertInstanceOf(JsonProcessingException.class, jsonContractFailure.getCause());
         }
+    }
+
+    private static AppProperties configuredEnrichmentProperties() {
+        AppProperties appProperties = new AppProperties();
+        appProperties.getLlm().setTemperature(TEST_ENRICHMENT_TEMPERATURE);
+        appProperties.getLlm().setEnrichmentOutputTokenBudget(TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET);
+        return appProperties;
     }
 }

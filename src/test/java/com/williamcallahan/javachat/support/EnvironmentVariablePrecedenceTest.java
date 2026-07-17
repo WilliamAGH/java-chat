@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Verifies environment-variable precedence over .env values for embedding settings.
+ * Verifies environment-variable precedence over .env values for embedding credentials.
  */
 class EnvironmentVariablePrecedenceTest {
 
@@ -25,9 +25,8 @@ class EnvironmentVariablePrecedenceTest {
     void processEnvironmentOverridesDotEnvThenDefaultsApply() throws IOException, InterruptedException {
         Path environmentFilePath = temporaryDirectoryPath.resolve("embedding-test.env");
         Files.writeString(environmentFilePath, """
-                REMOTE_EMBEDDING_SERVER_URL=https://from-dotenv.example/v1
-                REMOTE_EMBEDDING_MODEL_NAME=text-embedding-qwen3-embedding-8b
                 REMOTE_EMBEDDING_API_KEY=dotenv-remote-api-key
+                QDRANT_API_KEY=dotenv-qdrant-api-key
                 """, StandardCharsets.UTF_8);
 
         Path environmentLoaderScriptPath = Path.of("")
@@ -41,13 +40,11 @@ class EnvironmentVariablePrecedenceTest {
         String shellProgram = """
                 set -euo pipefail
                 source "$SCRIPT_PATH"
-                export REMOTE_EMBEDDING_SERVER_URL="https://from-process.example/v1"
-                export REMOTE_EMBEDDING_MODEL_NAME=""
+                export QDRANT_API_KEY="process-qdrant-api-key"
                 preserve_process_env_then_source_file "$ENV_FILE_PATH"
-                printf '%s|%s|%s|%s' \
-                  "$REMOTE_EMBEDDING_SERVER_URL" \
-                  "$REMOTE_EMBEDDING_MODEL_NAME" \
+                printf '%s|%s|%s' \
                   "$REMOTE_EMBEDDING_API_KEY" \
+                  "$QDRANT_API_KEY" \
                   "${APP_EMBEDDING_TIMEOUT_SECONDS:-fallback-default}"
                 """;
 
@@ -59,9 +56,8 @@ class EnvironmentVariablePrecedenceTest {
         // Remove variables under test from the inherited parent environment so that
         // only values explicitly exported in the shell script or sourced from the
         // .env file participate in the precedence check.
-        shellEnvironmentMap.remove("REMOTE_EMBEDDING_SERVER_URL");
-        shellEnvironmentMap.remove("REMOTE_EMBEDDING_MODEL_NAME");
         shellEnvironmentMap.remove("REMOTE_EMBEDDING_API_KEY");
+        shellEnvironmentMap.remove("QDRANT_API_KEY");
         shellEnvironmentMap.remove("APP_EMBEDDING_TIMEOUT_SECONDS");
 
         Process shellProcess = shellProcessBuilder.start();
@@ -70,7 +66,7 @@ class EnvironmentVariablePrecedenceTest {
         String shellErrorOutput = readStream(shellProcess.getErrorStream()).trim();
 
         assertEquals(0, shellExitCode, shellErrorOutput);
-        assertEquals("https://from-process.example/v1||dotenv-remote-api-key|fallback-default", shellOutput);
+        assertEquals("dotenv-remote-api-key|process-qdrant-api-key|fallback-default", shellOutput);
     }
 
     private static String readStream(java.io.InputStream inputStream) throws IOException {

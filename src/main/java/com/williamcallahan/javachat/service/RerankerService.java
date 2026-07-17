@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.cfg.CoercionAction;
@@ -33,30 +34,34 @@ public class RerankerService {
     /** Maximum character length of document text included in the rerank prompt. */
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
 
-    /** Output budget including hidden reasoning before the small JSON ordering. */
-    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 4_000;
-
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
     private final Duration rerankerTimeout;
+    private final double rerankerTemperature;
+    private final int rerankerOutputTokenBudget;
 
     /**
      * Creates a reranker backed by the streaming LLM client.
      *
      * @param openAIStreamingService streaming LLM client
      * @param objectMapper Jackson object mapper
-     * @param appProperties application configuration containing reranker timeout budget
+     * @param appProperties application configuration containing reranker request settings
      */
     public RerankerService(
             OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper, AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
-        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper")
+                .copy()
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature());
         this.mapper
                 .coercionConfigFor(LogicalType.Integer)
                 .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
                 .setCoercion(CoercionInputShape.String, CoercionAction.Fail);
-        this.rerankerTimeout =
-                Objects.requireNonNull(appProperties, "appProperties").getRag().getRerankerTimeout();
+        AppProperties configuredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
+        AppProperties.Llm llmConfiguration = configuredAppProperties.getLlm();
+        this.rerankerTimeout = configuredAppProperties.getRag().getRerankerTimeout();
+        this.rerankerTemperature = llmConfiguration.getRerankerTemperature();
+        this.rerankerOutputTokenBudget = llmConfiguration.getRerankerOutputTokenBudget();
     }
 
     /**
@@ -105,7 +110,7 @@ public class RerankerService {
 
         try {
             return openAIStreamingService
-                    .completeJsonObject(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET, rerankerTimeout)
+                    .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankerTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();

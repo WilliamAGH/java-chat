@@ -18,7 +18,7 @@ public class QdrantRestConnection {
     private static final String QDRANT_HOST_PROPERTY = "${spring.ai.vectorstore.qdrant.host:localhost}";
     private static final String QDRANT_PORT_PROPERTY = "${spring.ai.vectorstore.qdrant.port:6334}";
     private static final String QDRANT_USE_TLS_PROPERTY = "${spring.ai.vectorstore.qdrant.use-tls:false}";
-    private static final String QDRANT_API_KEY_PROPERTY = "${spring.ai.vectorstore.qdrant.api-key:}";
+    private static final String QDRANT_API_KEY_ENVIRONMENT_VARIABLE = "${QDRANT_API_KEY:}";
     private static final String HTTP_SCHEME = "http";
     private static final String HTTPS_SCHEME = "https";
     private static final String URL_SCHEME_SEPARATOR = "://";
@@ -52,13 +52,13 @@ public class QdrantRestConnection {
      * @param host configured Qdrant host
      * @param configuredPort configured Qdrant gRPC port
      * @param useTls true when the connection should use TLS
-     * @param apiKey configured Qdrant API key, if any
+     * @param apiKey Qdrant API key from {@code QDRANT_API_KEY}, if any
      */
     public QdrantRestConnection(
             @Value(QDRANT_HOST_PROPERTY) String host,
             @Value(QDRANT_PORT_PROPERTY) int configuredPort,
             @Value(QDRANT_USE_TLS_PROPERTY) boolean useTls,
-            @Value(QDRANT_API_KEY_PROPERTY) String apiKey) {
+            @Value(QDRANT_API_KEY_ENVIRONMENT_VARIABLE) String apiKey) {
         this.host = host;
         this.configuredPort = configuredPort;
         this.useTls = useTls;

@@ -8,6 +8,7 @@ import com.openai.models.ResponsesModel;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.util.Arrays;
@@ -30,8 +31,7 @@ import org.springframework.stereotype.Service;
 public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
-    private static final int GPT5_COMPLETION_OUTPUT_TOKEN_BUDGET = 4000;
-    private static final String OPENAI_REASONING_EFFORT_ENVIRONMENT_VARIABLE = "OPENAI_REASONING_EFFORT";
+    private static final String REASONING_EFFORT_PROPERTY = "app.llm.reasoning-effort";
     private static final String KNOWN_OPENAI_REASONING_EFFORTS = Arrays.stream(ReasoningEffort.Known.values())
             .map(knownReasoningEffort -> AsciiTextNormalizer.toLowerAscii(knownReasoningEffort.name()))
             .collect(Collectors.joining(", "));
@@ -64,6 +64,7 @@ public final class OpenAiRequestFactory {
     private final PromptTruncator promptTruncator;
     private final String openaiModel;
     private final String githubModelsChatModel;
+    private final int completionOutputTokenBudget;
     private final Optional<ReasoningEffort> reasoningEffort;
 
     /**
@@ -73,7 +74,7 @@ public final class OpenAiRequestFactory {
      * @param promptTruncator structured prompt truncator for streaming requests
      * @param openaiModel configured OpenAI model id
      * @param githubModelsChatModel configured GitHub Models model id
-     * @param reasoningEffortSetting optional reasoning effort for GPT-5 family models
+     * @param appProperties typed application configuration for LLM generation policy
      * @throws IllegalArgumentException if the reasoning effort is not recognized by the OpenAI SDK
      */
     public OpenAiRequestFactory(
@@ -81,12 +82,14 @@ public final class OpenAiRequestFactory {
             PromptTruncator promptTruncator,
             @Value("${OPENAI_MODEL:" + DEFAULT_OPENAI_MODEL + "}") String openaiModel,
             @Value("${GITHUB_MODELS_CHAT_MODEL:" + DEFAULT_GITHUB_MODELS_MODEL + "}") String githubModelsChatModel,
-            @Value("${OPENAI_REASONING_EFFORT:}") String reasoningEffortSetting) {
+            AppProperties appProperties) {
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
         this.openaiModel = openaiModel;
         this.githubModelsChatModel = githubModelsChatModel;
-        this.reasoningEffort = resolveReasoningEffort(reasoningEffortSetting);
+        AppProperties.Llm llmConfiguration = appProperties.getLlm();
+        this.completionOutputTokenBudget = llmConfiguration.getCompletionOutputTokenBudget();
+        this.reasoningEffort = resolveReasoningEffort(llmConfiguration.getReasoningEffort());
     }
 
     /**
@@ -230,7 +233,7 @@ public final class OpenAiRequestFactory {
         if (maximumOutputTokens != null) {
             builder.maxOutputTokens(maximumOutputTokens.longValue());
         } else if (gpt5Family) {
-            builder.maxOutputTokens((long) GPT5_COMPLETION_OUTPUT_TOKEN_BUDGET);
+            builder.maxOutputTokens((long) completionOutputTokenBudget);
         }
 
         if (gpt5Family) {
@@ -286,7 +289,7 @@ public final class OpenAiRequestFactory {
         } catch (OpenAIInvalidDataException e) {
             throw new IllegalArgumentException(
                     "Invalid "
-                            + OPENAI_REASONING_EFFORT_ENVIRONMENT_VARIABLE
+                            + REASONING_EFFORT_PROPERTY
                             + " value '"
                             + reasoningEffortSetting
                             + "'. Valid values: "

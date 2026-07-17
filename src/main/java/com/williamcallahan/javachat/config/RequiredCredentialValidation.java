@@ -24,14 +24,13 @@ import org.springframework.context.annotation.Lazy;
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
     private static final String QDRANT_USE_TLS_PROPERTY = "${spring.ai.vectorstore.qdrant.use-tls:false}";
-    private static final String QDRANT_API_KEY_PROPERTY = "${spring.ai.vectorstore.qdrant.api-key:}";
+    private static final String QDRANT_API_KEY_ENVIRONMENT_VARIABLE = "${QDRANT_API_KEY:}";
     private static final String MISSING_GITHUB_MODELS_API_KEY_MESSAGE =
             "Selected LLM provider github_models requires GITHUB_TOKEN.";
     private static final String MISSING_OPENAI_API_KEY_MESSAGE =
             "Selected LLM provider openai requires OPENAI_API_KEY.";
-    private static final String MISSING_QDRANT_API_KEY_MESSAGE = "Qdrant TLS is enabled but "
-            + "spring.ai.vectorstore.qdrant.api-key is not set. "
-            + "Set SPRING_AI_VECTORSTORE_QDRANT_API_KEY or QDRANT_API_KEY for authenticated access.";
+    private static final String MISSING_QDRANT_API_KEY_MESSAGE =
+            "Qdrant TLS is enabled but QDRANT_API_KEY is not set. Set QDRANT_API_KEY for authenticated access.";
     private static final String REQUIRED_CREDENTIAL_VALIDATION_PASSED_MESSAGE = "Required credential validation passed";
 
     private final OpenAIStreamingService streamingService;
@@ -45,7 +44,7 @@ public class RequiredCredentialValidation {
             OpenAIStreamingService streamingService,
             OpenAiProviderRoutingService providerRoutingService,
             @Value(QDRANT_USE_TLS_PROPERTY) boolean qdrantTlsEnabled,
-            @Value(QDRANT_API_KEY_PROPERTY) String qdrantApiKey) {
+            @Value(QDRANT_API_KEY_ENVIRONMENT_VARIABLE) String qdrantApiKey) {
         this.streamingService = streamingService;
         this.providerRoutingService = providerRoutingService;
         this.qdrantTlsEnabled = qdrantTlsEnabled;

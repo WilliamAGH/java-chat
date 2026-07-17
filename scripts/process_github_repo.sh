@@ -15,8 +15,8 @@
 #
 # Environment variables (loaded from .env):
 #   QDRANT_HOST, QDRANT_PORT, QDRANT_API_KEY (optional), QDRANT_SSL (optional)
-#   APP_LOCAL_EMBEDDING_ENABLED, REMOTE_EMBEDDING_SERVER_URL, REMOTE_EMBEDDING_API_KEY
-#   REMOTE_EMBEDDING_MODEL_NAME, OPENAI_EMBEDDING_BASE_URL, OPENAI_API_KEY
+#   APP_LOCAL_EMBEDDING_ENABLED, REMOTE_EMBEDDING_API_KEY, OPENAI_API_KEY
+# Non-secret embedding endpoint and model settings are read from application.properties.
 #
 # Exit codes:
 #   0 - Success

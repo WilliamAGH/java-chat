@@ -535,7 +535,12 @@ public class AppProperties {
 
     /** Embedding vector configuration. */
     public static class Embeddings {
+        private static final String OPENAI_BASE_URL_KEY = "app.embeddings.open-ai-base-url";
+        private static final String OPENAI_MODEL_KEY = "app.embeddings.open-ai-model";
+
         private int dimensions = 4096;
+        private String openAiBaseUrl;
+        private String openAiModel;
 
         public int getDimensions() {
             return dimensions;
@@ -545,9 +550,47 @@ public class AppProperties {
             this.dimensions = dimensions;
         }
 
+        /**
+         * Returns the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
+         */
+        public String getOpenAiBaseUrl() {
+            return openAiBaseUrl;
+        }
+
+        /**
+         * Sets the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
+         *
+         * @param openAiBaseUrl configured endpoint base URL
+         */
+        public void setOpenAiBaseUrl(String openAiBaseUrl) {
+            this.openAiBaseUrl = openAiBaseUrl;
+        }
+
+        /**
+         * Returns the explicit OpenAI embedding model selected for this deployment.
+         */
+        public String getOpenAiModel() {
+            return openAiModel;
+        }
+
+        /**
+         * Sets the explicit OpenAI embedding model selected for this deployment.
+         *
+         * @param openAiModel embedding model identifier, blank when OpenAI embeddings are not selected
+         */
+        public void setOpenAiModel(String openAiModel) {
+            this.openAiModel = openAiModel;
+        }
+
         Embeddings validateConfiguration() {
             if (dimensions <= 0) {
                 throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
+            }
+            if (openAiBaseUrl == null || openAiBaseUrl.isBlank()) {
+                throw new IllegalArgumentException(OPENAI_BASE_URL_KEY + " must not be blank");
+            }
+            if (openAiModel == null) {
+                throw new IllegalArgumentException(OPENAI_MODEL_KEY + " must not be null");
             }
             return this;
         }
@@ -558,7 +601,13 @@ public class AppProperties {
         private static final double MIN_TEMPERATURE = 0.0;
         private static final double MAX_TEMPERATURE = 2.0;
 
-        private double temperature = 0.7;
+        private double temperature;
+        private double rerankerTemperature;
+        private String reasoningEffort;
+        private int completionOutputTokenBudget;
+        private int enrichmentOutputTokenBudget;
+        private int rerankerOutputTokenBudget;
+        private long configuredProviderBackoffSeconds;
 
         public double getTemperature() {
             return temperature;
@@ -566,6 +615,58 @@ public class AppProperties {
 
         public void setTemperature(double temperature) {
             this.temperature = temperature;
+        }
+
+        /** Returns the deterministic generation temperature used only for reranking. */
+        public double getRerankerTemperature() {
+            return rerankerTemperature;
+        }
+
+        /** Sets the deterministic generation temperature used only for reranking. */
+        public void setRerankerTemperature(double rerankerTemperature) {
+            this.rerankerTemperature = rerankerTemperature;
+        }
+
+        public String getReasoningEffort() {
+            return reasoningEffort;
+        }
+
+        public void setReasoningEffort(String reasoningEffort) {
+            this.reasoningEffort = reasoningEffort;
+        }
+
+        public int getCompletionOutputTokenBudget() {
+            return completionOutputTokenBudget;
+        }
+
+        public void setCompletionOutputTokenBudget(int completionOutputTokenBudget) {
+            this.completionOutputTokenBudget = completionOutputTokenBudget;
+        }
+
+        public int getEnrichmentOutputTokenBudget() {
+            return enrichmentOutputTokenBudget;
+        }
+
+        public void setEnrichmentOutputTokenBudget(int enrichmentOutputTokenBudget) {
+            this.enrichmentOutputTokenBudget = enrichmentOutputTokenBudget;
+        }
+
+        /** Returns the output-token budget used only for reranker JSON responses. */
+        public int getRerankerOutputTokenBudget() {
+            return rerankerOutputTokenBudget;
+        }
+
+        /** Sets the output-token budget used only for reranker JSON responses. */
+        public void setRerankerOutputTokenBudget(int rerankerOutputTokenBudget) {
+            this.rerankerOutputTokenBudget = rerankerOutputTokenBudget;
+        }
+
+        public long getConfiguredProviderBackoffSeconds() {
+            return configuredProviderBackoffSeconds;
+        }
+
+        public void setConfiguredProviderBackoffSeconds(long configuredProviderBackoffSeconds) {
+            this.configuredProviderBackoffSeconds = configuredProviderBackoffSeconds;
         }
 
         Llm validateConfiguration() {
@@ -576,6 +677,30 @@ public class AppProperties {
                         MIN_TEMPERATURE,
                         MAX_TEMPERATURE,
                         temperature));
+            }
+            if (rerankerTemperature < MIN_TEMPERATURE || rerankerTemperature > MAX_TEMPERATURE) {
+                throw new IllegalArgumentException(String.format(
+                        Locale.ROOT,
+                        "app.llm.reranker-temperature must be in range [%.1f, %.1f], got: %.2f",
+                        MIN_TEMPERATURE,
+                        MAX_TEMPERATURE,
+                        rerankerTemperature));
+            }
+            if (completionOutputTokenBudget <= 0) {
+                throw new IllegalArgumentException(
+                        "app.llm.completion-output-token-budget must be positive, got: " + completionOutputTokenBudget);
+            }
+            if (enrichmentOutputTokenBudget <= 0) {
+                throw new IllegalArgumentException(
+                        "app.llm.enrichment-output-token-budget must be positive, got: " + enrichmentOutputTokenBudget);
+            }
+            if (rerankerOutputTokenBudget <= 0) {
+                throw new IllegalArgumentException(
+                        "app.llm.reranker-output-token-budget must be positive, got: " + rerankerOutputTokenBudget);
+            }
+            if (configuredProviderBackoffSeconds <= 0) {
+                throw new IllegalArgumentException("app.llm.configured-provider-backoff-seconds must be positive, got: "
+                        + configuredProviderBackoffSeconds);
             }
             return this;
         }

@@ -57,10 +57,9 @@ logback-classic = { module = "ch.qos.logback:logback-classic" }
 # Jackson
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
 
-# Spring AI
-spring-ai-advisors-vector-store = { module = "org.springframework.ai:spring-ai-advisors-vector-store" }
-spring-ai-starter-model-openai = { module = "org.springframework.ai:spring-ai-starter-model-openai" }
-spring-ai-starter-vector-store-qdrant = { module = "org.springframework.ai:spring-ai-starter-vector-store-qdrant" }
+# Spring AI model types used by chat and document contracts
+spring-ai-commons = { module = "org.springframework.ai:spring-ai-commons" }
+spring-ai-model = { module = "org.springframework.ai:spring-ai-model" }
 
 # OpenAI SDK
 openai-java = { module = "com.openai:openai-java", version.ref = "openai" }
@@ -123,7 +122,8 @@ spring-boot-web = [
     "spring-boot-starter-oauth2-client",
 ]
 spring-ai = [
-    "spring-ai-starter-model-openai",
+    "spring-ai-commons",
+    "spring-ai-model",
 ]
 flexmark-all = [
     "flexmark",

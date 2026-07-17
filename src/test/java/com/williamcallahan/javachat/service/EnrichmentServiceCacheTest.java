@@ -10,6 +10,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.CacheConfig;
 import com.williamcallahan.javachat.model.Enrichment;
 import java.util.List;
@@ -30,7 +31,12 @@ class EnrichmentServiceCacheTest {
     private static final String ENRICHMENT_FRESH_HINT = "Fresh hint";
     private static final String ENRICHMENT_INITIAL_JSON = "{\"hints\":[\"" + ENRICHMENT_INITIAL_HINT + "\"]}";
     private static final String ENRICHMENT_FRESH_JSON = "{\"hints\":[\"" + ENRICHMENT_FRESH_HINT + "\"]}";
-    private static final double ENRICHMENT_TEMPERATURE = 0.7;
+    private static final double ENRICHMENT_TEMPERATURE = 0.4;
+    private static final double TEST_RERANKER_TEMPERATURE = 0.2;
+    private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
+    private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
+    private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 256;
+    private static final long TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 120L;
     private static final int ENRICHMENT_CACHE_MISS_COMPLETION_COUNT = 2;
 
     @Test
@@ -69,8 +75,22 @@ class EnrichmentServiceCacheTest {
         }
 
         @Bean
-        EnrichmentService enrichmentService(ObjectMapper objectMapper, OpenAIStreamingService streamingService) {
-            return new EnrichmentService(objectMapper, streamingService);
+        EnrichmentService enrichmentService(
+                ObjectMapper objectMapper, OpenAIStreamingService streamingService, AppProperties appProperties) {
+            return new EnrichmentService(objectMapper, streamingService, appProperties);
+        }
+
+        @Bean
+        AppProperties appProperties() {
+            AppProperties appProperties = new AppProperties();
+            AppProperties.Llm llmProperties = appProperties.getLlm();
+            llmProperties.setTemperature(ENRICHMENT_TEMPERATURE);
+            llmProperties.setRerankerTemperature(TEST_RERANKER_TEMPERATURE);
+            llmProperties.setCompletionOutputTokenBudget(TEST_COMPLETION_OUTPUT_TOKEN_BUDGET);
+            llmProperties.setEnrichmentOutputTokenBudget(TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET);
+            llmProperties.setRerankerOutputTokenBudget(TEST_RERANKER_OUTPUT_TOKEN_BUDGET);
+            llmProperties.setConfiguredProviderBackoffSeconds(TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+            return appProperties;
         }
     }
 }
