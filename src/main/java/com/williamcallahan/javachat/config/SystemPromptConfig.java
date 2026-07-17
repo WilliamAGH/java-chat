@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import java.util.Objects;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 public class SystemPromptConfig {
 
     private static final String JDK_VERSION_PLACEHOLDER = "__JDK_VERSION__";
+    private static final String MARKER_INVENTORY_PLACEHOLDER = "__MARKER_INVENTORY__";
     private static final String MARKER_PROSE_LINE_PLACEHOLDER = "__MARKER_PROSE_LINE_CLAUSE__";
     private static final String MARKER_CODE_BOUNDARY_PLACEHOLDER = "__MARKER_CODE_BOUNDARY_CLAUSE__";
     private static final String JAVA_FENCE_VALIDITY_PLACEHOLDER = "__JAVA_FENCE_VALIDITY_CLAUSE__";
@@ -51,11 +53,7 @@ public class SystemPromptConfig {
 
             ## Learning Enhancement Markers
             Embed learning insights directly in prose using these markers:
-            - {{hint:Text here}} for helpful tips and best practices
-            - {{reminder:Text here}} for important things to remember
-            - {{background:Text here}} for conceptual explanations
-            - {{example:code here}} for concise Java examples
-            - {{warning:Text here}} for common pitfalls to avoid
+            __MARKER_INVENTORY__
 
             ### Marker and Code Boundaries
             - __MARKER_PROSE_LINE_CLAUSE__
@@ -82,6 +80,7 @@ public class SystemPromptConfig {
             .replace(JAVA_FENCE_VALIDITY_PLACEHOLDER, JAVA_FENCE_VALIDITY_CLAUSE);
 
     private final String jdkVersion;
+    private final String markerUsagePrompt;
 
     /**
      * Creates prompt configuration from the validated application-properties owner.
@@ -91,13 +90,27 @@ public class SystemPromptConfig {
     public SystemPromptConfig(AppProperties appProperties) {
         this.jdkVersion = Integer.toString(
                 Objects.requireNonNull(appProperties, "appProperties").getDocs().getJdkVersion());
+        this.markerUsagePrompt = buildMarkerUsagePrompt(EnrichmentKindCatalog.load());
     }
 
     /**
      * Core system prompt shared by all models (OpenAI, GitHub Models, etc.)
      */
     public String getCoreSystemPrompt() {
-        return CORE_PROMPT_TEMPLATE.replace(JDK_VERSION_PLACEHOLDER, jdkVersion);
+        return CORE_PROMPT_TEMPLATE
+                .replace(JDK_VERSION_PLACEHOLDER, jdkVersion)
+                .replace(MARKER_INVENTORY_PLACEHOLDER, markerUsagePrompt);
+    }
+
+    /** Returns marker syntax projected from the canonical enrichment-kind manifest. */
+    public String getMarkerUsagePrompt() {
+        return markerUsagePrompt;
+    }
+
+    private static String buildMarkerUsagePrompt(EnrichmentKindCatalog enrichmentKindCatalog) {
+        return enrichmentKindCatalog.all().stream()
+                .map(presentation -> "- {{" + presentation.token() + ":Text here}} (" + presentation.title() + ")")
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     /**

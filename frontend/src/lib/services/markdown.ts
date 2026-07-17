@@ -1,32 +1,63 @@
 import { Marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
 import DOMPurify from "dompurify";
+import enrichmentKindsManifest from "../../../../src/main/resources/enrichment-kinds.manifest?raw";
 
 /**
- * Enrichment kinds with their display metadata.
- * Matches server-side EnrichmentPlaceholderizer for consistent rendering.
+ * Display metadata projected from the canonical enrichment-kind manifest.
  */
-const ENRICHMENT_KINDS: Record<string, { title: string; icon: string }> = {
-  hint: {
-    title: "Helpful Hints",
-    icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z"/></svg>',
-  },
-  background: {
-    title: "Background Context",
-    icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z"/></svg>',
-  },
-  reminder: {
-    title: "Important Reminders",
-    icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
-  },
-  warning: {
-    title: "Warning",
-    icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>',
-  },
-  example: {
-    title: "Example",
-    icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>',
-  },
-};
+interface EnrichmentPresentation {
+  title: string;
+  iconHtml: string;
+}
+
+const ENRICHMENT_MANIFEST_FIELD_DELIMITER = "|";
+const CARRIAGE_RETURN = "\r";
+const NEWLINE = "\n";
+const ZERO_WIDTH_SPACE_CODE_POINT = 0x200b;
+const WORD_JOINER_CODE_POINT = 0x2060;
+
+function parseEnrichmentKindsManifest(
+  manifestSource: string,
+): ReadonlyMap<string, EnrichmentPresentation> {
+  if (!manifestSource) {
+    throw new Error("Enrichment kind manifest must contain at least one row");
+  }
+
+  const manifestRows = manifestSource.split(NEWLINE);
+  if (manifestRows.at(-1) === "") {
+    manifestRows.pop();
+  }
+
+  const enrichmentPresentationsByToken = new Map<string, EnrichmentPresentation>();
+  for (const [rowIndex, manifestRow] of manifestRows.entries()) {
+    const normalizedManifestRow = manifestRow.endsWith(CARRIAGE_RETURN)
+      ? manifestRow.slice(0, -1)
+      : manifestRow;
+    const [enrichmentToken, presentationTitle, iconHtml, ...unexpectedFields] =
+      normalizedManifestRow.split(ENRICHMENT_MANIFEST_FIELD_DELIMITER);
+
+    if (
+      !isCanonicalEnrichmentToken(enrichmentToken) ||
+      !presentationTitle ||
+      presentationTitle !== presentationTitle.trim() ||
+      !iconHtml.startsWith("<svg") ||
+      !iconHtml.endsWith("</svg>") ||
+      unexpectedFields.length > 0
+    ) {
+      throw new Error(`Malformed enrichment kind manifest row ${rowIndex + 1}`);
+    }
+    if (enrichmentPresentationsByToken.has(enrichmentToken)) {
+      throw new Error(`Duplicate enrichment kind manifest token: ${enrichmentToken}`);
+    }
+
+    enrichmentPresentationsByToken.set(enrichmentToken, {
+      title: presentationTitle,
+      iconHtml,
+    });
+  }
+
+  return enrichmentPresentationsByToken;
+}
 
 interface EnrichmentToken extends Tokens.Generic {
   type: "enrichment";
@@ -38,18 +69,35 @@ interface EnrichmentToken extends Tokens.Generic {
 
 type EnrichmentOpening = { kind: string; length: number };
 
-/** Pattern matching code fence delimiters (3+ backticks or tildes at line start). */
-const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/;
 const FENCE_MIN_LENGTH = 3;
-const NEWLINE = "\n";
 const ASCII_DIGIT_START = 48;
 const ASCII_DIGIT_END = 57;
 const ASCII_UPPERCASE_START = 65;
 const ASCII_UPPERCASE_END = 90;
 const ASCII_LOWERCASE_START = 97;
 const ASCII_LOWERCASE_END = 122;
+const COMMONMARK_MAX_FENCE_INDENTATION = 3;
+const COMMONMARK_INDENTED_CODE_SPACES = 4;
 
 type FenceMarker = { character: string; length: number };
+type BacktickRun = { length: number };
+
+function isCanonicalEnrichmentToken(enrichmentToken: string): boolean {
+  if (!enrichmentToken || enrichmentToken !== enrichmentToken.trim()) {
+    return false;
+  }
+  for (const tokenCharacter of enrichmentToken) {
+    const tokenCharacterCode = tokenCharacter.charCodeAt(0);
+    const isLowercaseAsciiLetter =
+      tokenCharacterCode >= ASCII_LOWERCASE_START && tokenCharacterCode <= ASCII_LOWERCASE_END;
+    if (!isLowercaseAsciiLetter && tokenCharacter !== "-") {
+      return false;
+    }
+  }
+  return true;
+}
+
+const ENRICHMENT_PRESENTATIONS_BY_TOKEN = parseEnrichmentKindsManifest(enrichmentKindsManifest);
 
 function scanFenceMarker(src: string, index: number): FenceMarker | null {
   if (index < 0 || index >= src.length) {
@@ -72,6 +120,156 @@ function scanFenceMarker(src: string, index: number): FenceMarker | null {
   return { character: markerChar, length: markerLength };
 }
 
+function lineStartIndex(src: string, cursor: number): number {
+  let lineStart = cursor;
+  while (lineStart > 0 && src[lineStart - 1] !== NEWLINE) {
+    lineStart--;
+  }
+  return lineStart;
+}
+
+function leadingSpaceCount(src: string, lineStart: number): number {
+  let indentationSpaces = 0;
+  while (lineStart + indentationSpaces < src.length && src[lineStart + indentationSpaces] === " ") {
+    indentationSpaces++;
+  }
+  return indentationSpaces;
+}
+
+function isFenceAtCommonMarkIndentation(src: string, markerIndex: number): boolean {
+  const currentLineStart = lineStartIndex(src, markerIndex);
+  const indentationSpaces = markerIndex - currentLineStart;
+  if (indentationSpaces > COMMONMARK_MAX_FENCE_INDENTATION) {
+    return false;
+  }
+  for (
+    let indentationIndex = currentLineStart;
+    indentationIndex < markerIndex;
+    indentationIndex++
+  ) {
+    if (src[indentationIndex] !== " ") {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isIndentedCodeLine(src: string, lineStart: number): boolean {
+  return (
+    src[lineStart] === "\t" || leadingSpaceCount(src, lineStart) >= COMMONMARK_INDENTED_CODE_SPACES
+  );
+}
+
+function scanFenceAfterCommonMarkIndentation(
+  src: string,
+  lineStart: number,
+): { marker: FenceMarker; markerIndex: number } | null {
+  const indentationSpaces = leadingSpaceCount(src, lineStart);
+  if (indentationSpaces > COMMONMARK_MAX_FENCE_INDENTATION) {
+    return null;
+  }
+  const markerIndex = lineStart + indentationSpaces;
+  const marker = scanFenceMarker(src, markerIndex);
+  return marker ? { marker, markerIndex } : null;
+}
+
+function scanBacktickRun(src: string, index: number): BacktickRun | null {
+  if (index < 0 || index >= src.length || src[index] !== "`") {
+    return null;
+  }
+
+  let runLength = 0;
+  while (index + runLength < src.length && src[index + runLength] === "`") {
+    runLength++;
+  }
+
+  return { length: runLength };
+}
+
+function hasClosingBacktickRun(
+  src: string,
+  openingIndex: number,
+  openingRunLength: number,
+): boolean {
+  let searchIndex = openingIndex + openingRunLength;
+  while (searchIndex < src.length) {
+    const nextBacktickIndex = src.indexOf("`", searchIndex);
+    if (nextBacktickIndex < 0) {
+      return false;
+    }
+
+    const candidateRun = scanBacktickRun(src, nextBacktickIndex);
+    if (!candidateRun) {
+      return false;
+    }
+    if (candidateRun.length === openingRunLength) {
+      return true;
+    }
+    searchIndex = nextBacktickIndex + candidateRun.length;
+  }
+
+  return false;
+}
+
+/** Tracks fenced and inline code so enrichment delimiters remain literal inside code regions. */
+class MarkdownCodeRegionState {
+  private inFence = false;
+  private fenceCharacter = "";
+  private fenceLength = 0;
+  private inInlineCode = false;
+  private inlineBacktickLength = 0;
+
+  isInsideFence(): boolean {
+    return this.inFence;
+  }
+
+  isInsideInlineCode(): boolean {
+    return this.inInlineCode;
+  }
+
+  enterFence(marker: FenceMarker): void {
+    this.inFence = true;
+    this.fenceCharacter = marker.character;
+    this.fenceLength = marker.length;
+  }
+
+  exitFence(): void {
+    this.inFence = false;
+    this.fenceCharacter = "";
+    this.fenceLength = 0;
+  }
+
+  wouldCloseFence(marker: FenceMarker): boolean {
+    return (
+      this.inFence && marker.character === this.fenceCharacter && marker.length >= this.fenceLength
+    );
+  }
+
+  openFence(): FenceMarker | null {
+    if (!this.inFence) {
+      return null;
+    }
+    return { character: this.fenceCharacter, length: this.fenceLength };
+  }
+
+  processBacktickRun(src: string, cursor: number, backtickRun: BacktickRun): void {
+    if (this.inFence) {
+      return;
+    }
+    if (!this.inInlineCode && !hasClosingBacktickRun(src, cursor, backtickRun.length)) {
+      return;
+    }
+
+    if (!this.inInlineCode) {
+      this.inInlineCode = true;
+      this.inlineBacktickLength = backtickRun.length;
+    } else if (backtickRun.length === this.inlineBacktickLength) {
+      this.inInlineCode = false;
+      this.inlineBacktickLength = 0;
+    }
+  }
+}
+
 function isFenceLanguageCharacter(character: string): boolean {
   if (character.length !== 1) {
     return false;
@@ -87,7 +285,7 @@ function isAttachedFenceStart(src: string, index: number): boolean {
   if (index <= 0 || index >= src.length) {
     return false;
   }
-  return !/\s/.test(src[index - 1]);
+  return src[index - 1].trim().length > 0;
 }
 
 function appendLineBreakIfNeeded(text: string): string {
@@ -135,78 +333,77 @@ function normalizeMarkdownForStreaming(content: string): string {
   }
 
   let normalized = "";
-  let inFence = false;
-  let fenceChar = "";
-  let fenceLength = 0;
+  const codeRegionState = new MarkdownCodeRegionState();
 
   for (let cursor = 0; cursor < content.length; ) {
     const startOfLine = cursor === 0 || content[cursor - 1] === NEWLINE;
-    const marker = scanFenceMarker(content, cursor);
-
-    if (marker && !inFence && (startOfLine || isAttachedFenceStart(content, cursor))) {
-      normalized = appendLineBreakIfNeeded(normalized);
-      const consumed = consumeOpeningFence(content, cursor, marker);
-      normalized += consumed.text;
-      cursor = consumed.nextCursor;
-      inFence = true;
-      fenceChar = marker.character;
-      fenceLength = marker.length;
+    if (
+      startOfLine &&
+      !codeRegionState.isInsideFence() &&
+      !codeRegionState.isInsideInlineCode() &&
+      isIndentedCodeLine(content, cursor)
+    ) {
+      const lineEnd = content.indexOf(NEWLINE, cursor);
+      const nextLineStart = lineEnd < 0 ? content.length : lineEnd + 1;
+      normalized += content.slice(cursor, nextLineStart);
+      cursor = nextLineStart;
       continue;
     }
 
-    if (
-      marker &&
-      inFence &&
-      startOfLine &&
-      marker.character === fenceChar &&
-      marker.length >= fenceLength
-    ) {
-      normalized = appendLineBreakIfNeeded(normalized);
-      const consumed = consumeClosingFence(content, cursor, marker);
-      normalized += consumed.text;
-      cursor = consumed.nextCursor;
-      inFence = false;
-      fenceChar = "";
-      fenceLength = 0;
-      continue;
+    const marker = scanFenceMarker(content, cursor);
+    const fenceAtCommonMarkIndentation =
+      marker !== null && isFenceAtCommonMarkIndentation(content, cursor);
+
+    if (marker && !codeRegionState.isInsideInlineCode()) {
+      if (
+        !codeRegionState.isInsideFence() &&
+        (fenceAtCommonMarkIndentation || isAttachedFenceStart(content, cursor))
+      ) {
+        if (!fenceAtCommonMarkIndentation) {
+          normalized = appendLineBreakIfNeeded(normalized);
+        }
+        const consumed = consumeOpeningFence(content, cursor, marker);
+        normalized += consumed.text;
+        cursor = consumed.nextCursor;
+        codeRegionState.enterFence(marker);
+        continue;
+      }
+
+      if (
+        codeRegionState.isInsideFence() &&
+        fenceAtCommonMarkIndentation &&
+        codeRegionState.wouldCloseFence(marker)
+      ) {
+        const consumed = consumeClosingFence(content, cursor, marker);
+        normalized += consumed.text;
+        cursor = consumed.nextCursor;
+        codeRegionState.exitFence();
+        continue;
+      }
+    }
+
+    if (!codeRegionState.isInsideFence()) {
+      const backtickRun = scanBacktickRun(content, cursor);
+      if (backtickRun) {
+        codeRegionState.processBacktickRun(content, cursor, backtickRun);
+        normalized += content.slice(cursor, cursor + backtickRun.length);
+        cursor += backtickRun.length;
+        continue;
+      }
     }
 
     normalized += content[cursor];
     cursor++;
   }
 
-  if (inFence && fenceChar) {
-    normalized += `${NEWLINE}${fenceChar.repeat(Math.max(fenceLength, FENCE_MIN_LENGTH))}`;
+  const unfinishedFence = codeRegionState.openFence();
+  if (unfinishedFence) {
+    normalized += `${NEWLINE}${unfinishedFence.character.repeat(
+      Math.max(unfinishedFence.length, FENCE_MIN_LENGTH),
+    )}`;
   }
 
   return normalized;
-}
-
-/**
- * Checks whether code fences in content are balanced.
- * Uses simple line-by-line scan with toggle semantics.
- */
-function hasBalancedCodeFences(content: string): boolean {
-  let depth = 0;
-  let openChar = "";
-  let openLen = 0;
-  for (const line of content.split("\n")) {
-    const match = line.match(FENCE_PATTERN);
-    if (!match) continue;
-    const fence = match[1];
-    if (depth === 0) {
-      // Opening fence
-      depth = 1;
-      openChar = fence[0];
-      openLen = fence.length;
-    } else if (fence[0] === openChar && fence.length >= openLen) {
-      // Matching closing fence
-      depth = 0;
-      openChar = "";
-      openLen = 0;
-    }
-  }
-  return depth === 0;
 }
 
 /** Enrichment close marker. */
@@ -222,7 +419,7 @@ function hasUnmatchedOpeningBrace(enrichmentText: string): boolean {
 }
 
 function readEnrichmentOpening(src: string, index: number): EnrichmentOpening | null {
-  for (const kind of Object.keys(ENRICHMENT_KINDS)) {
+  for (const kind of ENRICHMENT_PRESENTATIONS_BY_TOKEN.keys()) {
     const opening = `{{${kind}:`;
     if (src.startsWith(opening, index)) {
       return { kind, length: opening.length };
@@ -233,7 +430,7 @@ function readEnrichmentOpening(src: string, index: number): EnrichmentOpening | 
 
 function findEnrichmentStart(src: string): number {
   let openingIndex = -1;
-  for (const kind of Object.keys(ENRICHMENT_KINDS)) {
+  for (const kind of ENRICHMENT_PRESENTATIONS_BY_TOKEN.keys()) {
     const candidateIndex = src.indexOf(`{{${kind}:`);
     if (candidateIndex >= 0 && (openingIndex < 0 || candidateIndex < openingIndex)) {
       openingIndex = candidateIndex;
@@ -263,34 +460,45 @@ function resolveCloseIndexFromBraceRun(src: string, runStart: number): number {
   return runStart + (runLength - ENRICHMENT_CLOSE.length);
 }
 
-/** Finds the closing }} while rejecting unresolved nesting and fenced-code braces. */
+/** Finds the closing }} while keeping delimiters inside fenced and inline code literal. */
 function findEnrichmentClose(src: string, startIndex: number, isStreaming: boolean): number {
-  let inFence = false;
-  let fenceChar = "";
-  let fenceLen = 0;
-  for (let cursor = startIndex; cursor < src.length - 1; cursor++) {
-    // At line boundaries, check for fence delimiters
-    if (cursor === startIndex || src[cursor - 1] === "\n") {
-      const lineMatch = src.slice(cursor).match(FENCE_PATTERN);
-      if (lineMatch) {
-        const fence = lineMatch[1];
-        if (!inFence) {
-          inFence = true;
-          fenceChar = fence[0];
-          fenceLen = fence.length;
-        } else if (fence[0] === fenceChar && fence.length >= fenceLen) {
-          inFence = false;
-          fenceChar = "";
-          fenceLen = 0;
+  const codeRegionState = new MarkdownCodeRegionState();
+  for (let cursor = startIndex; cursor < src.length; ) {
+    const startOfLine = cursor === startIndex || src[cursor - 1] === NEWLINE;
+    if (startOfLine && !codeRegionState.isInsideInlineCode()) {
+      if (!codeRegionState.isInsideFence() && isIndentedCodeLine(src, cursor)) {
+        const lineEnd = src.indexOf(NEWLINE, cursor);
+        cursor = lineEnd < 0 ? src.length : lineEnd + 1;
+        continue;
+      }
+
+      const fenceCandidate = scanFenceAfterCommonMarkIndentation(src, cursor);
+      if (fenceCandidate) {
+        const { marker, markerIndex } = fenceCandidate;
+        if (!codeRegionState.isInsideFence()) {
+          codeRegionState.enterFence(marker);
+        } else if (codeRegionState.wouldCloseFence(marker)) {
+          codeRegionState.exitFence();
         }
-        cursor += fence.length - 1; // -1 because loop will increment
+        cursor = markerIndex + marker.length;
         continue;
       }
     }
-    if (!inFence && readEnrichmentOpening(src, cursor)) {
-      return -1;
+
+    if (!codeRegionState.isInsideFence()) {
+      const backtickRun = scanBacktickRun(src, cursor);
+      if (backtickRun) {
+        codeRegionState.processBacktickRun(src, cursor, backtickRun);
+        cursor += backtickRun.length;
+        continue;
+      }
     }
-    if (!inFence && src[cursor] === "}") {
+
+    if (
+      !codeRegionState.isInsideFence() &&
+      !codeRegionState.isInsideInlineCode() &&
+      src[cursor] === "}"
+    ) {
       const closeIndex = resolveCloseIndexFromBraceRun(src, cursor);
       if (closeIndex >= 0) {
         if (
@@ -298,14 +506,31 @@ function findEnrichmentClose(src: string, startIndex: number, isStreaming: boole
           closeIndex === cursor &&
           hasUnmatchedOpeningBrace(src.slice(startIndex, cursor))
         ) {
+          cursor++;
           continue;
         }
         return closeIndex;
       }
     }
+
+    cursor++;
   }
 
   return -1;
+}
+
+function isBlankEnrichmentText(enrichmentMarkdown: string): boolean {
+  for (const character of enrichmentMarkdown) {
+    const codePoint = character.codePointAt(0);
+    const isBlankCharacter =
+      character.trim().length === 0 ||
+      codePoint === ZERO_WIDTH_SPACE_CODE_POINT ||
+      codePoint === WORD_JOINER_CODE_POINT;
+
+    if (!isBlankCharacter) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -376,30 +601,15 @@ function createEnrichmentExtension(
 
       const kind = typeof token.kind === "string" ? token.kind : "";
       const enrichmentMarkdown = typeof token.content === "string" ? token.content : "";
-      const enrichmentPresentation = ENRICHMENT_KINDS[kind];
+      const enrichmentPresentation = ENRICHMENT_PRESENTATIONS_BY_TOKEN.get(kind);
       if (!enrichmentPresentation) {
         return token.raw;
       }
-      if (enrichmentMarkdown.length === 0) {
+      if (isBlankEnrichmentText(enrichmentMarkdown)) {
         return "";
       }
 
       const normalizedEnrichmentMarkdown = normalizeMarkdownForStreaming(enrichmentMarkdown);
-
-      // DIAGNOSTIC: Log enrichment content to identify malformed markdown
-      if (import.meta.env.DEV) {
-        const hasFences =
-          normalizedEnrichmentMarkdown.includes("```") ||
-          normalizedEnrichmentMarkdown.includes("~~~");
-        const isBalanced = hasBalancedCodeFences(normalizedEnrichmentMarkdown);
-        if (hasFences && !isBalanced) {
-          console.warn("[markdown] Unbalanced code fences in enrichment:", {
-            kind,
-            content: normalizedEnrichmentMarkdown,
-            raw: token.raw,
-          });
-        }
-      }
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
@@ -410,7 +620,7 @@ function createEnrichmentExtension(
       });
 
       return `<div class="inline-enrichment ${kind}" data-enrichment-type="${kind}">
-  <div class="inline-enrichment-header">${enrichmentPresentation.icon}<span>${enrichmentPresentation.title}</span></div>
+  <div class="inline-enrichment-header">${enrichmentPresentation.iconHtml}<span>${enrichmentPresentation.title}</span></div>
   <div class="enrichment-text">${innerHtml}</div>
 </div>`;
     },
@@ -441,15 +651,19 @@ export function parseMarkdown(
 
   const normalizedContent = normalizeMarkdownForStreaming(markdownText);
 
-  // DIAGNOSTIC: Log content with unbalanced fences before parsing
-  if (import.meta.env.DEV) {
-    const hasFences = normalizedContent.includes("```") || normalizedContent.includes("~~~");
-    if (hasFences && !hasBalancedCodeFences(normalizedContent)) {
-      console.warn("[markdown] Unbalanced code fences in input:", {
-        contentLength: normalizedContent.length,
-        contentPreview: normalizedContent.slice(0, 500),
-        contentEnd: normalizedContent.slice(-200),
+  if (import.meta.env.DEV && normalizedContent !== markdownText) {
+    for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
+      const opening = readEnrichmentOpening(markdownText, markerIndex);
+      if (!opening) {
+        continue;
+      }
+      const rawLength = markdownText.length - markerIndex;
+      console.warn("[markdown] Repaired enrichment markdown structure", {
+        kind: opening.kind,
+        contentLength: Math.max(0, rawLength - opening.length - ENRICHMENT_CLOSE.length),
+        rawLength,
       });
+      break;
     }
   }
 

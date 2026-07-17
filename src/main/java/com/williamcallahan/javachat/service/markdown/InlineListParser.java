@@ -14,7 +14,7 @@ import org.jsoup.nodes.Element;
  * letter (a. b. c.), and bullet (-, *, +, •) markers.</p>
  *
  * <p>This is a stateless parser with all utility methods exposed statically.
- * Follow the pattern established by {@link CodeFenceStateTracker}.</p>
+ * Follow the pattern established by {@link MarkdownBlockContext}.</p>
  */
 final class InlineListParser {
 

@@ -3,16 +3,12 @@ package com.williamcallahan.javachat.service.markdown;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
-import com.williamcallahan.javachat.domain.markdown.Background;
-import com.williamcallahan.javachat.domain.markdown.Example;
-import com.williamcallahan.javachat.domain.markdown.Hint;
+import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
+import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog.EnrichmentPresentation;
 import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
-import com.williamcallahan.javachat.domain.markdown.Reminder;
-import com.williamcallahan.javachat.domain.markdown.Warning;
-import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -29,71 +25,16 @@ class EnrichmentPlaceholderizer {
 
     private final Parser parser;
     private final HtmlRenderer renderer;
-
-    /**
-     * Defines supported enrichment marker kinds and their rendering metadata.
-     */
-    private enum EnrichmentKind {
-        HINT(
-                "hint",
-                "Helpful Hints",
-                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>"),
-        BACKGROUND(
-                "background",
-                "Background Context",
-                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>"),
-        REMINDER(
-                "reminder",
-                "Important Reminders",
-                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>"),
-        WARNING(
-                "warning",
-                "Warning",
-                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>"),
-        EXAMPLE(
-                "example",
-                "Example",
-                "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>");
-
-        private final String token;
-        private final String title;
-        private final String iconHtml;
-
-        EnrichmentKind(String token, String title, String iconHtml) {
-            this.token = token;
-            this.title = title;
-            this.iconHtml = iconHtml;
-        }
-
-        String token() {
-            return token;
-        }
-
-        String title() {
-            return title;
-        }
-
-        String iconHtml() {
-            return iconHtml;
-        }
-
-        static Optional<EnrichmentKind> fromToken(String rawToken) {
-            if (rawToken == null) {
-                return Optional.empty();
-            }
-            String normalized = AsciiTextNormalizer.toLowerAscii(rawToken.trim());
-            for (EnrichmentKind kind : EnrichmentKind.values()) {
-                if (kind.token.equals(normalized)) {
-                    return Optional.of(kind);
-                }
-            }
-            return Optional.empty();
-        }
-    }
+    private final EnrichmentKindCatalog enrichmentKindCatalog;
 
     EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer) {
-        this.parser = parser;
-        this.renderer = renderer;
+        this(parser, renderer, EnrichmentKindCatalog.load());
+    }
+
+    EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer, EnrichmentKindCatalog enrichmentKindCatalog) {
+        this.parser = Objects.requireNonNull(parser, "parser");
+        this.renderer = Objects.requireNonNull(renderer, "renderer");
+        this.enrichmentKindCatalog = Objects.requireNonNull(enrichmentKindCatalog, "enrichmentKindCatalog");
     }
 
     private record EnrichmentContext(
@@ -110,90 +51,77 @@ class EnrichmentPlaceholderizer {
 
         StringBuilder outputBuilder = new StringBuilder(markdown.length() + 64);
         EnrichmentContext context = new EnrichmentContext(markdown, enrichments, placeholders, outputBuilder);
-        CodeFenceStateTracker fenceTracker = new CodeFenceStateTracker();
-
-        int cursor = 0;
+        MarkdownBlockContext blockContext = new MarkdownBlockContext();
+        int lineStartIndex = 0;
         int absolutePosition = 0;
 
-        while (cursor < markdown.length()) {
-            boolean isStartOfLine = (cursor == 0) || (markdown.charAt(cursor - 1) == '\n');
-
-            // Check for fence markers at start of line
-            if (isStartOfLine && !fenceTracker.isInsideInlineCode()) {
-                CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, cursor);
-                if (marker != null) {
-                    if (!fenceTracker.isInsideFence()) {
-                        fenceTracker.enterFence(marker.character(), marker.length());
-                    } else if (fenceTracker.wouldCloseFence(marker)) {
-                        fenceTracker.exitFence();
-                    }
-
-                    for (int offset = 0; offset < marker.length(); offset++) {
-                        outputBuilder.append(markdown.charAt(cursor + offset));
-                    }
-                    cursor += marker.length();
-                    absolutePosition += marker.length();
-                    continue;
-                }
-            }
-
-            // Track inline code spans outside fenced code
-            if (!fenceTracker.isInsideFence()) {
-                CodeFenceStateTracker.BacktickRun backtickRun = CodeFenceStateTracker.scanBacktickRun(markdown, cursor);
-                if (backtickRun != null) {
-                    fenceTracker.processBacktickRun(markdown, cursor);
-                    for (int offset = 0; offset < backtickRun.length(); offset++) {
-                        outputBuilder.append(markdown.charAt(cursor + offset));
-                    }
-                    cursor += backtickRun.length();
-                    absolutePosition += backtickRun.length();
-                    continue;
-                }
-            }
-
-            // Detect enrichment start only when not inside code fences or inline code
-            if (!fenceTracker.isInsideCode() && startsWith(markdown, cursor, MARKER_START)) {
-                EnrichmentParseResult parseResult = parseEnrichmentMarker(markdown, cursor);
-                if (parseResult.isValid()) {
-                    EnrichmentProcessingResult processingResult = processEnrichment(
-                            context, cursor, parseResult.contentStartIndex(), parseResult.kind(), absolutePosition);
-
-                    if (processingResult != null) {
-                        cursor = processingResult.nextIndex();
-                        absolutePosition = processingResult.nextAbsolutePosition();
+        while (lineStartIndex < markdown.length()) {
+            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
+            MarkdownBlockContext.LineContext lineContext =
+                    blockContext.classifyLine(markdown, lineStartIndex, lineEndIndex);
+            if (lineContext.isCodeBlock()) {
+                outputBuilder.append(markdown, lineStartIndex, lineEndIndex);
+                absolutePosition += lineEndIndex - lineStartIndex;
+            } else {
+                int cursor = lineStartIndex;
+                while (cursor < lineEndIndex) {
+                    int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdown, cursor);
+                    if (inlineDelimiterLength > 0) {
+                        outputBuilder.append(markdown, cursor, cursor + inlineDelimiterLength);
+                        cursor += inlineDelimiterLength;
+                        absolutePosition += inlineDelimiterLength;
                         continue;
                     }
+
+                    if (!blockContext.isInsideCode() && markdown.startsWith(MARKER_START, cursor)) {
+                        EnrichmentParseResult parseResult = parseEnrichmentMarker(markdown, cursor);
+                        if (parseResult.isValid()) {
+                            EnrichmentProcessingResult processingResult = processEnrichment(
+                                    context,
+                                    cursor,
+                                    parseResult.contentStartIndex(),
+                                    parseResult.presentation(),
+                                    absolutePosition);
+                            if (processingResult != null) {
+                                cursor = processingResult.nextIndex();
+                                absolutePosition = processingResult.nextAbsolutePosition();
+                                lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, cursor);
+                                continue;
+                            }
+                        }
+                    }
+
+                    outputBuilder.append(markdown.charAt(cursor));
+                    cursor++;
+                    absolutePosition++;
                 }
             }
 
-            // Default copy behavior
-            outputBuilder.append(markdown.charAt(cursor));
-            cursor++;
-            absolutePosition++;
+            if (lineEndIndex < markdown.length()) {
+                outputBuilder.append('\n');
+                absolutePosition++;
+            }
+            lineStartIndex = lineEndIndex + 1;
         }
 
         return outputBuilder.toString();
     }
 
-    private boolean startsWith(String text, int index, String prefix) {
-        return text.startsWith(prefix, index);
-    }
-
-    private String buildEnrichmentHtmlUnified(EnrichmentKind kind, String content) {
+    private String buildEnrichmentHtmlUnified(EnrichmentPresentation presentation, String content) {
         Document document = Jsoup.parseBodyFragment("");
         document.outputSettings().prettyPrint(false);
 
         Element container = document.body().appendElement("div");
         container.addClass("inline-enrichment");
-        container.addClass(kind.token());
-        container.attr("data-enrichment-type", kind.token());
+        container.addClass(presentation.token());
+        container.attr("data-enrichment-type", presentation.token());
 
         Element header = container.appendElement("div").addClass("inline-enrichment-header");
-        Document iconFragment = Jsoup.parseBodyFragment(kind.iconHtml());
+        Document iconFragment = Jsoup.parseBodyFragment(presentation.iconHtml());
         for (org.jsoup.nodes.Node iconNode : iconFragment.body().childNodesCopy()) {
             header.appendChild(iconNode);
         }
-        header.appendElement("span").text(kind.title());
+        header.appendElement("span").text(presentation.title());
 
         Element textContainer = container.appendElement("div").addClass("enrichment-text");
         String processedContent = processFragmentForEnrichment(content);
@@ -238,44 +166,50 @@ class EnrichmentPlaceholderizer {
     }
 
     private int findEnrichmentEndIndex(String markdown, int startIndex) {
-        CodeFenceStateTracker fenceTracker = new CodeFenceStateTracker();
+        MarkdownBlockContext blockContext = new MarkdownBlockContext();
         int scanIndex = startIndex;
+        int lineStartIndex = findLineStartIndex(markdown, startIndex);
 
         while (scanIndex < markdown.length()) {
-            boolean isStartOfLine = (scanIndex == startIndex) || (markdown.charAt(scanIndex - 1) == '\n');
+            int lineEndIndex = MarkdownBlockContext.lineEndIndex(markdown, lineStartIndex);
+            if (scanIndex == lineStartIndex) {
+                MarkdownBlockContext.LineContext lineContext =
+                        blockContext.classifyLine(markdown, lineStartIndex, lineEndIndex);
+                if (lineContext.isCodeBlock()) {
+                    scanIndex = lineEndIndex;
+                }
+            }
 
-            if (isStartOfLine && !fenceTracker.isInsideInlineCode()) {
-                CodeFenceStateTracker.FenceMarker marker = CodeFenceStateTracker.scanFenceMarker(markdown, scanIndex);
-                if (marker != null) {
-                    if (!fenceTracker.isInsideFence()) {
-                        fenceTracker.enterFence(marker.character(), marker.length());
-                    } else if (fenceTracker.wouldCloseFence(marker)) {
-                        fenceTracker.exitFence();
+            while (scanIndex < lineEndIndex) {
+                int inlineDelimiterLength = blockContext.consumeInlineCodeDelimiter(markdown, scanIndex);
+                if (inlineDelimiterLength > 0) {
+                    scanIndex += inlineDelimiterLength;
+                    continue;
+                }
+
+                if (!blockContext.isInsideCode() && markdown.charAt(scanIndex) == '}') {
+                    int closeIndex = resolveCloseIndexFromBraceRun(markdown, scanIndex);
+                    if (closeIndex >= 0) {
+                        return closeIndex;
                     }
-                    scanIndex += marker.length();
-                    continue;
                 }
+                scanIndex++;
             }
 
-            if (!fenceTracker.isInsideFence()) {
-                CodeFenceStateTracker.BacktickRun backtickRun =
-                        CodeFenceStateTracker.scanBacktickRun(markdown, scanIndex);
-                if (backtickRun != null) {
-                    fenceTracker.processBacktickRun(markdown, scanIndex);
-                    scanIndex += backtickRun.length();
-                    continue;
-                }
+            if (scanIndex < markdown.length()) {
+                scanIndex++;
+                lineStartIndex = scanIndex;
             }
-
-            if (!fenceTracker.isInsideCode() && markdown.charAt(scanIndex) == '}') {
-                int closeIndex = resolveCloseIndexFromBraceRun(markdown, scanIndex);
-                if (closeIndex >= 0) {
-                    return closeIndex;
-                }
-            }
-            scanIndex++;
         }
         return -1;
+    }
+
+    private int findLineStartIndex(String markdown, int cursor) {
+        int lineStartIndex = cursor;
+        while (lineStartIndex > 0 && markdown.charAt(lineStartIndex - 1) != '\n') {
+            lineStartIndex--;
+        }
+        return lineStartIndex;
     }
 
     /**
@@ -299,21 +233,11 @@ class EnrichmentPlaceholderizer {
         return runStart + (runLength - MARKER_END.length());
     }
 
-    private MarkdownEnrichment createEnrichment(EnrichmentKind kind, String enrichmentMarkdown, int absolutePosition) {
-        return switch (kind) {
-            case HINT -> Hint.create(enrichmentMarkdown, absolutePosition);
-            case WARNING -> Warning.create(enrichmentMarkdown, absolutePosition);
-            case BACKGROUND -> Background.create(enrichmentMarkdown, absolutePosition);
-            case EXAMPLE -> Example.create(enrichmentMarkdown, absolutePosition);
-            case REMINDER -> Reminder.create(enrichmentMarkdown, absolutePosition);
-        };
-    }
-
     private EnrichmentProcessingResult processEnrichment(
             EnrichmentContext context,
             int openingIndex,
             int contentStartIndex,
-            EnrichmentKind kind,
+            EnrichmentPresentation presentation,
             int absolutePosition) {
         int closingIndex = findEnrichmentEndIndex(context.markdown, contentStartIndex);
         if (closingIndex == -1) {
@@ -328,11 +252,12 @@ class EnrichmentPlaceholderizer {
             return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
         }
 
-        MarkdownEnrichment enrichment = createEnrichment(kind, enrichmentMarkdown, absolutePosition);
+        MarkdownEnrichment enrichment =
+                new MarkdownEnrichment(presentation.token(), enrichmentMarkdown, absolutePosition);
         context.enrichments.add(enrichment);
 
         String placeholderId = PLACEHOLDER_PREFIX + UUID.randomUUID().toString().replace("-", "");
-        context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(kind, enrichmentMarkdown));
+        context.placeholders.put(placeholderId, buildEnrichmentHtmlUnified(presentation, enrichmentMarkdown));
         context.outputBuilder.append(placeholderId);
 
         return new EnrichmentProcessingResult(closingIndex + 2, absolutePosition + consumedLength);
@@ -344,16 +269,16 @@ class EnrichmentPlaceholderizer {
      * Result of parsing an enrichment marker opening sequence.
      *
      * @param valid true if a valid enrichment marker was found
-     * @param kind the enrichment kind, or null if invalid
+     * @param presentation canonical presentation, or null if invalid
      * @param contentStartIndex position where content begins (after the colon)
      */
-    private record EnrichmentParseResult(boolean valid, EnrichmentKind kind, int contentStartIndex) {
+    private record EnrichmentParseResult(boolean valid, EnrichmentPresentation presentation, int contentStartIndex) {
         static EnrichmentParseResult invalid() {
             return new EnrichmentParseResult(false, null, -1);
         }
 
-        static EnrichmentParseResult of(EnrichmentKind kind, int contentStartIndex) {
-            return new EnrichmentParseResult(true, kind, contentStartIndex);
+        static EnrichmentParseResult of(EnrichmentPresentation presentation, int contentStartIndex) {
+            return new EnrichmentParseResult(true, presentation, contentStartIndex);
         }
 
         boolean isValid() {
@@ -363,7 +288,7 @@ class EnrichmentPlaceholderizer {
 
     /**
      * Parses an enrichment marker at the given position.
-     * Expects format: {{kind: where kind is one of the EnrichmentKind tokens.
+     * Expects format: {{kind: where kind is an exact canonical manifest token.
      *
      * @param markdown the markdown text
      * @param markerStart position of the opening {{
@@ -376,8 +301,9 @@ class EnrichmentPlaceholderizer {
         }
 
         String rawToken = markdown.substring(markerStart + MARKER_START.length(), colonIndex);
-        return EnrichmentKind.fromToken(rawToken)
-                .map(kind -> EnrichmentParseResult.of(kind, colonIndex + 1))
+        return enrichmentKindCatalog
+                .find(rawToken)
+                .map(presentation -> EnrichmentParseResult.of(presentation, colonIndex + 1))
                 .orElse(EnrichmentParseResult.invalid());
     }
 }

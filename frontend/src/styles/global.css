@@ -412,7 +412,8 @@ pre code {
   margin: var(--space-4) 0;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
-  border-left: 3px solid;
+  background: var(--color-accent-subtle);
+  border-left: 3px solid var(--color-accent);
 }
 
 .inline-enrichment-header {
@@ -424,6 +425,7 @@ pre code {
   font-size: var(--text-sm);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
+  color: var(--color-accent);
 }
 
 .inline-enrichment-header svg {
@@ -439,54 +441,4 @@ pre code {
 
 .enrichment-text p:last-child {
   margin-bottom: 0;
-}
-
-/* Hint - Warm amber/gold */
-.inline-enrichment.hint {
-  background: rgba(201, 160, 74, 0.08);
-  border-color: var(--color-warning);
-}
-
-.inline-enrichment.hint .inline-enrichment-header {
-  color: var(--color-warning);
-}
-
-/* Warning - Alert red */
-.inline-enrichment.warning {
-  background: rgba(196, 93, 93, 0.08);
-  border-color: var(--color-error);
-}
-
-.inline-enrichment.warning .inline-enrichment-header {
-  color: var(--color-error);
-}
-
-/* Background - Muted blue/info */
-.inline-enrichment.background {
-  background: rgba(93, 138, 196, 0.08);
-  border-color: var(--color-info);
-}
-
-.inline-enrichment.background .inline-enrichment-header {
-  color: var(--color-info);
-}
-
-/* Example - Accent terracotta */
-.inline-enrichment.example {
-  background: var(--color-accent-subtle);
-  border-color: var(--color-accent);
-}
-
-.inline-enrichment.example .inline-enrichment-header {
-  color: var(--color-accent);
-}
-
-/* Reminder - Success green */
-.inline-enrichment.reminder {
-  background: rgba(93, 155, 93, 0.08);
-  border-color: var(--color-success);
-}
-
-.inline-enrichment.reminder .inline-enrichment-header {
-  color: var(--color-success);
 }

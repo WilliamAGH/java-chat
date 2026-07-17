@@ -26,6 +26,7 @@ COPY frontend/ .
 COPY .gitignore /app/.ignore
 COPY Dockerfile /app/Dockerfile
 COPY docs/getting-started.md /app/docs/getting-started.md
+COPY src/main/resources/enrichment-kinds.manifest /app/src/main/resources/enrichment-kinds.manifest
 RUN npm run validate && npm run test && npm run build
 
 # ================================

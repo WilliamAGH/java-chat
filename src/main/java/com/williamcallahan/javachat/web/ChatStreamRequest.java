@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
+
 /**
  * Request body for chat streaming endpoint.
  *
@@ -11,12 +13,12 @@ public record ChatStreamRequest(String sessionId, String latest) {
     private static final String LATEST_QUERY_REQUIRED_MESSAGE = "Latest query is required";
 
     /**
-     * Creates a request whose canonical query contains non-whitespace text.
+     * Creates a request whose canonical query contains visible text.
      *
      * @throws IllegalArgumentException when the latest query is null or blank
      */
     public ChatStreamRequest {
-        if (latest == null || latest.isBlank()) {
+        if (!UnicodeVisibleContent.hasVisibleContent(latest)) {
             throw new IllegalArgumentException(LATEST_QUERY_REQUIRED_MESSAGE);
         }
     }

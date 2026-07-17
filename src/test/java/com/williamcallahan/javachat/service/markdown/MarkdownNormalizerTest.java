@@ -2,7 +2,12 @@ package com.williamcallahan.javachat.service.markdown;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Verifies normalization rules that precede markdown AST parsing.
@@ -117,5 +122,39 @@ class MarkdownNormalizerTest {
         String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(attachedFence);
 
         assertEquals(expectedNormalizedMarkdown, normalizedMarkdown);
+    }
+
+    @Test
+    void preNormalizeForListsAndFences_keepsEnrichmentMarkerOutsideNumericListCodeIndentation() {
+        String markdownWithFollowingEnrichment = String.join(
+                "\n", "1. Learn the language", "", "{{hint:Read the official documentation}}", "", "### Next topic");
+
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownWithFollowingEnrichment);
+
+        assertEquals(markdownWithFollowingEnrichment, normalizedMarkdown);
+    }
+
+    @ParameterizedTest(name = "{0} fence with {1} spaces remains code context")
+    @MethodSource("fencedCodeBlocksAtEveryIndentation")
+    void preNormalizeForListsAndFencesPreservesFencedAndIndentedCodeContext(
+            String fenceDescription, int indentationSpaces, String markdownCodeBlock) {
+        String normalizedMarkdown = MarkdownNormalizer.preNormalizeForListsAndFences(markdownCodeBlock);
+
+        assertEquals(markdownCodeBlock, normalizedMarkdown, fenceDescription + " should remain literal Markdown");
+    }
+
+    private static Stream<Arguments> fencedCodeBlocksAtEveryIndentation() {
+        return Stream.of("backtick", "tilde").flatMap(fenceDescription -> {
+            String fence = "backtick".equals(fenceDescription) ? "```" : "~~~";
+            return IntStream.rangeClosed(0, 4).mapToObj(indentationSpaces -> {
+                String indentation = " ".repeat(indentationSpaces);
+                String markdownCodeBlock = String.join(
+                        "\n",
+                        indentation + fence,
+                        indentation + "{{hint: protected code marker}}",
+                        indentation + fence);
+                return Arguments.of(fenceDescription, indentationSpaces, markdownCodeBlock);
+            });
+        });
     }
 }

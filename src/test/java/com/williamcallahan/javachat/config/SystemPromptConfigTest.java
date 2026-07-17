@@ -1,8 +1,10 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,5 +39,18 @@ class SystemPromptConfigTest {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
 
         assertTrue(corePrompt.contains("Java " + TEST_DOCUMENTATION_JDK_VERSION));
+    }
+
+    @Test
+    void shouldProjectEveryCanonicalMarkerIntoPrompts() {
+        EnrichmentKindCatalog enrichmentKindCatalog = EnrichmentKindCatalog.load();
+        String markerUsagePrompt = systemPromptConfig.getMarkerUsagePrompt();
+
+        assertEquals(
+                enrichmentKindCatalog.all().size(), markerUsagePrompt.lines().count());
+        enrichmentKindCatalog
+                .all()
+                .forEach(presentation ->
+                        assertTrue(markerUsagePrompt.contains("{{" + presentation.token() + ":Text here}}")));
     }
 }
