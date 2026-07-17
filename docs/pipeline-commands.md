@@ -63,7 +63,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 - `wget --mirror --timestamping` skips files that haven't changed on the server.
 - Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
 - Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
-- Oracle Javadoc uses a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Manifest-governed Java API sources (those with a `javaRelease` field) use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
 
 ---
 
