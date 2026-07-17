@@ -170,9 +170,11 @@ public class ExternalServiceHealth {
     private void checkQdrantConnectivity() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
-        if (!status.tryStartCheck(Instant.now())) {
+        Optional<HealthCheckToken> initiatedCheck = status.startCheck(Instant.now());
+        if (initiatedCheck.isEmpty()) {
             return;
         }
+        HealthCheckToken checkToken = initiatedCheck.orElseThrow();
 
         try {
             String base = qdrantRestConnection.restBaseUrl();
@@ -191,37 +193,44 @@ public class ExternalServiceHealth {
                     .timeout(HEALTH_CHECK_TIMEOUT)
                     .subscribe(
                             ignoredResponse -> {
-                                log.info("[HEALTH] Qdrant connectivity check succeeded");
-                                status.markHealthy();
+                                if (status.markHealthy(checkToken)) {
+                                    log.info("[HEALTH] Qdrant connectivity check succeeded");
+                                }
                             },
                             healthCheckFailure -> {
-                                status.markUnhealthy();
-                                log.warn(
-                                        "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
-                                        healthCheckFailure.getClass().getSimpleName(),
-                                        healthCheckFailure.getMessage(),
-                                        formatDuration(status.currentBackoff()));
+                                if (status.markUnhealthy(checkToken)) {
+                                    log.warn(
+                                            "[HEALTH] Qdrant connectivity check failed (exception type: {}, message: {}) - Will retry in {}",
+                                            healthCheckFailure.getClass().getSimpleName(),
+                                            healthCheckFailure.getMessage(),
+                                            formatDuration(status.currentBackoff()));
+                                }
                             });
         } catch (RuntimeException connectivityException) {
-            status.markUnhealthy();
-            log.warn(
-                    "[HEALTH] Qdrant connectivity check failed before subscription (exception type: {}) - Will retry in {}",
-                    connectivityException.getClass().getSimpleName(),
-                    formatDuration(status.currentBackoff()),
-                    connectivityException);
+            if (status.markUnhealthy(checkToken)) {
+                log.warn(
+                        "[HEALTH] Qdrant connectivity check failed before subscription (exception type: {}) - Will retry in {}",
+                        connectivityException.getClass().getSimpleName(),
+                        formatDuration(status.currentBackoff()),
+                        connectivityException);
+            }
         }
     }
 
     private void checkQdrantHealth() {
         ServiceStatus status = serviceStatuses.get(SERVICE_QDRANT);
         if (status == null) return;
-        if (!status.tryStartCheck(Instant.now())) {
+        Optional<HealthCheckToken> initiatedCheck = status.startCheck(Instant.now());
+        if (initiatedCheck.isEmpty()) {
             return;
         }
+        HealthCheckToken checkToken = initiatedCheck.orElseThrow();
 
         if (qdrantCollections.isEmpty()) {
-            status.markUnhealthy();
-            log.warn("[HEALTH] Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
+            if (status.markUnhealthy(checkToken)) {
+                log.warn(
+                        "[HEALTH] Qdrant health check skipped: no collections configured under app.qdrant.collections.*");
+            }
             return;
         }
 
@@ -246,8 +255,9 @@ public class ExternalServiceHealth {
             }
 
             if (checks.isEmpty()) {
-                status.markUnhealthy();
-                log.warn("[HEALTH] Qdrant health check skipped: configured collections are blank");
+                if (status.markUnhealthy(checkToken)) {
+                    log.warn("[HEALTH] Qdrant health check skipped: configured collections are blank");
+                }
                 return;
             }
 
@@ -258,25 +268,28 @@ public class ExternalServiceHealth {
                                 // Mono<Void> has no onNext payload.
                             },
                             healthCheckFailure -> {
-                                status.markUnhealthy();
-                                log.warn(
-                                        "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
-                                        healthCheckFailure.getClass().getSimpleName(),
-                                        formatDuration(status.currentBackoff()));
+                                if (status.markUnhealthy(checkToken)) {
+                                    log.warn(
+                                            "[HEALTH] Qdrant health check failed (exception type: {}) - Will retry in {}",
+                                            healthCheckFailure.getClass().getSimpleName(),
+                                            formatDuration(status.currentBackoff()));
+                                }
                             },
                             () -> {
-                                status.markHealthy();
-                                log.info(
-                                        "[HEALTH] Qdrant health check succeeded (all {} collections present)",
-                                        checks.size());
+                                if (status.markHealthy(checkToken)) {
+                                    log.info(
+                                            "[HEALTH] Qdrant health check succeeded (all {} collections present)",
+                                            checks.size());
+                                }
                             });
         } catch (RuntimeException healthCheckException) {
-            status.markUnhealthy();
-            log.warn(
-                    "[HEALTH] Qdrant health check failed before subscription (exception type: {}) - Will retry in {}",
-                    healthCheckException.getClass().getSimpleName(),
-                    formatDuration(status.currentBackoff()),
-                    healthCheckException);
+            if (status.markUnhealthy(checkToken)) {
+                log.warn(
+                        "[HEALTH] Qdrant health check failed before subscription (exception type: {}) - Will retry in {}",
+                        healthCheckException.getClass().getSimpleName(),
+                        formatDuration(status.currentBackoff()),
+                        healthCheckException);
+            }
         }
     }
 
@@ -332,41 +345,64 @@ public class ExternalServiceHealth {
     /**
      * Internal class to track service status with exponential backoff
      */
-    private static class ServiceStatus {
-        private final AtomicReference<ServiceHealthState> healthState =
-                new AtomicReference<>(new ServiceHealthState(false, false, 0, Instant.now(), INITIAL_CHECK_INTERVAL));
+    static final class ServiceStatus {
+        private final AtomicReference<ServiceHealthState> healthState = new AtomicReference<>(
+                new ServiceHealthState(false, false, 0, Instant.now(), INITIAL_CHECK_INTERVAL, 0));
 
         ServiceStatus() {}
 
-        void markHealthy() {
-            healthState.set(new ServiceHealthState(true, false, 0, Instant.now(), HEALTHY_CHECK_INTERVAL));
+        boolean markHealthy(HealthCheckToken checkToken) {
+            while (true) {
+                ServiceHealthState currentState = healthState.get();
+                if (!currentState.acceptsCompletion(checkToken)) {
+                    return false;
+                }
+                ServiceHealthState healthyState = new ServiceHealthState(
+                        true, false, 0, Instant.now(), HEALTHY_CHECK_INTERVAL, currentState.generation());
+                if (healthState.compareAndSet(currentState, healthyState)) {
+                    return true;
+                }
+            }
         }
 
-        void markUnhealthy() {
-            healthState.updateAndGet(currentState -> {
+        boolean markUnhealthy(HealthCheckToken checkToken) {
+            while (true) {
+                ServiceHealthState currentState = healthState.get();
+                if (!currentState.acceptsCompletion(checkToken)) {
+                    return false;
+                }
                 int failureCount = currentState.consecutiveFailures() + 1;
                 Instant observedCompletionTime = Instant.now();
                 Instant checkCompletionTime = observedCompletionTime.isBefore(currentState.lastCheck())
                         ? currentState.lastCheck()
                         : observedCompletionTime;
-                return new ServiceHealthState(
-                        false, false, failureCount, checkCompletionTime, computeBackoffDuration(failureCount));
-            });
+                ServiceHealthState unhealthyState = new ServiceHealthState(
+                        false,
+                        false,
+                        failureCount,
+                        checkCompletionTime,
+                        computeBackoffDuration(failureCount),
+                        currentState.generation());
+                if (healthState.compareAndSet(currentState, unhealthyState)) {
+                    return true;
+                }
+            }
         }
 
         void reset() {
-            healthState.set(new ServiceHealthState(false, false, 0, Instant.EPOCH, INITIAL_CHECK_INTERVAL));
+            healthState.updateAndGet(currentState -> new ServiceHealthState(
+                    false, false, 0, Instant.EPOCH, INITIAL_CHECK_INTERVAL, currentState.generation() + 1));
         }
 
-        boolean tryStartCheck(Instant checkStartTime) {
+        Optional<HealthCheckToken> startCheck(Instant checkStartTime) {
             while (true) {
                 ServiceHealthState currentState = healthState.get();
                 if (currentState.checkInProgress()) {
-                    return false;
+                    return Optional.empty();
                 }
                 ServiceHealthState checkingState = currentState.withCheckStarted(checkStartTime);
                 if (healthState.compareAndSet(currentState, checkingState)) {
-                    return true;
+                    return Optional.of(new HealthCheckToken(currentState.generation()));
                 }
             }
         }
@@ -436,13 +472,22 @@ public class ExternalServiceHealth {
                 boolean checkInProgress,
                 int consecutiveFailures,
                 Instant lastCheck,
-                Duration currentBackoff) {
+                Duration currentBackoff,
+                long generation) {
 
             private ServiceHealthState withCheckStarted(Instant checkStartTime) {
-                return new ServiceHealthState(healthy, true, consecutiveFailures, checkStartTime, currentBackoff);
+                return new ServiceHealthState(
+                        healthy, true, consecutiveFailures, checkStartTime, currentBackoff, generation);
+            }
+
+            private boolean acceptsCompletion(HealthCheckToken checkToken) {
+                return checkInProgress && generation == checkToken.generation();
             }
         }
     }
+
+    /** Identifies the status generation that owns an asynchronous health-check completion. */
+    static record HealthCheckToken(long generation) {}
 
     /**
      * Immutable snapshot of service health status for UI and diagnostics.

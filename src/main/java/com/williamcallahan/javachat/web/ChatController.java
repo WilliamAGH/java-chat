@@ -9,6 +9,7 @@ import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
+import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -201,6 +202,9 @@ public class ChatController extends BaseController {
                     Throwable upstreamError = terminalFailureContext
                             .map(ReportedStreamingFailure::upstreamFailure)
                             .orElse(error);
+                    if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
+                        return sseSupport.configuredProviderUnavailableError();
+                    }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
                     String diagnostics = upstreamError instanceof Exception exception
                             ? describeException(exception)

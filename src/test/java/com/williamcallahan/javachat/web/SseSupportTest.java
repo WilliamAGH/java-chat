@@ -4,7 +4,6 @@ import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_S
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.Disposable;
+import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.TestSubscriber;
@@ -53,13 +53,12 @@ class SseSupportTest {
     }
 
     @Test
-    void prepareDataStreamAccumulatesOnlyChunksDeliveredAfterBackpressureOverflow() {
+    void prepareDataStreamTerminatesWithOverflowInsteadOfDroppingCoalescedChunks() {
         SseSupport sseSupport = new SseSupport(new ObjectMapper());
         int coalescedChunkCount = (STREAM_BACKPRESSURE_BUFFER_CAPACITY * BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER) + 1;
         int rawChunkCount = coalescedChunkCount * STREAM_CHUNK_COALESCE_MAX_ITEMS;
-        List<String> accumulatedChunks = new CopyOnWriteArrayList<>();
         Flux<String> preparedStream = sseSupport.prepareDataStream(
-                Flux.range(0, rawChunkCount).map(rawChunkIndex -> "chunk-" + rawChunkIndex), accumulatedChunks::add);
+                Flux.range(0, rawChunkCount).map(rawChunkIndex -> "chunk-" + rawChunkIndex), ignoredChunk -> {});
         TestSubscriber<String> textSubscriber =
                 TestSubscriber.builder().initialRequest(0).build();
         TestSubscriber<String> heartbeatSubscriber =
@@ -74,14 +73,13 @@ class SseSupportTest {
         heartbeatSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
 
         List<String> deliveredChunks = textSubscriber.getReceivedOnNext();
-        assertTrue(textSubscriber.isTerminatedComplete());
-        assertTrue(heartbeatSubscriber.isTerminatedComplete());
-        assertFalse(deliveredChunks.isEmpty());
-        assertTrue(
-                deliveredChunks.size() < coalescedChunkCount,
-                "The bounded buffer should discard coalesced chunks when both subscribers have no demand");
+        assertTrue(textSubscriber.isTerminatedError());
+        assertTrue(heartbeatSubscriber.isTerminatedError());
+        assertTrue(Exceptions.isOverflow(textSubscriber.expectTerminalError()));
+        assertTrue(Exceptions.isOverflow(heartbeatSubscriber.expectTerminalError()));
+        assertEquals(STREAM_BACKPRESSURE_BUFFER_CAPACITY, deliveredChunks.size());
+        assertTrue(deliveredChunks.getFirst().startsWith("chunk-0"));
         assertEquals(deliveredChunks, heartbeatSubscriber.getReceivedOnNext());
-        assertEquals(deliveredChunks, accumulatedChunks);
     }
 
     @Test

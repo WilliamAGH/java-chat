@@ -2,8 +2,6 @@ package com.williamcallahan.javachat.web;
 
 import static org.hamcrest.Matchers.contains;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -20,7 +18,6 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +25,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * Verifies guided learning endpoints return expected data under WebMvcTest.
@@ -80,15 +78,16 @@ class GuidedLearningControllerTest {
     }
 
     @Test
-    void lesson_not_found_removes_control_characters_from_exception_message() {
+    void lessonNotFoundReturnsNotFoundAndNeutralizesControlCharacters() throws Exception {
         String hostileSlug = "intro\nERROR: forged log entry";
         given(guidedLearningService.getLesson(hostileSlug)).willReturn(Optional.empty());
 
-        Exception requestFailure = assertThrows(
-                Exception.class, () -> mockMvc.perform(get("/api/guided/lesson").param("slug", hostileSlug)));
+        MvcResult failedResponse = mockMvc.perform(get("/api/guided/lesson").param("slug", hostileSlug))
+                .andExpect(status().isNotFound())
+                .andReturn();
 
-        NoSuchElementException lessonNotFound =
-                assertInstanceOf(NoSuchElementException.class, requestFailure.getCause());
-        assertEquals("Unknown lesson slug: intro?ERROR: forged log entry", lessonNotFound.getMessage());
+        assertEquals(
+                "Unknown lesson slug: intro?ERROR: forged log entry",
+                failedResponse.getResponse().getErrorMessage());
     }
 }

@@ -4,180 +4,212 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantRestConnection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeFunction;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /**
- * Verifies retry-gate and backoff behavior in external service health tracking.
+ * Verifies retry-gate, generation, and backoff behavior in external service health tracking.
  */
 class ExternalServiceHealthTest {
 
     private static final int HEALTH_BACKOFF_OVERFLOW_FAILURE_COUNT = 63;
+    private static final int QDRANT_GRPC_PORT = 6334;
     private static final Duration HEALTH_SNAPSHOT_CHECKING_OFFSET = Duration.ofMinutes(2);
     private static final String HEALTH_CHECK_IN_PROGRESS_MESSAGE = "Unhealthy (checking now...)";
 
     @Test
-    void computeBackoffDuration_capsBeforeDurationOverflow() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method computeBackoffDurationMethod =
-                serviceStatus.getClass().getDeclaredMethod("computeBackoffDuration", int.class);
-        computeBackoffDurationMethod.setAccessible(true);
+    void computeBackoffDurationCapsBeforeDurationOverflow() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
 
-        Duration currentBackoff =
-                (Duration) computeBackoffDurationMethod.invoke(serviceStatus, HEALTH_BACKOFF_OVERFLOW_FAILURE_COUNT);
-        assertEquals(Duration.ofDays(1), currentBackoff);
+        for (int failureIndex = 0; failureIndex < HEALTH_BACKOFF_OVERFLOW_FAILURE_COUNT; failureIndex++) {
+            ExternalServiceHealth.HealthCheckToken checkToken =
+                    serviceStatus.startCheck(Instant.now()).orElseThrow();
+            assertTrue(serviceStatus.markUnhealthy(checkToken));
+        }
+
+        assertEquals(Duration.ofDays(1), serviceStatus.currentBackoff());
     }
 
     @Test
-    void healthSnapshot_keepsMessageAlignedWithPublishedHealthState() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method markHealthyMethod = serviceStatus.getClass().getDeclaredMethod("markHealthy");
-        markHealthyMethod.setAccessible(true);
-        Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
-        markUnhealthyMethod.setAccessible(true);
-        Method resetMethod = serviceStatus.getClass().getDeclaredMethod("reset");
-        resetMethod.setAccessible(true);
-        Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
-        tryStartCheckMethod.setAccessible(true);
+    void healthSnapshotKeepsMessageAlignedWithPublishedHealthState() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
 
-        markHealthyMethod.invoke(serviceStatus);
+        ExternalServiceHealth.HealthCheckToken healthyCheck =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
+        assertTrue(serviceStatus.markHealthy(healthyCheck));
         assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
 
-        markUnhealthyMethod.invoke(serviceStatus);
+        ExternalServiceHealth.HealthCheckToken unhealthyCheck =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
+        assertTrue(serviceStatus.markUnhealthy(unhealthyCheck));
         assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
 
-        resetMethod.invoke(serviceStatus);
+        serviceStatus.reset();
         assertHealthMessageAgreement(readHealthSnapshot(serviceStatus, Instant.now()));
 
-        boolean checkStarted = (boolean) tryStartCheckMethod.invoke(serviceStatus, Instant.now());
-        assertTrue(checkStarted);
+        ExternalServiceHealth.HealthCheckToken activeCheck =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
         ExternalServiceHealth.HealthSnapshot activeCheckSnapshot = readHealthSnapshot(serviceStatus, Instant.now());
         assertEquals(HEALTH_CHECK_IN_PROGRESS_MESSAGE, activeCheckSnapshot.message());
         assertEquals(Optional.of(Duration.ZERO), activeCheckSnapshot.timeUntilNextCheck());
         assertHealthMessageAgreement(activeCheckSnapshot);
         assertHealthMessageAgreement(
                 readHealthSnapshot(serviceStatus, Instant.now().plus(HEALTH_SNAPSHOT_CHECKING_OFFSET)));
+        assertTrue(serviceStatus.markHealthy(activeCheck));
     }
 
     @Test
-    void serviceStatus_allowsOnlyOneConcurrentCheckUntilCompletion() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
-        tryStartCheckMethod.setAccessible(true);
-
+    void serviceStatusAllowsOnlyOneConcurrentCheckUntilCompletion() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
         Instant startInstant = Instant.now();
-        boolean firstCheckStarted = (boolean) tryStartCheckMethod.invoke(serviceStatus, startInstant);
-        boolean secondCheckStarted = (boolean) tryStartCheckMethod.invoke(serviceStatus, startInstant.plusSeconds(1));
+        ExternalServiceHealth.HealthCheckToken firstCheck =
+                serviceStatus.startCheck(startInstant).orElseThrow();
 
-        assertTrue(firstCheckStarted);
-        assertFalse(secondCheckStarted);
+        assertTrue(serviceStatus.startCheck(startInstant.plusSeconds(1)).isEmpty());
+        assertTrue(serviceStatus.markHealthy(firstCheck));
 
-        Method markHealthyMethod = serviceStatus.getClass().getDeclaredMethod("markHealthy");
-        markHealthyMethod.setAccessible(true);
-        markHealthyMethod.invoke(serviceStatus);
-
-        boolean checkStartedAfterCompletion =
-                (boolean) tryStartCheckMethod.invoke(serviceStatus, startInstant.plusSeconds(2));
-        assertTrue(checkStartedAfterCompletion);
+        assertTrue(serviceStatus.startCheck(startInstant.plusSeconds(2)).isPresent());
     }
 
     @Test
-    void shouldRetryNow_returnsFalseWhenCheckInProgress() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method tryStartCheckMethod = serviceStatus.getClass().getDeclaredMethod("tryStartCheck", Instant.class);
-        tryStartCheckMethod.setAccessible(true);
-        Method shouldRetryNowMethod = serviceStatus.getClass().getDeclaredMethod("shouldRetryNow", Instant.class);
-        shouldRetryNowMethod.setAccessible(true);
+    void resetRejectsCompletionFromPreviousGeneration() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
+        ExternalServiceHealth.HealthCheckToken staleCheck =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
 
-        tryStartCheckMethod.invoke(serviceStatus, Instant.now());
+        serviceStatus.reset();
+        ExternalServiceHealth.HealthCheckToken currentCheck =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
 
-        boolean shouldRetry = (boolean)
-                shouldRetryNowMethod.invoke(serviceStatus, Instant.now().plusSeconds(3600));
-        assertFalse(shouldRetry, "shouldRetryNow must return false while a check is in progress");
+        assertFalse(serviceStatus.markHealthy(staleCheck));
+        assertTrue(serviceStatus.markUnhealthy(currentCheck));
+        assertFalse(serviceStatus.isHealthy());
     }
 
     @Test
-    void shouldRetryNow_returnsFalseBeforeBackoffElapses() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
-        markUnhealthyMethod.setAccessible(true);
-        Method shouldRetryNowMethod = serviceStatus.getClass().getDeclaredMethod("shouldRetryNow", Instant.class);
-        shouldRetryNowMethod.setAccessible(true);
+    void shouldRetryNowReturnsFalseWhenCheckInProgress() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
+        serviceStatus.startCheck(Instant.now()).orElseThrow();
 
-        markUnhealthyMethod.invoke(serviceStatus);
-
-        Instant beforeBackoffElapses = Instant.now().plusSeconds(30);
-        boolean shouldRetry = (boolean) shouldRetryNowMethod.invoke(serviceStatus, beforeBackoffElapses);
-        assertFalse(shouldRetry, "shouldRetryNow must return false before backoff period elapses");
+        assertFalse(
+                serviceStatus.shouldRetryNow(Instant.now().plusSeconds(3600)),
+                "shouldRetryNow must return false while a check is in progress");
     }
 
     @Test
-    void shouldRetryNow_returnsTrueAfterBackoffElapses() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
-        markUnhealthyMethod.setAccessible(true);
-        Method shouldRetryNowMethod = serviceStatus.getClass().getDeclaredMethod("shouldRetryNow", Instant.class);
-        shouldRetryNowMethod.setAccessible(true);
+    void shouldRetryNowReturnsFalseBeforeBackoffElapses() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
+        markUnhealthy(serviceStatus);
 
-        markUnhealthyMethod.invoke(serviceStatus);
-
-        Instant afterBackoffElapses = Instant.now().plusSeconds(120);
-        boolean shouldRetry = (boolean) shouldRetryNowMethod.invoke(serviceStatus, afterBackoffElapses);
-        assertTrue(shouldRetry, "shouldRetryNow must return true after backoff period elapses");
+        assertFalse(
+                serviceStatus.shouldRetryNow(Instant.now().plusSeconds(30)),
+                "shouldRetryNow must return false before backoff period elapses");
     }
 
     @Test
-    void computeBackoffDuration_doublesExponentiallyUntilCap() throws ReflectiveOperationException {
-        Object serviceStatus = newServiceStatus();
-        Method markUnhealthyMethod = serviceStatus.getClass().getDeclaredMethod("markUnhealthy");
-        markUnhealthyMethod.setAccessible(true);
+    void shouldRetryNowReturnsTrueAfterBackoffElapses() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
+        markUnhealthy(serviceStatus);
 
-        // First failure: 1 minute
-        markUnhealthyMethod.invoke(serviceStatus);
-        assertEquals(Duration.ofMinutes(1), readCurrentBackoff(serviceStatus));
-
-        // Second failure: 2 minutes
-        markUnhealthyMethod.invoke(serviceStatus);
-        assertEquals(Duration.ofMinutes(2), readCurrentBackoff(serviceStatus));
-
-        // Third failure: 4 minutes
-        markUnhealthyMethod.invoke(serviceStatus);
-        assertEquals(Duration.ofMinutes(4), readCurrentBackoff(serviceStatus));
-
-        // Fifth failure (after fourth = 8m): 16 minutes
-        markUnhealthyMethod.invoke(serviceStatus);
-        markUnhealthyMethod.invoke(serviceStatus);
-        assertEquals(Duration.ofMinutes(16), readCurrentBackoff(serviceStatus));
+        assertTrue(
+                serviceStatus.shouldRetryNow(Instant.now().plusSeconds(120)),
+                "shouldRetryNow must return true after backoff period elapses");
     }
 
-    private Object newServiceStatus() throws ReflectiveOperationException {
-        Class<?> serviceStatusClass =
-                Class.forName("com.williamcallahan.javachat.service.ExternalServiceHealth$ServiceStatus");
-        Constructor<?> constructor = serviceStatusClass.getDeclaredConstructor();
-        constructor.setAccessible(true);
-        return constructor.newInstance();
+    @Test
+    void computeBackoffDurationDoublesExponentiallyUntilCap() {
+        ExternalServiceHealth.ServiceStatus serviceStatus = new ExternalServiceHealth.ServiceStatus();
+
+        markUnhealthy(serviceStatus);
+        assertEquals(Duration.ofMinutes(1), serviceStatus.currentBackoff());
+
+        markUnhealthy(serviceStatus);
+        assertEquals(Duration.ofMinutes(2), serviceStatus.currentBackoff());
+
+        markUnhealthy(serviceStatus);
+        assertEquals(Duration.ofMinutes(4), serviceStatus.currentBackoff());
+
+        markUnhealthy(serviceStatus);
+        markUnhealthy(serviceStatus);
+        assertEquals(Duration.ofMinutes(16), serviceStatus.currentBackoff());
     }
 
-    private ExternalServiceHealth.HealthSnapshot readHealthSnapshot(Object serviceStatus, Instant snapshotTime)
-            throws ReflectiveOperationException {
-        Method healthSnapshotMethod =
-                serviceStatus.getClass().getDeclaredMethod("healthSnapshot", String.class, Instant.class);
-        healthSnapshotMethod.setAccessible(true);
-        return (ExternalServiceHealth.HealthSnapshot)
-                healthSnapshotMethod.invoke(serviceStatus, ExternalServiceHealth.SERVICE_QDRANT, snapshotTime);
+    @Test
+    void delayedConnectivityFailureCannotOverwriteStartupCollectionHealth() {
+        DeferredConnectivityExchange deferredConnectivityExchange = new DeferredConnectivityExchange();
+        ExternalServiceHealth externalServiceHealth = new ExternalServiceHealth(
+                WebClient.builder().exchangeFunction(deferredConnectivityExchange),
+                new QdrantRestConnection("qdrant.test", QDRANT_GRPC_PORT, false, ""),
+                new AppProperties());
+
+        externalServiceHealth.init();
+        assertTrue(deferredConnectivityExchange.hasPendingConnectivitySubscriber());
+
+        externalServiceHealth.verifyQdrantCollectionsAfterStartup();
+        assertTrue(externalServiceHealth.isHealthy(ExternalServiceHealth.SERVICE_QDRANT));
+
+        deferredConnectivityExchange.failPendingConnectivityProbe();
+
+        assertTrue(
+                externalServiceHealth.isHealthy(ExternalServiceHealth.SERVICE_QDRANT),
+                "a completion from the pre-reset connectivity probe must not overwrite current collection health");
     }
 
-    private Duration readCurrentBackoff(Object serviceStatus) throws ReflectiveOperationException {
-        Method currentBackoffMethod = serviceStatus.getClass().getDeclaredMethod("currentBackoff");
-        currentBackoffMethod.setAccessible(true);
-        return (Duration) currentBackoffMethod.invoke(serviceStatus);
+    private static void markUnhealthy(ExternalServiceHealth.ServiceStatus serviceStatus) {
+        ExternalServiceHealth.HealthCheckToken checkToken =
+                serviceStatus.startCheck(Instant.now()).orElseThrow();
+        assertTrue(serviceStatus.markUnhealthy(checkToken));
     }
 
-    private void assertHealthMessageAgreement(ExternalServiceHealth.HealthSnapshot healthSnapshot) {
+    private static ExternalServiceHealth.HealthSnapshot readHealthSnapshot(
+            ExternalServiceHealth.ServiceStatus serviceStatus, Instant snapshotTime) {
+        return serviceStatus.healthSnapshot(ExternalServiceHealth.SERVICE_QDRANT, snapshotTime);
+    }
+
+    private static void assertHealthMessageAgreement(ExternalServiceHealth.HealthSnapshot healthSnapshot) {
         assertEquals(healthSnapshot.isHealthy(), healthSnapshot.message().startsWith("Healthy"));
+    }
+
+    /**
+     * Delays only the connectivity response so test order exactly models the startup race.
+     */
+    private static final class DeferredConnectivityExchange implements ExchangeFunction {
+        private static final String CONNECTIVITY_PATH = "/health";
+        private static final String COLLECTION_PATH_PREFIX = "/collections/";
+
+        private final Sinks.One<ClientResponse> pendingConnectivityResponse = Sinks.one();
+
+        @Override
+        public Mono<ClientResponse> exchange(ClientRequest clientRequest) {
+            String endpointPath = clientRequest.url().getPath();
+            if (CONNECTIVITY_PATH.equals(endpointPath)) {
+                return pendingConnectivityResponse.asMono();
+            }
+            if (endpointPath.startsWith(COLLECTION_PATH_PREFIX)) {
+                return Mono.just(ClientResponse.create(HttpStatus.OK).build());
+            }
+            return Mono.error(new IllegalArgumentException("Unexpected Qdrant health endpoint " + endpointPath));
+        }
+
+        boolean hasPendingConnectivitySubscriber() {
+            return pendingConnectivityResponse.currentSubscriberCount() == 1;
+        }
+
+        void failPendingConnectivityProbe() {
+            assertTrue(pendingConnectivityResponse
+                    .tryEmitError(new IllegalStateException("delayed connectivity failure"))
+                    .isSuccess());
+        }
     }
 }

@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
@@ -17,10 +18,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 /**
@@ -46,9 +48,13 @@ public class GuidedLearningController extends BaseController {
     private static final String GUIDED_CHAT_STREAM_ERROR_MESSAGE = "Streaming error";
     private static final String GUIDED_CHAT_STREAM_ERROR_DETAILS =
             "The response stream encountered an error. Please try again.";
+    private static final String CURATED_LESSON_RESOURCE_FAILURE_MESSAGE = "Curated lesson content is unavailable";
+    private static final String CURATED_LESSON_RESOURCE_FAILURE_LOG_MESSAGE =
+            "Guided lesson is listed in the TOC but has no packaged markdown";
+    private static final String UNKNOWN_LESSON_SLUG_MESSAGE = "Unknown lesson slug: ";
     private static final Logger log = LoggerFactory.getLogger(GuidedLearningController.class);
 
-    /** Timeout for synchronous lesson content generation operations. */
+    /** Timeout for synchronous curated lesson content reads. */
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
 
     private final GuidedLearningService guidedService;
@@ -96,15 +102,11 @@ public class GuidedLearningController extends BaseController {
      *
      * @param slug The unique identifier for the lesson.
      * @return The {@link GuidedLesson} object.
-     * @throws NoSuchElementException if the slug is not found.
+     * @throws ResponseStatusException when the slug is not listed in the guided table of contents.
      */
     @GetMapping("/lesson")
     public GuidedLesson lesson(@RequestParam("slug") String slug) {
-        return guidedService
-                .getLesson(slug)
-                .orElseThrow(() -> new NoSuchElementException("Unknown lesson slug: "
-                        + StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
-                                .text()));
+        return requireListedLesson(slug);
     }
 
     /**
@@ -139,13 +141,9 @@ public class GuidedLearningController extends BaseController {
      */
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> streamLesson(@RequestParam("slug") String slug, HttpServletResponse response) {
+        Flux<String> lessonContentStream = curatedLessonContentStream(slug);
         sseSupport.configureStreamingHeaders(response);
         return Flux.defer(() -> {
-                    // If cached, emit immediately as a single-frame stream with proper SSE formatting
-                    Flux<String> lessonContentStream = guidedService
-                            .getCachedLessonMarkdown(slug)
-                            .map(cachedMarkdown -> Flux.just(cachedMarkdown.replace("\r", "")))
-                            .orElseGet(() -> guidedService.streamLessonContent(slug));
                     Flux<String> dataStream = sseSupport.prepareDataStream(lessonContentStream, ignoredChunk -> {});
                     return Flux.merge(dataStream.map(sseSupport::textEvent), sseSupport.heartbeats(dataStream));
                 })
@@ -173,47 +171,73 @@ public class GuidedLearningController extends BaseController {
      * This is a non-streaming alternative to {@link #streamLesson(String)}.
      *
      * @param slug The unique identifier for the lesson.
-     * @return A response containing the markdown content and cache status.
+     * @return A response containing the authoritative curated markdown content.
      */
     @GetMapping(value = "/content", produces = MediaType.APPLICATION_JSON_VALUE)
     public LessonContentResponse content(@RequestParam("slug") String slug) {
-        return guidedService
-                .getCachedLessonMarkdown(slug)
-                .map(cachedMarkdown -> new LessonContentResponse(cachedMarkdown, true))
-                .orElseGet(() -> new LessonContentResponse(generateAndCacheLessonContent(slug), false));
+        return new LessonContentResponse(readCuratedLessonContent(slug), false);
     }
 
     /**
      * Retrieves the lesson content rendered as HTML.
-     * The markdown content is fetched (or generated) and then rendered by the server.
+     * The authoritative curated markdown is loaded and then rendered by the server.
      *
      * @param slug The unique identifier for the lesson.
      * @return A string containing the rendered HTML.
      */
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
     public String contentHtml(@RequestParam("slug") String slug) {
-        var cached = guidedService.getCachedLessonMarkdown(slug);
-        String lessonMarkdownContent = cached.orElseGet(() -> generateAndCacheLessonContent(slug));
+        String lessonMarkdownContent = readCuratedLessonContent(slug);
         return markdownService.processStructured(lessonMarkdownContent).html();
     }
 
     /**
-     * Generates lesson content synchronously and caches the result.
+     * Loads curated lesson content synchronously for non-streaming endpoints.
      *
      * @param slug lesson identifier
-     * @return generated markdown content
-     * @throws IllegalStateException if generation times out or returns empty
+     * @return curated markdown content
+     * @throws IllegalStateException if the curated stream returns empty
      */
-    private String generateAndCacheLessonContent(String slug) {
-        List<String> chunks =
-                guidedService.streamLessonContent(slug).collectList().block(LESSON_CONTENT_TIMEOUT);
-        if (chunks == null || chunks.isEmpty()) {
-            log.error("Content generation timed out or returned empty for lesson");
-            throw new IllegalStateException("Content generation failed for lesson");
+    private String readCuratedLessonContent(String slug) {
+        List<String> lessonMarkdownChunks =
+                curatedLessonContentStream(slug).collectList().block(LESSON_CONTENT_TIMEOUT);
+        if (lessonMarkdownChunks == null || lessonMarkdownChunks.isEmpty()) {
+            log.error("Curated lesson stream returned empty content");
+            throw new IllegalStateException("Curated lesson content is empty");
         }
-        String lessonMarkdown = String.join("", chunks);
-        guidedService.putLessonCache(slug, lessonMarkdown);
-        return lessonMarkdown;
+        return String.join("", lessonMarkdownChunks);
+    }
+
+    /**
+     * Resolves a curated lesson stream before the HTTP response commits so missing resources surface as 5xx.
+     */
+    private Flux<String> curatedLessonContentStream(String slug) {
+        requireListedLesson(slug);
+        try {
+            return guidedService.streamLessonContent(slug);
+        } catch (GuidedLearningService.CuratedLessonResourceMissingException missingResourceFailure) {
+            log.atError()
+                    .setMessage(CURATED_LESSON_RESOURCE_FAILURE_LOG_MESSAGE)
+                    .setCause(missingResourceFailure)
+                    .addKeyValue(
+                            "lessonSlug",
+                            StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .log();
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR, CURATED_LESSON_RESOURCE_FAILURE_MESSAGE, missingResourceFailure);
+        }
+    }
+
+    /** Resolves a lesson or maps its absence to the public guided-content 404 contract. */
+    private GuidedLesson requireListedLesson(String slug) {
+        return guidedService
+                .getLesson(slug)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        UNKNOWN_LESSON_SLUG_MESSAGE
+                                + StructuredLogValue.bounded(slug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                        .text()));
     }
 
     /**
@@ -311,6 +335,12 @@ public class GuidedLearningController extends BaseController {
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =
                             ReportedStreamingFailure.findInCauseChain(error);
+                    Throwable upstreamError = terminalFailureContext
+                            .map(ReportedStreamingFailure::upstreamFailure)
+                            .orElse(error);
+                    if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
+                        return sseSupport.configuredProviderUnavailableError();
+                    }
                     if (terminalFailureContext.isEmpty()) {
                         log.atError()
                                 .setMessage("Guided streaming error")

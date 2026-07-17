@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { streamSseMock, streamSseGetMock } = vi.hoisted(() => {
   return { streamSseMock: vi.fn(), streamSseGetMock: vi.fn() };
@@ -8,12 +8,38 @@ vi.mock("./sse", () => {
   return { streamSse: streamSseMock, streamSseGet: streamSseGetMock };
 });
 
-import { streamGuidedChat, streamLessonContent } from "./guided";
+import { fetchGuidedLessonCitations, streamGuidedChat, streamLessonContent } from "./guided";
 
 describe("streamGuidedChat", () => {
   beforeEach(() => {
     streamSseMock.mockReset();
     streamSseGetMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards the caller-owned cancellation signal to guided citation fetches", async () => {
+    const citationAbortController = new AbortController();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ url: "https://example.com/source", title: "Source" }]), {
+        status: 200,
+        statusText: "OK",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchGuidedLessonCitations("intro", { signal: citationAbortController.signal }),
+    ).resolves.toEqual({
+      success: true,
+      citations: [{ url: "https://example.com/source", title: "Source" }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/guided/citations?slug=intro", {
+      signal: citationAbortController.signal,
+    });
   });
 
   it("surfaces a recoverable stream failure without replaying the POST", async () => {

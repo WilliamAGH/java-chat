@@ -23,7 +23,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
@@ -117,9 +119,45 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
+    void configuredProviderCooldownUsesTheSharedRetryableClientError() throws JsonProcessingException {
+        ConfiguredProviderTemporarilyUnavailableException configuredProviderFailure =
+                new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.GITHUB_MODELS);
+        ReportedTerminalStreamingFailure terminalFailure =
+                new ReportedTerminalStreamingFailure(configuredProviderFailure);
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+                .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of()));
+        when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+
+        List<ServerSentEvent<String>> streamEvents = guidedController.stream(
+                        new GuidedStreamRequest(SESSION_ID, LESSON_SLUG, USER_QUERY), new MockHttpServletResponse())
+                .collectList()
+                .block();
+
+        String serializedStreamError = serializedErrorEvent(streamEvents);
+        SseSupport.SseEventPayload streamError =
+                objectMapper.readValue(serializedStreamError, SseSupport.SseEventPayload.class);
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, streamError.message());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, streamError.details());
+        assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, streamError.code());
+        assertEquals(Boolean.TRUE, streamError.retryable());
+        assertEquals(STATUS_STAGE_STREAM, streamError.stage());
+        assertFalse(serializedStreamError.contains(
+                ConfiguredProviderTemporarilyUnavailableException.class.getSimpleName()));
+        assertFalse(serializedStreamError.contains(RateLimitService.ApiProvider.GITHUB_MODELS.getName()));
+        assertEquals(0, controllerErrorCount());
+    }
+
+    @Test
     void guidedLessonContentDoesNotEmitDuplicateErrorForTerminalStreamingFailure() {
         ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
-        when(guidedLearningService.getCachedLessonMarkdown(LESSON_SLUG)).thenReturn(Optional.empty());
+        when(guidedLearningService.getLesson(LESSON_SLUG))
+                .thenReturn(Optional.of(new GuidedLesson(LESSON_SLUG, "Sealed Classes", "", List.of())));
         when(guidedLearningService.streamLessonContent(LESSON_SLUG)).thenReturn(Flux.error(terminalFailure));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 

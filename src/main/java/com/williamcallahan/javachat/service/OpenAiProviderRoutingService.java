@@ -8,6 +8,7 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
 import com.openai.errors.UnauthorizedException;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
@@ -30,7 +31,7 @@ import reactor.core.Exceptions;
  */
 @Service
 @Lazy(false)
-public class OpenAiProviderRoutingService {
+public final class OpenAiProviderRoutingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
 
     private static final String PROVIDER_SETTING_OPENAI = "openai";
@@ -60,20 +61,16 @@ public class OpenAiProviderRoutingService {
      * Creates provider routing state using the configured provider and backoff values.
      *
      * @param rateLimitService provider rate-limit state tracker
-     * @param configuredProviderBackoffSeconds backoff duration after configured-provider transient failure
+     * @param appProperties typed source of configured-provider backoff policy
      * @param configuredProviderSetting configured provider name
-     * @throws IllegalArgumentException when the backoff is not positive or the configured provider is unsupported
+     * @throws IllegalArgumentException when the configured provider is unsupported
      */
     public OpenAiProviderRoutingService(
             RateLimitService rateLimitService,
-            @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}") long configuredProviderBackoffSeconds,
+            AppProperties appProperties,
             @Value("${LLM_PRIMARY_PROVIDER:github_models}") String configuredProviderSetting) {
         this.rateLimitService = rateLimitService;
-        if (configuredProviderBackoffSeconds <= 0) {
-            throw new IllegalArgumentException(
-                    "LLM_PRIMARY_BACKOFF_SECONDS must be positive; received " + configuredProviderBackoffSeconds + ".");
-        }
-        this.configuredProviderBackoffSeconds = configuredProviderBackoffSeconds;
+        this.configuredProviderBackoffSeconds = appProperties.getLlm().getConfiguredProviderBackoffSeconds();
         this.configuredProvider = resolveConfiguredProvider(configuredProviderSetting);
         this.configuredProviderBackoffUntilEpochMs = 0L;
     }
@@ -128,13 +125,27 @@ public class OpenAiProviderRoutingService {
      * @param throwable failure raised by SDK or transport
      */
     public synchronized void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
-        if (throwable instanceof OpenAIServiceException serviceException
-                && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
-            rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
-        }
-
         if (provider == configuredProvider && shouldBackoffConfiguredProvider(throwable)) {
             markConfiguredProviderBackoff();
+        }
+
+        if (throwable instanceof OpenAIServiceException serviceException
+                && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
+            recordProviderRateLimitWhenTimingIsUsable(provider, serviceException);
+        }
+    }
+
+    private void recordProviderRateLimitWhenTimingIsUsable(
+            RateLimitService.ApiProvider provider, OpenAIServiceException serviceException) {
+        try {
+            rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+        } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+            log.atWarn()
+                    .setMessage("Provider rate-limit timing could not be recorded; configured cooldown remains active")
+                    .addKeyValue("providerId", provider.ordinal())
+                    .addKeyValue(
+                            "exceptionType", rateLimitDecisionFailure.getClass().getSimpleName())
+                    .log();
         }
     }
 

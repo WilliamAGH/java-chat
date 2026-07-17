@@ -17,7 +17,11 @@ import {
   type ProviderEvent,
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
-import { fetchCitationsByEndpoint, type CitationFetchResult } from "./chat";
+import {
+  fetchCitationsByEndpoint,
+  type CitationFetchOptions,
+  type CitationFetchResult,
+} from "./chat";
 import { streamSse, streamSseGet } from "./sse";
 
 export type { StreamStatus, GuidedLesson, LessonContentResponse };
@@ -107,10 +111,14 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
  * Fetch Think Java-only citations for a guided lesson slug.
  * Used by LearnView to render lesson sources with proper PDF page anchors.
  */
-export async function fetchGuidedLessonCitations(slug: string): Promise<CitationFetchResult> {
+export async function fetchGuidedLessonCitations(
+  slug: string,
+  options: CitationFetchOptions = {},
+): Promise<CitationFetchResult> {
   return fetchCitationsByEndpoint(
     `/api/guided/citations?slug=${encodeURIComponent(slug)}`,
     `fetchGuidedLessonCitations [slug=${slug}]`,
+    options,
   );
 }
 

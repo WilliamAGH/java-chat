@@ -25,6 +25,7 @@ import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
 import com.openai.core.http.StreamResponse;
 import com.openai.errors.InternalServerException;
+import com.openai.errors.RateLimitException;
 import com.openai.models.ErrorObject;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseStreamEvent;
@@ -34,6 +35,7 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureReporter;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.time.Duration;
 import java.util.List;
@@ -44,6 +46,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -60,6 +63,8 @@ class OpenAIStreamingServiceTest {
     private static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
     private static final String GITHUB_MODELS_BASE_URL = "https://models.github.ai/inference/v1";
     private static final String INVALID_UNSELECTED_PROVIDER_BASE_URL = " ";
+    private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
+    private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(OpenAIStreamingService.class);
     private final ListAppender<ILoggingEvent> serviceLogEvents = new ListAppender<>();
@@ -91,10 +96,9 @@ class OpenAIStreamingServiceTest {
 
     private OpenAIStreamingService createStreamingService(RateLimitService.ApiProvider configuredProvider) {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
+        OpenAiRequestFactory requestFactory = testRequestFactory();
         OpenAiProviderRoutingService providerRoutingService =
-                new OpenAiProviderRoutingService(rateLimitService, 600, configuredProvider.getName());
+                configuredProviderRoutingService(rateLimitService, configuredProvider);
         return new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
     }
@@ -171,10 +175,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -221,10 +224,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -266,10 +268,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(false);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -302,10 +303,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -332,10 +332,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -374,10 +373,9 @@ class OpenAIStreamingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -406,14 +404,77 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
+    void headerlessRateLimitCompletionPreservesOriginalFailureAndActivatesConfiguredCooldown() {
+        RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService,
+                testRequestFactory(),
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS),
+                new OpenAiStreamingFailureReporter());
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService responseService = mock(ResponseService.class);
+        RateLimitException headerlessRateLimitFailure =
+                RateLimitException.builder().headers(Headers.builder().build()).build();
+        when(githubModelsClient.responses()).thenReturn(responseService);
+        when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(headerlessRateLimitFailure);
+        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
+
+        StepVerifier.create(streamingService.complete("test", 0.7))
+                .expectErrorSatisfies(failure -> assertSame(headerlessRateLimitFailure, failure))
+                .verify();
+        StepVerifier.create(streamingService.complete("test", 0.7))
+                .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
+                .verify();
+
+        verify(responseService, times(1)).create(any(ResponseCreateParams.class), any(RequestOptions.class));
+    }
+
+    @Test
+    void unusableRateLimitHeaderStreamingPreservesOriginalFailureAndActivatesConfiguredCooldown() {
+        RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService,
+                testRequestFactory(),
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS),
+                new OpenAiStreamingFailureReporter());
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService responseService = mock(ResponseService.class);
+        Headers unusableRateLimitHeaders =
+                Headers.builder().put("Retry-After", "not-a-duration").build();
+        RateLimitException unusableRateLimitFailure =
+                RateLimitException.builder().headers(unusableRateLimitHeaders).build();
+        when(githubModelsClient.responses()).thenReturn(responseService);
+        when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(unusableRateLimitFailure);
+        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
+
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectErrorSatisfies(failure -> {
+                    OpenAiStreamingFailureException terminalFailure =
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
+                    assertSame(unusableRateLimitFailure, terminalFailure.upstreamFailure());
+                })
+                .verify();
+        StepVerifier.create(streamingService
+                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
+                        .flatMapMany(StreamingResult::textChunks))
+                .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
+                .verify();
+
+        verify(responseService, times(1)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+    }
+
+    @Test
     void streamingFailureAfterTextIsTerminal() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", "");
-        OpenAiProviderRoutingService providerRoutingService = new OpenAiProviderRoutingService(
-                rateLimitService, 600, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        OpenAiRequestFactory requestFactory = testRequestFactory();
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
@@ -477,6 +538,33 @@ class OpenAIStreamingServiceTest {
         assertCompletionFailure(
                 streamingService.completeJsonObject("prompt", 0.7, 128, Duration.ofSeconds(-1)),
                 "requestTimeout must be positive");
+    }
+
+    private static AppProperties configuredLlmProperties() {
+        AppProperties appProperties = new AppProperties();
+        appProperties.getLlm().setCompletionOutputTokenBudget(TEST_COMPLETION_OUTPUT_TOKEN_BUDGET);
+        appProperties.getLlm().setConfiguredProviderBackoffSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+        return appProperties;
+    }
+
+    private static OpenAiRequestFactory testRequestFactory() {
+        return new OpenAiRequestFactory(
+                new Chunker(), new PromptTruncator(), "gpt-5.2", "gpt-5", configuredLlmProperties());
+    }
+
+    private static OpenAiProviderRoutingService configuredProviderRoutingService(
+            RateLimitService rateLimitService, RateLimitService.ApiProvider configuredProvider) {
+        return new OpenAiProviderRoutingService(
+                rateLimitService, configuredLlmProperties(), configuredProvider.getName());
+    }
+
+    private static RateLimitService configuredGithubModelsRateLimitService() {
+        RateLimitState rateLimitState = mock(RateLimitState.class);
+        when(rateLimitState.isAvailable(RateLimitService.ApiProvider.GITHUB_MODELS.getName()))
+                .thenReturn(true);
+        MockEnvironment configuredEnvironment =
+                new MockEnvironment().withProperty("GITHUB_TOKEN", CONFIGURED_PROVIDER_API_KEY);
+        return new RateLimitService(rateLimitState, configuredEnvironment);
     }
 
     private static void assertCompletionFailure(Mono<String> completion, String expectedFailureMessage) {

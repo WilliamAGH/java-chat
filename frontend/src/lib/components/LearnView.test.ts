@@ -5,6 +5,9 @@ import { tick } from "svelte";
 type GuidedCitationFetchResult = Awaited<
   ReturnType<typeof import("../services/guided").fetchGuidedLessonCitations>
 >;
+type GuidedCitationFetchOptions = Parameters<
+  typeof import("../services/guided").fetchGuidedLessonCitations
+>[1];
 
 const fetchTocMock = vi.fn();
 const streamLessonContentMock = vi.fn();
@@ -364,8 +367,14 @@ describe("LearnView guided chat streaming stability", () => {
     });
     const firstCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
     const currentCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
+    let firstCitationAbortSignal: AbortSignal | undefined;
     fetchGuidedLessonCitationsMock
-      .mockReturnValueOnce(firstCitationRequest.promise)
+      .mockImplementationOnce(
+        (_lessonSlug: string, citationFetchOptions: GuidedCitationFetchOptions = {}) => {
+          firstCitationAbortSignal = citationFetchOptions.signal;
+          return firstCitationRequest.promise;
+        },
+      )
       .mockReturnValueOnce(currentCitationRequest.promise);
 
     const learnView = await renderLearnView();
@@ -373,6 +382,7 @@ describe("LearnView guided chat streaming stability", () => {
     await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(1));
 
     await fireEvent.click(learnView.getByRole("button", { name: "All Lessons" }));
+    expect(firstCitationAbortSignal?.aborted).toBe(true);
     await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
     await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(2));
 

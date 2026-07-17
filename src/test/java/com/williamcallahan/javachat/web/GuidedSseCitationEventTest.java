@@ -19,6 +19,7 @@ import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
@@ -104,8 +105,9 @@ class GuidedSseCitationEventTest {
     }
 
     @Test
-    void guidedContentStreamEmitsSseErrorWhenLessonGenerationFails() throws Exception {
-        given(guidedLearningService.getCachedLessonMarkdown(anyString())).willReturn(Optional.empty());
+    void guidedContentStreamEmitsSseErrorWhenCuratedLessonStreamingFails() throws Exception {
+        given(guidedLearningService.getLesson("intro"))
+                .willReturn(Optional.of(new GuidedLesson("intro", "Introduction", "", List.of())));
         given(guidedLearningService.streamLessonContent(anyString()))
                 .willReturn(Flux.error(new IllegalStateException("Reranking request failed")));
 

@@ -8,7 +8,7 @@ import java.util.Objects;
  * <p>This distinguishes provider backoff and rate-limit admission denials from a missing configured client, which is
  * a fatal configuration failure.</p>
  */
-final class ConfiguredProviderTemporarilyUnavailableException extends IllegalStateException {
+public final class ConfiguredProviderTemporarilyUnavailableException extends IllegalStateException {
     private final RateLimitService.ApiProvider provider;
 
     /**
@@ -16,7 +16,7 @@ final class ConfiguredProviderTemporarilyUnavailableException extends IllegalSta
      *
      * @param provider provider that temporarily rejected admission
      */
-    ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider provider) {
+    public ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider provider) {
         super(messageFor(provider));
         this.provider = Objects.requireNonNull(provider, "provider");
     }

@@ -35,13 +35,20 @@ public class SseSupport {
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
-    private static final Counter DROPPED_COALESCED_CHUNK_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.dropped_chunks");
+    /** Stable client-facing message for configured-provider admission cooldowns. */
+    static final String CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE =
+            "The AI provider is temporarily unavailable. Please try again shortly.";
+
+    /** Safe retry guidance for configured-provider admission cooldowns. */
+    static final String CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS = "Your request can be retried after a short wait.";
+
+    private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
+            Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
     private static final Counter DROPPED_HEARTBEAT_COUNTER =
             Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
 
     private final ObjectWriter jsonWriter;
-    private final AtomicLong droppedCoalescedChunkCount = new AtomicLong();
+    private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
     /**
@@ -69,7 +76,7 @@ public class SseSupport {
      * Filters empty chunks and applies the standard streaming configuration.
      *
      * @param source the raw content flux from the streaming service
-     * @param chunkConsumer consumer called only for coalesced chunks that survive the overflow strategy
+     * @param chunkConsumer consumer called for coalesced chunks after bounded data buffering
      * @return a shared flux configured for SSE streaming
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
@@ -77,12 +84,11 @@ public class SseSupport {
                 .bufferTimeout(STREAM_CHUNK_COALESCE_MAX_ITEMS, Duration.ofMillis(STREAM_CHUNK_COALESCE_WINDOW_MS))
                 .filter(chunkBatch -> !chunkBatch.isEmpty())
                 .map(chunkBatch -> String.join("", chunkBatch))
-                // Keep buffering bounded and drop oldest coalesced chunks under sustained
-                // downstream pressure to avoid unbounded memory growth.
+                // Keep buffering bounded and fail the stream rather than persist or display a truncated answer.
                 .onBackpressureBuffer(
                         STREAM_BACKPRESSURE_BUFFER_CAPACITY,
-                        this::recordDroppedCoalescedChunk,
-                        BufferOverflowStrategy.DROP_OLDEST)
+                        this::recordCoalescedChunkOverflow,
+                        BufferOverflowStrategy.ERROR)
                 .doOnNext(chunk -> chunkConsumer.accept(chunk))
                 // Two subscribers consume this stream in controllers:
                 // 1) text event emission, 2) heartbeat termination signal.
@@ -172,16 +178,16 @@ public class SseSupport {
                         .build());
     }
 
-    private void recordDroppedCoalescedChunk(String droppedChunk) {
-        DROPPED_COALESCED_CHUNK_COUNTER.increment();
-        long totalDroppedChunks = droppedCoalescedChunkCount.incrementAndGet();
-        if (totalDroppedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
+    private void recordCoalescedChunkOverflow(String overflowedChunk) {
+        COALESCED_CHUNK_OVERFLOW_COUNTER.increment();
+        long totalOverflowedChunks = coalescedChunkOverflowCount.incrementAndGet();
+        if (totalOverflowedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn(
-                    "Dropped {} coalesced SSE chunks due to downstream backpressure "
-                            + "(bufferCapacity={}, droppedChunkLength={})",
-                    totalDroppedChunks,
+                    "SSE stream buffer overflowed {} times due to downstream backpressure "
+                            + "(bufferCapacity={}, overflowedChunkLength={})",
+                    totalOverflowedChunks,
                     STREAM_BACKPRESSURE_BUFFER_CAPACITY,
-                    droppedChunk.length());
+                    overflowedChunk.length());
         }
     }
 
@@ -290,6 +296,18 @@ public class SseSupport {
                 .retryable(retryable)
                 .stage(STATUS_STAGE_STREAM)
                 .build());
+    }
+
+    /**
+     * Creates the stable retryable error used when the configured provider is in an admission cooldown.
+     *
+     * <p>Both chat streaming routes delegate here so provider internals never become part of either
+     * public SSE contract.</p>
+     *
+     * @return a retryable terminal SSE error event
+     */
+    public Flux<ServerSentEvent<String>> configuredProviderUnavailableError() {
+        return streamErrorEvent(CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, true);
     }
 
     /** Preserves text-chunk whitespace through JSON serialization. */
