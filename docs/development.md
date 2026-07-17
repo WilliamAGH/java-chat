@@ -8,7 +8,9 @@ This project uses a reproducible build system across macOS/Linux local dev and C
 
 #### Prerequisites
 
-The project is configured to use **Gradle Toolchains** with **BellSoft Liberica JDK 25** for build-time determinism.
+The Gradle build requires a **BellSoft Liberica Java 25** toolchain. Exact release pinning is
+owned by `.tool-versions` for local version managers and CI; Docker uses separately pinned
+Liberica image tags.
 
 ##### Option 1: Using mise (recommended)
 
@@ -42,24 +44,21 @@ asdf install
 
 #### How It Works
 
-1. **`.tool-versions` file** pins `java liberica-25.0.3+11` using asdf's whitespace-delimited syntax.
+1. **`.tool-versions` file** pins `java liberica-25.0.3+11` using asdf's whitespace-delimited syntax. `mise`/`asdf` use this exact local release, and GitHub Actions passes the same entry to `actions/setup-java`.
 2. **Gradle Wrapper** (`./gradlew`) pins Gradle 9.2.1.
-3. **Gradle Toolchains** auto-downloads BellSoft Liberica JDK 25 if missing (enabled by Foojay resolver in `settings.gradle.kts`).
-4. **Result**: Consistent Java version across:
-   - Shell commands (`./gradlew build`, `java -version`)
-   - IntelliJ "Gradle JVM" setting
-   - IntelliJ "Project SDK" setting
+3. **Gradle Toolchains** constrain build tools to Java major version 25 and BellSoft. The Foojay resolver can provision a matching toolchain if needed, but Gradle does not encode the `25.0.3+11` patch/build pin.
+4. **Result**: the version-manager/CI layer owns the exact JDK release, while Gradle rejects the wrong vendor or Java major for compilation, tests, and Javadoc.
 
 #### Verifying Setup
 
 ```bash
-# Check Java version (should be BellSoft Liberica 25.0.3)
+# Check the exact local version-manager pin (BellSoft Liberica 25.0.3+11)
 java -version
 
-# Verify Gradle uses correct toolchain
-./gradlew --version
+# List the Gradle toolchains available for the Java 25/BellSoft requirement
+./gradlew -q javaToolchains
 
-# Build (auto-downloads JDK if needed)
+# Build (Foojay can provision a toolchain satisfying Gradle's Java 25/BellSoft constraint)
 make build
 ```
 
@@ -79,11 +78,13 @@ make hooks              # installs hook shims into .git/hooks/
 The `.github/workflows/build.yml` workflow:
 
 - Runs on **ubuntu-24.04** (pinned, not `-latest`)
-- Uses `actions/setup-java@v5` with `distribution: liberica` + `java-version-file: .tool-versions`
+- Uses `actions/setup-java@v5` with `distribution: liberica` + `java-version-file: .tool-versions`, which requests the exact Liberica release recorded in that file
 - Logs Java, Gradle, and OS versions for drift detection
 - Uploads test/lint reports on failure
+- Builds the Dockerfile's pinned Liberica stages and checks runtime readiness with synthetic, non-secret smoke configuration
 
-**Key insight**: CI uses the same JDK vendor as local dev, but may differ in patch version. See [JDK Patch Versioning](#jdk-patch-versioning) below.
+**Key insight**: CI's exact JDK input is `.tool-versions`; Gradle's independent toolchain
+constraint enforces only the Java major and vendor. See [JDK Patch Versioning](#jdk-patch-versioning) below.
 
 ### Gradle Configuration
 
@@ -95,7 +96,9 @@ plugins {
 }
 ```
 
-This enables **auto-download** of BellSoft Liberica JDK if missing. Without it, Gradle fails to find the toolchain.
+This enables Gradle to provision a toolchain that satisfies the configured Java 25/BellSoft
+requirement when it is not already available. It does not turn Gradle's toolchain specification
+into an exact patch/build pin.
 
 #### `build.gradle.kts` (Toolchain Vendor)
 
@@ -108,7 +111,9 @@ java {
 }
 ```
 
-The explicit vendor removes ambiguity: Gradle will prefer BellSoft Liberica JDK 25 over other vendors.
+The explicit vendor removes ambiguity: Gradle selects BellSoft Java 25 rather than another
+vendor. `languageVersion` represents the Java major, so this block does not independently pin
+`25.0.3+11`.
 
 #### `gradle.properties` (Daemon & Caching)
 
@@ -135,9 +140,11 @@ The `Dockerfile` uses BellSoft's Debian-based Liberica JDK and JRE images, pinne
 
 ## JDK Patch Versioning
 
-### The Limitation
+### The Boundary
 
-**Gradle Toolchains cannot pin patch-level JDK versions** (e.g., 25.0.3). It can only pin major version (25) + vendor (BellSoft).
+**Gradle Toolchains cannot pin patch-level JDK versions** (for example, `25.0.3+11`).
+They constrain the Java major (`25`) and vendor (`BellSoft`). The exact release is owned by the
+version-manager/CI input in `.tool-versions` and by the explicit Docker image tags.
 
 Example:
 - ✅ **Supported**: Java 25 + BellSoft
@@ -146,12 +153,13 @@ Example:
 ### Strategy
 
 1. **Local dev**: `.tool-versions` pins the exact BellSoft Liberica release for `mise` and `asdf`.
-2. **CI/CD**: GitHub Actions reads that same pin and logs the exact Java patch version:
+2. **CI/CD**: GitHub Actions reads the same exact `java-version-file` entry; `java -version` in the workflow logs proves the installed release:
    ```text
    java -version
    # Output starts with: openjdk version "25.0.3"
    ```
-3. **When to bump patch**: Patch updates to JDK are **intentional commits**. Never rely on automatic patch upgrades.
+3. **Gradle**: the build that follows validates only Java 25 + BellSoft; it cannot independently reject a different BellSoft 25 patch.
+4. **When to bump patch**: Patch updates are intentional commits. Update `.tool-versions` and both Docker Liberica image tags together after verifying the corresponding release.
 
 ### Reproducing the Current Pin
 
@@ -173,7 +181,7 @@ git add .tool-versions
 git commit -m "Pin BellSoft Liberica JDK 25.0.3+11"
 ```
 
-CI will log the new patch version, and you'll have an audit trail.
+CI will log the resolved release, and the commit provides the audit trail.
 
 ---
 
@@ -221,9 +229,9 @@ make compose-down
 - Set "Project SDK" to BellSoft Liberica 25 (or refresh if it's auto-detected)
 
 #### CI build fails but local works
-- Check CI logs for Java version (e.g., `java -version`)
-- Ensure your local patch matches: `java -version 2>&1 | grep -o '"[^"]*"'`
-- If CI is on 25.0.4 and you're on 25.0.3, bump locally and re-test
+- Check the CI `java -version` line against the exact Liberica entry in `.tool-versions`.
+- Ensure your local release matches: `java -version 2>&1 | grep -o '"[^"]*"'`.
+- Treat a mismatch as version-manager/CI pin-resolution drift; Gradle's Java 25/BellSoft constraint does not repair a patch mismatch.
 
 ---
 

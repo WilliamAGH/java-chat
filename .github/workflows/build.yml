@@ -103,3 +103,84 @@ jobs:
           name: pmd-report
           path: build/reports/pmd/
           retention-days: 7
+
+  docker-smoke:
+    needs:
+      - frontend
+      - build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build image from pinned Liberica stages
+        run: |
+          docker buildx build --load \
+            --build-arg SOURCE_COMMIT="${{ github.sha }}" \
+            --tag java-chat:ci \
+            .
+
+      - name: Start runtime smoke container
+        run: |
+          docker run --detach --rm \
+            --name java-chat-ci-smoke \
+            --publish 8085:8085 \
+            --env GITHUB_TOKEN=ci-smoke-token \
+            --env APP_LOCAL_EMBEDDING_ENABLED=true \
+            java-chat:ci
+
+      - name: Verify runtime readiness and deployment identity
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          readiness_url="http://127.0.0.1:8085/actuator/health/readiness"
+          info_url="http://127.0.0.1:8085/actuator/info"
+          runtime_ready=false
+
+          for startup_attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+              --output /dev/null "$readiness_url"; then
+              runtime_ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$runtime_ready" != true ]]; then
+            docker logs java-chat-ci-smoke
+            exit 1
+          fi
+
+          docker exec java-chat-ci-smoke java --version
+
+          if ! info_payload="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$info_url")"; then
+            docker logs java-chat-ci-smoke
+            exit 1
+          fi
+
+          if ! deployment_commit="$(jq --exit-status --raw-output '.deployment.commit | strings | select(length > 0)' <<<"$info_payload")"; then
+            printf 'Missing deployment.commit in /actuator/info\n' >&2
+            exit 1
+          fi
+
+          if ! build_commit="$(jq --exit-status --raw-output '.build.commit | strings | select(length > 0)' <<<"$info_payload")"; then
+            printf 'Missing build.commit in /actuator/info\n' >&2
+            exit 1
+          fi
+
+          if [[ "$deployment_commit" != "$EXPECTED_COMMIT" || "$build_commit" != "$EXPECTED_COMMIT" ]]; then
+            printf 'Deployment identity mismatch: expected=%s deployment.commit=%s build.commit=%s\n' \
+              "$EXPECTED_COMMIT" "$deployment_commit" "$build_commit" >&2
+            exit 1
+          fi
+
+      - name: Stop runtime smoke container
+        if: always()
+        run: |
+          if docker container inspect java-chat-ci-smoke >/dev/null 2>&1; then
+            docker stop java-chat-ci-smoke
+          fi
