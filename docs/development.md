@@ -76,8 +76,14 @@ make hooks              # installs hook shims into .git/hooks/
 
 ### CI/CD (GitHub Actions)
 
-The `.github/workflows/build.yml` workflow:
+The `.github/workflows/build.yml` workflow runs two jobs:
 
+**Frontend job:**
+- Runs on **ubuntu-24.04**
+- Uses Node.js version pinned via `frontend/.nvmrc`
+- Runs: `npm ci`, `npm run validate`, `npm run test`, `npm run build`
+
+**Build job:**
 - Runs on **ubuntu-24.04** (pinned, not `-latest`)
 - Uses `actions/setup-java@v5` with `distribution: liberica` + `java-version-file: .tool-versions`
 - Logs Java, Gradle, and OS versions for drift detection
