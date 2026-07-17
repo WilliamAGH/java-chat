@@ -3,6 +3,8 @@
 JAVA_API_SOURCE_MANIFEST_HEADER='javaRelease|remoteBaseUrl|relativeMirrorPath|displayName|cutDirectories|minimumHtmlFiles|rejectRegex|allowPartial'
 JAVA_API_SOURCE_MAX_INTEGER='2147483647'
 JAVA_API_SOURCE_PROJECTIONS=()
+DOCUMENTATION_SOURCE_MANIFEST_HEADER='fetchUrl|citationBaseUrl|relativeMirrorPath|displayName|docSet|sourceKind|docType|docVersion'
+DOCUMENTATION_SOURCE_PROJECTIONS=()
 
 is_canonical_manifest_integer() {
     local integer_text="$1"
@@ -234,6 +236,120 @@ append_java_api_fetch_sources() {
     for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
         DOC_SOURCES+=("$java_api_source_projection")
     done
+}
+
+load_documentation_sources() {
+    local source_manifest_file="$1"
+    if [ ! -f "$source_manifest_file" ]; then
+        echo "Documentation source manifest not found: $source_manifest_file" >&2
+        return 1
+    fi
+
+    DOCUMENTATION_SOURCE_PROJECTIONS=()
+    local manifest_header=""
+    local expected_delimiter_count=-1
+    local manifest_line_number=0
+    local manifest_line
+    local retained_relative_mirror_paths=("")
+    while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
+        manifest_line_number=$((manifest_line_number + 1))
+        manifest_line="${manifest_line%$'\r'}"
+        if [ "$manifest_line_number" -eq 1 ]; then
+            manifest_header="$manifest_line"
+            if [ -z "$manifest_header" ]; then
+                echo "Documentation source manifest header cannot be blank: $source_manifest_file" >&2
+                return 1
+            fi
+            if [ "$manifest_header" != "$DOCUMENTATION_SOURCE_MANIFEST_HEADER" ]; then
+                echo "Documentation source manifest header is invalid: $source_manifest_file" >&2
+                return 1
+            fi
+            local header_delimiters="${manifest_header//[^|]/}"
+            expected_delimiter_count=${#header_delimiters}
+            continue
+        fi
+        if is_blank_manifest_line "$manifest_line"; then
+            echo "Documentation source manifest line $manifest_line_number cannot be blank" >&2
+            return 1
+        fi
+
+        local source_delimiters="${manifest_line//[^|]/}"
+        if [ "${#source_delimiters}" -ne "$expected_delimiter_count" ]; then
+            echo "Documentation source manifest line $manifest_line_number has an invalid column count" >&2
+            return 1
+        fi
+
+        local fetchUrl
+        local citationBaseUrl
+        local relativeMirrorPath
+        local displayName
+        local docSet
+        local sourceKind
+        local docType
+        local docVersion
+        IFS='|' read -r fetchUrl citationBaseUrl relativeMirrorPath displayName docSet sourceKind docType docVersion <<< "$manifest_line"
+
+        if [ -z "$fetchUrl" ] \
+            || [ -z "$citationBaseUrl" ] \
+            || [ -z "$relativeMirrorPath" ] \
+            || [ -z "$displayName" ] \
+            || [ -z "$docSet" ] \
+            || [ -z "$sourceKind" ] \
+            || [ -z "$docType" ]; then
+            echo "Documentation source manifest line $manifest_line_number has a blank required field" >&2
+            return 1
+        fi
+        if has_boundary_whitespace "$fetchUrl" \
+            || has_boundary_whitespace "$citationBaseUrl" \
+            || has_boundary_whitespace "$relativeMirrorPath" \
+            || has_boundary_whitespace "$displayName" \
+            || has_boundary_whitespace "$docSet" \
+            || has_boundary_whitespace "$sourceKind" \
+            || has_boundary_whitespace "$docType" \
+            || has_boundary_whitespace "$docVersion" \
+            || has_manifest_control_character "$fetchUrl" \
+            || has_manifest_control_character "$citationBaseUrl" \
+            || has_manifest_control_character "$relativeMirrorPath" \
+            || has_manifest_control_character "$displayName" \
+            || has_manifest_control_character "$docSet" \
+            || has_manifest_control_character "$sourceKind" \
+            || has_manifest_control_character "$docType" \
+            || has_manifest_control_character "$docVersion"; then
+            echo "Documentation source manifest line $manifest_line_number has invalid text fields" >&2
+            return 1
+        fi
+        if ! is_absolute_https_remote_base_url "$fetchUrl"; then
+            echo "Documentation source manifest line $manifest_line_number has an invalid fetch URL" >&2
+            return 1
+        fi
+        if ! is_absolute_https_remote_base_url "$citationBaseUrl"; then
+            echo "Documentation source manifest line $manifest_line_number has an invalid citation base URL" >&2
+            return 1
+        fi
+        if ! is_normalized_relative_mirror_path "$relativeMirrorPath"; then
+            echo "Documentation source manifest line $manifest_line_number has an invalid relative mirror path" >&2
+            return 1
+        fi
+        local retained_relative_mirror_path
+        for retained_relative_mirror_path in "${retained_relative_mirror_paths[@]}"; do
+            if [ "$retained_relative_mirror_path" = "$relativeMirrorPath" ]; then
+                echo "Documentation source manifest line $manifest_line_number duplicates mirror path $relativeMirrorPath" >&2
+                return 1
+            fi
+        done
+
+        retained_relative_mirror_paths+=("$relativeMirrorPath")
+        DOCUMENTATION_SOURCE_PROJECTIONS+=("$manifest_line")
+    done < "$source_manifest_file"
+
+    if [ -z "$manifest_header" ]; then
+        echo "Documentation source manifest is empty: $source_manifest_file" >&2
+        return 1
+    fi
+    if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -eq 0 ]; then
+        echo "No canonical documentation sources found in $source_manifest_file" >&2
+        return 1
+    fi
 }
 
 render_java_javadoc_versions_metadata() {

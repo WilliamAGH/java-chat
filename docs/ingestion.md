@@ -44,14 +44,15 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 
 ### Doc set filtering (CLI)
 
-List canonical complete Java API paths, then limit ingestion to a selected doc set:
+List canonical source paths, then limit ingestion to a selected doc set:
 
 ```bash
 ./scripts/fetch_all_docs.sh --list-java-api-sources
+./scripts/fetch_all_docs.sh --list-documentation-sources
 DOCS_SETS=relative/path/from/listing make process-doc-sets
 ```
 
-See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for filtering and the canonical Java API listing command.
+See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for filtering and the canonical source listing commands.
 
 ## Hybrid vector storage
 
@@ -72,7 +73,13 @@ Deduplication is based on per-chunk SHA-256 markers stored locally:
 
 - `data/index/` contains one file per ingested chunk hash
 - `data/parsed/` contains chunk text snapshots for debugging
-- `data/index/file_*.marker` records file-level fingerprints (size, mtime, content SHA-256) and chunk hashes so re-runs can skip unchanged files and prune stale vectors when a source file changes
+- `data/index/file_*.marker` records the file size, modification time, content SHA-256,
+  extractor-semantics version, and chunk hashes.
+
+A file is skipped only when every file-level marker value, including the extractor-semantics version,
+matches the current ingestion contract. Changing extraction behavior therefore invalidates otherwise
+identical HTML: the prior vectors and local chunks are pruned, then the file is re-chunked and upserted.
+Older markers without an extractor-semantics version are intentionally reindexed once.
 
 See [local store directories](domains/local-store-directories.md) for details.
 

@@ -1,32 +1,37 @@
 package com.williamcallahan.javachat.service.ingestion;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Extracts Java package names for ingestion metadata.
  *
- * <p>This is a heuristic tailored for Oracle JavaDoc pages, where the package
- * often appears in the URL path or in a "Package ..." heading in the page text.</p>
+ * <p>Manifest-governed Java API URLs yield package paths directly; other documents fall back to their
+ * extracted "Package ..." heading.</p>
  */
 public final class JavaPackageExtractor {
-    private static final String JAVA_API_PATH_SEGMENT = "/api/";
     private static final int PACKAGE_EXTRACTION_SNIPPET_LENGTH = 100;
+    private static final int MINIMUM_JAVA_API_PATH_SEGMENT_COUNT = 2;
 
     private JavaPackageExtractor() {}
 
     /**
      * Identifies URLs whose paths point to Java API documentation.
      *
-     * <p>The same path discriminator selects the structured Javadoc extractor and derives package
-     * metadata, so those behaviors cannot drift between local and remote ingestion.</p>
+     * <p>The canonical Java API manifest owns matching source bases. Only a URL's scheme, authority, and
+     * path participate in classification, so query and fragment text cannot select structured extraction.</p>
      *
      * @param url source URL
-     * @return {@code true} when the URL contains the Java API path segment
+     * @return {@code true} when the URL belongs to a canonical Java API source
      */
     public static boolean isJavaApiUrl(String url) {
         Objects.requireNonNull(url, "url");
-        return url.contains(JAVA_API_PATH_SEGMENT);
+        return findJavaApiSourceUrl(url).isPresent();
     }
 
     /**
@@ -40,18 +45,11 @@ public final class JavaPackageExtractor {
         Objects.requireNonNull(url, "url");
         Objects.requireNonNull(bodyText, "bodyText");
 
-        if (isJavaApiUrl(url)) {
-            int apiPathOffset = url.indexOf(JAVA_API_PATH_SEGMENT) + JAVA_API_PATH_SEGMENT.length();
-            String pathAfterApi = url.substring(apiPathOffset);
-            String[] pathSegments = pathAfterApi.split("/");
-            StringBuilder packageBuilder = new StringBuilder();
-            for (String pathSegment : pathSegments) {
-                if (pathSegment.endsWith(".html")) break;
-                if (packageBuilder.length() > 0) packageBuilder.append('.');
-                packageBuilder.append(pathSegment);
-            }
-            String packageName = packageBuilder.toString();
-            if (packageName.contains(".")) return packageName;
+        String pathDerivedPackageName = findJavaApiSourceUrl(url)
+                .map(JavaPackageExtractor::extractPackageFromJavaApiPath)
+                .orElse("");
+        if (!pathDerivedPackageName.isBlank()) {
+            return pathDerivedPackageName;
         }
 
         int packageIndex = bodyText.indexOf("Package ");
@@ -67,4 +65,59 @@ public final class JavaPackageExtractor {
 
         return "";
     }
+
+    private static Optional<JavaApiSourceUrl> findJavaApiSourceUrl(String url) {
+        URI documentUri;
+        try {
+            documentUri = new URI(url);
+        } catch (URISyntaxException invalidUrlException) {
+            return Optional.empty();
+        }
+
+        return DocsSourceRegistry.javaApiDocumentationSources().stream()
+                .filter(javaApiSource -> belongsToJavaApiSource(documentUri, javaApiSource))
+                .findFirst()
+                .map(javaApiSource -> new JavaApiSourceUrl(documentUri, javaApiSource));
+    }
+
+    private static boolean belongsToJavaApiSource(URI documentUri, JavaApiDocumentationSource javaApiSource) {
+        URI javaApiBaseUri = URI.create(javaApiSource.remoteBaseUrl());
+        String documentRawPath = documentUri.getRawPath();
+        return javaApiBaseUri.getScheme().equalsIgnoreCase(documentUri.getScheme())
+                && javaApiBaseUri.getHost().equalsIgnoreCase(documentUri.getHost())
+                && javaApiBaseUri.getPort() == documentUri.getPort()
+                && documentRawPath != null
+                && documentRawPath.startsWith(javaApiBaseUri.getRawPath());
+    }
+
+    private static String extractPackageFromJavaApiPath(JavaApiSourceUrl javaApiSourceUrl) {
+        URI javaApiBaseUri = URI.create(javaApiSourceUrl.javaApiSource().remoteBaseUrl());
+        String apiRelativePath = javaApiSourceUrl
+                .documentUri()
+                .getRawPath()
+                .substring(javaApiBaseUri.getRawPath().length());
+        String[] apiPathSegments = apiRelativePath.split("/");
+        if (apiPathSegments.length < MINIMUM_JAVA_API_PATH_SEGMENT_COUNT) {
+            return "";
+        }
+
+        StringBuilder packageBuilder = new StringBuilder();
+        for (int pathSegmentIndex = 1; pathSegmentIndex < apiPathSegments.length; pathSegmentIndex++) {
+            String apiPathSegment = apiPathSegments[pathSegmentIndex];
+            if (apiPathSegment.endsWith(".html")) {
+                break;
+            }
+            if (apiPathSegment.isBlank()) {
+                continue;
+            }
+            if (packageBuilder.length() > 0) {
+                packageBuilder.append('.');
+            }
+            packageBuilder.append(apiPathSegment);
+        }
+        String packageName = packageBuilder.toString();
+        return packageName.contains(".") ? packageName : "";
+    }
+
+    private record JavaApiSourceUrl(URI documentUri, JavaApiDocumentationSource javaApiSource) {}
 }

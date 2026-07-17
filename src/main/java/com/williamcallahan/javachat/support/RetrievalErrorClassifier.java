@@ -1,9 +1,11 @@
 package com.williamcallahan.javachat.support;
 
 import io.grpc.Status;
+import io.grpc.StatusException;
+import io.grpc.StatusRuntimeException;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
-import org.slf4j.Logger;
 
 /**
  * Classifies retrieval errors and logs user-facing context without leaking raw error payloads.
@@ -42,21 +44,24 @@ public final class RetrievalErrorClassifier {
     }
 
     private static RetrievalErrorCategory classify(Throwable failure) {
+        return classifyGrpcStatus(failure).orElseGet(() -> classifyNonGrpcFailure(failure));
+    }
+
+    private static RetrievalErrorCategory classifyNonGrpcFailure(Throwable failure) {
         StringBuilder failureMessageBuilder = new StringBuilder();
         boolean timeoutExceptionFound = false;
-        boolean retryableGrpcStatusFound = isRetryableGrpcStatus(failure);
-        Throwable current = failure;
-        while (current != null) {
-            timeoutExceptionFound |= current instanceof TimeoutException;
+        Throwable failureInChain = failure;
+        while (failureInChain != null) {
+            timeoutExceptionFound |= failureInChain instanceof TimeoutException;
 
-            String currentFailureMessage = current.getMessage();
+            String currentFailureMessage = failureInChain.getMessage();
             if (currentFailureMessage != null && !currentFailureMessage.isBlank()) {
                 if (failureMessageBuilder.length() > 0) {
                     failureMessageBuilder.append(' ');
                 }
                 failureMessageBuilder.append(currentFailureMessage);
             }
-            current = current.getCause();
+            failureInChain = failureInChain.getCause();
         }
 
         String combinedFailureMessage = failureMessageBuilder.toString().toLowerCase(Locale.ROOT);
@@ -69,7 +74,7 @@ public final class RetrievalErrorClassifier {
             return RetrievalErrorCategory.FORBIDDEN;
         } else if (combinedFailureMessage.contains("429") || combinedFailureMessage.contains("too many requests")) {
             return RetrievalErrorCategory.RATE_LIMITED;
-        } else if (timeoutExceptionFound || retryableGrpcStatusFound || combinedFailureMessage.contains("connection")) {
+        } else if (timeoutExceptionFound || combinedFailureMessage.contains("connection")) {
             return RetrievalErrorCategory.CONNECTION_ERROR;
         } else if (combinedFailureMessage.contains("embedding")
                 && (combinedFailureMessage.contains("unavailable")
@@ -83,9 +88,9 @@ public final class RetrievalErrorClassifier {
     /**
      * Determines whether the failure is a transient Qdrant/vector store error that should be retried.
      *
-     * <p>Transient errors include connection issues, timeouts, and service unavailability (503).
-     * Non-transient errors like invalid UUID format or programming errors should NOT be retried
-     * as they indicate bugs that need fixing.
+     * <p>Transient errors include connection issues, typed timeouts, and gRPC {@link
+     * Status.Code#DEADLINE_EXCEEDED}/{@link Status.Code#UNAVAILABLE} statuses. Non-transient errors like
+     * quota exhaustion, invalid UUID format, or programming errors should not be retried.
      *
      * @param failure exception to classify
      * @return true if the failure is transient and a retry is appropriate
@@ -95,41 +100,33 @@ public final class RetrievalErrorClassifier {
     }
 
     /**
-     * Identifies gRPC transport failures eligible for the shared vector-store retry path.
+     * Classifies an explicit gRPC status before inspecting arbitrary exception text.
      *
-     * <p>{@link Status#fromThrowable(Throwable)} locates wrapped gRPC status exceptions.
-     * {@link Status.Code#RESOURCE_EXHAUSTED} remains non-retryable because it can represent
-     * quota or capacity pressure rather than a transport interruption.</p>
+     * <p>{@link Status#fromThrowable(Throwable)} traverses wrapped {@link StatusException} and {@link
+     * StatusRuntimeException} instances. A typed {@link Status.Code#RESOURCE_EXHAUSTED} must not become a
+     * retryable HTTP-like 429 merely because its description contains that text.</p>
      */
-    private static boolean isRetryableGrpcStatus(Throwable failure) {
-        if (failure == null) {
-            return false;
+    private static Optional<RetrievalErrorCategory> classifyGrpcStatus(Throwable failure) {
+        if (!containsGrpcStatusException(failure)) {
+            return Optional.empty();
         }
 
         Status.Code grpcStatusCode = Status.fromThrowable(failure).getCode();
-        return switch (grpcStatusCode) {
-            case DEADLINE_EXCEEDED, UNAVAILABLE -> true;
-            default -> false;
-        };
+        return Optional.of(
+                switch (grpcStatusCode) {
+                    case DEADLINE_EXCEEDED, UNAVAILABLE -> RetrievalErrorCategory.CONNECTION_ERROR;
+                    default -> RetrievalErrorCategory.UNKNOWN;
+                });
     }
 
-    /**
-     * Log user-friendly context about why vector search failed.
-     *
-     * @param log logger to emit messages
-     * @param errorType classified error category
-     * @param error original exception
-     */
-    public static void logUserFriendlyErrorContext(Logger log, String errorType, Throwable error) {
-        if (error.getCause() instanceof com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException) {
-            log.info(
-                    "Embedding services are unavailable. Using keyword-based search with limited semantic understanding.");
-        } else if (errorType.contains("404")) {
-            log.info("Embedding API endpoint not found. Check configuration for spring.ai.openai.embedding.base-url");
-        } else if (errorType.contains("401") || errorType.contains("403")) {
-            log.info("Embedding API authentication failed. Check OPENAI_API_KEY or GITHUB_TOKEN configuration");
-        } else if (errorType.contains("429")) {
-            log.info("Embedding API rate limit exceeded. Consider using local embeddings or upgrading API tier");
+    private static boolean containsGrpcStatusException(Throwable failure) {
+        Throwable failureInChain = failure;
+        while (failureInChain != null) {
+            if (failureInChain instanceof StatusException || failureInChain instanceof StatusRuntimeException) {
+                return true;
+            }
+            failureInChain = failureInChain.getCause();
         }
+        return false;
     }
 }

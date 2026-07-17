@@ -32,15 +32,20 @@ class LocalStoreServiceFileMarkerTest {
         long size = 1234L;
         long mtime = 5678L;
         String fingerprint = "abc123";
+        String extractionSemanticsVersion = "utf8-javadoc-extraction-v1";
         List<String> hashes = List.of("a1", "b2", "c3");
 
-        localStore.markFileIngested(url, size, mtime, fingerprint, hashes);
+        localStore.markFileIngested(
+                url,
+                new LocalStoreService.FileIngestionRecord(
+                        size, mtime, fingerprint, extractionSemanticsVersion, hashes));
 
         LocalStoreService.FileIngestionRecord record =
                 localStore.readFileIngestionRecord(url).orElseThrow();
         assertEquals(size, record.fileSizeBytes());
         assertEquals(mtime, record.lastModifiedMillis());
         assertEquals(fingerprint, record.contentFingerprint());
+        assertEquals(extractionSemanticsVersion, record.extractionSemanticsVersion());
         assertEquals(hashes, record.chunkHashes());
 
         assertTrue(localStore.isFileIngestedAndUnchanged(url, size, mtime));

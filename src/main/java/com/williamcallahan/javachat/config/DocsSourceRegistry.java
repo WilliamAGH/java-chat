@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.config;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,8 +19,9 @@ import org.slf4j.LoggerFactory;
  * Provides a single place to define how locally mirrored paths map back to
  * authoritative remote URLs for citations and ingestion.
  *
- * Complete Java API sources are governed by {@code java-api-documentation-sources.manifest};
- * other remote base URLs are governed by {@code docs-sources.properties}.
+ * Complete Java API sources are governed by {@code java-api-documentation-sources.manifest},
+ * official non-Java sources are governed by {@code documentation-sources.manifest}, and legacy
+ * citation-only bases remain in {@code docs-sources.properties}.
  */
 public final class DocsSourceRegistry {
 
@@ -34,11 +36,9 @@ public final class DocsSourceRegistry {
     private static final String ORACLE_JAVASE_BASE_KEY = "ORACLE_JAVASE_BASE";
     private static final String IBM_ARTICLES_BASE_KEY = "IBM_ARTICLES_BASE";
     private static final String JETBRAINS_IDEA_2025_09_BASE_KEY = "JETBRAINS_IDEA_2025_09_BASE";
-    private static final String SPRING_BOOT_BASE_KEY = "SPRING_BOOT_BASE";
     private static final String SPRING_FRAMEWORK_BASE_KEY = "SPRING_FRAMEWORK_BASE";
     private static final String SPRING_AI_BASE_KEY = "SPRING_AI_BASE";
 
-    private static final String SPRING_BOOT_API_BASE_KEY = "SPRING_BOOT_API_BASE";
     private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_STABLE_BASE_KEY = "SPRING_AI_API_STABLE_BASE";
     private static final String SPRING_AI_API_2_BASE_KEY = "SPRING_AI_API_2_BASE";
@@ -49,11 +49,9 @@ public final class DocsSourceRegistry {
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
     private static final String DEFAULT_JETBRAINS_IDEA_2025_09_BASE = "https://blog.jetbrains.com/idea/2025/09/";
 
-    private static final String DEFAULT_SPRING_BOOT_BASE = "https://docs.spring.io/spring-boot/";
     private static final String DEFAULT_SPRING_FRAMEWORK_BASE = "https://docs.spring.io/spring-framework/";
     private static final String DEFAULT_SPRING_AI_BASE = "https://docs.spring.io/spring-ai/";
 
-    private static final String DEFAULT_SPRING_BOOT_API_BASE = "https://docs.spring.io/spring-boot/api/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
     private static final String DEFAULT_SPRING_AI_API_STABLE_BASE =
@@ -61,8 +59,7 @@ public final class DocsSourceRegistry {
     private static final String DEFAULT_SPRING_AI_API_2_BASE = "https://docs.spring.io/spring-ai/docs/2.0.x/api/";
 
     private static final String LOCAL_DOCS_ROOT = "/data/docs/";
-    private static final String LOCAL_DOCS_SPRING_BOOT = LOCAL_DOCS_ROOT + "spring-boot/";
-    private static final String LOCAL_DOCS_SPRING_BOOT_COMPLETE = LOCAL_DOCS_ROOT + "spring-boot-complete/";
+    private static final String RELATIVE_MIRROR_PATH_SEPARATOR = "/";
     private static final String LOCAL_DOCS_SPRING_FRAMEWORK = LOCAL_DOCS_ROOT + "spring-framework/";
     private static final String LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE = LOCAL_DOCS_ROOT + "spring-framework-complete/";
     private static final String LOCAL_DOCS_SPRING_AI = LOCAL_DOCS_ROOT + "spring-ai/";
@@ -87,19 +84,17 @@ public final class DocsSourceRegistry {
     private static final Properties PROPS = loadDocsSourceProperties();
     private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES =
             JavaApiDocumentationManifest.load();
+    private static final List<DocumentationSource> DOCUMENTATION_SOURCES = DocumentationSourceManifest.load();
 
     public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
     public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
     public static final String JETBRAINS_IDEA_2025_09_BASE =
             resolveSetting(JETBRAINS_IDEA_2025_09_BASE_KEY, DEFAULT_JETBRAINS_IDEA_2025_09_BASE);
 
-    public static final String SPRING_BOOT_BASE = resolveSetting(SPRING_BOOT_BASE_KEY, DEFAULT_SPRING_BOOT_BASE);
     public static final String SPRING_FRAMEWORK_BASE =
             resolveSetting(SPRING_FRAMEWORK_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_BASE);
     public static final String SPRING_AI_BASE = resolveSetting(SPRING_AI_BASE_KEY, DEFAULT_SPRING_AI_BASE);
 
-    public static final String SPRING_BOOT_API_BASE =
-            resolveSetting(SPRING_BOOT_API_BASE_KEY, DEFAULT_SPRING_BOOT_API_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
             resolveSetting(SPRING_FRAMEWORK_API_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_API_BASE);
     public static final String SPRING_AI_API_STABLE_BASE =
@@ -140,16 +135,16 @@ public final class DocsSourceRegistry {
             if (parsedJavaRelease < 1) {
                 throw new IllegalArgumentException("Java release must be positive");
             }
-            JavaApiDocumentationManifest.requireHttpsRemoteBaseUrl(remoteBaseUrl);
-            JavaApiDocumentationManifest.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
-            JavaApiDocumentationManifest.requireManifestText(displayName, "displayName", false);
+            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(remoteBaseUrl, "remoteBaseUrl");
+            DocumentationManifestFieldRules.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
+            DocumentationManifestFieldRules.requireManifestText(displayName, "displayName", false);
             if (cutDirectories < 0) {
                 throw new IllegalArgumentException("Java API cut directories cannot be negative");
             }
             if (minimumHtmlFiles < 1) {
                 throw new IllegalArgumentException("Java API minimum HTML files must be positive");
             }
-            JavaApiDocumentationManifest.requireManifestText(rejectRegex, "rejectRegex", true);
+            DocumentationManifestFieldRules.requireManifestText(rejectRegex, "rejectRegex", true);
         }
 
         /**
@@ -169,6 +164,100 @@ public final class DocsSourceRegistry {
      */
     public static List<JavaApiDocumentationSource> javaApiDocumentationSources() {
         return List.copyOf(JAVA_API_DOCUMENTATION_SOURCES);
+    }
+
+    /**
+     * Describes one official non-Java documentation mirror projected from the canonical manifest.
+     *
+     * @param fetchUrl upstream URL mirrored by the fetch script
+     * @param citationBaseUrl authoritative URL prefix used for local citation reconstruction
+     * @param relativeMirrorPath canonical path beneath {@code data/docs}
+     * @param displayName operator-facing ingestion name
+     * @param docSet canonical Qdrant documentation-set token
+     * @param sourceKind provenance category for the upstream publisher
+     * @param docType content classification for retrieval metadata
+     * @param docVersion upstream release token, or blank for an unversioned source
+     */
+    public record DocumentationSource(
+            String fetchUrl,
+            String citationBaseUrl,
+            String relativeMirrorPath,
+            String displayName,
+            String docSet,
+            String sourceKind,
+            String docType,
+            String docVersion) {
+        public DocumentationSource {
+            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(fetchUrl, "fetchUrl");
+            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(citationBaseUrl, "citationBaseUrl");
+            DocumentationManifestFieldRules.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
+            DocumentationManifestFieldRules.requireManifestText(displayName, "displayName", false);
+            DocumentationManifestFieldRules.requireManifestText(docSet, "docSet", false);
+            DocumentationManifestFieldRules.requireManifestText(sourceKind, "sourceKind", false);
+            DocumentationManifestFieldRules.requireManifestText(docType, "docType", false);
+            DocumentationManifestFieldRules.requireManifestText(docVersion, "docVersion", true);
+        }
+
+        /**
+         * Serializes this validated source with the canonical manifest grammar.
+         *
+         * @return exact manifest record row
+         */
+        public String toManifestRow() {
+            return DocumentationSourceManifest.serialize(this);
+        }
+    }
+
+    /**
+     * Returns official non-Java documentation sources projected from the canonical manifest.
+     *
+     * @return immutable sources in manifest order
+     */
+    public static List<DocumentationSource> documentationSources() {
+        return List.copyOf(DOCUMENTATION_SOURCES);
+    }
+
+    /**
+     * Finds the canonical source for a local mirror path.
+     *
+     * @param relativeMirrorPath path beneath {@code data/docs}
+     * @return matching source when the path is manifest governed
+     */
+    public static Optional<DocumentationSource> documentationSourceForRelativeMirrorPath(String relativeMirrorPath) {
+        if (relativeMirrorPath == null || relativeMirrorPath.isBlank()) {
+            return Optional.empty();
+        }
+        return DOCUMENTATION_SOURCES.stream()
+                .filter(documentationSource ->
+                        documentationSource.relativeMirrorPath().equals(relativeMirrorPath))
+                .findFirst();
+    }
+
+    /**
+     * Finds the canonical source governing a file path beneath {@code data/docs}.
+     *
+     * <p>The longest matching mirror root owns the file, so a catalog can safely contain nested
+     * source roots.</p>
+     *
+     * @param relativeDocumentPath file path beneath {@code data/docs}
+     * @return matching source when the path is manifest governed
+     */
+    public static Optional<DocumentationSource> documentationSourceForRelativeDocumentPath(
+            String relativeDocumentPath) {
+        if (relativeDocumentPath == null || relativeDocumentPath.isBlank()) {
+            return Optional.empty();
+        }
+        String normalizedDocumentPath = relativeDocumentPath.replace('\\', '/');
+        return DOCUMENTATION_SOURCES.stream()
+                .filter(documentationSource ->
+                        isWithinDocumentationSource(normalizedDocumentPath, documentationSource.relativeMirrorPath()))
+                .max(Comparator.comparingInt(documentationSource ->
+                        documentationSource.relativeMirrorPath().length()));
+    }
+
+    private static boolean isWithinDocumentationSource(String relativeDocumentPath, String relativeMirrorPath) {
+        return relativeDocumentPath.equals(relativeMirrorPath)
+                || relativeDocumentPath.startsWith(relativeMirrorPath + RELATIVE_MIRROR_PATH_SEPARATOR);
     }
 
     private static Properties loadDocsSourceProperties() {
@@ -207,9 +296,11 @@ public final class DocsSourceRegistry {
                     javaApiDocumentationSource.remoteBaseUrl());
         }
 
-        // Spring Boot documentation
-        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT, SPRING_BOOT_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_BOOT_COMPLETE, SPRING_BOOT_BASE);
+        for (DocumentationSource documentationSource : DOCUMENTATION_SOURCES) {
+            prefixLookup.put(
+                    LOCAL_DOCS_ROOT + documentationSource.relativeMirrorPath() + "/",
+                    documentationSource.citationBaseUrl());
+        }
 
         // Spring Framework documentation
         prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK, SPRING_FRAMEWORK_BASE);
@@ -311,8 +402,6 @@ public final class DocsSourceRegistry {
         // Fix malformed Spring docs paths that accidentally include '/java/' segment
         if (result.contains(SPRING_DOCS_HTTPS_PREFIX)) {
             // Legacy path normalization for older local mirrors
-            result = result.replace("/spring-boot/docs/current/api/java/", "/spring-boot/api/java/");
-            result = result.replace("/spring-boot/docs/current/api/", "/spring-boot/api/");
             result = result.replace(
                     "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
         }

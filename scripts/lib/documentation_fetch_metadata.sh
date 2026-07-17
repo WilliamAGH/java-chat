@@ -22,8 +22,6 @@ write_documentation_fetch_metadata() {
     total_html_files=$(find "$DOCS_ROOT" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')
     local total_files
     total_files=$(find "$DOCS_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')
-    local spring_boot_reference_version
-    spring_boot_reference_version="$(extract_meta_version "$DOCS_ROOT/spring-boot-complete/reference/index.html")"
     local spring_framework_reference_version
     spring_framework_reference_version="$(extract_meta_version "$DOCS_ROOT/spring-framework-complete/reference/index.html")"
     local spring_ai_reference_stable_version
@@ -52,14 +50,12 @@ write_documentation_fetch_metadata() {
   },
   "versions": {
 $java_javadoc_versions_metadata,
-    "spring_boot_reference": "$spring_boot_reference_version",
     "spring_framework_reference": "$spring_framework_reference_version",
     "spring_ai_reference_stable": "$spring_ai_reference_stable_version",
     "spring_ai_reference_2": "$spring_ai_reference_2_version"
   },
   "directories": {
 $java_complete_directories_metadata,
-    "spring_boot_complete": "$(find "$DOCS_ROOT/spring-boot-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_framework_complete": "$(find "$DOCS_ROOT/spring-framework-complete" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_ai_reference_stable": "$(find "$DOCS_ROOT/spring-ai-reference" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",
     "spring_ai_reference_2": "$(find "$DOCS_ROOT/spring-ai-reference-2" -name "*.html" 2>/dev/null | wc -l | tr -d ' ')",

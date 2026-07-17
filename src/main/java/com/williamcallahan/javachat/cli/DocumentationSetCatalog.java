@@ -20,15 +20,11 @@ final class DocumentationSetCatalog {
     private static final String DOCSET_IBM_JAVA_25_ARTICLE_PATH = "ibm/articles";
     private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_NAME = "JetBrains Java 25 Blog";
     private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_PATH = "jetbrains/idea/2025/09";
-    private static final String DOCSET_SPRING_BOOT_COMPLETE_NAME = "Spring Boot Complete";
-    private static final String DOCSET_SPRING_BOOT_COMPLETE_PATH = "spring-boot-complete";
     private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME = "Spring Framework Complete";
     private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH = "spring-framework-complete";
     private static final String DOCSET_SPRING_AI_COMPLETE_NAME = "Spring AI Complete";
     private static final String DOCSET_SPRING_AI_COMPLETE_PATH = "spring-ai-complete";
 
-    private static final String DOCSET_SPRING_BOOT_QUICK_NAME = "Spring Boot Quick";
-    private static final String DOCSET_SPRING_BOOT_QUICK_PATH = "spring-boot";
     private static final String DOCSET_SPRING_FRAMEWORK_QUICK_NAME = "Spring Framework Quick";
     private static final String DOCSET_SPRING_FRAMEWORK_QUICK_PATH = "spring-framework";
     private static final String DOCSET_SPRING_AI_QUICK_NAME = "Spring AI Quick";
@@ -37,7 +33,6 @@ final class DocumentationSetCatalog {
     private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = buildBaseDocumentationSets();
 
     private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
-            new DocumentationSet(DOCSET_SPRING_BOOT_QUICK_NAME, DOCSET_SPRING_BOOT_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
             new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));
 
@@ -54,11 +49,14 @@ final class DocumentationSetCatalog {
                 .map(javaApiDocumentationSource -> new DocumentationSet(
                         javaApiDocumentationSource.displayName(), javaApiDocumentationSource.relativeMirrorPath()))
                 .toList());
+        baseDocumentationSets.addAll(DocsSourceRegistry.documentationSources().stream()
+                .map(documentationSource -> new DocumentationSet(
+                        documentationSource.displayName(), documentationSource.relativeMirrorPath()))
+                .toList());
         baseDocumentationSets.addAll(List.of(
                 new DocumentationSet(DOCSET_JAVA_25_RELEASE_NOTES_NAME, DOCSET_JAVA_25_RELEASE_NOTES_PATH),
                 new DocumentationSet(DOCSET_IBM_JAVA_25_ARTICLE_NAME, DOCSET_IBM_JAVA_25_ARTICLE_PATH),
                 new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
-                new DocumentationSet(DOCSET_SPRING_BOOT_COMPLETE_NAME, DOCSET_SPRING_BOOT_COMPLETE_PATH),
                 new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
                 new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH)));
         return List.copyOf(baseDocumentationSets);

@@ -35,6 +35,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
+    private static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-javadoc-extraction-v1";
 
     private final FileContentServices content;
     private final IngestionStorageServices storage;
@@ -123,7 +124,8 @@ public class LocalDocsFileIngestionProcessor {
         boolean unchangedByFingerprint = priorIngestionRecord
                 .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == fileSizeBytes
                         && ingestionRecord.lastModifiedMillis() == lastModifiedMillis
-                        && fileContentFingerprint.equals(ingestionRecord.contentFingerprint()))
+                        && fileContentFingerprint.equals(ingestionRecord.contentFingerprint())
+                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion()))
                 .orElse(false);
 
         if (unchangedByFingerprint) {
@@ -391,7 +393,14 @@ public class LocalDocsFileIngestionProcessor {
         }
         LocalStoreService localStore = storage.localStore();
         try {
-            localStore.markFileIngested(url, fileSizeBytes, lastModifiedMillis, fileContentFingerprint, chunkHashes);
+            localStore.markFileIngested(
+                    url,
+                    new LocalStoreService.FileIngestionRecord(
+                            fileSizeBytes,
+                            lastModifiedMillis,
+                            fileContentFingerprint,
+                            LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                            chunkHashes));
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
         }

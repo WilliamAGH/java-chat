@@ -77,6 +77,26 @@ class RetrievalErrorClassifierTest {
     }
 
     @Test
+    void prioritizesGrpcUnavailableOverHttp429Description() {
+        RuntimeException grpcUnavailableFailure = Status.UNAVAILABLE
+                .withDescription("HTTP 429 from upstream proxy")
+                .asRuntimeException();
+
+        assertEquals("Connection Error", RetrievalErrorClassifier.determineErrorType(grpcUnavailableFailure));
+        assertTrue(RetrievalErrorClassifier.isTransientVectorStoreError(grpcUnavailableFailure));
+    }
+
+    @Test
+    void keepsGrpcResourceExhaustedWithHttp429DescriptionNonRetryable() {
+        RuntimeException grpcResourceExhaustedFailure = Status.RESOURCE_EXHAUSTED
+                .withDescription("HTTP 429 quota exhausted")
+                .asRuntimeException();
+
+        assertEquals("Unknown Error", RetrievalErrorClassifier.determineErrorType(grpcResourceExhaustedFailure));
+        assertFalse(RetrievalErrorClassifier.isTransientVectorStoreError(grpcResourceExhaustedFailure));
+    }
+
+    @Test
     void doesNotRetryGrpcInvalidArgumentFailure() {
         RuntimeException grpcInvalidArgumentFailure = Status.INVALID_ARGUMENT.asRuntimeException();
 
