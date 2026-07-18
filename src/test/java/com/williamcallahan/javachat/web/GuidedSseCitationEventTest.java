@@ -2,6 +2,8 @@ package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -15,6 +17,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
@@ -27,9 +31,11 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -49,6 +55,9 @@ import reactor.core.publisher.Mono;
 @Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
+
+    private static final Logger GUIDED_LEARNING_CONTROLLER_LOGGER =
+            (Logger) LoggerFactory.getLogger(GuidedLearningController.class);
 
     @Autowired
     MockMvc mockMvc;
@@ -111,15 +120,24 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.streamLessonContent(anyString()))
                 .willReturn(Flux.error(new IllegalStateException("Reranking request failed")));
 
-        var asyncResult = mockMvc.perform(get("/api/guided/content/stream").param("slug", "intro"))
-                .andExpect(request().asyncStarted())
-                .andReturn();
+        String aggregated;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(GUIDED_LEARNING_CONTROLLER_LOGGER)) {
+            var asyncResult = mockMvc.perform(get("/api/guided/content/stream").param("slug", "intro"))
+                    .andExpect(request().asyncStarted())
+                    .andReturn();
 
-        String aggregated = mockMvc.perform(asyncDispatch(asyncResult))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+            aggregated = mockMvc.perform(asyncDispatch(asyncResult))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+
+            assertEquals(1, expectedLogEvents.events().size());
+            var streamFailureEvent = expectedLogEvents.events().getFirst();
+            assertEquals(Level.ERROR, streamFailureEvent.getLevel());
+            assertEquals("Guided lesson content stream error", streamFailureEvent.getFormattedMessage());
+            assertNull(streamFailureEvent.getThrowableProxy());
+        }
 
         assertTrue(
                 aggregated.contains("event:" + EVENT_ERROR) || aggregated.contains("event: " + EVENT_ERROR),

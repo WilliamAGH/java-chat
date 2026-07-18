@@ -1,29 +1,36 @@
 package com.williamcallahan.javachat.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.mvc.support.DefaultHandlerExceptionResolver;
 
 /** Verifies the chat stream request exposes one canonical, meaningful query. */
 @WebMvcTest(controllers = ChatController.class)
@@ -32,6 +39,8 @@ import org.springframework.test.web.servlet.MockMvc;
 class ChatStreamRequestTest {
     private static final String SESSION_ID = "request-session";
     private static final String USER_QUERY = "What is new in Java 25?";
+    private static final Logger DEFAULT_HANDLER_EXCEPTION_RESOLVER_LOGGER =
+            (Logger) LoggerFactory.getLogger(DefaultHandlerExceptionResolver.class);
 
     @Autowired
     MockMvc mockMvc;
@@ -70,11 +79,25 @@ class ChatStreamRequestTest {
     @ParameterizedTest
     @MethodSource("invalidChatStreamRequestBodies")
     void rejectsMissingNullBlankAndLegacyMessageQueries(String invalidRequestBody) throws Exception {
-        mockMvc.perform(post("/api/chat/stream")
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(invalidRequestBody))
-                .andExpect(status().isBadRequest());
+        try (ExpectedLogEvents expectedLogEvents =
+                ExpectedLogEvents.capture(DEFAULT_HANDLER_EXCEPTION_RESOLVER_LOGGER)) {
+            mockMvc.perform(post("/api/chat/stream")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(invalidRequestBody))
+                    .andExpect(status().isBadRequest());
+
+            assertEquals(1, expectedLogEvents.events().size());
+            var requestRejectionWarning = expectedLogEvents.events().getFirst();
+            assertEquals(Level.WARN, requestRejectionWarning.getLevel());
+            assertTrue(
+                    requestRejectionWarning
+                            .getFormattedMessage()
+                            .startsWith(
+                                    "Resolved [org.springframework.http.converter.HttpMessageNotReadableException: JSON parse error:"));
+            assertTrue(requestRejectionWarning.getFormattedMessage().contains("Latest query is required"));
+            assertNull(requestRejectionWarning.getThrowableProxy());
+        }
 
         verifyNoInteractions(chatService, openAIStreamingService);
     }

@@ -3,7 +3,7 @@ pre-commit:
   commands:
     spotless-apply:
       glob: "*.{java,kts}"
-      run: ./gradlew spotlessApply
+      run: make format
       stage_fixed: true
     frontend-format:
       root: "frontend/"

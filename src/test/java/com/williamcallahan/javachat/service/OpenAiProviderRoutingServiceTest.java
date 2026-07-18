@@ -3,12 +3,15 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.openai.client.OpenAIClient;
 import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
@@ -18,9 +21,11 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.InterruptedIOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import reactor.core.Exceptions;
 
 /**
@@ -33,6 +38,8 @@ class OpenAiProviderRoutingServiceTest {
     private static final String OPENAI_REQUEST_FAILED_MESSAGE = "Request failed";
     private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
     private static final String CALLER_INTERRUPTION_MESSAGE = "request interrupted by caller timeout";
+    private static final Logger PROVIDER_ROUTING_LOGGER =
+            (Logger) LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
 
     private OpenAiProviderRoutingService createRoutingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -138,12 +145,21 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
-        assertDoesNotThrow(() -> routingService.recordProviderFailure(
-                RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure));
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            assertDoesNotThrow(() -> routingService.recordProviderFailure(
+                    RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure));
 
-        assertThrows(
-                ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Provider rate-limit timing could not be recorded; configured cooldown remains active",
+                            "Configured provider unavailable (backoff active, providerId=1)"));
+        }
     }
 
     @Test
@@ -203,11 +219,20 @@ class OpenAiProviderRoutingServiceTest {
                 .headers(Headers.builder().build())
                 .build();
 
-        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeout);
+        ConfiguredProviderTemporarilyUnavailableException temporaryFailure;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeout);
 
-        ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
-                ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.admitConfiguredProviderRequest(null, openAiClient));
+            temporaryFailure = assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(null, openAiClient));
+
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Configured provider unavailable (backoff active, providerId=0)"));
+        }
 
         assertEquals(RateLimitService.ApiProvider.OPENAI, temporaryFailure.provider());
         assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
@@ -225,11 +250,19 @@ class OpenAiProviderRoutingServiceTest {
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
-        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
 
-        assertThrows(
-                ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.admitConfiguredProviderRequest(githubModelsClient, openAiClient));
+            assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, openAiClient));
+
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Configured provider unavailable (backoff active, providerId=0)"));
+        }
     }
 
     @Test
@@ -240,9 +273,13 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
-        ConfiguredProviderTemporarilyUnavailableException temporaryFailure = assertThrows(
-                ConfiguredProviderTemporarilyUnavailableException.class,
-                () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+        ConfiguredProviderTemporarilyUnavailableException temporaryFailure;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            temporaryFailure = assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertWarningMessages(expectedLogEvents, List.of("Configured provider admission denied (providerId=1)"));
+        }
 
         assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, temporaryFailure.provider());
         assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
@@ -290,5 +327,15 @@ class OpenAiProviderRoutingServiceTest {
         AppProperties appProperties = new AppProperties();
         appProperties.getLlm().setConfiguredProviderBackoffSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS);
         return appProperties;
+    }
+
+    private static void assertWarningMessages(ExpectedLogEvents expectedLogEvents, List<String> expectedMessages) {
+        assertEquals(expectedMessages.size(), expectedLogEvents.events().size());
+        for (int eventIndex = 0; eventIndex < expectedMessages.size(); eventIndex++) {
+            var warningEvent = expectedLogEvents.events().get(eventIndex);
+            assertEquals(Level.WARN, warningEvent.getLevel());
+            assertEquals(expectedMessages.get(eventIndex), warningEvent.getFormattedMessage());
+            assertNull(warningEvent.getThrowableProxy());
+        }
     }
 }

@@ -2,25 +2,38 @@ package com.williamcallahan.javachat;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.config.QdrantHealthIndicator;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.EmbeddingModelKeepAlive;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
+import com.williamcallahan.javachat.service.ExternalServiceHealth;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.QdrantClient;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.health.Status;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContextInitializer;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -40,9 +53,14 @@ import org.springframework.test.web.servlet.MockMvc;
         })
 @AutoConfigureMockMvc
 @AutoConfigureObservability
+@ContextConfiguration(initializers = JavaChatApplicationTests.ExternalServiceHealthLogCaptureInitializer.class)
 class JavaChatApplicationTests {
 
     private static final String TEST_SOURCE_COMMIT = "java-chat-test-source-commit";
+    private static final Logger EXTERNAL_SERVICE_HEALTH_LOGGER =
+            (Logger) LoggerFactory.getLogger(ExternalServiceHealth.class);
+    private static final AtomicReference<ExpectedLogEvents> EXTERNAL_SERVICE_HEALTH_LOG_EVENTS =
+            new AtomicReference<>();
 
     @Autowired
     MockMvc mockMvc;
@@ -93,5 +111,42 @@ class JavaChatApplicationTests {
         assertEquals(Status.DOWN, qdrantHealthIndicator.health().getStatus());
         mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
         mockMvc.perform(get("/actuator/health/dependencies")).andExpect(status().isServiceUnavailable());
+    }
+
+    @AfterAll
+    static void assertsQdrantStartupWarningsAndRestoresLogger() {
+        ExpectedLogEvents externalServiceHealthLogEvents = EXTERNAL_SERVICE_HEALTH_LOG_EVENTS.getAndSet(null);
+        assertNotNull(externalServiceHealthLogEvents);
+        try (externalServiceHealthLogEvents) {
+            assertEquals(
+                    2L,
+                    externalServiceHealthLogEvents.events().stream()
+                            .filter(logEvent -> logEvent.getLevel() == Level.WARN)
+                            .count());
+            assertQdrantHealthWarning(externalServiceHealthLogEvents, "[HEALTH] Qdrant connectivity check failed");
+            assertQdrantHealthWarning(externalServiceHealthLogEvents, "[HEALTH] Qdrant health check failed");
+        }
+    }
+
+    private static void assertQdrantHealthWarning(
+            ExpectedLogEvents externalServiceHealthLogEvents, String messagePrefix) {
+        var qdrantHealthWarning = externalServiceHealthLogEvents.events().stream()
+                .filter(logEvent -> logEvent.getLevel() == Level.WARN)
+                .filter(logEvent -> logEvent.getFormattedMessage().startsWith(messagePrefix))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Level.WARN, qdrantHealthWarning.getLevel());
+        assertTrue(qdrantHealthWarning.getFormattedMessage().contains("Will retry in"));
+        assertNull(qdrantHealthWarning.getThrowableProxy());
+    }
+
+    /** Starts log capture before the Spring context schedules its first dependency probe. */
+    static final class ExternalServiceHealthLogCaptureInitializer
+            implements ApplicationContextInitializer<ConfigurableApplicationContext> {
+
+        @Override
+        public void initialize(ConfigurableApplicationContext applicationContext) {
+            EXTERNAL_SERVICE_HEALTH_LOG_EVENTS.set(ExpectedLogEvents.capture(EXTERNAL_SERVICE_HEALTH_LOGGER));
+        }
     }
 }

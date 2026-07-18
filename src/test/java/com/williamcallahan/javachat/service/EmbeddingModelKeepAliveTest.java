@@ -6,8 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.List;
@@ -25,22 +24,16 @@ import org.springframework.boot.actuate.health.Status;
  */
 class EmbeddingModelKeepAliveTest {
     private final Logger lifecycleLogger = (Logger) LoggerFactory.getLogger(EmbeddingModelKeepAlive.class);
-    private final ListAppender<ILoggingEvent> lifecycleEvents = new ListAppender<>();
-    private boolean lifecycleLoggerAdditive;
+    private ExpectedLogEvents lifecycleLogEvents;
 
     @BeforeEach
     void captureLifecycleEvents() {
-        lifecycleLoggerAdditive = lifecycleLogger.isAdditive();
-        lifecycleLogger.setAdditive(false);
-        lifecycleEvents.start();
-        lifecycleLogger.addAppender(lifecycleEvents);
+        lifecycleLogEvents = ExpectedLogEvents.capture(lifecycleLogger);
     }
 
     @AfterEach
     void stopCapturingLifecycleEvents() {
-        lifecycleLogger.detachAppender(lifecycleEvents);
-        lifecycleLogger.setAdditive(lifecycleLoggerAdditive);
-        lifecycleEvents.stop();
+        lifecycleLogEvents.close();
     }
 
     @Test
@@ -92,7 +85,7 @@ class EmbeddingModelKeepAliveTest {
         assertEquals(1, eventCount(Level.INFO, "event=embedding_model_probe_slow"));
         assertEquals(1, eventCount(Level.WARN, "event=embedding_model_probe_slow_loop"));
         assertEquals(1, eventCount(Level.INFO, "event=embedding_model_probe_recovered"));
-        assertTrue(lifecycleEvents.list.stream()
+        assertTrue(lifecycleLogEvents.events().stream()
                 .noneMatch(loggingEvent -> loggingEvent.getFormattedMessage().contains("cold and has been reloaded")));
     }
 
@@ -135,7 +128,7 @@ class EmbeddingModelKeepAliveTest {
     }
 
     private long eventCount(Level level, String eventName) {
-        return lifecycleEvents.list.stream()
+        return lifecycleLogEvents.events().stream()
                 .filter(loggingEvent -> loggingEvent.getLevel().equals(level))
                 .filter(loggingEvent -> loggingEvent.getFormattedMessage().contains(eventName))
                 .count();

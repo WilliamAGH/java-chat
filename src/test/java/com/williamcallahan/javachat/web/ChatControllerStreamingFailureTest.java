@@ -20,13 +20,13 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.errors.InternalServerException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
+import com.williamcallahan.javachat.config.ReactorHooksConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
@@ -35,6 +35,7 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -47,6 +48,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Operators;
 
 /** Verifies the chat request boundary does not duplicate the service-owned terminal stream alert. */
 class ChatControllerStreamingFailureTest {
@@ -55,19 +57,24 @@ class ChatControllerStreamingFailureTest {
     private static final String UPSTREAM_SECRET_MESSAGE = "OPENAI_API_KEY=secret-body";
 
     private final Logger pipelineLogger = (Logger) LoggerFactory.getLogger("PIPELINE");
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
+    private final Logger reactorOperatorsLogger = (Logger) LoggerFactory.getLogger(Operators.class);
+    private ExpectedLogEvents pipelineLogEvents;
+    private ExpectedLogEvents reactorHookLogEvents;
+    private ExpectedLogEvents reactorOperatorLogEvents;
 
     @BeforeEach
     void capturePipelineLogs() {
-        logAppender.start();
-        pipelineLogger.addAppender(logAppender);
+        pipelineLogEvents = ExpectedLogEvents.capture(pipelineLogger);
+        reactorHookLogEvents = ExpectedLogEvents.capture(reactorHooksLogger);
+        reactorOperatorLogEvents = ExpectedLogEvents.capture(reactorOperatorsLogger);
     }
 
     @AfterEach
     void stopCapturingPipelineLogs() {
-        pipelineLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        reactorOperatorLogEvents.close();
+        reactorHookLogEvents.close();
+        pipelineLogEvents.close();
     }
 
     @Test
@@ -87,7 +94,7 @@ class ChatControllerStreamingFailureTest {
         assertFalse(errorEvent.data().contains(UPSTREAM_SECRET_MESSAGE));
         assertEquals(
                 0,
-                logAppender.list.stream()
+                pipelineLogEvents.events().stream()
                         .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
                         .count());
     }
@@ -104,7 +111,7 @@ class ChatControllerStreamingFailureTest {
                 .orElseThrow();
         assertTrue(errorEvent.data().contains(AssertionError.class.getName()));
         assertFalse(errorEvent.data().contains(UPSTREAM_SECRET_MESSAGE));
-        ILoggingEvent controllerAlert = logAppender.list.stream()
+        ILoggingEvent controllerAlert = pipelineLogEvents.events().stream()
                 .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
                 .findFirst()
                 .orElseThrow();
@@ -115,7 +122,7 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
-    void configuredProviderCooldownEmitsStableRetryableClientError() throws Exception {
+    void configuredProviderCooldownEmitsStableRetryableClientError() throws JsonProcessingException {
         ConfiguredProviderTemporarilyUnavailableException configuredProviderFailure =
                 new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.GITHUB_MODELS);
 

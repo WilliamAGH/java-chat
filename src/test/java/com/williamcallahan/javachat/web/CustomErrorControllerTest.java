@@ -17,7 +17,7 @@ import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.ConsoleAppender;
-import ch.qos.logback.core.read.ListAppender;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -52,19 +52,16 @@ class CustomErrorControllerTest {
     CustomErrorController errorController;
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(CustomErrorController.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private ExpectedLogEvents controllerLogEvents;
 
     @BeforeEach
     void captureControllerLogs() {
-        logAppender.start();
-        controllerLogger.addAppender(logAppender);
+        controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
     }
 
     @AfterEach
     void stopCapturingControllerLogs() {
-        controllerLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        controllerLogEvents.close();
     }
 
     @Test
@@ -230,7 +227,7 @@ class CustomErrorControllerTest {
     }
 
     private ILoggingEvent onlyLogEvent() {
-        List<ILoggingEvent> capturedLogs = logAppender.list;
+        List<ILoggingEvent> capturedLogs = controllerLogEvents.events();
         assertEquals(1, capturedLogs.size());
         return capturedLogs.getFirst();
     }

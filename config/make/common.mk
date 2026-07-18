@@ -6,6 +6,7 @@
 # ============================================================================
 SHELL := /bin/bash
 GRADLEW := ./gradlew
+LOCKED_GRADLEW := ./scripts/with_build_state_lock.sh $(GRADLEW)
 
 # ============================================================================
 # Application Configuration

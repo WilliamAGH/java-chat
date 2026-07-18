@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.openai.core.http.Headers;
 import com.openai.errors.InternalServerException;
 import com.openai.models.ErrorObject;
@@ -19,6 +18,7 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailureException.StreamingFailureKind;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter.TerminalAttempt;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,19 +35,16 @@ class OpenAiStreamingFailureExceptionTest {
     private static final int UPSTREAM_GATEWAY_TIMEOUT_STATUS = 504;
 
     private final Logger adapterLogger = (Logger) LoggerFactory.getLogger(OpenAiStreamingFailureException.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private ExpectedLogEvents adapterLogEvents;
 
     @BeforeEach
     void captureAdapterLogs() {
-        logAppender.start();
-        adapterLogger.addAppender(logAppender);
+        adapterLogEvents = ExpectedLogEvents.capture(adapterLogger);
     }
 
     @AfterEach
     void stopCapturingAdapterLogs() {
-        adapterLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        adapterLogEvents.close();
     }
 
     @Test
@@ -202,7 +199,7 @@ class OpenAiStreamingFailureExceptionTest {
     }
 
     private ILoggingEvent onlyTerminalAlert() {
-        List<ILoggingEvent> terminalAlerts = logAppender.list.stream()
+        List<ILoggingEvent> terminalAlerts = adapterLogEvents.events().stream()
                 .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
                 .filter(logEvent -> OpenAiStreamingFailureException.TERMINAL_STREAM_FAILURE_EVENT_NAME.equals(
                         logField(logEvent, AlertField.EVENT)))

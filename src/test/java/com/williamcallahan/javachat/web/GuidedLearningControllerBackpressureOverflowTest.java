@@ -17,11 +17,10 @@ import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ReactorHooksConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
@@ -30,6 +29,7 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -50,19 +50,20 @@ class GuidedLearningControllerBackpressureOverflowTest {
     private static final String USER_QUERY = "explain permits";
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(GuidedLearningController.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
+    private ExpectedLogEvents controllerLogEvents;
+    private ExpectedLogEvents reactorHooksLogEvents;
 
     @BeforeEach
     void captureExpectedOverflowLog() {
-        logAppender.start();
-        controllerLogger.addAppender(logAppender);
+        controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
+        reactorHooksLogEvents = ExpectedLogEvents.capture(reactorHooksLogger);
     }
 
     @AfterEach
     void stopCapturingExpectedOverflowLog() {
-        controllerLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        reactorHooksLogEvents.close();
+        controllerLogEvents.close();
     }
 
     @Test
@@ -110,7 +111,7 @@ class GuidedLearningControllerBackpressureOverflowTest {
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
         assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
-        assertTrue(logAppender.list.stream().anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR));
+        assertTrue(controllerLogEvents.events().stream().anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR));
         verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
     }
 }

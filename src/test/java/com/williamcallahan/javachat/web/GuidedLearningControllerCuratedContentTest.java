@@ -11,8 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 import com.williamcallahan.javachat.model.GuidedLesson;
@@ -22,6 +20,7 @@ import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +46,7 @@ class GuidedLearningControllerCuratedContentTest {
     private static final String UNKNOWN_LESSON_SLUG = "unknown-guided-lesson";
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(GuidedLearningController.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private ExpectedLogEvents controllerLogEvents;
 
     @Autowired
     MockMvc mockMvc;
@@ -75,15 +74,12 @@ class GuidedLearningControllerCuratedContentTest {
 
     @BeforeEach
     void startCapturingControllerLogs() {
-        logAppender.start();
-        controllerLogger.addAppender(logAppender);
+        controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
     }
 
     @AfterEach
     void stopCapturingControllerLogs() {
-        controllerLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        controllerLogEvents.close();
     }
 
     @Test
@@ -142,7 +138,7 @@ class GuidedLearningControllerCuratedContentTest {
         assertEquals(
                 "Curated lesson content is unavailable",
                 failedResponse.getResponse().getErrorMessage());
-        assertTrue(logAppender.list.stream()
+        assertTrue(controllerLogEvents.events().stream()
                 .anyMatch(controllerAlert -> controllerAlert.getLevel() == Level.ERROR
                         && controllerAlert.getFormattedMessage().contains("no packaged markdown")));
     }

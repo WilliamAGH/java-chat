@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.notNull;
@@ -9,9 +10,12 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.google.common.util.concurrent.Futures;
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
@@ -24,11 +28,16 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /**
  * Verifies hybrid retrieval behavior for server-side filtering, fusion tuning, and partial failures.
  */
 class HybridSearchServiceTest {
+
+    private static final Logger HYBRID_SEARCH_LOGGER = (Logger) LoggerFactory.getLogger(HybridSearchService.class);
+    private static final String COLLECTION_FAILURE_WARNING =
+            "[QDRANT] Search failed for collection=java-chat-books (exceptionType=RuntimeException)";
 
     private QdrantClient qdrantClient;
     private EmbeddingClient embeddingClient;
@@ -84,9 +93,12 @@ class HybridSearchServiceTest {
         HybridSearchService hybridSearchService = buildSearchService();
         RetrievalConstraint constraint = RetrievalConstraint.none();
 
-        assertThrows(
-                HybridSearchPartialFailureException.class,
-                () -> hybridSearchService.searchOutcome("collections health", 5, constraint));
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
+            assertThrows(
+                    HybridSearchPartialFailureException.class,
+                    () -> hybridSearchService.searchOutcome("collections health", 5, constraint));
+            assertCollectionFailureWarning(expectedLogEvents);
+        }
     }
 
     @Test
@@ -97,8 +109,11 @@ class HybridSearchServiceTest {
         HybridSearchService hybridSearchService = buildSearchService();
         RetrievalConstraint constraint = RetrievalConstraint.none();
 
-        HybridSearchService.SearchOutcome searchOutcome =
-                hybridSearchService.searchOutcome("collections health", 5, constraint);
+        HybridSearchService.SearchOutcome searchOutcome;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
+            searchOutcome = hybridSearchService.searchOutcome("collections health", 5, constraint);
+            assertCollectionFailureWarning(expectedLogEvents);
+        }
 
         assertFalse(searchOutcome.notices().isEmpty());
     }
@@ -126,6 +141,14 @@ class HybridSearchServiceTest {
                 })
                 .when(qdrantClient)
                 .queryAsync(notNull());
+    }
+
+    private static void assertCollectionFailureWarning(ExpectedLogEvents expectedLogEvents) {
+        assertEquals(1, expectedLogEvents.events().size());
+        var collectionFailureWarning = expectedLogEvents.events().getFirst();
+        assertEquals(Level.WARN, collectionFailureWarning.getLevel());
+        assertEquals(COLLECTION_FAILURE_WARNING, collectionFailureWarning.getFormattedMessage());
+        assertNull(collectionFailureWarning.getThrowableProxy());
     }
 
     private static ScoredPoint scoredPoint() {

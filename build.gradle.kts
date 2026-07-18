@@ -44,6 +44,11 @@ configurations.all {
     exclude(group = "commons-logging", module = "commons-logging")
 }
 
+val mockitoAgent by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${libs.versions.spring.ai.get()}")
@@ -115,6 +120,9 @@ dependencies {
     // Testing
     testImplementation(libs.bundles.testing)
     testRuntimeOnly(libs.junit.platform.launcher)
+    mockitoAgent(libs.mockito.core) {
+        isTransitive = false
+    }
 
     // SpotBugs FindSecBugs plugin
     spotbugsPlugins(libs.findsecbugs.plugin)
@@ -123,9 +131,9 @@ dependencies {
 // SpotBugs configuration
 spotbugs {
     toolVersion.set(spotbugsToolVersion)
-    // Match Maven behavior: lint errors don't fail the build
-    // Use explicit `./gradlew spotbugsMain` to enforce
-    ignoreFailures.set(true)
+    ignoreFailures.set(false)
+    // Keep SpotBugs in the explicit lint lane instead of attaching it to every build.
+    runOnCheck.set(false)
     effort.set(com.github.spotbugs.snom.Effort.MAX)
     reportLevel.set(com.github.spotbugs.snom.Confidence.LOW)
     excludeFilter.set(file("config/spotbugs/spotbugs-exclude.xml"))
@@ -143,26 +151,11 @@ tasks.withType<com.github.spotbugs.snom.SpotBugsTask> {
     }
 }
 
-tasks.named("check") {
-    // Keep SpotBugs as an explicit opt-in quality gate (`spotbugsMain`, `spotbugsTest`).
-    // This avoids non-fatal "SpotBugs ended with exit code 1" noise during normal builds.
-    setDependsOn(dependsOn.filterNot {
-        when (it) {
-            is String -> it == "spotbugsMain" || it == "spotbugsTest"
-            is Task -> it.name == "spotbugsMain" || it.name == "spotbugsTest"
-            is TaskProvider<*> -> it.name == "spotbugsMain" || it.name == "spotbugsTest"
-            else -> false
-        }
-    })
-}
-
 // PMD configuration
 pmd {
     toolVersion = pmdToolVersion
     ruleSetFiles = files("config/pmd/pmd-ruleset.xml")
-    // Match Maven behavior: lint errors don't fail the build
-    // Use explicit `./gradlew pmdMain` to enforce
-    isIgnoreFailures = true
+    isIgnoreFailures = false
 }
 
 tasks.withType<Pmd>().configureEach {
@@ -186,6 +179,9 @@ tasks.withType<Test> {
     useJUnitPlatform()
     maxHeapSize = "1024m"
     jvmArgs(
+        "-javaagent:${mockitoAgent.asPath}",
+        "-Xshare:off",
+        "--enable-native-access=ALL-UNNAMED",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
         "--add-opens", "java.base/java.util=ALL-UNNAMED",
         // Suppress sun.misc.Unsafe deprecation warnings from gRPC/Netty (Qdrant client dependency)

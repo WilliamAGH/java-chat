@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.anyString;
@@ -10,12 +11,16 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import reactor.core.publisher.Mono;
 
@@ -24,6 +29,7 @@ class RerankerServiceTest {
     private static final Duration TEST_RERANKER_TIMEOUT = Duration.ofSeconds(45);
     private static final double TEST_RERANKER_TEMPERATURE = 0.2;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 384;
+    private static final Logger RERANKER_LOGGER = (Logger) LoggerFactory.getLogger(RerankerService.class);
 
     @Test
     void rerankThrowsWhenServiceUnavailable() {
@@ -34,7 +40,17 @@ class RerankerServiceTest {
                 new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
         List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
 
-        assertThrows(RerankingFailureException.class, () -> rerankerService.rerank("query", sourceDocuments, 2));
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RERANKER_LOGGER)) {
+            assertThrows(RerankingFailureException.class, () -> rerankerService.rerank("query", sourceDocuments, 2));
+
+            assertEquals(1, expectedLogEvents.events().size());
+            var unavailableWarning = expectedLogEvents.events().getFirst();
+            assertEquals(Level.WARN, unavailableWarning.getLevel());
+            assertEquals(
+                    "OpenAIStreamingService unavailable; skipping LLM rerank",
+                    unavailableWarning.getFormattedMessage());
+            assertNull(unavailableWarning.getThrowableProxy());
+        }
     }
 
     @Test

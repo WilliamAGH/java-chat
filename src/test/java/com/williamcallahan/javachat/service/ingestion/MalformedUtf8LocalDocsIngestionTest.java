@@ -10,8 +10,6 @@ import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
@@ -22,6 +20,7 @@ import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.PdfContentExtractor;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionRouter;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,22 +41,16 @@ class MalformedUtf8LocalDocsIngestionTest {
 
     private final Logger ingestionProcessorLogger =
             (Logger) LoggerFactory.getLogger(LocalDocsFileIngestionProcessor.class);
-    private final ListAppender<ILoggingEvent> ingestionProcessorEvents = new ListAppender<>();
-    private boolean ingestionProcessorLoggerAdditive;
+    private ExpectedLogEvents ingestionProcessorLogEvents;
 
     @BeforeEach
     void captureIngestionProcessorEvents() {
-        ingestionProcessorLoggerAdditive = ingestionProcessorLogger.isAdditive();
-        ingestionProcessorLogger.setAdditive(false);
-        ingestionProcessorEvents.start();
-        ingestionProcessorLogger.addAppender(ingestionProcessorEvents);
+        ingestionProcessorLogEvents = ExpectedLogEvents.capture(ingestionProcessorLogger);
     }
 
     @AfterEach
     void stopCapturingIngestionProcessorEvents() {
-        ingestionProcessorLogger.detachAppender(ingestionProcessorEvents);
-        ingestionProcessorLogger.setAdditive(ingestionProcessorLoggerAdditive);
-        ingestionProcessorEvents.stop();
+        ingestionProcessorLogEvents.close();
     }
 
     @Test
@@ -100,7 +93,7 @@ class MalformedUtf8LocalDocsIngestionTest {
         assertEquals("html-read", ingestionFailure.phase());
         assertTrue(ingestionFailure.details().contains("MalformedInputException"));
         assertTrue(ingestionFailure.details().contains(UTF8_DIAGNOSTIC_HINT));
-        assertTrue(ingestionProcessorEvents.list.stream()
+        assertTrue(ingestionProcessorLogEvents.events().stream()
                 .anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR
                         && logEvent.getFormattedMessage().contains("MalformedInputException")));
         verifyNoInteractions(chunkProcessingService, hybridVectorService);

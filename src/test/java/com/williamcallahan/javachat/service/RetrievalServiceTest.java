@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,16 +12,22 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 
 /**
  * Verifies retrieval outcome behavior around hybrid-search notices and strict failures.
  */
 class RetrievalServiceTest {
+
+    private static final Logger RETRIEVAL_SERVICE_LOGGER = (Logger) LoggerFactory.getLogger(RetrievalService.class);
 
     @Test
     void propagatesHybridSearchNotices() {
@@ -275,8 +283,28 @@ class RetrievalServiceTest {
         validDocument.getMetadata().put("url", "https://docs.oracle.com/javase/8/docs/api/java/lang/String.html");
         validDocument.getMetadata().put("title", "String");
 
-        RetrievalService.CitationOutcome citationOutcome =
-                retrievalService.toCitations(List.of(malformedDocument, validDocument));
+        RetrievalService.CitationOutcome citationOutcome;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RETRIEVAL_SERVICE_LOGGER)) {
+            citationOutcome = retrievalService.toCitations(List.of(malformedDocument, validDocument));
+
+            assertEquals(2, expectedLogEvents.events().size());
+            var conversionFailureWarning = expectedLogEvents.events().getFirst();
+            assertEquals(Level.WARN, conversionFailureWarning.getLevel());
+            assertEquals(
+                    "Citation conversion failed (exceptionType=IllegalStateException, docUrl=[unprintable:BrokenUrlValue], docTitle=Broken citation)",
+                    conversionFailureWarning.getFormattedMessage());
+            assertNotNull(conversionFailureWarning.getThrowableProxy());
+            assertEquals(
+                    IllegalStateException.class.getName(),
+                    conversionFailureWarning.getThrowableProxy().getClassName());
+
+            var conversionSummaryWarning = expectedLogEvents.events().get(1);
+            assertEquals(Level.WARN, conversionSummaryWarning.getLevel());
+            assertEquals(
+                    "Citation conversion completed with 1 failure(s) out of 2 documents",
+                    conversionSummaryWarning.getFormattedMessage());
+            assertNull(conversionSummaryWarning.getThrowableProxy());
+        }
 
         assertEquals(1, citationOutcome.citations().size());
         assertEquals(1, citationOutcome.failedConversionCount());

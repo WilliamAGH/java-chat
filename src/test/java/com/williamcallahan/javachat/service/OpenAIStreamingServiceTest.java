@@ -19,7 +19,6 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.openai.client.OpenAIClient;
 import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
@@ -37,6 +36,7 @@ import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -67,27 +67,25 @@ class OpenAIStreamingServiceTest {
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(OpenAIStreamingService.class);
-    private final ListAppender<ILoggingEvent> serviceLogEvents = new ListAppender<>();
+    private ExpectedLogEvents serviceLogEvents;
     private final Logger streamingFailureLogger =
             (Logger) LoggerFactory.getLogger(OpenAiStreamingFailureException.class);
-    private final ListAppender<ILoggingEvent> streamingFailureLogEvents = new ListAppender<>();
+    private ExpectedLogEvents streamingFailureLogEvents;
+    private final Logger providerRoutingLogger = (Logger) LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
+    private ExpectedLogEvents providerRoutingLogEvents;
 
     @BeforeEach
     void captureServiceLogs() {
-        serviceLogEvents.start();
-        serviceLogger.addAppender(serviceLogEvents);
-        streamingFailureLogEvents.start();
-        streamingFailureLogger.addAppender(streamingFailureLogEvents);
+        serviceLogEvents = ExpectedLogEvents.capture(serviceLogger);
+        streamingFailureLogEvents = ExpectedLogEvents.capture(streamingFailureLogger);
+        providerRoutingLogEvents = ExpectedLogEvents.capture(providerRoutingLogger);
     }
 
     @AfterEach
     void stopCapturingServiceLogs() {
-        serviceLogger.detachAppender(serviceLogEvents);
-        serviceLogEvents.stop();
-        serviceLogEvents.list.clear();
-        streamingFailureLogger.detachAppender(streamingFailureLogEvents);
-        streamingFailureLogEvents.stop();
-        streamingFailureLogEvents.list.clear();
+        providerRoutingLogEvents.close();
+        streamingFailureLogEvents.close();
+        serviceLogEvents.close();
     }
 
     private OpenAIStreamingService createStreamingService() {
@@ -209,7 +207,7 @@ class OpenAIStreamingServiceTest {
                 .verify();
 
         verify(responseService).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
-        List<ILoggingEvent> terminalAlerts = streamingFailureLogEvents.list.stream()
+        List<ILoggingEvent> terminalAlerts = streamingFailureLogEvents.events().stream()
                 .filter(loggingEvent -> loggingEvent.getLevel() == Level.ERROR)
                 .toList();
         assertEquals(1, terminalAlerts.size());
@@ -575,7 +573,7 @@ class OpenAIStreamingServiceTest {
     }
 
     private long logCount(Level level, String messageFragment) {
-        return serviceLogEvents.list.stream()
+        return serviceLogEvents.events().stream()
                 .filter(loggingEvent -> loggingEvent.getLevel().equals(level))
                 .filter(loggingEvent -> loggingEvent.getFormattedMessage().contains(messageFragment))
                 .count();

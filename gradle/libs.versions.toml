@@ -108,6 +108,7 @@ netty-resolver-dns-classes-macos = { module = "io.netty:netty-resolver-dns-class
 spring-security-test = { module = "org.springframework.security:spring-security-test" }
 reactor-test = { module = "io.projectreactor:reactor-test" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+mockito-core = { module = "org.mockito:mockito-core" }
 
 # SpotBugs plugins
 findsecbugs-plugin = { module = "com.h3xstream.findsecbugs:findsecbugs-plugin", version.ref = "findsecbugs" }
