@@ -35,18 +35,15 @@ public class ApiKeyLoggingConfig {
             "Chat API: Selected OpenAI provider requires OPENAI_API_KEY";
     private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
     private static final String OPENAI_API_KEY_PROPERTY = "${OPENAI_API_KEY:}";
-    private static final String QDRANT_API_KEY_PROPERTY = "${QDRANT_API_KEY:}";
     private static final String ACTIVE_PROFILE_PROPERTY = "${spring.profiles.active:dev}";
     private final OpenAiProviderRoutingService providerRoutingService;
+    private final QdrantConnectionProperties qdrantConnectionProperties;
 
     @Value(GITHUB_TOKEN_PROPERTY)
     private String githubToken;
 
     @Value(OPENAI_API_KEY_PROPERTY)
     private String openaiApiKey;
-
-    @Value(QDRANT_API_KEY_PROPERTY)
-    private String qdrantApiKey;
 
     @Value(ACTIVE_PROFILE_PROPERTY)
     private String activeProfile;
@@ -55,9 +52,14 @@ public class ApiKeyLoggingConfig {
      * Creates startup diagnostics bound to the canonical chat-provider selection.
      *
      * @param providerRoutingService validated chat-provider configuration
+     * @param qdrantConnectionProperties canonical Qdrant connection settings
      */
-    public ApiKeyLoggingConfig(OpenAiProviderRoutingService providerRoutingService) {
+    public ApiKeyLoggingConfig(
+            OpenAiProviderRoutingService providerRoutingService,
+            QdrantConnectionProperties qdrantConnectionProperties) {
         this.providerRoutingService = Objects.requireNonNull(providerRoutingService, "providerRoutingService");
+        this.qdrantConnectionProperties =
+                Objects.requireNonNull(qdrantConnectionProperties, "qdrantConnectionProperties");
     }
 
     /**
@@ -86,7 +88,7 @@ public class ApiKeyLoggingConfig {
                 LOGGER.info(LOG_OPENAI_CONFIGURED);
             }
 
-            if (!isNonBlank(qdrantApiKey)) {
+            if (!isNonBlank(qdrantConnectionProperties.apiKey())) {
                 LOGGER.info(LOG_QDRANT_NOT_CONFIGURED);
             } else if (devProfile) {
                 LOGGER.info(LOG_QDRANT_CONFIGURED_MASKED);

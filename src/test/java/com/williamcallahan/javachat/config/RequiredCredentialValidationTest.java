@@ -19,51 +19,29 @@ import org.springframework.context.annotation.Lazy;
  * Verifies fail-fast credential validation for required API keys.
  */
 class RequiredCredentialValidationTest {
-    private static final String EMPTY_CREDENTIAL = "";
-    private static final String QDRANT_TEST_API_KEY = "qdrant-key-123";
     private static final String MISSING_GITHUB_MODELS_MESSAGE_FRAGMENT = "requires GITHUB_TOKEN";
     private static final String MISSING_OPENAI_MESSAGE_FRAGMENT = "requires OPENAI_API_KEY";
-    private static final String MISSING_QDRANT_MESSAGE_FRAGMENT = "QDRANT_API_KEY";
 
     @Test
     void unavailableGithubModelsProvider_throwsIllegalStateException() {
-        RequiredCredentialValidation validation =
-                createValidation(false, RateLimitService.ApiProvider.GITHUB_MODELS, false, EMPTY_CREDENTIAL);
+        RequiredCredentialValidation validation = createValidation(false, RateLimitService.ApiProvider.GITHUB_MODELS);
         IllegalStateException thrown =
-                assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
+                assertThrows(IllegalStateException.class, validation::validateRequiredChatCredential);
         assertTrue(thrown.getMessage().contains(MISSING_GITHUB_MODELS_MESSAGE_FRAGMENT));
     }
 
     @Test
     void unavailableOpenAiProvider_throwsIllegalStateException() {
-        RequiredCredentialValidation validation =
-                createValidation(false, RateLimitService.ApiProvider.OPENAI, false, EMPTY_CREDENTIAL);
+        RequiredCredentialValidation validation = createValidation(false, RateLimitService.ApiProvider.OPENAI);
         IllegalStateException thrown =
-                assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
+                assertThrows(IllegalStateException.class, validation::validateRequiredChatCredential);
         assertTrue(thrown.getMessage().contains(MISSING_OPENAI_MESSAGE_FRAGMENT));
     }
 
     @Test
-    void tlsEnabledWithoutQdrantApiKey_throwsIllegalStateException() {
-        RequiredCredentialValidation validation =
-                createValidation(true, RateLimitService.ApiProvider.GITHUB_MODELS, true, EMPTY_CREDENTIAL);
-        IllegalStateException thrown =
-                assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
-        assertTrue(thrown.getMessage().contains(MISSING_QDRANT_MESSAGE_FRAGMENT));
-    }
-
-    @Test
-    void tlsEnabledWithQdrantApiKey_passes() {
-        RequiredCredentialValidation validation =
-                createValidation(true, RateLimitService.ApiProvider.GITHUB_MODELS, true, QDRANT_TEST_API_KEY);
-        assertDoesNotThrow(validation::validateRequiredCredentials);
-    }
-
-    @Test
-    void tlsDisabledWithoutQdrantApiKey_passes() {
-        RequiredCredentialValidation validation =
-                createValidation(true, RateLimitService.ApiProvider.OPENAI, false, EMPTY_CREDENTIAL);
-        assertDoesNotThrow(validation::validateRequiredCredentials);
+    void availableSelectedProvider_passes() {
+        RequiredCredentialValidation validation = createValidation(true, RateLimitService.ApiProvider.OPENAI);
+        assertDoesNotThrow(validation::validateRequiredChatCredential);
     }
 
     @Test
@@ -84,15 +62,11 @@ class RequiredCredentialValidationTest {
     }
 
     private RequiredCredentialValidation createValidation(
-            boolean streamingAvailable,
-            RateLimitService.ApiProvider configuredProvider,
-            boolean qdrantTlsEnabled,
-            String qdrantApiKey) {
+            boolean streamingAvailable, RateLimitService.ApiProvider configuredProvider) {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         OpenAiProviderRoutingService providerRoutingService = mock(OpenAiProviderRoutingService.class);
         when(streamingService.isAvailable()).thenReturn(streamingAvailable);
         when(providerRoutingService.configuredProvider()).thenReturn(configuredProvider);
-        return new RequiredCredentialValidation(
-                streamingService, providerRoutingService, qdrantTlsEnabled, qdrantApiKey);
+        return new RequiredCredentialValidation(streamingService, providerRoutingService);
     }
 }

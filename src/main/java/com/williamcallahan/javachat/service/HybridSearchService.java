@@ -6,6 +6,7 @@ import static io.qdrant.client.QueryFactory.rrf;
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
+import com.williamcallahan.javachat.config.QdrantProperties;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
@@ -195,7 +196,7 @@ public class HybridSearchService {
         }
 
         static HybridQueryConfig fromProperties(AppProperties appProperties) {
-            AppProperties.Qdrant qdrant = appProperties.getQdrant();
+            QdrantProperties qdrant = appProperties.getQdrant();
             return new HybridQueryConfig(
                     qdrant.getDenseVectorName(),
                     qdrant.getSparseVectorName(),

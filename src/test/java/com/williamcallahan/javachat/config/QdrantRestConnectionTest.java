@@ -79,6 +79,8 @@ class QdrantRestConnectionTest {
     }
 
     private QdrantRestConnection newConnection(String host, int configuredPort, boolean useTls) {
-        return new QdrantRestConnection(host, configuredPort, useTls, "");
+        QdrantConnectionProperties connectionProperties =
+                new QdrantConnectionProperties(host, configuredPort, useTls, "");
+        return new QdrantRestConnection(connectionProperties);
     }
 }

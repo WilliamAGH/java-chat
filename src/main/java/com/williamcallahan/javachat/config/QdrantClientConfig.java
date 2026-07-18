@@ -8,7 +8,6 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -32,28 +31,15 @@ public class QdrantClientConfig {
     /** Idle timeout before keepalive pings start. */
     private static final long IDLE_TIMEOUT_MINUTES = 5;
 
-    private final String host;
-    private final int port;
-    private final boolean useTls;
-    private final String apiKey;
+    private final QdrantConnectionProperties connectionProperties;
 
     /**
-     * Creates Qdrant connection settings from non-secret properties and the direct credential environment variable.
+     * Creates the gRPC client configuration from the shared Qdrant connection settings.
      *
-     * @param host Qdrant host
-     * @param port Qdrant gRPC port
-     * @param useTls whether to use TLS for gRPC
-     * @param apiKey Qdrant API credential from {@code QDRANT_API_KEY}
+     * @param connectionProperties canonical Qdrant connection settings
      */
-    public QdrantClientConfig(
-            @Value("${spring.ai.vectorstore.qdrant.host:localhost}") String host,
-            @Value("${spring.ai.vectorstore.qdrant.port:6334}") int port,
-            @Value("${spring.ai.vectorstore.qdrant.use-tls:false}") boolean useTls,
-            @Value("${QDRANT_API_KEY:}") String apiKey) {
-        this.host = Objects.requireNonNull(host, "host");
-        this.port = port;
-        this.useTls = useTls;
-        this.apiKey = Objects.requireNonNull(apiKey, "apiKey");
+    public QdrantClientConfig(QdrantConnectionProperties connectionProperties) {
+        this.connectionProperties = Objects.requireNonNull(connectionProperties, "connectionProperties");
     }
 
     /**
@@ -68,8 +54,9 @@ public class QdrantClientConfig {
     public QdrantClient qdrantClient() {
         log.info("Creating QdrantClient with gRPC keepalive");
 
-        ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(host, port);
-        if (useTls) {
+        ManagedChannelBuilder<?> channelBuilder =
+                ManagedChannelBuilder.forAddress(connectionProperties.host(), connectionProperties.grpcPort());
+        if (connectionProperties.useTls()) {
             channelBuilder.useTransportSecurity();
         } else {
             channelBuilder.usePlaintext();
@@ -89,8 +76,9 @@ public class QdrantClientConfig {
         ManagedChannel channel = Objects.requireNonNull(channelBuilder.build(), "ManagedChannel");
         QdrantGrpcClient.Builder grpcClientBuilder = QdrantGrpcClient.newBuilder(channel, true);
 
-        if (!apiKey.isBlank()) {
-            grpcClientBuilder.withApiKey(apiKey);
+        String configuredApiKey = connectionProperties.apiKey();
+        if (!configuredApiKey.isBlank()) {
+            grpcClientBuilder.withApiKey(configuredApiKey);
         }
 
         return new QdrantClient(Objects.requireNonNull(grpcClientBuilder.build(), "QdrantGrpcClient"));

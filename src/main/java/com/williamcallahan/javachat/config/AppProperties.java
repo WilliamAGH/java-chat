@@ -4,12 +4,7 @@ import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.Duration;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -52,7 +47,7 @@ public class AppProperties {
     private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private DocumentationConfig docs = new DocumentationConfig();
     private Diagnostics diagnostics = new Diagnostics();
-    private Qdrant qdrant = new Qdrant();
+    private QdrantProperties qdrant = new QdrantProperties();
     private CorsConfig cors = new CorsConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
@@ -210,11 +205,22 @@ public class AppProperties {
         this.diagnostics = requireConfiguredSection(diagnostics, DIAG_KEY);
     }
 
-    public Qdrant getQdrant() {
+    /**
+     * Returns Qdrant vector-store configuration.
+     *
+     * @return Qdrant settings and collection routing names
+     */
+    public QdrantProperties getQdrant() {
         return qdrant;
     }
 
-    public void setQdrant(Qdrant qdrant) {
+    /**
+     * Replaces Qdrant vector-store configuration during property binding.
+     *
+     * @param qdrant Qdrant settings and collection routing names
+     * @throws IllegalArgumentException when qdrant is null
+     */
+    public void setQdrant(QdrantProperties qdrant) {
         this.qdrant = requireConfiguredSection(qdrant, QDRANT_KEY);
     }
 
@@ -297,231 +303,6 @@ public class AppProperties {
         }
     }
 
-    /** Qdrant vector store settings. */
-    public static class Qdrant {
-        private boolean ensurePayloadIndexes = true;
-        private QdrantCollections collections = new QdrantCollections();
-        private String denseVectorName = "dense";
-        private String sparseVectorName = "bm25";
-        private boolean ensureCollections = true;
-        private int prefetchLimit = 20;
-        private int rrfK = 60;
-        private boolean failOnPartialSearchError = true;
-        private Duration queryTimeout = Duration.ofSeconds(5);
-
-        public boolean isEnsurePayloadIndexes() {
-            return ensurePayloadIndexes;
-        }
-
-        public void setEnsurePayloadIndexes(boolean ensurePayloadIndexes) {
-            this.ensurePayloadIndexes = ensurePayloadIndexes;
-        }
-
-        /**
-         * Returns the configured collection names used for routing ingested content.
-         *
-         * <p>Collections are used to split content by source type (books, docs, articles, PDFs)
-         * while still allowing cross-collection retrieval.
-         */
-        public QdrantCollections getCollections() {
-            return collections.copy();
-        }
-
-        public void setCollections(QdrantCollections collections) {
-            this.collections = requireConfiguredSection(collections, QDRANT_KEY + ".collections")
-                    .copy();
-        }
-
-        /**
-         * Returns the configured dense vector name used for embeddings.
-         *
-         * <p>This name must match the collection schema's {@code vectors} key when using
-         * named-vector mode (required for storing dense + sparse vectors in a single point).</p>
-         */
-        public String getDenseVectorName() {
-            return denseVectorName;
-        }
-
-        public void setDenseVectorName(String denseVectorName) {
-            this.denseVectorName = denseVectorName;
-        }
-
-        /**
-         * Returns the configured sparse vector name used for lexical (hybrid) retrieval.
-         *
-         * <p>This name must match the collection schema's {@code sparse_vectors} key.
-         */
-        public String getSparseVectorName() {
-            return sparseVectorName;
-        }
-
-        public void setSparseVectorName(String sparseVectorName) {
-            this.sparseVectorName = sparseVectorName;
-        }
-
-        /**
-         * Returns the timeout budget for hybrid query fan-out.
-         */
-        public Duration getQueryTimeout() {
-            return queryTimeout;
-        }
-
-        public void setQueryTimeout(Duration queryTimeout) {
-            this.queryTimeout = queryTimeout;
-        }
-
-        /**
-         * Returns whether the application should ensure hybrid-capable collections exist at startup.
-         */
-        public boolean isEnsureCollections() {
-            return ensureCollections;
-        }
-
-        public void setEnsureCollections(boolean ensureCollections) {
-            this.ensureCollections = ensureCollections;
-        }
-
-        /**
-         * Returns the per-collection prefetch limit for hybrid queries.
-         *
-         * <p>Controls how many candidates each dense/sparse prefetch stage retrieves
-         * before RRF fusion selects the final results.</p>
-         */
-        public int getPrefetchLimit() {
-            return prefetchLimit;
-        }
-
-        public void setPrefetchLimit(int prefetchLimit) {
-            this.prefetchLimit = prefetchLimit;
-        }
-
-        /**
-         * Returns the reciprocal-rank-fusion k value used for hybrid result fusion.
-         */
-        public int getRrfK() {
-            return rrfK;
-        }
-
-        public void setRrfK(int rrfK) {
-            this.rrfK = rrfK;
-        }
-
-        /**
-         * Returns whether retrieval should fail when any collection query fails.
-         */
-        public boolean isFailOnPartialSearchError() {
-            return failOnPartialSearchError;
-        }
-
-        public void setFailOnPartialSearchError(boolean failOnPartialSearchError) {
-            this.failOnPartialSearchError = failOnPartialSearchError;
-        }
-
-        Qdrant validateConfiguration() {
-            if (collections == null) {
-                throw new IllegalArgumentException("app.qdrant.collections must not be null");
-            }
-            collections.validateConfiguration();
-
-            if (denseVectorName == null || denseVectorName.isBlank()) {
-                throw new IllegalArgumentException("app.qdrant.dense-vector-name must not be blank");
-            }
-            if (sparseVectorName == null || sparseVectorName.isBlank()) {
-                throw new IllegalArgumentException("app.qdrant.sparse-vector-name must not be blank");
-            }
-            if (prefetchLimit <= 0) {
-                throw new IllegalArgumentException("app.qdrant.prefetch-limit must be positive, got: " + prefetchLimit);
-            }
-            if (rrfK <= 0) {
-                throw new IllegalArgumentException("app.qdrant.rrf-k must be positive, got: " + rrfK);
-            }
-            if (queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()) {
-                throw new IllegalArgumentException("app.qdrant.query-timeout must be positive");
-            }
-            return this;
-        }
-    }
-
-    /**
-     * Qdrant collection names used by the ingestion and retrieval pipelines.
-     */
-    public static class QdrantCollections {
-        private String books = "java-chat-books";
-        private String docs = "java-docs";
-        private String articles = "java-articles";
-        private String pdfs = "java-pdfs";
-
-        /**
-         * Creates collection-name defaults used when no explicit configuration is provided.
-         */
-        public QdrantCollections() {}
-
-        private QdrantCollections(String books, String docs, String articles, String pdfs) {
-            this.books = books;
-            this.docs = docs;
-            this.articles = articles;
-            this.pdfs = pdfs;
-        }
-
-        public String getBooks() {
-            return books;
-        }
-
-        public void setBooks(String books) {
-            this.books = books;
-        }
-
-        public String getDocs() {
-            return docs;
-        }
-
-        public void setDocs(String docs) {
-            this.docs = docs;
-        }
-
-        public String getArticles() {
-            return articles;
-        }
-
-        public void setArticles(String articles) {
-            this.articles = articles;
-        }
-
-        public String getPdfs() {
-            return pdfs;
-        }
-
-        public void setPdfs(String pdfs) {
-            this.pdfs = pdfs;
-        }
-
-        /**
-         * Returns all configured collection names in deterministic order.
-         */
-        public List<String> all() {
-            return Arrays.asList(books, docs, articles, pdfs);
-        }
-
-        QdrantCollections copy() {
-            return new QdrantCollections(books, docs, articles, pdfs);
-        }
-
-        QdrantCollections validateConfiguration() {
-            List<String> all = all();
-            Set<String> unique = new LinkedHashSet<>();
-            for (String name : all) {
-                if (name == null || name.isBlank()) {
-                    throw new IllegalArgumentException("app.qdrant.collections.* must not be blank");
-                }
-                unique.add(name);
-            }
-            if (unique.size() != all.size()) {
-                throw new IllegalArgumentException("app.qdrant.collections.* must be distinct");
-            }
-            return this;
-        }
-    }
-
     /** Embedding vector configuration. */
     public static class Embeddings {
         private static final String OPENAI_BASE_URL_KEY = "app.embeddings.open-ai-base-url";
@@ -589,8 +370,6 @@ public class AppProperties {
     public static class Llm {
         private static final double MIN_TEMPERATURE = 0.0;
         private static final double MAX_TEMPERATURE = 2.0;
-        private static final long MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 86_400L;
-
         private double temperature;
         private double rerankerTemperature;
         private String reasoningEffort;
@@ -662,21 +441,14 @@ public class AppProperties {
         /**
          * Returns the validated configured-provider backoff duration.
          *
-         * <p>Centralizing the operational bound here prevents downstream failure handling from
-         * discovering an unusable duration only after a provider outage begins.</p>
+         * <p>The configured-provider value type owns the operational bound so downstream failure
+         * handling cannot discover an unusable duration only after a provider outage begins.</p>
          *
-         * @return configured-provider backoff duration
+         * @return validated configured-provider backoff policy
          * @throws IllegalArgumentException when the configured duration is outside the supported range
          */
-        public Duration configuredProviderBackoff() {
-            if (configuredProviderBackoffSeconds <= 0
-                    || configuredProviderBackoffSeconds > MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS) {
-                throw new IllegalArgumentException("app.llm.configured-provider-backoff-seconds must be in range [1, "
-                        + MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
-                        + "], got: "
-                        + configuredProviderBackoffSeconds);
-            }
-            return Duration.ofSeconds(configuredProviderBackoffSeconds);
+        public ConfiguredProviderBackoff configuredProviderBackoff() {
+            return ConfiguredProviderBackoff.fromSeconds(configuredProviderBackoffSeconds);
         }
 
         Llm validateConfiguration() {

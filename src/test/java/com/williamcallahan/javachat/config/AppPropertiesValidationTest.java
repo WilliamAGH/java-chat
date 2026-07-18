@@ -16,8 +16,6 @@ class AppPropertiesValidationTest {
     private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 256;
     private static final long TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 120L;
-    private static final long MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 1L;
-    private static final long MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 86_400L;
     private static final String TEST_OPENAI_EMBEDDING_BASE_URL = "https://api.openai.com";
     private static final String TEST_REMOTE_EMBEDDING_MODEL = "provider/test-embedding-model";
     private static final int TEST_REMOTE_EMBEDDING_DIMENSIONS = 8;
@@ -62,27 +60,31 @@ class AppPropertiesValidationTest {
         IllegalArgumentException configurationFailure =
                 assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
 
-        assertEquals(
-                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: 0",
-                configurationFailure.getMessage());
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(0), configurationFailure.getMessage());
     }
 
     @Test
     void acceptsMinimumConfiguredProviderBackoff() {
         AppProperties.Llm llmProperties = new AppProperties.Llm();
-        llmProperties.setConfiguredProviderBackoffSeconds(MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+        llmProperties.setConfiguredProviderBackoffSeconds(
+                ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
 
         assertEquals(
-                Duration.ofSeconds(MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS), llmProperties.configuredProviderBackoff());
+                new ConfiguredProviderBackoff(
+                        Duration.ofSeconds(ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS)),
+                llmProperties.configuredProviderBackoff());
     }
 
     @Test
     void acceptsMaximumConfiguredProviderBackoff() {
         AppProperties.Llm llmProperties = new AppProperties.Llm();
-        llmProperties.setConfiguredProviderBackoffSeconds(MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+        llmProperties.setConfiguredProviderBackoffSeconds(
+                ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
 
         assertEquals(
-                Duration.ofSeconds(MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS), llmProperties.configuredProviderBackoff());
+                new ConfiguredProviderBackoff(
+                        Duration.ofSeconds(ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS)),
+                llmProperties.configuredProviderBackoff());
     }
 
     @Test
@@ -94,8 +96,7 @@ class AppPropertiesValidationTest {
                 assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
 
         assertEquals(
-                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: " + Long.MAX_VALUE,
-                configurationFailure.getMessage());
+                expectedConfiguredProviderBackoffFailureMessage(Long.MAX_VALUE), configurationFailure.getMessage());
     }
 
     @Test
@@ -145,5 +146,15 @@ class AppPropertiesValidationTest {
         appProperties.getRemoteEmbedding().setModel(TEST_REMOTE_EMBEDDING_MODEL);
         appProperties.getRemoteEmbedding().setDimensions(TEST_REMOTE_EMBEDDING_DIMENSIONS);
         return appProperties;
+    }
+
+    private static String expectedConfiguredProviderBackoffFailureMessage(long configuredProviderBackoffSeconds) {
+        return ConfiguredProviderBackoff.CONFIGURED_PROVIDER_BACKOFF_CONFIGURATION_KEY
+                + " must be in range ["
+                + ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + ", "
+                + ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + "], got: "
+                + configuredProviderBackoffSeconds;
     }
 }

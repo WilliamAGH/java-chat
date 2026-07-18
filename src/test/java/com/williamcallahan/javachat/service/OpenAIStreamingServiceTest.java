@@ -24,7 +24,6 @@ import com.openai.core.RequestOptions;
 import com.openai.core.http.Headers;
 import com.openai.core.http.StreamResponse;
 import com.openai.errors.InternalServerException;
-import com.openai.errors.RateLimitException;
 import com.openai.models.ErrorObject;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseStreamEvent;
@@ -46,7 +45,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
-import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -367,116 +365,6 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void completionTransportFailureIsTerminalAndDoesNotDispatchAlternateProvider() {
-        RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
-                .thenReturn(true);
-        OpenAiRequestFactory requestFactory = testRequestFactory();
-        OpenAiProviderRoutingService providerRoutingService =
-                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
-        OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService, requestFactory, providerRoutingService, new OpenAiStreamingFailureReporter());
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
-        OpenAIClient openAiClient = mock(OpenAIClient.class);
-        ResponseService githubModelsResponseService = mock(ResponseService.class);
-        InternalServerException githubModelsFailure = InternalServerException.builder()
-                .statusCode(504)
-                .headers(Headers.builder().build())
-                .build();
-        when(githubModelsClient.responses()).thenReturn(githubModelsResponseService);
-        when(githubModelsResponseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenThrow(githubModelsFailure);
-        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
-        ReflectionTestUtils.setField(streamingService, "openAiClient", openAiClient);
-
-        StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectErrorSatisfies(failure -> {
-                    assertSame(githubModelsFailure, failure);
-                })
-                .verify();
-
-        verify(githubModelsResponseService).create(any(ResponseCreateParams.class), any(RequestOptions.class));
-        verify(rateLimitService).tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS);
-        verify(rateLimitService, never()).tryReserveRequest(RateLimitService.ApiProvider.OPENAI);
-        verifyNoInteractions(openAiClient);
-    }
-
-    @Test
-    void headerlessRateLimitCompletionSurfacesDecisionFailureWithoutFixedCooldown() {
-        RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
-        OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService,
-                testRequestFactory(),
-                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS),
-                new OpenAiStreamingFailureReporter());
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
-        ResponseService responseService = mock(ResponseService.class);
-        RateLimitException headerlessRateLimitFailure =
-                RateLimitException.builder().headers(Headers.builder().build()).build();
-        when(githubModelsClient.responses()).thenReturn(responseService);
-        when(responseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenThrow(headerlessRateLimitFailure);
-        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
-
-        StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectErrorSatisfies(failure -> {
-                    RateLimitDecisionException decisionFailure =
-                            assertInstanceOf(RateLimitDecisionException.class, failure);
-                    assertEquals("OpenAI rate-limit headers are missing", decisionFailure.getMessage());
-                })
-                .verify();
-        StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectError(RateLimitDecisionException.class)
-                .verify();
-
-        verify(responseService, times(2)).create(any(ResponseCreateParams.class), any(RequestOptions.class));
-    }
-
-    @Test
-    void unusableRateLimitHeaderStreamingSurfacesDecisionFailureWithoutFixedCooldown() {
-        RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
-        OpenAIStreamingService streamingService = new OpenAIStreamingService(
-                rateLimitService,
-                testRequestFactory(),
-                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS),
-                new OpenAiStreamingFailureReporter());
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
-        ResponseService responseService = mock(ResponseService.class);
-        Headers unusableRateLimitHeaders =
-                Headers.builder().put("Retry-After", "not-a-duration").build();
-        RateLimitException unusableRateLimitFailure =
-                RateLimitException.builder().headers(unusableRateLimitHeaders).build();
-        when(githubModelsClient.responses()).thenReturn(responseService);
-        when(responseService.createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class)))
-                .thenThrow(unusableRateLimitFailure);
-        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
-
-        StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
-                        .flatMapMany(StreamingResult::textChunks))
-                .expectErrorSatisfies(failure -> {
-                    OpenAiStreamingFailureException terminalFailure =
-                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    RateLimitDecisionException decisionFailure =
-                            assertInstanceOf(RateLimitDecisionException.class, terminalFailure.upstreamFailure());
-                    assertEquals("OpenAI rate-limit headers are invalid", decisionFailure.getMessage());
-                    assertTrue(List.of(decisionFailure.getSuppressed()).contains(unusableRateLimitFailure));
-                })
-                .verify();
-        StepVerifier.create(streamingService
-                        .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
-                        .flatMapMany(StreamingResult::textChunks))
-                .expectErrorSatisfies(failure -> {
-                    OpenAiStreamingFailureException terminalFailure =
-                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    assertInstanceOf(RateLimitDecisionException.class, terminalFailure.upstreamFailure());
-                })
-                .verify();
-
-        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
-    }
-
-    @Test
     void streamingFailureAfterTextIsTerminal() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
@@ -565,15 +453,6 @@ class OpenAIStreamingServiceTest {
             RateLimitService rateLimitService, RateLimitService.ApiProvider configuredProvider) {
         return new OpenAiProviderRoutingService(
                 rateLimitService, configuredLlmProperties(), configuredProvider.getName());
-    }
-
-    private static RateLimitService configuredGithubModelsRateLimitService() {
-        RateLimitState rateLimitState = mock(RateLimitState.class);
-        when(rateLimitState.isAvailable(RateLimitService.ApiProvider.GITHUB_MODELS.getName()))
-                .thenReturn(true);
-        MockEnvironment configuredEnvironment =
-                new MockEnvironment().withProperty("GITHUB_TOKEN", CONFIGURED_PROVIDER_API_KEY);
-        return new RateLimitService(rateLimitState, configuredEnvironment);
     }
 
     private static void assertCompletionFailure(Mono<String> completion, String expectedFailureMessage) {

@@ -282,7 +282,7 @@ class QdrantIndexInitializerTest {
         RestTemplateBuilder restTemplateBuilder =
                 new RestTemplateBuilder().additionalCustomizers(initializedRestTemplate::set);
         QdrantIndexInitializer initializer = new QdrantIndexInitializer(
-                new QdrantRestConnection("qdrant.test", configuredPort, false, ""),
+                new QdrantRestConnection(new QdrantConnectionProperties("qdrant.test", configuredPort, false, "")),
                 appProperties,
                 restTemplateBuilder,
                 embeddingClient,

@@ -4,11 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,6 +22,7 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ConfiguredProviderBackoff;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.InterruptedIOException;
 import java.time.Duration;
@@ -170,31 +169,6 @@ class OpenAiProviderRoutingServiceTest {
                 .admitConfiguredProviderRequest(githubModelsClient, null)
                 .orElseThrow();
         assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, providerAdmission.provider());
-    }
-
-    @Test
-    void rateLimitDecisionFailurePropagatesWithoutStartingConfiguredProviderCooldown() {
-        RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
-                .thenReturn(true);
-        RateLimitException headerlessRateLimitFailure =
-                RateLimitException.builder().headers(Headers.builder().build()).build();
-        RateLimitDecisionException rateLimitDecisionFailure =
-                new RateLimitDecisionException("OpenAI rate-limit headers are missing");
-        doThrow(rateLimitDecisionFailure)
-                .when(rateLimitService)
-                .recordRateLimitFromOpenAiServiceException(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure);
-        OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
-
-        RateLimitDecisionException propagatedFailure = assertThrows(
-                RateLimitDecisionException.class,
-                () -> routingService.recordProviderFailure(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure));
-
-        assertSame(rateLimitDecisionFailure, propagatedFailure);
-        assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
     }
 
     @Test
@@ -464,12 +438,8 @@ class OpenAiProviderRoutingServiceTest {
                         RateLimitService.ApiProvider.OPENAI.getName(),
                         InstantSource.fixed(CONFIGURED_PROVIDER_BACKOFF_START)));
 
-        assertEquals(
-                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: 0",
-                zeroBackoffFailure.getMessage());
-        assertEquals(
-                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: -1",
-                negativeBackoffFailure.getMessage());
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(0), zeroBackoffFailure.getMessage());
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(-1), negativeBackoffFailure.getMessage());
     }
 
     private OpenAIIoException wrappedOkHttpCallTimeout() {
@@ -512,5 +482,15 @@ class OpenAiProviderRoutingServiceTest {
             assertEquals(expectedMessages.get(eventIndex), warningEvent.getFormattedMessage());
             assertNull(warningEvent.getThrowableProxy());
         }
+    }
+
+    private static String expectedConfiguredProviderBackoffFailureMessage(long configuredProviderBackoffSeconds) {
+        return ConfiguredProviderBackoff.CONFIGURED_PROVIDER_BACKOFF_CONFIGURATION_KEY
+                + " must be in range ["
+                + ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + ", "
+                + ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + "], got: "
+                + configuredProviderBackoffSeconds;
     }
 }

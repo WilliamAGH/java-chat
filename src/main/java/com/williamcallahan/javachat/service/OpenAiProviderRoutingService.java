@@ -6,6 +6,7 @@ import com.openai.errors.OpenAIServiceException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ConfiguredProviderBackoff;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
@@ -57,7 +58,7 @@ public final class OpenAiProviderRoutingService {
     private static final int HTTP_NOT_FOUND = 404;
 
     private final RateLimitService rateLimitService;
-    private final Duration configuredProviderBackoff;
+    private final ConfiguredProviderBackoff configuredProviderBackoff;
     private final RateLimitService.ApiProvider configuredProvider;
     private final InstantSource instantSource;
 
@@ -141,6 +142,7 @@ public final class OpenAiProviderRoutingService {
      *
      * @param provider provider that failed
      * @param throwable failure raised by SDK or transport
+     * @throws RateLimitDecisionException when rate-limit timing headers are missing or invalid
      */
     public synchronized void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
         if (provider == configuredProvider && shouldBackoffConfiguredProvider(throwable)) {
@@ -296,7 +298,7 @@ public final class OpenAiProviderRoutingService {
 
     private synchronized void markConfiguredProviderBackoff() {
         Instant failureObservedAt = instantSource.instant();
-        Instant proposedBackoffDeadline = failureObservedAt.plus(configuredProviderBackoff);
+        Instant proposedBackoffDeadline = failureObservedAt.plus(configuredProviderBackoff.duration());
         if (proposedBackoffDeadline.isAfter(configuredProviderBackoffUntil)) {
             configuredProviderBackoffUntil = proposedBackoffDeadline;
         }
