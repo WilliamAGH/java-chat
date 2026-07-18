@@ -203,7 +203,8 @@ public class IngestionProvenanceDeriver {
      * @param sourceName logical source identifier
      * @param sourceKind source category ("official", "vendor", "unknown")
      * @param docVersion version token when available
-     * @param docType doc type token (Java API, release-notes, blog, PDF, etc.)
+     * @param docType normalized doc type token (for example,
+     *     {@link DocsSourceRegistry#JAVA_API_DOCUMENT_TYPE}, {@code release-notes}, {@code blog}, or {@code pdf})
      */
     public record IngestionProvenance(
             String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {

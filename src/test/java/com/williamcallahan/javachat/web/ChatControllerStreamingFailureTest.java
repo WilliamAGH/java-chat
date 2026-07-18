@@ -285,6 +285,9 @@ class ChatControllerStreamingFailureTest {
             }
             subscriptionRegistration.cancel(true);
             subscriptionExecutor.shutdownNow();
+            assertTrue(
+                    subscriptionExecutor.awaitTermination(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "subscription executor should terminate after cancellation");
         }
     }
 
