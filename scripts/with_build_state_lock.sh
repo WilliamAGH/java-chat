@@ -14,6 +14,7 @@ fi
 
 mkdir -p -- "$BUILD_LOCK_PROJECT_ROOT/.gradle"
 
-# macOS lockf holds a kernel-managed advisory lock for the command lifetime.
-# Keeping the inode preserves waiter ordering without stale PID recovery or lock-file races.
-exec /usr/bin/lockf -k -t "$BUILD_LOCK_WAIT_TIMEOUT_SECONDS" "$BUILD_LOCK_FILE" "$@"
+exec java "$BUILD_LOCK_SCRIPT_DIRECTORY/BuildStateLock.java" \
+    "$BUILD_LOCK_FILE" \
+    "$BUILD_LOCK_WAIT_TIMEOUT_SECONDS" \
+    "$@"
