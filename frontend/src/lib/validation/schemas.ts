@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod/v4";
+import sseStatusContracts from "../../../../src/main/resources/sse-status-contracts.json";
 
 // =============================================================================
 // SSE Stream Event Schemas
@@ -23,8 +24,36 @@ const sseEventFieldShape = {
   stage: z.string().nullish(),
 };
 
+/** Frontend projection of the canonical citation partial-failure contract. */
+export const CITATION_PARTIAL_FAILURE_STATUS_CONTRACT = sseStatusContracts.citationPartialFailure;
+
+/** Validates citation partial-failure statuses before they enter durable UI state. */
+export const CitationPartialFailureStatusSchema = z.object({
+  ...sseEventFieldShape,
+  code: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code)
+    .brand<"CitationPartialFailureStatusCode">(),
+  retryable: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.retryable)
+    .brand<"CitationPartialFailureStatusRetryable">(),
+  stage: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.stage)
+    .brand<"CitationPartialFailureStatusStage">(),
+});
+
+/** Generic status message for status codes without specialized UI behavior. */
+const GenericStreamStatusSchema = z
+  .object(sseEventFieldShape)
+  .refine(
+    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code,
+    "Citation partial-failure statuses must satisfy their specialized contract",
+  );
+
 /** Status message from SSE status events. */
-export const StreamStatusSchema = z.object(sseEventFieldShape);
+export const StreamStatusSchema = z.union([
+  CitationPartialFailureStatusSchema,
+  GenericStreamStatusSchema,
+]);
 
 /** Error response from SSE error events. */
 export const StreamErrorSchema = z.object(sseEventFieldShape);
@@ -64,6 +93,8 @@ export const GuidedLessonSchema = z.object({
   title: z.string(),
   summary: z.string(),
   keywords: z.array(z.string()),
+  technology: z.string(),
+  docSet: z.array(z.string()),
 });
 
 /** Array of lessons for TOC endpoint. */
@@ -91,6 +122,7 @@ export const ApiErrorResponseSchema = z.object({
 // =============================================================================
 
 export type StreamStatus = z.infer<typeof StreamStatusSchema>;
+export type CitationPartialFailureStatus = z.infer<typeof CitationPartialFailureStatusSchema>;
 export type StreamError = z.infer<typeof StreamErrorSchema>;
 export type TextChunk = z.infer<typeof TextChunkSchema>;
 export type ProviderEvent = z.infer<typeof ProviderEventSchema>;

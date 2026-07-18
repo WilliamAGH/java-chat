@@ -4,6 +4,7 @@ import static io.qdrant.client.ConditionFactory.matchKeyword;
 
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantCollectionNames;
 import com.williamcallahan.javachat.support.RetrySupport;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.WithPayloadSelectorFactory;
@@ -258,7 +259,7 @@ public class HybridVectorService {
      */
     public String resolveCollectionName(QdrantCollectionKind kind) {
         Objects.requireNonNull(kind, "kind");
-        AppProperties.QdrantCollections collections = appProperties.getQdrant().getCollections();
+        QdrantCollectionNames collections = appProperties.getQdrant().getCollections();
         return switch (kind) {
             case BOOKS -> collections.getBooks();
             case DOCS -> collections.getDocs();

@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.config;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -52,10 +54,49 @@ class AppPropertiesValidationTest {
 
     @Test
     void rejectsNonPositiveConfiguredProviderBackoff() {
-        AppProperties appProperties = validAppProperties();
-        appProperties.getLlm().setConfiguredProviderBackoffSeconds(0);
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(0);
 
-        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
+
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(0), configurationFailure.getMessage());
+    }
+
+    @Test
+    void acceptsMinimumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(
+                ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+
+        assertEquals(
+                new ConfiguredProviderBackoff(
+                        Duration.ofSeconds(ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS)),
+                llmProperties.configuredProviderBackoff());
+    }
+
+    @Test
+    void acceptsMaximumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(
+                ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+
+        assertEquals(
+                new ConfiguredProviderBackoff(
+                        Duration.ofSeconds(ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS)),
+                llmProperties.configuredProviderBackoff());
+    }
+
+    @Test
+    void rejectsLongMaximumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(Long.MAX_VALUE);
+
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
+
+        assertEquals(
+                expectedConfiguredProviderBackoffFailureMessage(Long.MAX_VALUE), configurationFailure.getMessage());
     }
 
     @Test
@@ -105,5 +146,15 @@ class AppPropertiesValidationTest {
         appProperties.getRemoteEmbedding().setModel(TEST_REMOTE_EMBEDDING_MODEL);
         appProperties.getRemoteEmbedding().setDimensions(TEST_REMOTE_EMBEDDING_DIMENSIONS);
         return appProperties;
+    }
+
+    private static String expectedConfiguredProviderBackoffFailureMessage(long configuredProviderBackoffSeconds) {
+        return ConfiguredProviderBackoff.CONFIGURED_PROVIDER_BACKOFF_CONFIGURATION_KEY
+                + " must be in range ["
+                + ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + ", "
+                + ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + "], got: "
+                + configuredProviderBackoffSeconds;
     }
 }

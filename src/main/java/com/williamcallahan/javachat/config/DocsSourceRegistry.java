@@ -106,6 +106,10 @@ public final class DocsSourceRegistry {
 
     private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
 
+    static {
+        validateLifecycleMirrorRoots(DOCUMENTATION_SOURCES);
+    }
+
     private DocsSourceRegistry() {}
 
     /**
@@ -131,7 +135,7 @@ public final class DocsSourceRegistry {
             boolean allowPartial) {
         public JavaApiDocumentationSource {
             int parsedJavaRelease =
-                    JavaApiDocumentationManifest.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
+                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
             if (parsedJavaRelease < 1) {
                 throw new IllegalArgumentException("Java release must be positive");
             }
@@ -177,6 +181,14 @@ public final class DocsSourceRegistry {
      * @param sourceKind provenance category for the upstream publisher
      * @param docType content classification for retrieval metadata
      * @param docVersion upstream release token, or blank for an unversioned source
+     * @param minimumHtmlFiles minimum accepted mirror size
+     * @param rejectRegex crawler exclusion expression, or blank when no exclusion applies
+     * @param allowPartial whether the fetcher accepts a validated partial mirror
+     * @param seedDocumentType structured discovery document type, or blank for recursive mirroring
+     * @param seedDiscoveryUrl structured discovery document URL, or blank for recursive mirroring
+     * @param seedSourcePrefix exact discovered URL prefix mapped onto {@code fetchUrl}
+     * @param supersededRelativeMirrorPath prior mirror root quarantined only after its canonical replacement succeeds;
+     *     manifest validation keeps lifecycle roots unique and disjoint from every other active source root
      */
     public record DocumentationSource(
             String fetchUrl,
@@ -186,16 +198,57 @@ public final class DocsSourceRegistry {
             String docSet,
             String sourceKind,
             String docType,
-            String docVersion) {
+            String docVersion,
+            int minimumHtmlFiles,
+            String rejectRegex,
+            boolean allowPartial,
+            String seedDocumentType,
+            String seedDiscoveryUrl,
+            String seedSourcePrefix,
+            String supersededRelativeMirrorPath) {
         public DocumentationSource {
             DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(fetchUrl, "fetchUrl");
             DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(citationBaseUrl, "citationBaseUrl");
             DocumentationManifestFieldRules.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
             DocumentationManifestFieldRules.requireManifestText(displayName, "displayName", false);
-            DocumentationManifestFieldRules.requireManifestText(docSet, "docSet", false);
+            DocumentationManifestFieldRules.requireDocSet(docSet);
             DocumentationManifestFieldRules.requireManifestText(sourceKind, "sourceKind", false);
             DocumentationManifestFieldRules.requireManifestText(docType, "docType", false);
             DocumentationManifestFieldRules.requireManifestText(docVersion, "docVersion", true);
+            if (minimumHtmlFiles < 1) {
+                throw new IllegalArgumentException("Documentation minimum HTML files must be positive");
+            }
+            DocumentationManifestFieldRules.requireManifestText(rejectRegex, "rejectRegex", true);
+            DocumentationManifestFieldRules.requireManifestText(seedDocumentType, "seedDocumentType", true);
+            DocumentationManifestFieldRules.requireManifestText(seedDiscoveryUrl, "seedDiscoveryUrl", true);
+            DocumentationManifestFieldRules.requireManifestText(seedSourcePrefix, "seedSourcePrefix", true);
+            DocumentationManifestFieldRules.requireOptionalNormalizedRelativeMirrorPath(
+                    supersededRelativeMirrorPath, "supersededRelativeMirrorPath");
+            if (!supersededRelativeMirrorPath.isEmpty()
+                    && mirrorRootContains(supersededRelativeMirrorPath, relativeMirrorPath)) {
+                throw new IllegalArgumentException(
+                        "Superseded mirror path must not equal or contain the canonical mirror path");
+            }
+            boolean hasSeedDiscovery = !seedDiscoveryUrl.isEmpty();
+            if (hasSeedDiscovery != !seedDocumentType.isEmpty() || hasSeedDiscovery != !seedSourcePrefix.isEmpty()) {
+                throw new IllegalArgumentException("Documentation seed discovery fields must be all blank or all set");
+            }
+            if (hasSeedDiscovery) {
+                DocumentationManifestFieldRules.requireCanonicalSeedDocumentType(seedDocumentType);
+                DocumentationSeedDocumentTypeCatalog.requireSupported(seedDocumentType);
+                DocumentationManifestFieldRules.requireHttpsRemoteUrl(seedDiscoveryUrl, "seedDiscoveryUrl");
+                DocumentationManifestFieldRules.requireHttpRemoteBaseUrl(seedSourcePrefix, "seedSourcePrefix");
+            }
+        }
+
+        static boolean mirrorRootContains(String containingMirrorRoot, String candidateMirrorRoot) {
+            return candidateMirrorRoot.equals(containingMirrorRoot)
+                    || candidateMirrorRoot.startsWith(containingMirrorRoot + RELATIVE_MIRROR_PATH_SEPARATOR);
+        }
+
+        static boolean mirrorRootsOverlap(String firstMirrorRoot, String secondMirrorRoot) {
+            return mirrorRootContains(firstMirrorRoot, secondMirrorRoot)
+                    || mirrorRootContains(secondMirrorRoot, firstMirrorRoot);
         }
 
         /**
@@ -249,15 +302,40 @@ public final class DocsSourceRegistry {
         }
         String normalizedDocumentPath = relativeDocumentPath.replace('\\', '/');
         return DOCUMENTATION_SOURCES.stream()
-                .filter(documentationSource ->
-                        isWithinDocumentationSource(normalizedDocumentPath, documentationSource.relativeMirrorPath()))
+                .filter(documentationSource -> normalizedDocumentPath.equals(documentationSource.relativeMirrorPath())
+                        || normalizedDocumentPath.startsWith(
+                                documentationSource.relativeMirrorPath() + RELATIVE_MIRROR_PATH_SEPARATOR))
                 .max(Comparator.comparingInt(documentationSource ->
                         documentationSource.relativeMirrorPath().length()));
     }
 
-    private static boolean isWithinDocumentationSource(String relativeDocumentPath, String relativeMirrorPath) {
-        return relativeDocumentPath.equals(relativeMirrorPath)
-                || relativeDocumentPath.startsWith(relativeMirrorPath + RELATIVE_MIRROR_PATH_SEPARATOR);
+    static void validateLifecycleMirrorRoots(List<DocumentationSource> candidateDocumentationSources) {
+        for (DocumentationSource documentationSource : candidateDocumentationSources) {
+            String supersededRelativeMirrorPath = documentationSource.supersededRelativeMirrorPath();
+            if (supersededRelativeMirrorPath.isEmpty()) {
+                continue;
+            }
+            for (String activeLocalPrefix : LOCAL_PREFIX_TO_REMOTE_BASE.keySet()) {
+                String activeRelativeMirrorPath = relativeMirrorPathFromLocalPrefix(activeLocalPrefix);
+                if (activeRelativeMirrorPath.equals(documentationSource.relativeMirrorPath())) {
+                    continue;
+                }
+                if (DocumentationSource.mirrorRootsOverlap(supersededRelativeMirrorPath, activeRelativeMirrorPath)) {
+                    throw new IllegalStateException("Documentation source superseded mirror path "
+                            + supersededRelativeMirrorPath
+                            + " overlaps active registry mirror path "
+                            + activeRelativeMirrorPath);
+                }
+            }
+        }
+    }
+
+    private static String relativeMirrorPathFromLocalPrefix(String activeLocalPrefix) {
+        if (!activeLocalPrefix.startsWith(LOCAL_DOCS_ROOT)
+                || !activeLocalPrefix.endsWith(RELATIVE_MIRROR_PATH_SEPARATOR)) {
+            throw new IllegalStateException("Documentation registry contains an invalid local mirror prefix");
+        }
+        return activeLocalPrefix.substring(LOCAL_DOCS_ROOT.length(), activeLocalPrefix.length() - 1);
     }
 
     private static Properties loadDocsSourceProperties() {
@@ -322,11 +400,7 @@ public final class DocsSourceRegistry {
         return prefixLookup;
     }
 
-    /**
-     * If the given local filesystem-like path contains an embedded known host,
-     * reconstruct an HTTPS URL to that embedded path.
-     */
-    public static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
+    private static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
         Optional<String> reconstructedUrl = Optional.empty();
         if (localPath != null) {
             final String normalizedPath = localPath.replace('\\', '/');
@@ -346,13 +420,7 @@ public final class DocsSourceRegistry {
         return reconstructedUrl;
     }
 
-    /**
-     * Map a local mirrored path to its authoritative remote base URL.
-     *
-     * @param localPath local filesystem-like path
-     * @return authoritative remote URL when a mapping is found
-     */
-    public static Optional<String> mapLocalPrefixToRemote(final String localPath) {
+    private static Optional<String> mapLocalPrefixToRemote(final String localPath) {
         Optional<String> mappedUrl = Optional.empty();
         if (localPath != null && !localPath.isBlank()) {
             mappedUrl = DocsLocalPathMapper.mapLocalPrefixToRemote(localPath, LOCAL_PREFIX_TO_REMOTE_BASE);

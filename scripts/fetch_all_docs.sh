@@ -16,6 +16,8 @@ source "$SCRIPT_DIR/lib/documentation_sources.sh"
 source "$SCRIPT_DIR/lib/documentation_fetch_sources.sh"
 # shellcheck source=lib/documentation_fetch_metadata.sh
 source "$SCRIPT_DIR/lib/documentation_fetch_metadata.sh"
+# shellcheck source=lib/documentation_seed_mirrors.sh
+source "$SCRIPT_DIR/lib/documentation_seed_mirrors.sh"
 
 # Centralized source definitions
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
@@ -30,6 +32,8 @@ CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
 LIST_DOCUMENTATION_SOURCES="false"
+DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="false"
+DOCUMENTATION_DOC_SET_SELECTOR=""
 DOCUMENTATION_FETCH_PARTIAL_STATUS=2
 
 parse_fetch_arguments() {
@@ -51,11 +55,20 @@ parse_fetch_arguments() {
             --list-documentation-sources)
                 LIST_DOCUMENTATION_SOURCES="true"
                 ;;
+            --doc-sets=*)
+                if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
+                    echo "--doc-sets can be specified only once"
+                    exit 1
+                fi
+                DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="true"
+                DOCUMENTATION_DOC_SET_SELECTOR="${fetch_argument#--doc-sets=}"
+                ;;
             --help|-h)
-                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]"
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]"
                 echo "  --include-quick : Also refresh small 'quick' doc mirrors"
                 echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
                 echo "  --force         : Refresh even when mirrors look complete"
+                echo "  --doc-sets      : Fetch only selected canonical non-Java docSet rows"
                 echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
                 echo "  --list-documentation-sources : Print canonical non-Java source projections without fetching"
                 exit 0
@@ -67,6 +80,27 @@ parse_fetch_arguments() {
                 ;;
         esac
     done
+}
+
+create_documentation_quarantine_directory() {
+    local quarantine_basename="$1"
+    local quarantine_category="$2"
+    local quarantine_root
+    quarantine_root="$(dirname "$DOCS_ROOT")/.quarantine"
+    local timestamp
+    timestamp="$(date -u +%Y%m%d_%H%M%S)"
+
+    if ! mkdir -p "$quarantine_root"; then
+        return 1
+    fi
+
+    local quarantine_directory
+    if ! quarantine_directory="$(mktemp -d "$quarantine_root/${quarantine_basename}.${quarantine_category}.${timestamp}.XXXXXX")" \
+        || [[ "$quarantine_directory" != "$quarantine_root/"* ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "$quarantine_directory"
 }
 
 quarantine_incomplete_dir() {
@@ -85,16 +119,19 @@ quarantine_incomplete_dir() {
         return 0
     fi
 
-    local quarantine_root="$DOCS_ROOT/.quarantine"
-    local timestamp
-    timestamp="$(date -u +%Y%m%d_%H%M%S)"
-    mkdir -p "$quarantine_root"
-
     local base
     base="$(basename "$dir")"
-    local quarantine_dir="$quarantine_root/${base}.${timestamp}"
-    log "${YELLOW}⚠ Quarantining incomplete mirror: $name ($html_count HTML files; expected $min_files+) -> $quarantine_dir${NC}"
-    mv "$dir" "$quarantine_dir"
+    local quarantine_directory
+    if ! quarantine_directory="$(create_documentation_quarantine_directory "$base" "incomplete")"; then
+        log "${RED}✗ Could not create incomplete-mirror quarantine for $name${NC}"
+        return 1
+    fi
+    local quarantine_path="$quarantine_directory/$base"
+    log "${YELLOW}⚠ Quarantining incomplete mirror: $name ($html_count HTML files; expected $min_files+) -> $quarantine_path${NC}"
+    if ! mv "$dir" "$quarantine_path"; then
+        log "${RED}✗ Could not quarantine incomplete mirror: $name${NC}"
+        return 1
+    fi
 }
 
 quarantine_path() {
@@ -108,16 +145,19 @@ quarantine_path() {
         return 0
     fi
 
-    local quarantine_root="$DOCS_ROOT/.quarantine"
-    local timestamp
-    timestamp="$(date -u +%Y%m%d_%H%M%S)"
-    mkdir -p "$quarantine_root"
-
     local base
     base="$(basename "$dir")"
-    local quarantine_dir="$quarantine_root/${base}.${timestamp}"
-    log "${YELLOW}⚠ Quarantining legacy mirror path: $name -> $quarantine_dir${NC}"
-    mv "$dir" "$quarantine_dir"
+    local quarantine_directory
+    if ! quarantine_directory="$(create_documentation_quarantine_directory "$base" "legacy")"; then
+        log "${RED}✗ Could not create legacy-mirror quarantine for $name${NC}"
+        return 1
+    fi
+    local quarantine_path="$quarantine_directory/$base"
+    log "${YELLOW}⚠ Quarantining legacy mirror path: $name -> $quarantine_path${NC}"
+    if ! mv "$dir" "$quarantine_path"; then
+        log "${RED}✗ Could not quarantine legacy mirror path: $name${NC}"
+        return 1
+    fi
 }
 
 quarantine_versioned_reference_subdirs() {
@@ -147,161 +187,8 @@ quarantine_versioned_reference_subdirs() {
     shopt -u nullglob
 }
 
-# Validates a wget fetch result: checks exit code, counts HTML files, and
-# enforces the minimum-files threshold. Returns 0 on success, 2 for a retained
-# partial mirror, and 1 for any other failure.
-#
-# Arguments:
-#   $1 - wget exit code
-#   $2 - target directory (for HTML count)
-#   $3 - human-readable name
-#   $4 - minimum required HTML files (0 = no minimum)
-#   $5 - whether a nonempty partial mirror is retained for incremental reruns
-validate_fetch_result() {
-    local wget_exit_code="$1"
-    local target_dir="$2"
-    local name="$3"
-    local min_files="$4"
-    local partial_mirror_allowed="$5"
-
-    local fetched_html_count
-    fetched_html_count="$(count_html_files "$target_dir")"
-
-    # wget returns 8 for HTTP errors (e.g., a few 404s) even when the mirror is usable.
-    # Prefer our post-fetch validation over raw exit status.
-    if [ "$wget_exit_code" -ne 0 ] && [ "$wget_exit_code" -ne 8 ]; then
-        log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
-        return 1
-    fi
-
-    if [ "$fetched_html_count" -eq 0 ]; then
-        log "${RED}✗ $name fetch produced no HTML files${NC}"
-        return 1
-    fi
-    if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
-        if [ "$partial_mirror_allowed" = "true" ]; then
-            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
-            return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
-        else
-            log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
-            return 1
-        fi
-    fi
-    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
-    return 0
-}
-
-# Fetches a manifest-governed Java API using an explicit seed list derived from the Javadoc
-# search indices.  This avoids incomplete recursive crawls that miss pages.
-#
-# Arguments:
-#   $1 - Java API Javadoc base URL
-#   $2 - target directory
-#   $3 - human-readable name
-#   $4 - --cut-dirs value
-#   $5 - minimum required HTML files
-#   $6 - reject regex (optional)
-#   $7 - whether a validated partial mirror is accepted
-fetch_java_api_javadoc_seed() {
-    local url="$1"
-    local target_dir="$2"
-    local name="$3"
-    local cut_dirs="$4"
-    local min_files="$5"
-    local reject_regex="${6:-}"
-    local partial_mirror_allowed="$7"
-
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
-    log "${BLUE}ℹ Java API Javadoc source; generating explicit URL seed list...${NC}"
-    python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
-    local seed_url_count
-    seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
-    log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
-
-    local wget_seed_args=(
-        --timestamping
-        --no-host-directories
-        --cut-dirs="$cut_dirs"
-        --input-file="$seed_file"
-        --directory-prefix="$target_dir"
-        --show-progress
-        --progress=bar:force
-        --timeout=120
-        --dns-timeout=30
-        --connect-timeout=30
-        --read-timeout=120
-        --tries=5
-        --waitretry=1
-        --retry-connrefused
-        --user-agent="java-chat-doc-fetcher/1.0"
-    )
-    if [ -n "$reject_regex" ]; then
-        wget_seed_args+=(--reject-regex="$reject_regex")
-    fi
-
-    wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
-    cd - > /dev/null
-
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
-}
-
-# Fetches documentation using wget --mirror for generic (non-Oracle) sites.
-#
-# Arguments:
-#   $1 - URL to mirror
-#   $2 - target directory
-#   $3 - human-readable name
-#   $4 - --cut-dirs value
-#   $5 - minimum required HTML files
-#   $6 - reject regex (optional)
-#   $7 - whether a nonempty partial mirror is retained for incremental reruns
-fetch_docs_mirror() {
-    local url="$1"
-    local target_dir="$2"
-    local name="$3"
-    local cut_dirs="$4"
-    local min_files="$5"
-    local reject_regex="${6:-}"
-    local partial_mirror_allowed="$7"
-
-    local wget_args=(
-        --mirror \
-        --convert-links \
-        --adjust-extension \
-        --page-requisites \
-        --no-parent \
-        --no-host-directories \
-        --cut-dirs="$cut_dirs" \
-        --reject="index.html?*" \
-        --accept="*.html,*.css,*.js,*.png,*.gif,*.jpg,*.jpeg,*.svg,*.pdf,*.woff,*.woff2,*.ttf,*.eot" \
-        --quiet \
-        --show-progress \
-        --progress=bar:force \
-        --timeout=30 \
-        --dns-timeout=30 \
-        --connect-timeout=30 \
-        --read-timeout=30 \
-        --tries=3 \
-        --waitretry=1 \
-        --retry-connrefused \
-        --no-verbose \
-    )
-
-    if [ -n "$reject_regex" ]; then
-        wget_args+=(--reject-regex="$reject_regex")
-    fi
-
-    wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
-    cd - > /dev/null
-
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
-}
-
-# Dispatches documentation fetching: performs pre-fetch housekeeping (existing
-# mirror check, quarantine, legacy cleanup), then delegates to the appropriate
-# strategy — seed-list for manifest-governed Java APIs, wget --mirror for everything else.
+# Dispatches documentation fetching, then retires a superseded mirror only after
+# the canonical replacement has passed its strategy-specific validation.
 #
 # Arguments (canonical manifest order):
 #   $1 - Java release, blank only for non-Java documentation
@@ -312,6 +199,10 @@ fetch_docs_mirror() {
 #   $6 - minimum required HTML files
 #   $7 - reject regex (optional)
 #   $8 - whether a nonempty partial mirror is retained for incremental reruns
+#   $9 - structured seed document type, blank for recursive mirroring
+#   $10 - structured seed discovery URL
+#   $11 - exact source prefix mapped onto the canonical URL
+#   $12 - exact superseded mirror path quarantined after successful replacement
 fetch_docs() {
     local java_release="$1"
     local url="$2"
@@ -321,46 +212,167 @@ fetch_docs() {
     local min_files="$6"
     local reject_regex="${7:-}"
     local partial_mirror_allowed="$8"
+    local seed_document_type="${9:-}"
+    local seed_discovery_url="${10:-}"
+    local seed_source_prefix="${11:-}"
+    local superseded_relative_mirror_path="${12:-}"
     local target_dir="$DOCS_ROOT/$relative_mirror_path"
+    local fetch_target_directory="$target_dir"
+    local staging_directory=""
 
     # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
     reject_regex="${reject_regex//__OR__/|}"
 
+    if [ -n "$superseded_relative_mirror_path" ] \
+        && ! require_lifecycle_root_disjoint_from_external_fetch_roots \
+            "$superseded_relative_mirror_path"; then
+        log "${RED}✗ Superseded mirror overlaps an external active mirror: $superseded_relative_mirror_path${NC}"
+        return 1
+    fi
+
+    if [ -n "$superseded_relative_mirror_path" ] \
+        && [ -e "$DOCS_ROOT/$superseded_relative_mirror_path" ] \
+        && [ "$CLEAN_INCOMPLETE" != "true" ]; then
+        log "${RED}✗ Superseded mirror remains while cleanup is disabled: $superseded_relative_mirror_path${NC}"
+        return 1
+    fi
+
+    if [ -n "$superseded_relative_mirror_path" ]; then
+        if ! staging_directory="$(create_documentation_fetch_staging_directory "$relative_mirror_path")"; then
+            log "${RED}✗ Could not create a replacement staging directory for $name${NC}"
+            return 1
+        fi
+        fetch_target_directory="$staging_directory"
+    fi
+
     # ── Pre-fetch: check existing mirror and quarantine if incomplete ──
     local existing_count
-    existing_count="$(count_html_files "$target_dir")"
+    existing_count="$(count_html_files "$fetch_target_directory")"
     if [ "$existing_count" -gt 0 ]; then
         log "${BLUE}ℹ Existing mirror: $existing_count HTML files${NC}"
     fi
     if [ "$partial_mirror_allowed" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -gt 0 ] && [ "$existing_count" -lt "$min_files" ]; then
-        quarantine_incomplete_dir "$target_dir" "$name" "$existing_count" "$min_files"
+        quarantine_incomplete_dir "$fetch_target_directory" "$name" "$existing_count" "$min_files"
     fi
 
     # Proactive cleanup for known legacy Spring mirror layouts that otherwise mask incomplete fetches.
     if [[ "$name" == *"Spring Framework Javadoc"* ]]; then
-        quarantine_path "$target_dir/api/current" "$name legacy api/current"
+        quarantine_path "$fetch_target_directory/api/current" "$name legacy api/current"
     fi
     if [[ "$name" == *"Spring Framework Reference"* ]]; then
-        quarantine_versioned_reference_subdirs "$target_dir" "$name" ""
+        quarantine_versioned_reference_subdirs "$fetch_target_directory" "$name" ""
     fi
     if [[ "$name" == *"Spring AI Reference"* ]]; then
-        quarantine_versioned_reference_subdirs "$target_dir" "$name" "^2\\."
+        quarantine_versioned_reference_subdirs "$fetch_target_directory" "$name" "^2\\."
     fi
 
     log "${YELLOW}Fetching $name...${NC}"
-    mkdir -p "$target_dir"
-    cd "$target_dir"
+    if ! mkdir -p "$fetch_target_directory" || ! cd "$fetch_target_directory"; then
+        if [ -n "$staging_directory" ] \
+            && ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+            log "${RED}✗ Could not discard inaccessible replacement staging for $name${NC}"
+        fi
+        log "${RED}✗ Could not enter the fetch directory for $name${NC}"
+        return 1
+    fi
 
     # ── Dispatch to strategy ──
+    local documentation_fetch_status=0
     if [ -n "$java_release" ]; then
-        if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
-            log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
-            return 0
+        local java_api_fetch_required="true"
+        if ! generate_java_api_javadoc_seed "$url" "$fetch_target_directory" \
+            || ! reconcile_java_api_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
+            cd - > /dev/null
+            return 1
         fi
-        fetch_java_api_javadoc_seed "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+        existing_count="$(count_html_files "$fetch_target_directory")"
+        if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
+            if verify_java_api_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
+                log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
+                if ! cd - > /dev/null; then
+                    log "${RED}✗ Could not restore the working directory after checking $name${NC}"
+                    return 1
+                fi
+                java_api_fetch_required="false"
+            else
+                log "${YELLOW}⚠ $name cached mirror is missing canonical seed paths; refetching${NC}"
+            fi
+        fi
+        if [ "$java_api_fetch_required" = "true" ]; then
+            fetch_java_api_javadoc_seed \
+                "$fetch_target_directory" \
+                "$name" \
+                "$cut_dirs" \
+                "$min_files" \
+                "$reject_regex" \
+                "$partial_mirror_allowed" \
+                "$url" || documentation_fetch_status=$?
+        fi
+    elif [ -n "$seed_discovery_url" ]; then
+        fetch_discovered_documentation_seed \
+            "$url" \
+            "$fetch_target_directory" \
+            "$name" \
+            "$cut_dirs" \
+            "$min_files" \
+            "$reject_regex" \
+            "$partial_mirror_allowed" \
+            "$seed_document_type" \
+            "$seed_discovery_url" \
+            "$seed_source_prefix" || documentation_fetch_status=$?
     else
-        fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+        fetch_docs_mirror \
+            "$url" \
+            "$fetch_target_directory" \
+            "$name" \
+            "$cut_dirs" \
+            "$min_files" \
+            "$reject_regex" \
+            "$partial_mirror_allowed" || documentation_fetch_status=$?
     fi
+
+    if [ "$documentation_fetch_status" -ne 0 ]; then
+        if [ -n "$staging_directory" ] \
+            && ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+            log "${RED}✗ Could not discard failed replacement staging for $name${NC}"
+            return 1
+        fi
+        return "$documentation_fetch_status"
+    fi
+
+    if [ -n "$staging_directory" ]; then
+        if ! publish_staged_documentation_mirror \
+            "$staging_directory" \
+            "$relative_mirror_path" \
+            "$superseded_relative_mirror_path" \
+            "$name"; then
+            if [ -d "$staging_directory" ]; then
+                if ! discard_documentation_fetch_staging_directory "$staging_directory"; then
+                    log "${RED}✗ Could not discard unpublished replacement staging for $name${NC}"
+                fi
+            fi
+            return 1
+        fi
+    fi
+}
+
+record_documentation_fetch() {
+    local fetch_strategy="$1"
+    local documentation_source_projection="$2"
+    if "$fetch_strategy" "$documentation_source_projection"; then
+        TOTAL_FETCHED=$((TOTAL_FETCHED + 1))
+        return
+    else
+        local documentation_fetch_status=$?
+    fi
+
+    if [ "$documentation_fetch_status" -eq "$DOCUMENTATION_FETCH_PARTIAL_STATUS" ]; then
+        TOTAL_PARTIAL=$((TOTAL_PARTIAL + 1))
+        log "${YELLOW}Partial documentation source preserved; completion remains blocked${NC}"
+        return
+    fi
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
 }
 
 run_documentation_fetch() {
@@ -370,8 +382,10 @@ if [ -f "$RES_PROPS" ]; then
 fi
 parse_fetch_arguments "$@"
 
-load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
+load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST" || return 1
+load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST" || return 1
+load_builtin_documentation_fetch_projections
+validate_documentation_source_lifecycle_external_roots || return 1
 
 if [ "$LIST_JAVA_API_SOURCES" = "true" ]; then
     printf '%s\n' "${JAVA_API_SOURCE_PROJECTIONS[@]}"
@@ -380,18 +394,6 @@ fi
 if [ "$LIST_DOCUMENTATION_SOURCES" = "true" ]; then
     printf '%s\n' "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"
     exit 0
-fi
-
-# Format: JAVA_RELEASE|URL|RELATIVE_MIRROR_PATH|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
-# Java API rows are projected from their dedicated manifest; generic official sources are projected
-# from documentation-sources.manifest; older specialized sources remain isolated in their legacy catalog.
-DOC_SOURCES=()
-append_legacy_documentation_fetch_sources
-append_manifest_documentation_fetch_sources
-append_java_api_fetch_sources
-
-if [ "$INCLUDE_QUICK" = "true" ]; then
-    append_quick_documentation_fetch_sources
 fi
 
 echo "=============================================="
@@ -413,21 +415,28 @@ echo ""
 log "Starting documentation fetch process..."
 echo "=============================================="
 
-# Process each documentation source
-for documentation_source_projection in "${DOC_SOURCES[@]}"; do
-    if fetch_documentation_source "$documentation_source_projection"; then
-        TOTAL_FETCHED=$((TOTAL_FETCHED + 1))
-    else
-        documentation_fetch_status=$?
-        if [ "$documentation_fetch_status" -eq "$DOCUMENTATION_FETCH_PARTIAL_STATUS" ]; then
-            TOTAL_PARTIAL=$((TOTAL_PARTIAL + 1))
-            log "${YELLOW}Partial documentation source preserved; completion remains blocked${NC}"
-        else
-            TOTAL_FAILED=$((TOTAL_FAILED + 1))
-            log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
-        fi
+if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
+    DOC_SOURCES=()
+    append_manifest_documentation_fetch_sources "$DOCUMENTATION_DOC_SET_SELECTOR"
+    for documentation_source_projection in "${DOC_SOURCES[@]}"; do
+        record_documentation_fetch fetch_manifest_documentation_source "$documentation_source_projection"
+    done
+else
+    for documentation_source_projection in "${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}"; do
+        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
+    done
+    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+        record_documentation_fetch fetch_manifest_documentation_source "$documentation_source_projection"
+    done
+    for documentation_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
+        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
+    done
+    if [ "$INCLUDE_QUICK" = "true" ]; then
+        for documentation_source_projection in "${QUICK_DOCUMENTATION_FETCH_PROJECTIONS[@]}"; do
+            record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
+        done
     fi
-done
+fi
 
 echo ""
 echo "=============================================="

@@ -52,6 +52,7 @@ __pycache__/
 ### Logs ###
 logs/
 *.log
+*.pid
 
 ### Project data directories ###
 data/

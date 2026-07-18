@@ -112,7 +112,7 @@ class LocalStoreServiceTest {
 
     @Test
     void markHashIngested_noArgOverloadWritesEmptyMetadata() throws IOException {
-        localStoreService.markHashIngested(SAMPLE_HASH);
+        localStoreService.markHashIngested(SAMPLE_HASH, "", "");
 
         assertTrue(localStoreService.isHashIngested(SAMPLE_HASH));
         assertFalse(

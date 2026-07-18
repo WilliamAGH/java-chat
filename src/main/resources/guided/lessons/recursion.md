@@ -1,6 +1,10 @@
-Recursion is a technique in which a method solves a problem by calling itself with a smaller version of that same problem. It is powerful when the problem has a natural “smaller problem” shape, but it needs a reliable stopping rule.
+## Solve a problem by solving a smaller one
+
+Recursion is a technique in which a method calls itself with a smaller version of the same problem. It fits problems with a natural smaller-problem shape, but it needs a reliable stopping rule.
 
 ## Define a base case and a recursive case
+
+Save this program as `FactorialDemo.java`, then run `java FactorialDemo.java`.
 
 ```java
 long factorial(int nonNegativeNumber) {
@@ -19,11 +23,17 @@ void main() {
 }
 ```
 
-The base case is `nonNegativeNumber <= 1`. It returns a known answer without another recursive call. The recursive case multiplies by the current number and asks for the factorial of one smaller number. Because the input moves toward the base case, the method terminates for every non-negative input.
+Expected output:
 
-## Trace the calls
+```text
+4! = 24
+```
 
-For `factorial(4)`, Java must wait for smaller calls to finish before it can multiply the answers:
+The negative-number check is a guard, not a base case: it rejects an input for which this lesson does not define a factorial. The base case, `nonNegativeNumber <= 1`, returns a known answer without another recursive call. For factorial, `0!` is defined as `1`, and `1!` has that same value, so both inputs safely end the recursion. The recursive case multiplies by the current number and asks for the factorial of one smaller number. Each call moves toward the base case, so every non-negative input terminates.
+
+## Trace pending calls
+
+For `factorial(4)`, Java waits for smaller calls to finish before it can multiply their answers:
 
 ```text
 factorial(4)
@@ -33,16 +43,51 @@ factorial(4)
 = 24
 ```
 
-Each pending method call has its own parameters and local variables. Java keeps those pending calls on the call stack. Once `factorial(1)` returns `1`, the calls complete in reverse order.
+Each pending method call has its own parameters and local variables. Java keeps those calls on the call stack. After `factorial(1)` returns `1`, the calls complete in reverse order.
+
+## Apply the same pattern to a sum
+
+Save this program as `SumThroughDemo.java`, then run `java SumThroughDemo.java`.
+
+```java
+int sumThrough(int nonNegativeNumber) {
+    if (nonNegativeNumber < 0) {
+        throw new IllegalArgumentException("The sum requires a non-negative number.");
+    }
+    if (nonNegativeNumber == 0) {
+        return 0;
+    }
+    return nonNegativeNumber + sumThrough(nonNegativeNumber - 1);
+}
+
+void main() {
+    int finalLessonNumber = 4;
+    IO.println("Total through lesson " + finalLessonNumber + ": " + sumThrough(finalLessonNumber));
+}
+```
+
+Expected output:
+
+```text
+Total through lesson 4: 10
+```
+
+Here the base case is `sumThrough(0)`, and every recursive call uses one smaller non-negative number.
 
 ## Check the three recursion rules
 
-Every recursive method needs all three of these properties:
+Every recursive method needs all three properties:
 
-1. A base case that returns without calling the method again.
+1. A base case that returns without another recursive call.
 2. A recursive case that calls the same method.
 3. Progress toward the base case on every recursive call.
 
-If the base case is missing or the argument never gets closer to it, the calls continue until the program exhausts the call stack. Even a correct recursive algorithm can use too much stack space for a very deep input, so choose recursion when the problem's structure makes the smaller-problem rule clear.
+If a base case is missing or an argument does not get closer to it, calls continue until Java exhausts call-stack space and throws a `StackOverflowError`. Even a correct recursive method can use too much stack space for a deeply nested input, so use recursion when the smaller-problem rule is clear.
 
-The factorial example uses `long` only for small teaching examples; factorials grow quickly and eventually exceed its range. As practice, write a recursive `sumThrough` method that returns the sum from a non-negative number down to zero. State its base case and how its recursive call makes progress before writing the code.
+`long` keeps the factorial example useful only for small teaching inputs: factorial values grow quickly and eventually exceed its range.
+
+## Check your understanding
+
+- Trace `sumThrough(3)` on paper before running it.
+- State the base case and progress rule for a recursive method that counts down from a positive number to zero.
+- Explain why changing `nonNegativeNumber - 1` to `nonNegativeNumber + 1` breaks the recursion rule.

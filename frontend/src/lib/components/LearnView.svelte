@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tick } from "svelte";
     import {
         fetchTOC,
         fetchGuidedLessonCitations,
@@ -85,6 +86,7 @@
 
     // Mobile chat drawer state
     let isChatDrawerOpen = $state(false);
+    let mobileChatTrigger: HTMLButtonElement | null = null;
 
     // Attach scroll anchor to the active container when components mount
     $effect(() => {
@@ -331,8 +333,18 @@
         messages = [];
     }
 
-    function toggleChatDrawer(): void {
-        isChatDrawerOpen = !isChatDrawerOpen;
+    function toggleChatDrawer(event?: MouseEvent): void {
+        if (isChatDrawerOpen) {
+            closeChatDrawer();
+            return;
+        }
+
+        const chatDrawerTrigger = event?.currentTarget;
+        mobileChatTrigger =
+            chatDrawerTrigger instanceof HTMLButtonElement
+                ? chatDrawerTrigger
+                : null;
+        isChatDrawerOpen = true;
         // Re-attach scroll anchor to the new active container
         updateScrollAnchorContainer();
     }
@@ -341,6 +353,7 @@
         isChatDrawerOpen = false;
         // Re-attach scroll anchor to desktop container
         updateScrollAnchorContainer();
+        void tick().then(() => mobileChatTrigger?.focus());
     }
 
     /** Returns the currently active messages container based on drawer state. */
@@ -500,6 +513,7 @@
             if (selectedLesson?.slug !== streamLessonSlug) return;
             if (guidedChatStreamVersion !== activeStreamVersion) return;
             if (abortSignal.aborted) return;
+            streaming.failStream();
             const errorMessage =
                 error instanceof Error
                     ? error.message
@@ -517,7 +531,9 @@
                 guidedChatStreamVersion === activeStreamVersion &&
                 !abortSignal.aborted
             ) {
-                streaming.finishStream();
+                if (streaming.isStreaming) {
+                    streaming.finishStream();
+                }
                 activeStreamingMessageId = null;
                 // No final scroll - user maintains their position
             }
@@ -673,6 +689,7 @@
                     isStreaming={streaming.isStreaming}
                     statusMessage={streaming.statusMessage}
                     statusDetails={streaming.statusDetails}
+                    citationWarning={streaming.citationWarning}
                     hasContent={hasStreamingContent}
                     streamingMessageId={activeStreamingMessageId}
                     lessonTitle={selectedLesson.title}
@@ -693,6 +710,7 @@
                 isStreaming={streaming.isStreaming}
                 statusMessage={streaming.statusMessage}
                 statusDetails={streaming.statusDetails}
+                citationWarning={streaming.citationWarning}
                 hasContent={hasStreamingContent}
                 streamingMessageId={activeStreamingMessageId}
                 title="Ask about this lesson"

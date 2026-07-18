@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantCollectionNames;
 import com.williamcallahan.javachat.config.QdrantRestConnection;
 import com.williamcallahan.javachat.model.AuditReport;
 import java.io.IOException;
@@ -63,7 +64,7 @@ public class AuditService {
         this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         LocalStoreService requiredLocalStore = Objects.requireNonNull(localStore, "localStore");
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
-        AppProperties.QdrantCollections configuredCollections =
+        QdrantCollectionNames configuredCollections =
                 requiredAppProperties.getQdrant().getCollections();
         this.safeNameResolver = requiredLocalStore::toSafeName;
         this.parsedDirSupplier = requiredLocalStore::getParsedDir;

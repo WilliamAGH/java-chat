@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantCollectionNames;
 import com.williamcallahan.javachat.config.QdrantRestConnection;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
@@ -67,8 +68,7 @@ public class ExternalServiceHealth {
                 Objects.requireNonNull(webClientBuilder, "webClientBuilder").build();
         this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
-        AppProperties.QdrantCollections collections =
-                requiredAppProperties.getQdrant().getCollections();
+        QdrantCollectionNames collections = requiredAppProperties.getQdrant().getCollections();
         this.qdrantCollections = List.of(
                 collections.getBooks(), collections.getDocs(), collections.getArticles(), collections.getPdfs());
     }

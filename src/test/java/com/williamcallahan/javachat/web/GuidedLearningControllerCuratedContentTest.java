@@ -18,10 +18,8 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +35,7 @@ import reactor.core.publisher.Flux;
 
 /** Verifies guided content HTTP contracts resolve only authoritative curated lesson markdown. */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseStatusContractCatalog.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedLearningControllerCuratedContentTest {
     private static final String CURATED_LESSON_MARKDOWN = "Curated lesson markdown";
@@ -68,9 +66,6 @@ class GuidedLearningControllerCuratedContentTest {
 
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
-
-    @MockitoBean
-    RetrievalService retrievalService;
 
     @BeforeEach
     void startCapturingControllerLogs() {
@@ -144,6 +139,9 @@ class GuidedLearningControllerCuratedContentTest {
     }
 
     private static GuidedLesson listedLesson(String lessonSlug) {
-        return new GuidedLesson(lessonSlug, "Listed Lesson", "", List.of());
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(lessonSlug);
+        listedLesson.setTitle("Listed Lesson");
+        return listedLesson;
     }
 }

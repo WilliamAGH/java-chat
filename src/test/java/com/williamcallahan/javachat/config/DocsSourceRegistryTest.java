@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
@@ -11,6 +12,20 @@ import org.junit.jupiter.api.Test;
  * Verifies that Java API citation mappings project the canonical documentation source manifest.
  */
 class DocsSourceRegistryTest {
+
+    @Test
+    void returnsImmutableJavaApiDocumentationSourceSnapshot() {
+        List<JavaApiDocumentationSource> javaApiDocumentationSources = DocsSourceRegistry.javaApiDocumentationSources();
+
+        assertThrows(UnsupportedOperationException.class, javaApiDocumentationSources::removeFirst);
+    }
+
+    @Test
+    void returnsImmutableDocumentationSourceSnapshot() {
+        List<DocumentationSource> documentationSources = DocsSourceRegistry.documentationSources();
+
+        assertThrows(UnsupportedOperationException.class, documentationSources::removeFirst);
+    }
 
     @Test
     void mapsEveryCanonicalJavaApiMirrorToItsRemoteBaseUrl() {

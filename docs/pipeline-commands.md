@@ -38,7 +38,26 @@ Run `./scripts/fetch_all_docs.sh --list-java-api-sources` to inspect the exact r
 script; the CLI catalog and citation registry project the same rows and parity is enforced by tests.
 
 The non-Java manifest is the single semantic owner of each official source's fetch URL, citation base URL,
-mirror path, display name, and ingestion provenance. Add, change, or remove an official non-Java source by
+mirror path, display name, ingestion provenance, minimum HTML-file count, rejection expression, and
+partial-mirror policy. The optional `seedDocumentType`, `seedDiscoveryUrl`, and `seedSourcePrefix` fields
+also own structured sitemap or navigation discovery for sources whose recursive landing page is incomplete.
+The optional `supersededRelativeMirrorPath` field owns one exact prior mirror root. Manifest loading rejects
+duplicate lifecycle roots and segment-boundary overlap with every other active source root before exposing list
+or fetch projections. A strict child of the same source's new stable root remains valid for one-way migrations
+from prior versioned subdirectories. The fetcher quarantines that prior root only after the canonical replacement
+passes its strategy-specific validation; a failed replacement leaves the prior mirror untouched. Rolling upstream
+aliases use stable mirror roots and a blank `docVersion`; only immutable release URLs retain release-specific
+mirror roots and provenance versions.
+`src/main/resources/documentation-seed-document-types.manifest` is the single semantic owner of supported
+`seedDocumentType` values; do not restate that inventory in Java, shell, Python, tests, or documentation.
+Each catalog token selects a convention-named Python reader, and a missing reader fails catalog validation.
+Discovered URLs must match the exact source prefix and are deterministically mapped onto the canonical fetch URL
+before `wget` receives the seed list. Seeded fetches reject redirects and every nonzero `wget` status, reconcile
+stale HTML against the exact current seed paths before fetching, and verify exact path coverage afterward.
+Recursive mirrors convert local HTML links, omit page requisites, and reject known binary asset extensions while
+leaving extensionless documentation pages eligible;
+`--no-parent` still bounds each crawl
+to its declared source path. Add, change, or remove an official non-Java source by
 editing one manifest row only. Do not duplicate its field values in Java constants, shell arrays, tests, or
 documentation. Run `./scripts/fetch_all_docs.sh --list-documentation-sources` to inspect the exact rows
 consumed by the fetch script; the CLI catalog, citation registry, and provenance deriver project those rows.
@@ -54,7 +73,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 ### Script flags
 
 ```bash
-./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]
+./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]
 ```
 
 | Flag | Effect |
@@ -62,9 +81,13 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 | `--include-quick` | Also fetch small landing-page mirrors (Spring Framework/AI quick sets) |
 | `--no-clean` | Do not quarantine incomplete mirrors before refetching |
 | `--force` | Refresh all sources even if they look complete |
+| `--doc-sets=DOC_SET,...` | Fetch exactly the selected canonical non-Java `docSet` rows; omit Java API, legacy, and quick rows |
 | `--list-java-api-sources` | Print configured Java API source projections without fetching |
 | `--list-documentation-sources` | Print configured official non-Java source projections without fetching |
 | `--help` | Show usage |
+
+Copy selector tokens from the `docSet` column printed by `--list-documentation-sources`. Blank, duplicate,
+and unknown selector tokens are rejected.
 
 ### What "incremental" means for scraping
 
@@ -72,6 +95,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 - Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
 - Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
 - Manifest-governed Java API sources (those with a `javaRelease` field) use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Structured non-Java seed sources accept only an exact current seed mirror; an old aggregate HTML count cannot satisfy completeness.
 
 ---
 
@@ -150,12 +174,12 @@ non-Java doc sets are:
 ### What "incremental" means for ingestion
 
 - Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
-- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256, and
-  extractor-semantics version as the current ingestion contract.
+- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256,
+  extractor-semantics version, and provenance-aware ingestion fingerprint as the current ingestion contract.
 - File-level markers (`data/index/file_*.marker`) include those values plus the ingested chunk hashes.
-  A source-content change or extractor-semantics change triggers strict stale-vector and parsed-chunk
-  pruning before re-chunking and upserting to Qdrant. Markers created before the semantics field existed
-  are reindexed once.
+  A source-content, provenance, or extractor-semantics change triggers strict stale-vector and parsed-chunk
+  pruning before re-chunking and upserting to Qdrant. Older markers missing a current contract field are
+  reindexed once.
 
 ---
 

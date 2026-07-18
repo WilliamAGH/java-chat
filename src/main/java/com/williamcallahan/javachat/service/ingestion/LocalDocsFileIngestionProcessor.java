@@ -5,14 +5,18 @@ import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.DocumentFactory;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionKind;
 import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardDecision;
+import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardInput;
 import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver.IngestionProvenance;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -35,9 +39,9 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    private static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-javadoc-extraction-v1";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v2";
 
-    private final FileContentServices content;
+    private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
     private final ProgressTracker progressTracker;
     private final IngestionProvenanceDeriver provenanceDeriver;
@@ -47,7 +51,7 @@ public class LocalDocsFileIngestionProcessor {
     /**
      * Wires grouped ingestion dependencies.
      *
-     * @param content file content extraction and validation services
+     * @param fileContentServices file content extraction and validation services
      * @param storage chunking, hashing, vector storage, and local marker services
      * @param progressTracker ingestion progress tracker
      * @param provenanceDeriver derives deterministic provenance tokens for routing and citations
@@ -55,13 +59,13 @@ public class LocalDocsFileIngestionProcessor {
      * @param ingestedFilePruneService shared stale-file prune service
      */
     public LocalDocsFileIngestionProcessor(
-            FileContentServices content,
+            FileContentServices fileContentServices,
             IngestionStorageServices storage,
             ProgressTracker progressTracker,
             IngestionProvenanceDeriver provenanceDeriver,
             LocalIngestionFailureFactory failureFactory,
             IngestedFilePruneService ingestedFilePruneService) {
-        this.content = Objects.requireNonNull(content, "content");
+        this.fileContentServices = Objects.requireNonNull(fileContentServices, "fileContentServices");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.progressTracker = Objects.requireNonNull(progressTracker, "progressTracker");
         this.provenanceDeriver = Objects.requireNonNull(provenanceDeriver, "provenanceDeriver");
@@ -97,25 +101,28 @@ public class LocalDocsFileIngestionProcessor {
         try {
             fileSizeBytes = Files.size(file);
             lastModifiedMillis = Files.getLastModifiedTime(file).toMillis();
-            fileContentFingerprint = storage.localStore().computeFileContentFingerprint(file);
+            fileContentFingerprint = storage.hasher().sha256(file);
         } catch (IOException attributeException) {
             return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "file-attributes", attributeException));
         }
 
         IngestionProvenance provenance = provenanceDeriver.derive(root, file, url);
+        String provenanceAwareIngestionFingerprint =
+                provenanceAwareIngestionFingerprint(fileContentFingerprint, provenance);
         var router = storage.router();
-        var localStore = storage.localStore();
+        FileIngestionMarkerStore fileMarkerStore = storage.fileMarkers();
         QdrantCollectionKind collectionKind =
                 router.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
+        String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
         INDEXING_LOG.info(
                 "[INDEXING] Routed → {} (docSet={}, docType={})",
                 collectionKind,
                 provenance.docSet(),
                 provenance.docType());
 
-        final Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord;
+        final Optional<FileIngestionRecord> priorIngestionRecord;
         try {
-            priorIngestionRecord = localStore.readFileIngestionRecord(url);
+            priorIngestionRecord = fileMarkerStore.readFileIngestionRecord(url);
         } catch (RuntimeException markerReadException) {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(file, "file-marker-read", markerReadException));
@@ -124,8 +131,9 @@ public class LocalDocsFileIngestionProcessor {
         boolean unchangedByFingerprint = priorIngestionRecord
                 .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == fileSizeBytes
                         && ingestionRecord.lastModifiedMillis() == lastModifiedMillis
-                        && fileContentFingerprint.equals(ingestionRecord.contentFingerprint())
-                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion()))
+                        && provenanceAwareIngestionFingerprint.equals(ingestionRecord.ingestionFingerprint())
+                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
+                        && collectionName.equals(ingestionRecord.collectionName()))
                 .orElse(false);
 
         if (unchangedByFingerprint) {
@@ -149,7 +157,7 @@ public class LocalDocsFileIngestionProcessor {
         boolean requiresFullReindex = priorIngestionRecord.isPresent() && !unchangedByFingerprint;
         if (requiresFullReindex) {
             try {
-                prunePreviouslyIngestedFileStrict(collectionKind, url, priorIngestionRecord);
+                prunePreviouslyIngestedFileStrict(url, priorIngestionRecord.orElseThrow());
             } catch (IOException ioException) {
                 return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-local", ioException));
             } catch (RuntimeException runtimeException) {
@@ -163,8 +171,8 @@ public class LocalDocsFileIngestionProcessor {
 
         if (fileName.endsWith(".pdf")) {
             try {
-                var pdfExtractor = content.pdfExtractor();
-                var titleExtractor = content.titleExtractor();
+                var pdfExtractor = fileContentServices.pdfExtractor();
+                var titleExtractor = fileContentServices.titleExtractor();
                 String metadata = pdfExtractor.getPdfMetadata(file);
                 title = titleExtractor.extractTitle(metadata, fileNamePath.toString());
                 packageName = "";
@@ -176,15 +184,16 @@ public class LocalDocsFileIngestionProcessor {
                         failureFactory.failure(file, "pdf-extraction", pdfExtractionException));
             }
         } else {
+            org.jsoup.nodes.Document parsedDocument;
             try {
-                var fileOps = content.fileOps();
-                var htmlExtractor = content.htmlExtractor();
+                var fileOps = fileContentServices.fileOps();
+                var htmlExtractor = fileContentServices.htmlExtractor();
                 String html = fileOps.readTextFile(file);
-                org.jsoup.nodes.Document doc = Jsoup.parse(html);
-                title = Optional.ofNullable(doc.title()).orElse("");
+                parsedDocument = Jsoup.parse(html);
+                title = Optional.ofNullable(parsedDocument.title()).orElse("");
                 bodyText = JavaPackageExtractor.isJavaApiUrl(url)
-                        ? htmlExtractor.extractJavaApiContent(doc)
-                        : htmlExtractor.extractCleanContent(doc);
+                        ? htmlExtractor.extractJavaApiContent(parsedDocument)
+                        : htmlExtractor.extractCleanContent(parsedDocument);
                 packageName = JavaPackageExtractor.extractPackage(url, bodyText);
             } catch (IOException htmlReadException) {
                 log.error(
@@ -193,15 +202,18 @@ public class LocalDocsFileIngestionProcessor {
                 return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "html-read", htmlReadException));
             }
 
-            var contentGuard = content.contentGuard();
-            GuardDecision guardDecision = contentGuard.evaluate(bodyText);
+            var contentGuard = fileContentServices.contentGuard();
+            GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
             if (!guardDecision.acceptable()) {
                 try {
-                    var quarantine = content.quarantine();
-                    quarantine.quarantine(file);
-                    INDEXING_LOG.warn("[INDEXING] Content guard rejected file and moved it to quarantine");
+                    var quarantineService = fileContentServices.quarantine();
+                    IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(file);
+                    INDEXING_LOG.warn("[INDEXING] Content guard rejected file and copied it to quarantine");
                     return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                            file.toString(), "content-guard", "quarantined: " + guardDecision.rejectionReason()));
+                            file.toString(),
+                            "content-guard",
+                            "quarantine copy " + quarantineCopy.quarantined() + ": "
+                                    + guardDecision.rejectionReason()));
                 } catch (IOException quarantineException) {
                     log.warn(
                             "Failed to quarantine invalid content (exception type: {})",
@@ -236,11 +248,12 @@ public class LocalDocsFileIngestionProcessor {
             applyProvenanceMetadata(documents, provenance);
             return processDocuments(
                     collectionKind,
+                    collectionName,
                     file,
                     url,
                     fileSizeBytes,
                     lastModifiedMillis,
-                    fileContentFingerprint,
+                    provenanceAwareIngestionFingerprint,
                     documents,
                     chunkingOutcome.allChunkHashes(),
                     fileStartMillis);
@@ -259,11 +272,12 @@ public class LocalDocsFileIngestionProcessor {
                         applyProvenanceMetadata(forcedDocuments, provenance);
                         return processDocuments(
                                 collectionKind,
+                                collectionName,
                                 file,
                                 url,
                                 fileSizeBytes,
                                 lastModifiedMillis,
-                                fileContentFingerprint,
+                                provenanceAwareIngestionFingerprint,
                                 forcedDocuments,
                                 forcedChunkingOutcome.allChunkHashes(),
                                 fileStartMillis);
@@ -283,7 +297,14 @@ public class LocalDocsFileIngestionProcessor {
             }
             INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
             markFileIngested(
-                    url, fileSizeBytes, lastModifiedMillis, fileContentFingerprint, chunkingOutcome.allChunkHashes());
+                    url,
+                    new FileIngestionRecord(
+                            fileSizeBytes,
+                            lastModifiedMillis,
+                            provenanceAwareIngestionFingerprint,
+                            LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                            collectionName,
+                            chunkingOutcome.allChunkHashes()));
             return LocalDocsFileOutcome.skippedFile();
         }
         if (chunkingOutcome.generatedNoChunks()) {
@@ -294,23 +315,27 @@ public class LocalDocsFileIngestionProcessor {
                 new IngestionLocalFailure(file.toString(), "empty-document", "No chunks generated"));
     }
 
-    private void prunePreviouslyIngestedFileStrict(
-            QdrantCollectionKind collectionKind,
-            String url,
-            Optional<LocalStoreService.FileIngestionRecord> priorIngestionRecord)
+    private void prunePreviouslyIngestedFileStrict(String url, FileIngestionRecord priorIngestionRecord)
             throws IOException {
-        String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
-        LocalStoreService.FileIngestionRecord previousFileRecord = priorIngestionRecord.orElse(null);
-        ingestedFilePruneService.pruneCollectionFileStrict(collectionName, url, previousFileRecord);
+        if (priorIngestionRecord.hasCollectionIdentity()) {
+            ingestedFilePruneService.pruneCollectionFileStrict(
+                    priorIngestionRecord.collectionName(), url, priorIngestionRecord);
+            return;
+        }
+        List<String> governedCollectionNames = Arrays.stream(QdrantCollectionKind.values())
+                .map(storage.hybridVector()::resolveCollectionName)
+                .toList();
+        ingestedFilePruneService.pruneCollectionsFileStrict(governedCollectionNames, url, priorIngestionRecord);
     }
 
     private LocalDocsFileOutcome processDocuments(
             QdrantCollectionKind collectionKind,
+            String collectionName,
             Path file,
             String url,
             long fileSizeBytes,
             long lastModifiedMillis,
-            String fileContentFingerprint,
+            String ingestionFingerprint,
             List<Document> documents,
             List<String> allChunkHashes,
             long fileStartMillis) {
@@ -336,7 +361,15 @@ public class LocalDocsFileIngestionProcessor {
                 formattedPercent);
 
         markDocumentsIngested(documents);
-        markFileIngested(url, fileSizeBytes, lastModifiedMillis, fileContentFingerprint, allChunkHashes);
+        markFileIngested(
+                url,
+                new FileIngestionRecord(
+                        fileSizeBytes,
+                        lastModifiedMillis,
+                        ingestionFingerprint,
+                        LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                        collectionName,
+                        allChunkHashes));
 
         return LocalDocsFileOutcome.processedFile();
     }
@@ -367,13 +400,13 @@ public class LocalDocsFileIngestionProcessor {
 
     private void markDocumentsIngested(List<Document> documents) {
         LocalStoreService localStore = storage.localStore();
-        for (Document doc : documents) {
-            Object hashMetadata = doc.getMetadata().get("hash");
+        for (Document indexedDocument : documents) {
+            Object hashMetadata = indexedDocument.getMetadata().get("hash");
             if (hashMetadata == null) {
                 continue;
             }
-            String title = DocumentFactory.metadataText(doc, "title");
-            String packageName = DocumentFactory.metadataText(doc, "package");
+            String title = DocumentFactory.metadataText(indexedDocument, "title");
+            String packageName = DocumentFactory.metadataText(indexedDocument, "package");
             try {
                 localStore.markHashIngested(hashMetadata.toString(), title, packageName);
             } catch (IOException markHashException) {
@@ -382,25 +415,12 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private void markFileIngested(
-            String url,
-            long fileSizeBytes,
-            long lastModifiedMillis,
-            String fileContentFingerprint,
-            List<String> chunkHashes) {
+    private void markFileIngested(String url, FileIngestionRecord fileIngestionRecord) {
         if (url == null || url.isBlank()) {
             return;
         }
-        LocalStoreService localStore = storage.localStore();
         try {
-            localStore.markFileIngested(
-                    url,
-                    new LocalStoreService.FileIngestionRecord(
-                            fileSizeBytes,
-                            lastModifiedMillis,
-                            fileContentFingerprint,
-                            LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
-                            chunkHashes));
+            storage.fileMarkers().markFileIngested(url, fileIngestionRecord);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
         }
@@ -409,24 +429,24 @@ public class LocalDocsFileIngestionProcessor {
     private static void applyProvenanceMetadata(List<Document> documents, IngestionProvenance provenance) {
         Objects.requireNonNull(documents, "documents");
         Objects.requireNonNull(provenance, "provenance");
-        for (Document doc : documents) {
+        for (Document indexedDocument : documents) {
             if (!provenance.docSet().isBlank()) {
-                doc.getMetadata().put("docSet", provenance.docSet());
+                indexedDocument.getMetadata().put("docSet", provenance.docSet());
             }
             if (!provenance.docPath().isBlank()) {
-                doc.getMetadata().put("docPath", provenance.docPath());
+                indexedDocument.getMetadata().put("docPath", provenance.docPath());
             }
             if (!provenance.sourceName().isBlank()) {
-                doc.getMetadata().put("sourceName", provenance.sourceName());
+                indexedDocument.getMetadata().put("sourceName", provenance.sourceName());
             }
             if (!provenance.sourceKind().isBlank()) {
-                doc.getMetadata().put("sourceKind", provenance.sourceKind());
+                indexedDocument.getMetadata().put("sourceKind", provenance.sourceKind());
             }
             if (!provenance.docVersion().isBlank()) {
-                doc.getMetadata().put("docVersion", provenance.docVersion());
+                indexedDocument.getMetadata().put("docVersion", provenance.docVersion());
             }
             if (!provenance.docType().isBlank()) {
-                doc.getMetadata().put("docType", provenance.docType());
+                indexedDocument.getMetadata().put("docType", provenance.docType());
             }
         }
     }
@@ -434,5 +454,11 @@ public class LocalDocsFileIngestionProcessor {
     private String mapLocalPathToUrl(final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
         return DocsSourceRegistry.resolveLocalPath(absolutePath).orElse(FILE_URL_PREFIX + absolutePath);
+    }
+
+    private String provenanceAwareIngestionFingerprint(String fileContentFingerprint, IngestionProvenance provenance) {
+        Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
+        Objects.requireNonNull(provenance, "provenance");
+        return storage.hasher().sha256(provenance.fingerprintInput(fileContentFingerprint));
     }
 }

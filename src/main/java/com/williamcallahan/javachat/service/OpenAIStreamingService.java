@@ -20,6 +20,7 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -237,7 +238,7 @@ public class OpenAIStreamingService {
                         log.debug("[LLM] Complete succeeded (providerId={})", configuredProvider.ordinal());
                         return Mono.just(extractTextFromResponse(completion));
                     } catch (RuntimeException completionException) {
-                        providerRoutingService.recordProviderFailure(configuredProvider, completionException);
+                        recordProviderFailurePreservingUpstream(configuredProvider, completionException);
                         log.error(
                                 "[LLM] Complete failed (providerId={})",
                                 configuredProvider.ordinal(),
@@ -330,8 +331,19 @@ public class OpenAIStreamingService {
                     rateLimitService.recordSuccess(activeProvider);
                 })
                 .doOnError(exception -> {
-                    providerRoutingService.recordProviderFailure(activeProvider, exception);
+                    recordProviderFailurePreservingUpstream(activeProvider, exception);
                 });
+    }
+
+    private void recordProviderFailurePreservingUpstream(
+            RateLimitService.ApiProvider provider, Throwable upstreamFailure) {
+        try {
+            providerRoutingService.recordProviderFailure(provider, upstreamFailure);
+        } catch (RuntimeException providerFailureRecordingException) {
+            if (!Objects.equals(providerFailureRecordingException, upstreamFailure)) {
+                upstreamFailure.addSuppressed(providerFailureRecordingException);
+            }
+        }
     }
 
     private Timeout streamingTimeout() {

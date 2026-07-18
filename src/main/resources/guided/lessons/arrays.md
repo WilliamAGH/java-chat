@@ -1,6 +1,10 @@
+## Store an ordered group of values
+
 An array stores an ordered, fixed-length group of values of one declared type. Arrays are useful when one variable should represent several related values, such as lesson titles or practice scores.
 
-## Create and read an array
+## Create, index, and read an array
+
+Save this program as `LessonTitles.java`, then run `java LessonTitles.java`.
 
 ```java
 void main() {
@@ -19,19 +23,33 @@ void main() {
 }
 ```
 
-`String[]` means an array whose entries are strings. The braces create an array with three entries. Java numbers the positions, called indexes, from `0`, so `lessonTitles[0]` is the first title.
+Expected output:
 
-## Use a safe counting pattern
+```text
+First lesson: Variables
+Numbered list:
+1. Variables
+2. Conditionals
+3. Loops
+Titles only:
+Variables
+Conditionals
+Loops
+```
 
-An array with length `3` has valid indexes `0`, `1`, and `2`. Its last valid index is always `length - 1`. The indexed `for` loop begins at `0` and continues while `lessonIndex < lessonTitles.length`, so it never attempts to read past the end.
+`String[]` means an array whose entries are strings. The braces create three entries. Java numbers positions, called indexes, from `0`, so `lessonTitles[0]` is the first title.
 
-`length` is an array field, not a method, so it has no parentheses. This differs from `String.length()`, which you will use in the next lesson.
+## Use a safe indexed loop
 
-The enhanced `for` loop reads as “for each lesson title in the array.” Use it when you need every entry but do not need the index. Use an indexed loop when the position itself matters, such as when producing a numbered list.
+An array with length `3` has valid indexes `0`, `1`, and `2`; its final valid index is `length - 1`. The indexed `for` loop begins at `0` and continues while `lessonIndex < lessonTitles.length`, so it does not read past the end.
 
-## Fixed size, changeable entries
+`length` is an array field, not a method, so it has no parentheses. This differs from `String.length()`, which the next lesson introduces.
 
-The array's length cannot change after creation. Its entries can change as long as the replacement has the same declared type:
+The enhanced `for` loop reads as “for each lesson title in the array.” Use it when you need every entry but not its position. The loop variable receives the current entry; assigning a different string to `lessonTitle` would not replace an array entry. Use an indexed loop when a position matters or when you need to replace a particular entry.
+
+## Keep the length fixed and update an entry
+
+Save this program as `ReviewScores.java`, then run `java ReviewScores.java`.
 
 ```java
 void main() {
@@ -40,8 +58,24 @@ void main() {
     reviewScores[1] = 87;
     reviewScores[2] = 95;
 
-    IO.println("Latest score: " + reviewScores[2]);
+    reviewScores[1] = 90;
+
+    IO.println("Updated second score: " + reviewScores[1]);
+    IO.println("Number of scores: " + reviewScores.length);
 }
 ```
 
-An index outside the valid range causes an `ArrayIndexOutOfBoundsException`. Keep the initialization, condition, and update parts of an indexed loop aligned with the array's bounds. As practice, add a fourth lesson title, then confirm that both loops include it without changing the loop conditions.
+Expected output:
+
+```text
+Updated second score: 90
+Number of scores: 3
+```
+
+`new int[3]` creates three `int` slots. Each starts as `0`, so initialize a slot before treating it as a real score. A particular array's length cannot change after creation, but an entry can change when its replacement has the same declared type. To use a different length, create a new array: `reviewScores = new int[4]` gives the variable a different four-slot array; it does not enlarge the original. An index outside the valid range causes an `ArrayIndexOutOfBoundsException`.
+
+## Check your understanding
+
+- Add a fourth lesson title and confirm that both loops in `LessonTitles.java` include it without changing the loop conditions.
+- Change the indexed loop condition to `lessonIndex <= lessonTitles.length`, then explain why that attempts to access an invalid position.
+- Explain why `lessonTitles.length` has no parentheses while `courseName.length()` does.

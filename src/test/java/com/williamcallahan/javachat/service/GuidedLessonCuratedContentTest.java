@@ -9,10 +9,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.model.GuidedLesson;
-import com.williamcallahan.javachat.support.PdfCitationEnhancer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -23,11 +21,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import reactor.test.subscriber.TestSubscriber;
 
 /** Verifies curated classpath lesson content remains the single source for guided lesson streaming. */
+@JsonTest
 class GuidedLessonCuratedContentTest {
     private static final String CURATED_LESSON_RESOURCE_DIRECTORY = "guided/lessons/";
     private static final String CURATED_LESSON_RESOURCE_PATTERN = "classpath*:guided/lessons/*.md";
@@ -35,6 +36,9 @@ class GuidedLessonCuratedContentTest {
     private static final String MISSING_CURATED_LESSON_SLUG = "missing-curated-lesson";
     private static final Duration SLOW_SUBSCRIBER_COMPLETION_TIMEOUT = Duration.ofSeconds(1);
     private static final String TEST_JDK_VERSION = "25";
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @Test
     void tocAndCuratedClasspathResourcesHaveExactSlugParity() throws IOException {
@@ -97,9 +101,18 @@ class GuidedLessonCuratedContentTest {
     }
 
     @Test
+    void everyTocLessonDeclaresTechnologyAndCanonicalOfficialDocSetScope() {
+        for (GuidedLesson guidedLesson : curatedTocProvider().getTOC()) {
+            assertFalse(guidedLesson.getTechnology().isBlank());
+            assertFalse(guidedLesson.getDocSet().isEmpty());
+        }
+    }
+
+    @Test
     void rejectsListedLessonWithoutPackagedCuratedMarkdown() {
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
-        GuidedLesson listedLesson = new GuidedLesson(MISSING_CURATED_LESSON_SLUG, "Missing", "", List.of());
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(MISSING_CURATED_LESSON_SLUG);
         when(tocProvider.findBySlug(MISSING_CURATED_LESSON_SLUG)).thenReturn(Optional.of(listedLesson));
 
         GuidedLearningService.CuratedLessonResourceMissingException missingResourceFailure = assertThrows(
@@ -111,8 +124,8 @@ class GuidedLessonCuratedContentTest {
                 missingResourceFailure.getMessage());
     }
 
-    private static GuidedTOCProvider curatedTocProvider() {
-        return new GuidedTOCProvider(new ObjectMapper());
+    private GuidedTOCProvider curatedTocProvider() {
+        return new GuidedTOCProvider(objectMapper);
     }
 
     private static GuidedLearningService curatedLessonService(GuidedTOCProvider tocProvider) {
@@ -122,8 +135,6 @@ class GuidedLessonCuratedContentTest {
                 mock(EnrichmentService.class),
                 mock(ChatService.class),
                 mock(SystemPromptConfig.class),
-                mock(PdfCitationEnhancer.class),
-                new AppProperties(),
                 TEST_JDK_VERSION);
     }
 

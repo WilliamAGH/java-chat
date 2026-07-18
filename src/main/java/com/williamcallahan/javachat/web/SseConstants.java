@@ -32,14 +32,14 @@ public final class SseConstants {
     /** Stable status/error code emitted for non-recoverable stream-provider failures. */
     public static final String STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR = "stream.provider.fatal-error";
 
-    /** Stable status code emitted when citations partially fail but response streaming continues. */
-    public static final String STATUS_CODE_CITATION_PARTIAL_FAILURE = "citation.partial-failure";
+    /** Stable status code emitted when a response stream begins retrieval preparation. */
+    public static final String STATUS_CODE_STREAM_PREPARING = "stream.preparing";
 
     /** Processing stage label for stream-provider diagnostics. */
     public static final String STATUS_STAGE_STREAM = "stream";
 
-    /** Processing stage label for citation diagnostics. */
-    public static final String STATUS_STAGE_CITATION = "citation";
+    /** Processing stage label for response preparation retrieval work. */
+    public static final String STATUS_STAGE_RETRIEVAL = "retrieval";
 
     /** SSE comment content for keepalive heartbeats. */
     public static final String COMMENT_KEEPALIVE = "keepalive";

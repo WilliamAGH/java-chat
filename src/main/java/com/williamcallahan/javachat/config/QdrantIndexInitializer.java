@@ -144,7 +144,7 @@ public class QdrantIndexInitializer {
     }
 
     private void initializeCollectionsAndIndexes() {
-        AppProperties.Qdrant qdrant = appProperties.getQdrant();
+        QdrantProperties qdrant = appProperties.getQdrant();
         List<String> collections = qdrant.getCollections().all();
         String denseVectorName = qdrant.getDenseVectorName();
         String sparseVectorName = qdrant.getSparseVectorName();

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -36,6 +37,8 @@ public class RetrievalService {
     private static final String METADATA_TITLE = "title";
     private static final String METADATA_PACKAGE = "package";
     private static final String METADATA_HASH = "hash";
+    private static final String METADATA_DOC_TYPE = "docType";
+    private static final String DOCUMENT_TYPE_API_DOCS = "api-docs";
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
 
@@ -101,6 +104,42 @@ public class RetrievalService {
     }
 
     /**
+     * Retrieves documents for a query within the caller-owned metadata constraint.
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @return retrieved and reranked documents
+     */
+    public List<Document> retrieve(String query, RetrievalConstraint retrievalConstraint) {
+        return retrieveOutcome(query, retrievalConstraint).documents();
+    }
+
+    /**
+     * Retrieves official documents for static citation discovery using hybrid RRF ranking only.
+     *
+     * <p>Lesson citation panels need a deterministic source list before a learner asks a question.
+     * This operation intentionally uses the Qdrant hybrid ranking already produced by the single
+     * retrieval path and does not make a second LLM reranking request. Chat-answer retrieval
+     * continues to use {@link #retrieve(String)} and its configured reranker.</p>
+     *
+     * @param query citation-discovery query
+     * @param retrievalConstraint exact server-side constraint for the citation sources
+     * @return hybrid-ranked documents limited to the configured citation count
+     */
+    public List<Document> retrieveForCitationDiscovery(String query, RetrievalConstraint retrievalConstraint) {
+        Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
+        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, versionFilter);
+        int citationDocumentLimit = appProperties.getRag().getSearchCitations();
+        return candidateRetrieval.documents().stream()
+                .limit(citationDocumentLimit)
+                .toList();
+    }
+
+    /**
      * Retrieves documents and diagnostic notices for a query.
      */
     public RetrievalOutcome retrieveOutcome(String query) {
@@ -109,21 +148,34 @@ public class RetrievalService {
         }
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
         RetrievalConstraint retrievalConstraint = toRetrievalConstraint(versionFilter);
-        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+        return retrieveOutcome(query, retrievalConstraint, versionFilter);
+    }
 
-        int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
+    /**
+     * Retrieves documents and notices within the caller-owned metadata constraint.
+     *
+     * <p>The same constraint instance is passed to hybrid search so feature-specific source scopes
+     * cannot drift into an unconstrained retrieval path.</p>
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @return retrieval outcome with documents and notices
+     */
+    public RetrievalOutcome retrieveOutcome(String query, RetrievalConstraint retrievalConstraint) {
+        Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
+        if (query == null || query.isBlank()) {
+            return new RetrievalOutcome(List.of(), List.of());
+        }
+        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
+        return retrieveOutcome(query, retrievalConstraint, versionFilter);
+    }
 
-        HybridSearchService.SearchOutcome searchOutcome =
-                hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint);
-        List<Document> candidates = searchOutcome.documents();
-
-        List<Document> filtered = retrievalConstraint.hasServerSideConstraint()
-                ? candidates
-                : applyVersionFilterIfPresent(versionFilter, candidates);
-        List<Document> deduplicatedCandidates = deduplicateByContentHashThenHashlessCanonicalUrl(filtered);
+    private RetrievalOutcome retrieveOutcome(
+            String query, RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
+        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, versionFilter);
 
         List<Document> reranked = rerankerService.rerank(
-                query, deduplicatedCandidates, appProperties.getRag().getSearchReturnK());
+                query, candidateRetrieval.documents(), appProperties.getRag().getSearchReturnK());
 
         if (!reranked.isEmpty()) {
             Map<String, ?> firstDocMetadata = reranked.get(0).getMetadata();
@@ -134,10 +186,23 @@ public class RetrievalService {
             log.debug("First doc metadata size: {}", metadataSize);
             log.debug("First doc content preview length: {}", previewLength);
         }
+        return new RetrievalOutcome(reranked, candidateRetrieval.notices());
+    }
+
+    private CandidateRetrieval retrieveCandidates(
+            String query, RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+        int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
+        HybridSearchService.SearchOutcome searchOutcome =
+                hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint);
+        List<Document> filtered = retrievalConstraint.hasServerSideConstraint()
+                ? searchOutcome.documents()
+                : applyVersionFilterIfPresent(versionFilter, searchOutcome.documents());
+        List<Document> deduplicatedCandidates = deduplicateByContentHashThenHashlessCanonicalUrl(filtered);
         List<RetrievalNotice> retrievalNotices = searchOutcome.notices().stream()
                 .map(searchNotice -> new RetrievalNotice(searchNotice.summary(), searchNotice.details()))
                 .toList();
-        return new RetrievalOutcome(reranked, retrievalNotices);
+        return new CandidateRetrieval(deduplicatedCandidates, retrievalNotices);
     }
 
     /**
@@ -183,6 +248,14 @@ public class RetrievalService {
         }
         String versionNumber = versionFilter.get().versionNumber();
         return RetrievalConstraint.forDocVersion(versionNumber);
+    }
+
+    /** Holds hybrid-ranked candidates before the operation-specific final ordering step. */
+    private record CandidateRetrieval(List<Document> documents, List<RetrievalNotice> notices) {
+        private CandidateRetrieval {
+            documents = documents == null ? List.of() : List.copyOf(documents);
+            notices = notices == null ? List.of() : List.copyOf(notices);
+        }
     }
 
     private List<Document> deduplicateByContentHashThenHashlessCanonicalUrl(List<Document> documents) {
@@ -294,7 +367,8 @@ public class RetrievalService {
                 String rawUrl = stringMetadataValue(sourceDocMetadata, METADATA_URL);
                 String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
                 String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
-                String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName);
+                String documentType = stringMetadataValue(sourceDocMetadata, METADATA_DOC_TYPE);
+                String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
                 String citationIdentity = citationIdentityFor(rawUrl, url);
                 if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
@@ -342,19 +416,22 @@ public class RetrievalService {
     }
 
     /**
-     * Refines a raw document URL through nested-type and member-anchor resolution, then canonicalizes.
+     * Refines a raw document URL and gates Javadoc member anchors to {@code api-docs} metadata.
      *
      */
-    private String refineCitationUrl(String rawUrl, String docText, String packageName) {
+    private String refineCitationUrl(String rawUrl, String documentText, String packageName, String documentType) {
         String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
-        String nestedTypeRefinedUrl =
-                com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(normalizedUrl, docText);
-        String memberAnchorRefinedUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
-                nestedTypeRefinedUrl, docText, packageName);
-        if (memberAnchorRefinedUrl.startsWith("http://") || memberAnchorRefinedUrl.startsWith("https://")) {
-            return DocsSourceRegistry.canonicalizeHttpDocUrl(memberAnchorRefinedUrl);
+        String citationUrl = normalizedUrl;
+        if (DOCUMENT_TYPE_API_DOCS.equals(documentType)) {
+            String nestedTypeRefinedUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(
+                    citationUrl, documentText);
+            citationUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
+                    nestedTypeRefinedUrl, documentText, packageName);
         }
-        return memberAnchorRefinedUrl;
+        if (citationUrl.startsWith("http://") || citationUrl.startsWith("https://")) {
+            return DocsSourceRegistry.canonicalizeHttpDocUrl(citationUrl);
+        }
+        return citationUrl;
     }
 
     private String trimmedCitationSnippet(String sourceText) {

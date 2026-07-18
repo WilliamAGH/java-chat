@@ -3,9 +3,12 @@ package com.williamcallahan.javachat.service.ingestion;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -13,6 +16,7 @@ import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
 import com.williamcallahan.javachat.service.FileOperationsService;
 import com.williamcallahan.javachat.service.HtmlContentExtractor;
 import com.williamcallahan.javachat.service.HybridVectorService;
@@ -36,7 +40,6 @@ import org.slf4j.LoggerFactory;
 class MalformedUtf8LocalDocsIngestionTest {
 
     private static final String NON_UTF8_HTML = "<html><body>caf\u00e9</body></html>";
-    private static final String FILE_FINGERPRINT = "malformed-utf8-fingerprint";
     private static final String UTF8_DIAGNOSTIC_HINT = "file encoding issue - not valid UTF-8";
 
     private final Logger ingestionProcessorLogger =
@@ -63,8 +66,8 @@ class MalformedUtf8LocalDocsIngestionTest {
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
-        when(localStoreService.computeFileContentFingerprint(malformedHtmlFile)).thenReturn(FILE_FINGERPRINT);
-        when(localStoreService.readFileIngestionRecord(anyString())).thenReturn(Optional.empty());
+        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
+        when(fileMarkerStore.readFileIngestionRecord(anyString())).thenReturn(Optional.empty());
 
         LocalDocsFileIngestionProcessor ingestionProcessor = new LocalDocsFileIngestionProcessor(
                 new FileContentServices(
@@ -77,8 +80,9 @@ class MalformedUtf8LocalDocsIngestionTest {
                 new IngestionStorageServices(
                         hybridVectorService,
                         chunkProcessingService,
-                        mock(ContentHasher.class),
+                        new ContentHasher(),
                         localStoreService,
+                        fileMarkerStore,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),
                 new IngestionProvenanceDeriver(),
@@ -96,6 +100,8 @@ class MalformedUtf8LocalDocsIngestionTest {
         assertTrue(ingestionProcessorLogEvents.events().stream()
                 .anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR
                         && logEvent.getFormattedMessage().contains("MalformedInputException")));
-        verifyNoInteractions(chunkProcessingService, hybridVectorService);
+        verify(hybridVectorService).resolveCollectionName(any());
+        verifyNoMoreInteractions(hybridVectorService);
+        verifyNoInteractions(chunkProcessingService, localStoreService);
     }
 }

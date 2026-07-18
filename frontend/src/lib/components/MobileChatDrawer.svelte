@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Snippet } from "svelte";
     import type { ChatMessage } from "../services/chat";
+    import type { CitationPartialFailureStatus } from "../validation/schemas";
     import ChatInput from "./ChatInput.svelte";
     import NewContentIndicator from "./NewContentIndicator.svelte";
     import StreamingMessagesList from "./StreamingMessagesList.svelte";
@@ -21,6 +22,7 @@
         isStreaming: boolean;
         statusMessage: string;
         statusDetails: string;
+        citationWarning: CitationPartialFailureStatus | null;
         /** Whether the current in-progress assistant message has content yet. */
         hasContent: boolean;
         /** Stable identifier for the in-progress assistant message (if present). */
@@ -52,6 +54,7 @@
         isStreaming,
         statusMessage,
         statusDetails,
+        citationWarning,
         hasContent,
         streamingMessageId = null,
         messageRenderer,
@@ -193,6 +196,7 @@
                         {isStreaming}
                         {statusMessage}
                         {statusDetails}
+                        {citationWarning}
                         {hasContent}
                         {streamingMessageId}
                         {messageRenderer}

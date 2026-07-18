@@ -159,6 +159,7 @@
             );
         } catch (error) {
             if (!isActiveChatStream(chatStreamController)) return;
+            streaming.failStream();
             const errorMessage =
                 error instanceof Error
                     ? error.message
@@ -213,7 +214,9 @@
             if (activeChatStreamController === chatStreamController) {
                 activeChatStreamController = null;
                 if (!chatStreamController.signal.aborted) {
-                    streaming.finishStream();
+                    if (streaming.isStreaming) {
+                        streaming.finishStream();
+                    }
                     activeStreamingMessageId = null;
                     // No final scroll - user maintains their position
                 }
@@ -242,6 +245,7 @@
                         isStreaming={streaming.isStreaming}
                         statusMessage={streaming.statusMessage}
                         statusDetails={streaming.statusDetails}
+                        citationWarning={streaming.citationWarning}
                         hasContent={hasStreamingContent}
                         streamingMessageId={activeStreamingMessageId}
                     >

@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.service.ContentHasher;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import java.io.IOException;
@@ -25,6 +27,7 @@ public class IngestedFilePruneService {
     private final HybridVectorService hybridVectorService;
     private final LocalStoreService localStoreService;
     private final ContentHasher contentHasher;
+    private final FileIngestionMarkerStore fileMarkerStore;
 
     /**
      * Creates a prune service for vector-store and local-marker cleanup.
@@ -32,12 +35,17 @@ public class IngestedFilePruneService {
      * @param hybridVectorService hybrid vector storage service
      * @param localStoreService local marker and parsed-chunk store
      * @param contentHasher content hash helper
+     * @param fileMarkerStore canonical file-level marker store
      */
     public IngestedFilePruneService(
-            HybridVectorService hybridVectorService, LocalStoreService localStoreService, ContentHasher contentHasher) {
+            HybridVectorService hybridVectorService,
+            LocalStoreService localStoreService,
+            ContentHasher contentHasher,
+            FileIngestionMarkerStore fileMarkerStore) {
         this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
         this.localStoreService = Objects.requireNonNull(localStoreService, "localStoreService");
         this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
+        this.fileMarkerStore = Objects.requireNonNull(fileMarkerStore, "fileMarkerStore");
     }
 
     /**
@@ -47,25 +55,58 @@ public class IngestedFilePruneService {
      * @param sourceUrl authoritative URL key for file markers and vectors
      * @param previousFileRecord previous file marker record, or {@code null} if unavailable
      * @throws IOException when local marker or parsed-chunk cleanup fails
+     * @throws IllegalArgumentException when the collection name is blank
      */
     public void pruneCollectionFileStrict(
-            String collectionName, String sourceUrl, LocalStoreService.FileIngestionRecord previousFileRecord)
-            throws IOException {
+            String collectionName, String sourceUrl, FileIngestionRecord previousFileRecord) throws IOException {
         Objects.requireNonNull(collectionName, "collectionName");
+        pruneFileStrict(List.of(collectionName), sourceUrl, previousFileRecord);
+    }
+
+    /**
+     * Strictly prunes a file from every specified collection before deleting its local ingestion state.
+     *
+     * <p>Deferring local cleanup until every vector deletion succeeds preserves the marker needed to retry
+     * a partially completed legacy-record prune.</p>
+     *
+     * @param collectionNames target Qdrant collection names
+     * @param sourceUrl authoritative URL key for file markers and vectors
+     * @param previousFileRecord previous file marker record, or {@code null} if unavailable
+     * @throws IOException when local marker or parsed-chunk cleanup fails
+     * @throws IllegalArgumentException when no collection names are provided or any name is blank
+     */
+    public void pruneCollectionsFileStrict(
+            List<String> collectionNames, String sourceUrl, FileIngestionRecord previousFileRecord) throws IOException {
+        Objects.requireNonNull(collectionNames, "collectionNames");
+        if (collectionNames.isEmpty()) {
+            throw new IllegalArgumentException("At least one collection name is required for file pruning");
+        }
+        pruneFileStrict(List.copyOf(collectionNames), sourceUrl, previousFileRecord);
+    }
+
+    private void pruneFileStrict(List<String> collectionNames, String sourceUrl, FileIngestionRecord previousFileRecord)
+            throws IOException {
         Objects.requireNonNull(sourceUrl, "sourceUrl");
 
-        hybridVectorService.deleteByUrl(collectionName, sourceUrl);
+        for (String collectionName : collectionNames) {
+            if (collectionName.isBlank()) {
+                throw new IllegalArgumentException("Collection names must not be blank for file pruning");
+            }
+        }
+        for (String collectionName : collectionNames) {
+            hybridVectorService.deleteByUrl(collectionName, sourceUrl);
+        }
 
         List<String> staleChunkHashes = resolveChunkHashesForPrune(sourceUrl, previousFileRecord);
         if (!staleChunkHashes.isEmpty()) {
             localStoreService.deleteChunkIngestionMarkers(staleChunkHashes);
         }
         localStoreService.deleteParsedChunksForUrl(sourceUrl);
-        localStoreService.deleteFileIngestionRecord(sourceUrl);
+        fileMarkerStore.deleteFileIngestionRecord(sourceUrl);
     }
 
-    private List<String> resolveChunkHashesForPrune(
-            String sourceUrl, LocalStoreService.FileIngestionRecord previousFileRecord) throws IOException {
+    private List<String> resolveChunkHashesForPrune(String sourceUrl, FileIngestionRecord previousFileRecord)
+            throws IOException {
         if (previousFileRecord != null) {
             List<String> previousHashes = previousFileRecord.chunkHashes();
             if (previousHashes != null && !previousHashes.isEmpty()) {

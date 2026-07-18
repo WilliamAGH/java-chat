@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://docs.example.test/reference/collections-overview.html</loc></url>
+  <url><loc>https://docs.example.test/reference/getting-started</loc></url>
+  <url><loc>https://docs.example.test/reference/collections-overview.html#duplicate-fragment</loc></url>
+  <url><loc>https://docs.example.test/reference-other/not-allowed.html</loc></url>
+  <url><loc>https://external.example.test/reference/not-allowed.html</loc></url>
+</urlset>

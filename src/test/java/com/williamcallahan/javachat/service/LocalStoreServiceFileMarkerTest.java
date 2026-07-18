@@ -19,99 +19,153 @@ import org.junit.jupiter.api.io.TempDir;
 class LocalStoreServiceFileMarkerTest {
 
     @Test
-    void recordsAndReadsFileIngestionRecordWithChunkHashes(@TempDir Path tempDir) throws IOException {
-        Path snapshotDir = tempDir.resolve("snapshots");
-        Path parsedDir = tempDir.resolve("parsed");
-        Path indexDir = tempDir.resolve("index");
+    void recordsAndReadsFileIngestionRecordWithChunkHashes(@TempDir Path temporaryDirectory) throws IOException {
+        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
+        Path parsedDirectory = temporaryDirectory.resolve("parsed");
+        Path indexDirectory = temporaryDirectory.resolve("index");
 
-        LocalStoreService localStore =
-                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
+        LocalStoreService localStore = new LocalStoreService(
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
         localStore.createStoreDirectories();
 
-        String url = "https://docs.example.com/reference/page.html";
-        long size = 1234L;
-        long mtime = 5678L;
-        String fingerprint = "abc123";
+        String sourceUrl = "https://docs.example.com/reference/page.html";
+        long fileSizeBytes = 1234L;
+        long lastModifiedMillis = 5678L;
+        String ingestionFingerprint = "abc123";
         String extractionSemanticsVersion = "utf8-javadoc-extraction-v1";
-        List<String> hashes = List.of("a1", "b2", "c3");
+        String collectionName = "java-api-docs";
+        List<String> chunkHashes = List.of("a1", "b2", "c3");
 
-        localStore.markFileIngested(
-                url,
-                new LocalStoreService.FileIngestionRecord(
-                        size, mtime, fingerprint, extractionSemanticsVersion, hashes));
+        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
+        fileMarkerStore.markFileIngested(
+                sourceUrl,
+                new FileIngestionMarkerStore.FileIngestionRecord(
+                        fileSizeBytes,
+                        lastModifiedMillis,
+                        ingestionFingerprint,
+                        extractionSemanticsVersion,
+                        collectionName,
+                        chunkHashes));
 
-        LocalStoreService.FileIngestionRecord record =
-                localStore.readFileIngestionRecord(url).orElseThrow();
-        assertEquals(size, record.fileSizeBytes());
-        assertEquals(mtime, record.lastModifiedMillis());
-        assertEquals(fingerprint, record.contentFingerprint());
-        assertEquals(extractionSemanticsVersion, record.extractionSemanticsVersion());
-        assertEquals(hashes, record.chunkHashes());
+        Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
+        assertEquals(
+                List.of(
+                        "size=" + fileSizeBytes,
+                        "mtime=" + lastModifiedMillis,
+                        "fingerprint=" + ingestionFingerprint,
+                        "extractorSemanticsVersion=" + extractionSemanticsVersion,
+                        "collectionName=" + collectionName,
+                        "hash=a1",
+                        "hash=b2",
+                        "hash=c3"),
+                Files.readAllLines(markerPath, StandardCharsets.UTF_8));
 
-        assertTrue(localStore.isFileIngestedAndUnchanged(url, size, mtime));
-        assertFalse(localStore.isFileIngestedAndUnchanged(url, size + 1, mtime));
-        assertFalse(localStore.isFileIngestedAndUnchanged(url, size, mtime + 1));
+        FileIngestionMarkerStore.FileIngestionRecord persistedIngestionRecord =
+                fileMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
+        assertEquals(fileSizeBytes, persistedIngestionRecord.fileSizeBytes());
+        assertEquals(lastModifiedMillis, persistedIngestionRecord.lastModifiedMillis());
+        assertEquals(ingestionFingerprint, persistedIngestionRecord.ingestionFingerprint());
+        assertEquals(extractionSemanticsVersion, persistedIngestionRecord.extractionSemanticsVersion());
+        assertEquals(collectionName, persistedIngestionRecord.collectionName());
+        assertTrue(persistedIngestionRecord.hasCollectionIdentity());
+        assertEquals(chunkHashes, persistedIngestionRecord.chunkHashes());
     }
 
     @Test
-    void deletesParsedChunksForUrlBySafeNamePrefix(@TempDir Path tempDir) throws IOException {
-        Path snapshotDir = tempDir.resolve("snapshots");
-        Path parsedDir = tempDir.resolve("parsed");
-        Path indexDir = tempDir.resolve("index");
-
-        LocalStoreService localStore =
-                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
+    void readsFileMarkerWithoutCollectionIdentity(@TempDir Path temporaryDirectory) throws IOException {
+        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
+        Path parsedDirectory = temporaryDirectory.resolve("parsed");
+        Path indexDirectory = temporaryDirectory.resolve("index");
+        LocalStoreService localStore = new LocalStoreService(
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
         localStore.createStoreDirectories();
+        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
 
-        String url = "https://docs.example.com/api/foo.html";
-        String safeName = localStore.toSafeName(url);
+        String sourceUrl = "https://docs.example.com/reference/unbound.html";
+        Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
+        Files.writeString(
+                markerPath,
+                "size=123\nmtime=456\nfingerprint=unbound\nextractorSemanticsVersion=v1\nhash=old-hash\n",
+                StandardCharsets.UTF_8);
 
-        Path shouldDelete = parsedDir.resolve(safeName + "_0_deadbeef.txt");
-        Files.writeString(shouldDelete, "chunk", StandardCharsets.UTF_8);
+        FileIngestionMarkerStore.FileIngestionRecord unboundIngestionRecord =
+                fileMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
 
-        Path shouldRemain = parsedDir.resolve(localStore.toSafeName("https://other.example.com/x") + "_0_deadbeef.txt");
-        Files.writeString(shouldRemain, "chunk", StandardCharsets.UTF_8);
-
-        localStore.deleteParsedChunksForUrl(url);
-
-        assertFalse(Files.exists(shouldDelete), "Expected parsed chunk for URL to be deleted");
-        assertTrue(Files.exists(shouldRemain), "Expected unrelated parsed chunk to remain");
+        assertFalse(unboundIngestionRecord.hasCollectionIdentity());
+        assertTrue(unboundIngestionRecord.collectionName().isBlank());
     }
 
     @Test
-    void throwsWhenFileMarkerIsMalformed(@TempDir Path tempDir) throws IOException {
-        Path snapshotDir = tempDir.resolve("snapshots");
-        Path parsedDir = tempDir.resolve("parsed");
-        Path indexDir = tempDir.resolve("index");
+    void bindsMarkerRecordToCanonicalCollectionIdentity() {
+        FileIngestionMarkerStore.FileIngestionRecord unboundIngestionRecord =
+                new FileIngestionMarkerStore.FileIngestionRecord(123L, 456L, "fingerprint", "v1", "", List.of("h1"));
 
-        LocalStoreService localStore =
-                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
-        localStore.createStoreDirectories();
+        FileIngestionMarkerStore.FileIngestionRecord boundIngestionRecord =
+                unboundIngestionRecord.bindCollectionIdentity("github-openai-java-chat");
 
-        String url = "https://docs.example.com/broken.html";
-        Path marker = indexDir.resolve("file_" + localStore.toSafeName(url) + ".marker");
-        Files.writeString(marker, "size=not-a-number\n", StandardCharsets.UTF_8);
-
-        assertThrows(IllegalStateException.class, () -> localStore.readFileIngestionRecord(url));
+        assertEquals("github-openai-java-chat", boundIngestionRecord.collectionName());
+        assertEquals(unboundIngestionRecord.fileSizeBytes(), boundIngestionRecord.fileSizeBytes());
+        assertEquals(unboundIngestionRecord.lastModifiedMillis(), boundIngestionRecord.lastModifiedMillis());
+        assertEquals(unboundIngestionRecord.ingestionFingerprint(), boundIngestionRecord.ingestionFingerprint());
+        assertEquals(
+                unboundIngestionRecord.extractionSemanticsVersion(), boundIngestionRecord.extractionSemanticsVersion());
+        assertEquals(unboundIngestionRecord.chunkHashes(), boundIngestionRecord.chunkHashes());
     }
 
     @Test
-    void computesDeterministicFileFingerprint(@TempDir Path tempDir) throws IOException {
-        Path snapshotDir = tempDir.resolve("snapshots");
-        Path parsedDir = tempDir.resolve("parsed");
-        Path indexDir = tempDir.resolve("index");
+    void deletesParsedChunksForUrlBySafeNamePrefix(@TempDir Path temporaryDirectory) throws IOException {
+        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
+        Path parsedDirectory = temporaryDirectory.resolve("parsed");
+        Path indexDirectory = temporaryDirectory.resolve("index");
 
-        LocalStoreService localStore =
-                new LocalStoreService(snapshotDir.toString(), parsedDir.toString(), indexDir.toString(), null);
+        LocalStoreService localStore = new LocalStoreService(
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
         localStore.createStoreDirectories();
 
-        Path first = tempDir.resolve("first.html");
-        Path second = tempDir.resolve("second.html");
-        Files.writeString(first, "<h1>same</h1>", StandardCharsets.UTF_8);
-        Files.writeString(second, "<h1>same</h1>", StandardCharsets.UTF_8);
+        String sourceUrl = "https://docs.example.com/api/foo.html";
+        String safeSourceName = localStore.toSafeName(sourceUrl);
 
-        String firstFingerprint = localStore.computeFileContentFingerprint(first);
-        String secondFingerprint = localStore.computeFileContentFingerprint(second);
+        Path parsedChunkToDelete = parsedDirectory.resolve(safeSourceName + "_0_deadbeef.txt");
+        Files.writeString(parsedChunkToDelete, "chunk", StandardCharsets.UTF_8);
+
+        Path unrelatedParsedChunk =
+                parsedDirectory.resolve(localStore.toSafeName("https://other.example.com/x") + "_0_deadbeef.txt");
+        Files.writeString(unrelatedParsedChunk, "chunk", StandardCharsets.UTF_8);
+
+        localStore.deleteParsedChunksForUrl(sourceUrl);
+
+        assertFalse(Files.exists(parsedChunkToDelete), "Expected parsed chunk for URL to be deleted");
+        assertTrue(Files.exists(unrelatedParsedChunk), "Expected unrelated parsed chunk to remain");
+    }
+
+    @Test
+    void throwsWhenFileMarkerIsMalformed(@TempDir Path temporaryDirectory) throws IOException {
+        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
+        Path parsedDirectory = temporaryDirectory.resolve("parsed");
+        Path indexDirectory = temporaryDirectory.resolve("index");
+
+        LocalStoreService localStore = new LocalStoreService(
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
+        localStore.createStoreDirectories();
+        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
+
+        String sourceUrl = "https://docs.example.com/broken.html";
+        Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
+        Files.writeString(markerPath, "size=not-a-number\n", StandardCharsets.UTF_8);
+
+        assertThrows(IllegalStateException.class, () -> fileMarkerStore.readFileIngestionRecord(sourceUrl));
+    }
+
+    @Test
+    void computesDeterministicFileFingerprint(@TempDir Path temporaryDirectory) throws IOException {
+        Path firstDocument = temporaryDirectory.resolve("first.html");
+        Path secondDocument = temporaryDirectory.resolve("second.html");
+        Files.writeString(firstDocument, "<h1>same</h1>", StandardCharsets.UTF_8);
+        Files.writeString(secondDocument, "<h1>same</h1>", StandardCharsets.UTF_8);
+
+        ContentHasher contentHasher = new ContentHasher();
+        String firstFingerprint = contentHasher.sha256(firstDocument);
+        String secondFingerprint = contentHasher.sha256(secondDocument);
 
         assertEquals(firstFingerprint, secondFingerprint);
         assertFalse(firstFingerprint.isBlank());

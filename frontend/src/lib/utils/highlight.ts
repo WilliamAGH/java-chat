@@ -1,3 +1,5 @@
+import type { HLJSApi, LanguageFn } from "highlight.js";
+
 /**
  * Syntax highlighting utilities using highlight.js.
  *
@@ -12,7 +14,20 @@ const UNHIGHLIGHTED_CODE_SELECTOR = "pre code:not(.hljs)";
 let languagesRegistered = false;
 
 /** Cached highlight.js instance after first load. */
-let hljsInstance: typeof import("highlight.js/lib/core").default | null = null;
+let highlightJsInstance: HLJSApi | null = null;
+
+/**
+ * Registers a language definition only when the shared highlighter does not already know it.
+ */
+function registerLanguageIfMissing(
+  highlightJs: HLJSApi,
+  languageName: string,
+  languageDefinition: LanguageFn,
+): void {
+  if (!highlightJs.getLanguage(languageName)) {
+    highlightJs.registerLanguage(languageName, languageDefinition);
+  }
+}
 
 /**
  * Dynamically imports highlight.js core and registers all supported languages.
@@ -20,31 +35,56 @@ let hljsInstance: typeof import("highlight.js/lib/core").default | null = null;
  *
  * @returns Promise resolving to the highlight.js instance
  */
-async function loadHighlightJs(): Promise<typeof import("highlight.js/lib/core").default> {
-  if (hljsInstance && languagesRegistered) {
-    return hljsInstance;
+async function loadHighlightJs(): Promise<HLJSApi> {
+  if (highlightJsInstance && languagesRegistered) {
+    return highlightJsInstance;
   }
 
-  const [hljs, java, xml, json, bash] = await Promise.all([
+  const [
+    highlightJsModule,
+    java,
+    xml,
+    json,
+    bash,
+    plaintext,
+    properties,
+    kotlin,
+    scala,
+    groovy,
+    clojure,
+  ] = await Promise.all([
     import("highlight.js/lib/core"),
     import("highlight.js/lib/languages/java"),
     import("highlight.js/lib/languages/xml"),
     import("highlight.js/lib/languages/json"),
     import("highlight.js/lib/languages/bash"),
+    import("highlight.js/lib/languages/plaintext"),
+    import("highlight.js/lib/languages/properties"),
+    import("highlight.js/lib/languages/kotlin"),
+    import("highlight.js/lib/languages/scala"),
+    import("highlight.js/lib/languages/groovy"),
+    import("highlight.js/lib/languages/clojure"),
   ]);
 
-  hljsInstance = hljs.default;
+  const highlightJs = highlightJsModule.default;
+  highlightJsInstance = highlightJs;
 
   // Register languages only once
   if (!languagesRegistered) {
-    if (!hljsInstance.getLanguage("java")) hljsInstance.registerLanguage("java", java.default);
-    if (!hljsInstance.getLanguage("xml")) hljsInstance.registerLanguage("xml", xml.default);
-    if (!hljsInstance.getLanguage("json")) hljsInstance.registerLanguage("json", json.default);
-    if (!hljsInstance.getLanguage("bash")) hljsInstance.registerLanguage("bash", bash.default);
+    registerLanguageIfMissing(highlightJs, "java", java.default);
+    registerLanguageIfMissing(highlightJs, "xml", xml.default);
+    registerLanguageIfMissing(highlightJs, "json", json.default);
+    registerLanguageIfMissing(highlightJs, "bash", bash.default);
+    registerLanguageIfMissing(highlightJs, "plaintext", plaintext.default);
+    registerLanguageIfMissing(highlightJs, "properties", properties.default);
+    registerLanguageIfMissing(highlightJs, "kotlin", kotlin.default);
+    registerLanguageIfMissing(highlightJs, "scala", scala.default);
+    registerLanguageIfMissing(highlightJs, "groovy", groovy.default);
+    registerLanguageIfMissing(highlightJs, "clojure", clojure.default);
     languagesRegistered = true;
   }
 
-  return hljsInstance;
+  return highlightJs;
 }
 
 /**
@@ -59,9 +99,9 @@ export async function highlightCodeBlocks(container: HTMLElement): Promise<void>
     return;
   }
 
-  const hljs = await loadHighlightJs();
+  const highlightJs = await loadHighlightJs();
   codeBlocks.forEach((block) => {
-    hljs.highlightElement(block);
+    highlightJs.highlightElement(block);
   });
 }
 

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.QdrantConnectionProperties;
 import com.williamcallahan.javachat.config.QdrantRestConnection;
 import java.time.Duration;
 import java.time.Instant;
@@ -150,7 +151,7 @@ class ExternalServiceHealthTest {
         DeferredConnectivityExchange deferredConnectivityExchange = new DeferredConnectivityExchange();
         ExternalServiceHealth externalServiceHealth = new ExternalServiceHealth(
                 WebClient.builder().exchangeFunction(deferredConnectivityExchange),
-                new QdrantRestConnection("qdrant.test", QDRANT_GRPC_PORT, false, ""),
+                new QdrantRestConnection(new QdrantConnectionProperties("qdrant.test", QDRANT_GRPC_PORT, false, "")),
                 new AppProperties());
 
         externalServiceHealth.init();

@@ -1,14 +1,11 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { svelteTesting } from "@testing-library/svelte/vite";
+
+const COMPONENT_TEST_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
-  plugins: [svelte({ hot: !process.env.VITEST })],
-  // Vitest runs modules through Vite's SSR pipeline by default, which can cause
-  // conditional exports to resolve Svelte's server entry (where `mount()` is unavailable).
-  // Force browser conditions so component tests can mount under jsdom.
-  resolve: {
-    conditions: ["module", "browser", "development"],
-  },
+  plugins: [svelte({ hot: !process.env.VITEST }), svelteTesting()],
   server: {
     fs: {
       allow: [".."],
@@ -19,6 +16,7 @@ export default defineConfig({
     globals: true,
     include: ["src/**/*.{test,spec}.{js,ts}"],
     setupFiles: ["./src/test/setup.ts"],
+    testTimeout: COMPONENT_TEST_TIMEOUT_MS,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

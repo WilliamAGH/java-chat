@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
+import { createCitationPartialFailureStatusFixture } from "../../test/citationPartialFailureStatus";
+import { createGuidedLessonFixture } from "../../test/guidedLesson";
 
+type FetchTocFunction = typeof import("../services/guided").fetchTOC;
+type GuidedLesson = Awaited<ReturnType<FetchTocFunction>>[number];
 type GuidedCitationFetchResult = Awaited<
   ReturnType<typeof import("../services/guided").fetchGuidedLessonCitations>
 >;
@@ -9,10 +13,12 @@ type GuidedCitationFetchOptions = Parameters<
   typeof import("../services/guided").fetchGuidedLessonCitations
 >[1];
 
-const fetchTocMock = vi.fn();
+const fetchTocMock = vi.fn<FetchTocFunction>();
 const streamLessonContentMock = vi.fn();
 const fetchGuidedLessonCitationsMock = vi.fn();
 const streamGuidedChatMock = vi.fn();
+const TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE = "The guided provider ended the stream";
+const TEST_GUIDED_LESSON = createGuidedLessonFixture("intro", "Test Lesson", "Lesson summary");
 const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
 const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
 const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
@@ -33,6 +39,30 @@ vi.mock("../services/guided", async () => {
 async function renderLearnView() {
   const LearnViewComponent = (await import("./LearnView.svelte")).default;
   return render(LearnViewComponent);
+}
+
+async function openLessonAndSendMessage(
+  learnView: Awaited<ReturnType<typeof renderLearnView>>,
+  lessonName: RegExp,
+  guidedQuestion: string,
+): Promise<void> {
+  await fireEvent.click(await learnView.findByRole("button", { name: lessonName }));
+  await fireEvent.input(learnView.getByLabelText("Message input"), {
+    target: { value: guidedQuestion },
+  });
+  await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+}
+
+function configureLessonCatalog(...guidedLessons: GuidedLesson[]): void {
+  fetchTocMock.mockResolvedValue(guidedLessons);
+}
+
+function configureLoadedLesson(guidedLesson: GuidedLesson): void {
+  configureLessonCatalog(guidedLesson);
+  streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+    lessonStreamCallbacks.onChunk("# Lesson");
+  });
+  fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
 }
 
 function configureGuidedChatWithPendingStream() {
@@ -93,6 +123,7 @@ describe("LearnView guided chat streaming stability", () => {
     streamLessonContentMock.mockReset();
     fetchGuidedLessonCitationsMock.mockReset();
     streamGuidedChatMock.mockReset();
+    configureLoadedLesson(TEST_GUIDED_LESSON);
   });
 
   afterEach(() => {
@@ -101,15 +132,6 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   it("keeps the All Lessons back control named when its visual label is hidden on mobile", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
-
-    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
-      callbacks.onChunk("# Lesson");
-    });
-    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
-
     const { findByRole } = await renderLearnView();
     const lessonButton = await findByRole("button", { name: /test lesson/i });
     await fireEvent.click(lessonButton);
@@ -122,16 +144,25 @@ describe("LearnView guided chat streaming stability", () => {
     expect(await findByRole("button", { name: /test lesson/i })).toBeInTheDocument();
   });
 
-  it("keeps the guided assistant message DOM node stable when the stream completes", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
+  it("returns focus to the mobile chat trigger after closing the drawer", async () => {
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
 
-    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
-      callbacks.onChunk("# Lesson");
+    const mobileChatTrigger = learnView.getByRole("button", {
+      name: "Ask questions about this lesson",
     });
-    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+    mobileChatTrigger.focus();
+    await fireEvent.click(mobileChatTrigger);
 
+    const closeChatButton = await learnView.findByRole("button", { name: "Close chat" });
+    closeChatButton.focus();
+    await fireEvent.click(closeChatButton);
+    await tick();
+
+    expect(mobileChatTrigger).toHaveFocus();
+  });
+
+  it("keeps the guided assistant message DOM node stable when the stream completes", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected guided stream completion callback to be set");
     };
@@ -149,22 +180,10 @@ describe("LearnView guided chat streaming stability", () => {
       });
     });
 
-    const { findByRole, getByLabelText, getByRole, container, findByText } =
-      await renderLearnView();
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Hi");
 
-    const lessonButton = await findByRole("button", { name: /test lesson/i });
-    await fireEvent.click(lessonButton);
-
-    const inputElement = getByLabelText("Message input");
-    if (!(inputElement instanceof HTMLTextAreaElement)) {
-      throw new Error("Expected message input element to be a textarea");
-    }
-    await fireEvent.input(inputElement, { target: { value: "Hi" } });
-
-    const sendButton = getByRole("button", { name: "Send message" });
-    await fireEvent.click(sendButton);
-
-    const assistantTextElement = await findByText("Hello");
+    const assistantTextElement = await learnView.findByText("Hello");
     await tick();
 
     const assistantMessageElement = assistantTextElement.closest(
@@ -173,31 +192,82 @@ describe("LearnView guided chat streaming stability", () => {
     expect(assistantMessageElement).not.toBeNull();
 
     expect(
-      container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
+      learnView.container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
     ).not.toBeNull();
 
     completeStream();
     await tick();
 
-    const assistantTextElementAfter = await findByText("Hello");
+    const assistantTextElementAfter = await learnView.findByText("Hello");
     const assistantMessageElementAfter = assistantTextElementAfter.closest(
       ".chat-panel--desktop .message.assistant",
     );
 
     expect(assistantMessageElementAfter).toBe(assistantMessageElement);
     expect(
-      container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
+      learnView.container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
     ).toBeNull();
   });
 
-  it("shows the provider selected for the active guided stream", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
-    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
-      lessonStreamCallbacks.onChunk("# Lesson");
+  it("keeps a nonzero guided citation failure visible after stream completion", async () => {
+    const citationWarning = createCitationPartialFailureStatusFixture();
+    let completeStream: () => void = () => {
+      throw new Error("Expected guided stream completion callback to be set");
+    };
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, streamCallbacks) => {
+        streamCallbacks.onStatus?.(citationWarning);
+        streamCallbacks.onChunk("Records are immutable data carriers.");
+        return new Promise<void>((resolve) => {
+          completeStream = resolve;
+        });
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    const warningRegion = await learnView.findByRole("status", {
+      name: "Citation warning",
     });
-    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+    expect(warningRegion).toHaveTextContent(citationWarning.message);
+
+    completeStream();
+    await vi.waitFor(() =>
+      expect(
+        learnView.container.querySelector(
+          ".chat-panel--desktop .message.assistant .cursor.visible",
+        ),
+      ).toBeNull(),
+    );
+
+    expect(learnView.getByRole("status", { name: "Citation warning" })).toBe(warningRegion);
+  });
+
+  it("removes a guided citation warning when the response stream fails", async () => {
+    const citationWarning = createCitationPartialFailureStatusFixture();
+    const guidedStreamFailure = Promise.withResolvers<void>();
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, streamCallbacks) => {
+        streamCallbacks.onStatus?.(citationWarning);
+        streamCallbacks.onChunk("Incomplete guided response");
+        return guidedStreamFailure.promise;
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+    expect(await learnView.findByRole("status", { name: "Citation warning" })).toHaveTextContent(
+      citationWarning.message,
+    );
+
+    guidedStreamFailure.reject(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    expect(await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE)).toBeInTheDocument();
+    expect(learnView.queryByRole("status", { name: "Citation warning" })).toBeNull();
+  });
+
+  it("shows the provider selected for the active guided stream", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {
         callbacks.onProvider?.({ provider: "GitHub Models" });
@@ -206,19 +276,12 @@ describe("LearnView guided chat streaming stability", () => {
     );
 
     const learnView = await renderLearnView();
-    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
-    await fireEvent.input(learnView.getByLabelText("Message input"), {
-      target: { value: "Explain records" },
-    });
-    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
 
     expect(await learnView.findAllByText("Provider: GitHub Models")).not.toHaveLength(0);
   });
 
   it("clears the new-updates indicator when clearing chat", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -243,15 +306,10 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   it("clears the new-updates indicator when switching lessons", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Intro Lesson", summary: "Lesson summary", keywords: [] },
-      {
-        slug: "classes",
-        title: "Classes Lesson",
-        summary: "Classes summary",
-        keywords: [],
-      },
-    ]);
+    configureLessonCatalog(
+      createGuidedLessonFixture("intro", "Intro Lesson", "Lesson summary"),
+      createGuidedLessonFixture("classes", "Classes Lesson", "Classes summary"),
+    );
 
     const learnView = await openLessonWithPendingNewUpdatesIndicator(/intro lesson/i);
 
@@ -264,15 +322,6 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   it("cancels the guided stream and clears messages without late writes after clear chat", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
-
-    streamLessonContentMock.mockImplementation(async (_slug, callbacks) => {
-      callbacks.onChunk("# Lesson");
-    });
-    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
-
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -359,9 +408,6 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   it("ignores stale citations when the same lesson is reselected", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
     streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
       lessonStreamCallbacks.onChunk("# Lesson");
     });
@@ -404,9 +450,6 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   it("aborts lesson and guided streams when the view unmounts", async () => {
-    fetchTocMock.mockResolvedValue([
-      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
-    ]);
     let lessonStreamSignal: AbortSignal | undefined;
     streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
       lessonStreamSignal = lessonStreamCallbacks.signal;

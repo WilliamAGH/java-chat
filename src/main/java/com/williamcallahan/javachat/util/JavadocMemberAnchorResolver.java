@@ -108,9 +108,12 @@ final class JavadocMemberAnchorResolver {
 
         String[] parameterTokens = splitParams(trimmedParams);
         StringBuilder canonicalBuilder = new StringBuilder();
-        for (String token : parameterTokens) {
+        for (String rawParameterToken : parameterTokens) {
+            if (!representsDeclarationParameter(rawParameterToken)) {
+                return Optional.empty();
+            }
             Optional<String> canonicalType =
-                    JavadocTypeCanonicalizer.canonicalizeType(token.trim(), packageName, fullClassName);
+                    JavadocTypeCanonicalizer.canonicalizeType(rawParameterToken.trim(), packageName, fullClassName);
             if (canonicalType.isEmpty()) {
                 return Optional.empty(); // abort if an unknown type can't be resolved confidently
             }
@@ -120,6 +123,36 @@ final class JavadocMemberAnchorResolver {
             canonicalBuilder.append(canonicalType.get());
         }
         return Optional.of(canonicalBuilder.toString());
+    }
+
+    /**
+     * Distinguishes a declaration parameter from a dotted invocation argument before type
+     * canonicalization loses that context.
+     *
+     * <p>Qualified parameter types in declarations carry a trailing parameter name, whereas
+     * expressions such as {@code this.SomeField} do not. Requiring that name only for dotted
+     * tokens preserves fully qualified declaration types while avoiding speculative anchors from
+     * prose that contains method invocations.</p>
+     */
+    private static boolean representsDeclarationParameter(String rawParameterToken) {
+        String trimmedParameterToken = rawParameterToken.trim();
+        return !trimmedParameterToken.contains(".") || hasTrailingParameterName(trimmedParameterToken);
+    }
+
+    private static boolean hasTrailingParameterName(String parameterDeclaration) {
+        int parameterNameEnd = parameterDeclaration.length();
+        while (parameterNameEnd > 0 && Character.isWhitespace(parameterDeclaration.charAt(parameterNameEnd - 1))) {
+            parameterNameEnd--;
+        }
+        int parameterNameStart = parameterNameEnd;
+        while (parameterNameStart > 0
+                && Character.isJavaIdentifierPart(parameterDeclaration.charAt(parameterNameStart - 1))) {
+            parameterNameStart--;
+        }
+        return parameterNameStart < parameterNameEnd
+                && Character.isJavaIdentifierStart(parameterDeclaration.charAt(parameterNameStart))
+                && parameterNameStart > 0
+                && Character.isWhitespace(parameterDeclaration.charAt(parameterNameStart - 1));
     }
 
     private static String[] splitParams(String rawParams) {

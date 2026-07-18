@@ -1,12 +1,12 @@
-Java is a language for turning a precise sequence of instructions into a running program. You write source code, the Java tools check and compile it, and the Java runtime starts the program on the Java Virtual Machine (JVM).
+## From source code to a running program
 
-## The Java 25 starting point
+Java turns a precise sequence of instructions into a running program. You write **source code** in a `.java` file. Java checks that source, compiles it for execution, and the Java Virtual Machine (JVM) executes the resulting Java bytecode.
 
-This guided track uses Java 25's compact source file form for early examples. It lets a small program begin with a `main` method, so you can focus on instructions before learning class-related structure. Java still runs the program with the same Java tools used for larger applications.
+Early lessons use Java 25's compact source-file form. It lets a small program begin with `main`, so you can learn instructions before learning class structure. The same Java tools also run larger programs later.
 
 ## Run your first program
 
-Save this code in a file named `HelloJava.java`:
+Save this program as `HelloJava.java`. From the directory containing the file, run `java HelloJava.java`.
 
 ```java
 void main() {
@@ -14,26 +14,49 @@ void main() {
 }
 ```
 
-Then run the source file from a terminal:
+Expected output:
 
-```sh
-java HelloJava.java
+```text
+Hello, Java!
 ```
 
-The source-code launcher compiles that file for this run and starts it. `IO.println` writes a line of text to the terminal.
+`java HelloJava.java` uses the source-file launcher: it compiles the source for that launch and starts the program. If compilation reports an error, `main` does not start. `IO.println` writes one line to the terminal.
 
 ## Read the program
 
-- `main` is the entry point: Java starts executing the program there.
-- Parentheses hold a method's input list. This `main` method does not need input yet, so the parentheses are empty.
-- Curly braces mark the body of the method: the instructions Java should execute.
+- `main` is the entry point: Java starts executing this program there.
+- `void` says this entry method performs its work without returning a value.
+- The parentheses hold a method's inputs. This `main` method needs none yet, so they are empty.
+- Curly braces enclose the method body: the instructions Java executes.
 - A semicolon ends the `IO.println` statement.
-- Text inside double quotes is a `String` literal. Java prints the characters between the quotes, not the quote marks themselves.
+- Text in double quotes is a `String` literal. Java prints the characters inside the quotes, not the quote marks.
 
-The file is source code. Java checks its grammar and types before it runs it. If you miss a semicolon or write an unknown name, Java reports where it found the problem instead of guessing what you meant.
+Java executes statements in order, from the top of the method body to the bottom. Save this second program as `StudySteps.java`, then run `java StudySteps.java`.
 
-## Build a useful habit
+```java
+void main() {
+    IO.println("Open the lesson.");
+    IO.println("Run the example.");
+    IO.println("Check the output.");
+}
+```
 
-Make one small change, run the program, and inspect the exact output. For example, change the greeting to include your name, then add a second `IO.println` call below the first one. Programs execute statements in order, from the top of the method body to the bottom.
+Expected output:
 
-Later lessons introduce variables, decisions, repetition, methods, and explicit classes. The compact form is an on-ramp: the programming ideas you learn here continue to work when a program grows.
+```text
+Open the lesson.
+Run the example.
+Check the output.
+```
+
+## Use compiler feedback
+
+Java checks grammar and types before it runs a source file. A missing semicolon or an unknown name produces a diagnostic that points to the place Java could not understand. Read that diagnostic, make one small correction, and run the program again. Java does not infer the instruction you intended.
+
+## Check your understanding
+
+- Change the greeting to include your name, predict the output, and then run it.
+- Add one more `IO.println` statement to `StudySteps.java`; it should print after the existing three statements.
+- Explain why the quote marks around `"Hello, Java!"` do not appear in the output.
+
+Later lessons add variables, decisions, repetition, methods, and explicit classes. The compact form is an on-ramp: the programming ideas continue to apply as a program grows.

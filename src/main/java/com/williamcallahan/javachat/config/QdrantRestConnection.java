@@ -2,11 +2,11 @@ package com.williamcallahan.javachat.config;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Value;
+import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 /**
- * Centralizes Qdrant REST connection knowledge: host, port mapping, TLS, and API key.
+ * Projects shared Qdrant connection settings into REST URLs and authentication.
  *
  * <p>Spring AI configures the gRPC port (6334 default, 8086 in docker-compose),
  * but health checks, auditing, and index management require the REST port
@@ -15,10 +15,6 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class QdrantRestConnection {
-    private static final String QDRANT_HOST_PROPERTY = "${spring.ai.vectorstore.qdrant.host:localhost}";
-    private static final String QDRANT_PORT_PROPERTY = "${spring.ai.vectorstore.qdrant.port:6334}";
-    private static final String QDRANT_USE_TLS_PROPERTY = "${spring.ai.vectorstore.qdrant.use-tls:false}";
-    private static final String QDRANT_API_KEY_ENVIRONMENT_VARIABLE = "${QDRANT_API_KEY:}";
     private static final String HTTP_SCHEME = "http";
     private static final String HTTPS_SCHEME = "https";
     private static final String URL_SCHEME_SEPARATOR = "://";
@@ -38,31 +34,15 @@ public class QdrantRestConnection {
     /** Docker compose REST port mapping used in this repository. */
     private static final int DOCKER_REST_PORT = 8087;
 
-    private final String host;
-
-    private final int configuredPort;
-
-    private final boolean useTls;
-
-    private final String apiKey;
+    private final QdrantConnectionProperties connectionProperties;
 
     /**
-     * Creates a connection descriptor from Spring configuration properties.
+     * Creates a REST projection from the canonical Qdrant connection settings.
      *
-     * @param host configured Qdrant host
-     * @param configuredPort configured Qdrant gRPC port
-     * @param useTls true when the connection should use TLS
-     * @param apiKey Qdrant API key from {@code QDRANT_API_KEY}, if any
+     * @param connectionProperties canonical Qdrant connection settings
      */
-    public QdrantRestConnection(
-            @Value(QDRANT_HOST_PROPERTY) String host,
-            @Value(QDRANT_PORT_PROPERTY) int configuredPort,
-            @Value(QDRANT_USE_TLS_PROPERTY) boolean useTls,
-            @Value(QDRANT_API_KEY_ENVIRONMENT_VARIABLE) String apiKey) {
-        this.host = host;
-        this.configuredPort = configuredPort;
-        this.useTls = useTls;
-        this.apiKey = apiKey;
+    public QdrantRestConnection(QdrantConnectionProperties connectionProperties) {
+        this.connectionProperties = Objects.requireNonNull(connectionProperties, "connectionProperties");
     }
 
     /**
@@ -75,9 +55,9 @@ public class QdrantRestConnection {
      * @return base URL for Qdrant REST API calls (for example {@code https://cloud.qdrant.io:6333})
      */
     public String restBaseUrl() {
-        String scheme = useTls ? HTTPS_SCHEME : HTTP_SCHEME;
-        int restPort = mapGrpcPortToRestPort(configuredPort);
-        return buildBaseUrl(scheme, restPort);
+        String urlScheme = connectionProperties.useTls() ? HTTPS_SCHEME : HTTP_SCHEME;
+        int restPort = mapGrpcPortToRestPort(connectionProperties.grpcPort());
+        return buildBaseUrl(urlScheme, restPort);
     }
 
     /**
@@ -90,13 +70,13 @@ public class QdrantRestConnection {
      * @return ordered, deduplicated list of candidate base URLs
      */
     public List<String> candidateRestBaseUrls() {
-        if (useTls) {
+        if (connectionProperties.useTls()) {
             return List.of(restBaseUrl());
         }
-        LinkedHashSet<String> candidates = new LinkedHashSet<>();
-        candidates.add(buildBaseUrl(HTTP_SCHEME, QDRANT_REST_PORT));
-        candidates.add(buildBaseUrl(HTTP_SCHEME, mapGrpcPortToRestPort(configuredPort)));
-        return List.copyOf(candidates);
+        LinkedHashSet<String> candidateBaseUrls = new LinkedHashSet<>();
+        candidateBaseUrls.add(buildBaseUrl(HTTP_SCHEME, QDRANT_REST_PORT));
+        candidateBaseUrls.add(buildBaseUrl(HTTP_SCHEME, mapGrpcPortToRestPort(connectionProperties.grpcPort())));
+        return List.copyOf(candidateBaseUrls);
     }
 
     /**
@@ -105,7 +85,7 @@ public class QdrantRestConnection {
      * @return API key string (never null)
      */
     public String apiKey() {
-        return apiKey;
+        return connectionProperties.apiKey();
     }
 
     /**
@@ -114,7 +94,7 @@ public class QdrantRestConnection {
      * @return true when the connection uses HTTPS
      */
     public boolean useTls() {
-        return useTls;
+        return connectionProperties.useTls();
     }
 
     /**
@@ -137,7 +117,7 @@ public class QdrantRestConnection {
         return grpcPort;
     }
 
-    private String buildBaseUrl(String scheme, int port) {
-        return scheme + URL_SCHEME_SEPARATOR + host + ":" + port;
+    private String buildBaseUrl(String urlScheme, int restPort) {
+        return urlScheme + URL_SCHEME_SEPARATOR + connectionProperties.host() + ":" + restPort;
     }
 }

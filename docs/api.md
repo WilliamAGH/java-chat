@@ -20,18 +20,11 @@ SSE event types (see `SseConstants`):
 - `citation` → JSON array of citations
 - `error` → shared status/error payload for a terminal stream failure
 
-`status` and `error` both serialize the following payload shape. The event type determines
-whether it is a progress/warning notice or a terminal failure.
-
-```json
-{
-  "message": "Citations could not be loaded",
-  "details": "Citations could not be loaded",
-  "code": "citation.partial-failure",
-  "retryable": false,
-  "stage": "citation"
-}
-```
+`status` and `error` both serialize the payload fields below. The event type determines whether
+the payload is a progress/warning notice or a terminal failure. Citation warning metadata is
+projected directly from the canonical
+[`sse-status-contracts.json`](../src/main/resources/sse-status-contracts.json) resource by both the
+backend and frontend; this document does not restate those governed values.
 
 | Field | Meaning |
 | --- | --- |
@@ -43,6 +36,11 @@ whether it is a progress/warning notice or a terminal failure.
 
 Stream-provider `error` events populate `code`, `retryable`, and `stage`; a citation warning
 emits the same metadata on a `status` event. Treat `null` metadata as absent.
+
+The first event for `POST /api/chat/stream` and `POST /api/guided/stream` is a `status` event with
+`code: "stream.preparing"` and `stage: "retrieval"`. It confirms that the stream was admitted
+before history and retrieval work begin; a later dependency failure still emits a terminal `error`
+event.
 
 Chat uses exactly one provider selected by `LLM_PRIMARY_PROVIDER` (`github_models` or `openai`).
 The request never falls back to the other provider: an unavailable, rate-limited, or failed configured

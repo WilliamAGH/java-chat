@@ -5,9 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -21,9 +22,22 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.ConfiguredProviderBackoff;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.InterruptedIOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import reactor.core.Exceptions;
@@ -35,9 +49,13 @@ import reactor.core.Exceptions;
  */
 class OpenAiProviderRoutingServiceTest {
     private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
+    private static final int CONCURRENT_FAILURE_RECORDERS = 2;
+    private static final int CONCURRENT_TEST_TIMEOUT_SECONDS = 10;
+    private static final Duration CAUSE_CLASSIFICATION_TIMEOUT = Duration.ofSeconds(1);
     private static final String OPENAI_REQUEST_FAILED_MESSAGE = "Request failed";
     private static final String OK_HTTP_CALL_TIMEOUT_MESSAGE = "timeout";
     private static final String CALLER_INTERRUPTION_MESSAGE = "request interrupted by caller timeout";
+    private static final Instant CONFIGURED_PROVIDER_BACKOFF_START = Instant.parse("2026-07-18T00:00:00Z");
     private static final Logger PROVIDER_ROUTING_LOGGER =
             (Logger) LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
 
@@ -96,12 +114,21 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void permanentProviderFailuresDoNotCreateRetryableCooldown() {
+    void permanentProviderFailuresAndWrappersDoNotCreateRetryableCooldown() {
         Headers headers = Headers.builder().build();
         List<RuntimeException> permanentProviderFailures = List.of(
                 UnauthorizedException.builder().headers(headers).build(),
                 PermissionDeniedException.builder().headers(headers).build(),
-                NotFoundException.builder().headers(headers).build());
+                NotFoundException.builder().headers(headers).build(),
+                new OpenAIIoException(
+                        OPENAI_REQUEST_FAILED_MESSAGE,
+                        UnauthorizedException.builder().headers(headers).build()),
+                new OpenAIIoException(
+                        OPENAI_REQUEST_FAILED_MESSAGE,
+                        PermissionDeniedException.builder().headers(headers).build()),
+                new OpenAIIoException(
+                        OPENAI_REQUEST_FAILED_MESSAGE,
+                        NotFoundException.builder().headers(headers).build()));
 
         for (RuntimeException permanentProviderFailure : permanentProviderFailures) {
             RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -122,44 +149,26 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
-    void shouldBackoffConfiguredProviderTreats429AsBackoffEligible() {
-        OpenAiProviderRoutingService routingService = createRoutingService();
-        Headers headers = Headers.builder().build();
-        RateLimitException rateLimit =
-                RateLimitException.builder().headers(headers).build();
-
-        assertTrue(routingService.shouldBackoffConfiguredProvider(rateLimit));
-    }
-
-    @Test
-    void rateLimitTimingPersistenceFailureDoesNotSuppressConfiguredProviderCooldown() {
+    void rateLimitFailureUsesRateLimitServiceWithoutStartingFixedCooldown() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
                 .thenReturn(true);
-        RateLimitException headerlessRateLimitFailure =
-                RateLimitException.builder().headers(Headers.builder().build()).build();
-        doThrow(new RateLimitDecisionException("OpenAI rate-limit headers are missing"))
-                .when(rateLimitService)
-                .recordRateLimitFromOpenAiServiceException(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure);
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
+        RateLimitException rateLimitFailure =
+                RateLimitException.builder().headers(Headers.builder().build()).build();
         OpenAIClient githubModelsClient = mock(OpenAIClient.class);
 
-        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
-            assertDoesNotThrow(() -> routingService.recordProviderFailure(
-                    RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure));
+        assertFalse(routingService.shouldBackoffConfiguredProvider(rateLimitFailure));
 
-            assertThrows(
-                    ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, rateLimitFailure);
 
-            assertWarningMessages(
-                    expectedLogEvents,
-                    List.of(
-                            "Configured provider temporarily disabled for 600s due to failure",
-                            "Provider rate-limit timing could not be recorded; configured cooldown remains active",
-                            "Configured provider unavailable (backoff active, providerId=1)"));
-        }
+        verify(rateLimitService)
+                .recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.GITHUB_MODELS, rateLimitFailure);
+        OpenAiProviderCandidate providerAdmission = routingService
+                .admitConfiguredProviderRequest(githubModelsClient, null)
+                .orElseThrow();
+        assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, providerAdmission.provider());
     }
 
     @Test
@@ -167,6 +176,19 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
         assertFalse(routingService.shouldBackoffConfiguredProvider(new IllegalArgumentException("no")));
+    }
+
+    @Test
+    void cyclicCauseClassificationTerminatesForGenericFailure() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        IllegalStateException cycleEntryFailure = new IllegalStateException("cycle entry");
+        IllegalStateException cycleLinkFailure = new IllegalStateException("cycle link", cycleEntryFailure);
+        cycleEntryFailure.initCause(cycleLinkFailure);
+
+        assertTimeoutPreemptively(CAUSE_CLASSIFICATION_TIMEOUT, () -> {
+            assertFalse(routingService.shouldBackoffConfiguredProvider(cycleEntryFailure));
+            assertFalse(routingService.isRecoverableStreamingFailure(cycleEntryFailure));
+        });
     }
 
     @Test
@@ -286,6 +308,97 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     @Test
+    void configuredProviderCooldownExpiresAtItsExactDeadline() {
+        AtomicReference<Instant> currentTime = new AtomicReference<>(CONFIGURED_PROVIDER_BACKOFF_START);
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
+                rateLimitService,
+                configuredAppProperties(),
+                RateLimitService.ApiProvider.GITHUB_MODELS.getName(),
+                currentTime::get);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+            currentTime.set(CONFIGURED_PROVIDER_BACKOFF_START
+                    .plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS)
+                    .minusNanos(1));
+
+            assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+
+            currentTime.set(CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS));
+
+            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Configured provider unavailable (backoff active, providerId=1)"));
+        }
+    }
+
+    @Test
+    void concurrentFailuresNeverMoveConfiguredProviderCooldownDeadlineBackward()
+            throws ExecutionException, InterruptedException, TimeoutException {
+        AtomicInteger instantReadIndex = new AtomicInteger();
+        AtomicReference<Instant> admissionTime = new AtomicReference<>(
+                CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS));
+        InstantSource sequencedInstantSource = () -> switch (instantReadIndex.getAndIncrement()) {
+            case 0 -> CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(1);
+            case 1 -> CONFIGURED_PROVIDER_BACKOFF_START;
+            default -> admissionTime.get();
+        };
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
+                rateLimitService,
+                configuredAppProperties(),
+                RateLimitService.ApiProvider.GITHUB_MODELS.getName(),
+                sequencedInstantSource);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ExecutorService failureRecorder = Executors.newFixedThreadPool(CONCURRENT_FAILURE_RECORDERS);
+        CyclicBarrier failureStartBarrier = new CyclicBarrier(CONCURRENT_FAILURE_RECORDERS);
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            Future<?> firstFailureRecording = failureRecorder.submit(() -> {
+                failureStartBarrier.await();
+                routingService.recordProviderFailure(
+                        RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+                return null;
+            });
+            Future<?> secondFailureRecording = failureRecorder.submit(() -> {
+                failureStartBarrier.await();
+                routingService.recordProviderFailure(
+                        RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+                return null;
+            });
+
+            firstFailureRecording.get(CONCURRENT_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            secondFailureRecording.get(CONCURRENT_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+
+            admissionTime.set(CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS + 1));
+
+            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Configured provider temporarily disabled for 601s due to failure",
+                            "Configured provider unavailable (backoff active, providerId=1)"));
+        } finally {
+            failureRecorder.shutdownNow();
+        }
+    }
+
+    @Test
     void rejectsBlankProviderConfigurationDuringConstruction() {
         IllegalArgumentException configurationFailure = assertThrows(
                 IllegalArgumentException.class,
@@ -308,6 +421,27 @@ class OpenAiProviderRoutingServiceTest {
                 configurationFailure.getMessage());
     }
 
+    @Test
+    void rejectsNonPositiveConfiguredProviderBackoffDuringConstruction() {
+        IllegalArgumentException zeroBackoffFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class),
+                        configuredAppProperties(0),
+                        RateLimitService.ApiProvider.OPENAI.getName(),
+                        InstantSource.fixed(CONFIGURED_PROVIDER_BACKOFF_START)));
+        IllegalArgumentException negativeBackoffFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiProviderRoutingService(
+                        mock(RateLimitService.class),
+                        configuredAppProperties(-1),
+                        RateLimitService.ApiProvider.OPENAI.getName(),
+                        InstantSource.fixed(CONFIGURED_PROVIDER_BACKOFF_START)));
+
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(0), zeroBackoffFailure.getMessage());
+        assertEquals(expectedConfiguredProviderBackoffFailureMessage(-1), negativeBackoffFailure.getMessage());
+    }
+
     private OpenAIIoException wrappedOkHttpCallTimeout() {
         return new OpenAIIoException(
                 OPENAI_REQUEST_FAILED_MESSAGE, new InterruptedIOException(OK_HTTP_CALL_TIMEOUT_MESSAGE));
@@ -323,9 +457,20 @@ class OpenAiProviderRoutingServiceTest {
                 rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.GITHUB_MODELS.getName());
     }
 
-    private AppProperties configuredAppProperties() {
+    private static InternalServerException gatewayTimeoutFailure() {
+        return InternalServerException.builder()
+                .statusCode(504)
+                .headers(Headers.builder().build())
+                .build();
+    }
+
+    private static AppProperties configuredAppProperties() {
+        return configuredAppProperties(CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+    }
+
+    private static AppProperties configuredAppProperties(long configuredProviderBackoffSeconds) {
         AppProperties appProperties = new AppProperties();
-        appProperties.getLlm().setConfiguredProviderBackoffSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+        appProperties.getLlm().setConfiguredProviderBackoffSeconds(configuredProviderBackoffSeconds);
         return appProperties;
     }
 
@@ -337,5 +482,15 @@ class OpenAiProviderRoutingServiceTest {
             assertEquals(expectedMessages.get(eventIndex), warningEvent.getFormattedMessage());
             assertNull(warningEvent.getThrowableProxy());
         }
+    }
+
+    private static String expectedConfiguredProviderBackoffFailureMessage(long configuredProviderBackoffSeconds) {
+        return ConfiguredProviderBackoff.CONFIGURED_PROVIDER_BACKOFF_CONFIGURATION_KEY
+                + " must be in range ["
+                + ConfiguredProviderBackoff.MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + ", "
+                + ConfiguredProviderBackoff.MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                + "], got: "
+                + configuredProviderBackoffSeconds;
     }
 }

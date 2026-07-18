@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static io.qdrant.client.ConditionFactory.matchKeyword;
+import static io.qdrant.client.ConditionFactory.matchKeywords;
 
 import io.qdrant.client.grpc.Common.Filter;
 import java.util.Objects;
@@ -12,9 +13,18 @@ import org.springframework.stereotype.Component;
  *
  * <p>This keeps filter construction in one place so retrieval services apply
  * consistent field names across dense and sparse query stages.</p>
+ *
+ * <p>Qdrant Java client 1.16.2's {@code ConditionFactory.matchKeywords} encodes one
+ * {@code Match.keywords} condition that matches any supplied keyword, so docSet alternatives
+ * remain one OR group inside the surrounding MUST filter.</p>
  */
 @Component
 public class QdrantRetrievalConstraintBuilder {
+    private static final String METADATA_DOC_VERSION = "docVersion";
+    private static final String METADATA_SOURCE_KIND = "sourceKind";
+    private static final String METADATA_DOC_TYPE = "docType";
+    private static final String METADATA_SOURCE_NAME = "sourceName";
+    private static final String METADATA_DOC_SET = "docSet";
 
     /**
      * Builds a Qdrant filter from the provided retrieval constraint.
@@ -29,19 +39,27 @@ public class QdrantRetrievalConstraintBuilder {
         int mustConditionCount = 0;
 
         if (!retrievalConstraint.docVersion().isBlank()) {
-            filterBuilder.addMust(matchKeyword("docVersion", Objects.requireNonNull(retrievalConstraint.docVersion())));
+            filterBuilder.addMust(
+                    matchKeyword(METADATA_DOC_VERSION, Objects.requireNonNull(retrievalConstraint.docVersion())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceKind().isBlank()) {
-            filterBuilder.addMust(matchKeyword("sourceKind", Objects.requireNonNull(retrievalConstraint.sourceKind())));
+            filterBuilder.addMust(
+                    matchKeyword(METADATA_SOURCE_KIND, Objects.requireNonNull(retrievalConstraint.sourceKind())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.docType().isBlank()) {
-            filterBuilder.addMust(matchKeyword("docType", Objects.requireNonNull(retrievalConstraint.docType())));
+            filterBuilder.addMust(
+                    matchKeyword(METADATA_DOC_TYPE, Objects.requireNonNull(retrievalConstraint.docType())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceName().isBlank()) {
-            filterBuilder.addMust(matchKeyword("sourceName", Objects.requireNonNull(retrievalConstraint.sourceName())));
+            filterBuilder.addMust(
+                    matchKeyword(METADATA_SOURCE_NAME, Objects.requireNonNull(retrievalConstraint.sourceName())));
+            mustConditionCount++;
+        }
+        if (!retrievalConstraint.docSet().isEmpty()) {
+            filterBuilder.addMust(matchKeywords(METADATA_DOC_SET, retrievalConstraint.docSet()));
             mustConditionCount++;
         }
 

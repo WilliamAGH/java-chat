@@ -8,7 +8,12 @@ vi.mock("./sse", () => {
   return { streamSse: streamSseMock, streamSseGet: streamSseGetMock };
 });
 
-import { fetchGuidedLessonCitations, streamGuidedChat, streamLessonContent } from "./guided";
+import {
+  fetchGuidedLessonCitations,
+  fetchTOC,
+  streamGuidedChat,
+  streamLessonContent,
+} from "./guided";
 
 describe("streamGuidedChat", () => {
   beforeEach(() => {
@@ -18,6 +23,49 @@ describe("streamGuidedChat", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("validates the projected guided lesson source-scope contract", async () => {
+    const guidedLesson = {
+      slug: "intro",
+      title: "Introduction",
+      summary: "Start learning the topic.",
+      keywords: ["topic"],
+      technology: "Example technology",
+      docSet: ["official-source"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([guidedLesson]), {
+          status: 200,
+          statusText: "OK",
+        }),
+      ),
+    );
+
+    await expect(fetchTOC()).resolves.toEqual([guidedLesson]);
+  });
+
+  it("rejects guided lessons that omit their official source scope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              slug: "intro",
+              title: "Introduction",
+              summary: "Start learning Java.",
+              keywords: ["Java"],
+            },
+          ]),
+          { status: 200, statusText: "OK" },
+        ),
+      ),
+    );
+
+    await expect(fetchTOC()).rejects.toThrow("Failed to fetch TOC");
   });
 
   it("forwards the caller-owned cancellation signal to guided citation fetches", async () => {

@@ -92,93 +92,12 @@
       rel="stylesheet"
     />
 
-    <!--
-      Lightweight SEO: keep reasonable defaults in static HTML, then refine per-path using a tiny inline script.
-      This improves social previews + canonical URLs for non-root entries served by the SPA fallback.
-    -->
+    <!-- The SPA bootstraps path-specific metadata from its canonical route catalog. -->
     <script type="application/ld+json" id="java-chat-structured-data"></script>
-    <script>
-      (function () {
-        var origin = globalThis.location.origin;
-        var path = globalThis.location.pathname || "/";
-        var normalizedPath = path.endsWith("/") && path.length > 1 ? path.slice(0, -1) : path;
+    <script type="module">
+      import { synchronizeDocumentMetadata } from "/src/lib/services/pageMetadata.ts";
 
-        var baseSeo = {
-          title: "Java Chat - AI-Powered Java Learning With Citations",
-          description:
-            "Learn Java faster with an AI tutor: streaming answers, code examples, and citations to official docs.",
-          imagePath: "/og-image.png",
-        };
-
-        var perPathSeo = {
-          "/": baseSeo,
-          "/chat": {
-            title: "Java Chat - Streaming Java Tutor With Citations",
-            description:
-              "Ask Java questions and get streaming answers with citations to official docs and practical examples.",
-            imagePath: baseSeo.imagePath,
-          },
-          "/guided": {
-            title: "Guided Java Learning - Java Chat",
-            description:
-              "Structured, step-by-step Java learning paths with examples and explanations.",
-            imagePath: baseSeo.imagePath,
-          },
-          "/learn": {
-            title: "Guided Java Learning - Java Chat",
-            description:
-              "Structured, step-by-step Java learning paths with examples and explanations.",
-            imagePath: baseSeo.imagePath,
-          },
-        };
-
-        var selectedSeo = perPathSeo[normalizedPath] || baseSeo;
-        var canonicalUrl = origin + normalizedPath;
-
-        document.title = selectedSeo.title;
-
-        var descriptionTag = document.querySelector('meta[name="description"]');
-        if (descriptionTag) descriptionTag.setAttribute("content", selectedSeo.description);
-
-        var canonicalTag = document.querySelector('link[data-seo="canonical"]');
-        if (canonicalTag) canonicalTag.setAttribute("href", canonicalUrl);
-
-        var ogUrlTag = document.querySelector('meta[data-seo="og:url"]');
-        if (ogUrlTag) ogUrlTag.setAttribute("content", canonicalUrl);
-
-        var ogTitleTag = document.querySelector('meta[data-seo="og:title"]');
-        if (ogTitleTag) ogTitleTag.setAttribute("content", selectedSeo.title);
-
-        var ogDescriptionTag = document.querySelector('meta[data-seo="og:description"]');
-        if (ogDescriptionTag) ogDescriptionTag.setAttribute("content", selectedSeo.description);
-
-        var ogImageTag = document.querySelector('meta[data-seo="og:image"]');
-        if (ogImageTag) ogImageTag.setAttribute("content", origin + selectedSeo.imagePath);
-
-        var twitterTitleTag = document.querySelector('meta[data-seo="twitter:title"]');
-        if (twitterTitleTag) twitterTitleTag.setAttribute("content", selectedSeo.title);
-
-        var twitterDescriptionTag = document.querySelector('meta[data-seo="twitter:description"]');
-        if (twitterDescriptionTag)
-          twitterDescriptionTag.setAttribute("content", selectedSeo.description);
-
-        var twitterImageTag = document.querySelector('meta[data-seo="twitter:image"]');
-        if (twitterImageTag)
-          twitterImageTag.setAttribute("content", origin + selectedSeo.imagePath);
-
-        var structuredSchemaTag = document.getElementById("java-chat-structured-data");
-        if (structuredSchemaTag) {
-          structuredSchemaTag.textContent = JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "WebApplication",
-            name: "Java Chat",
-            url: origin + "/",
-            applicationCategory: "EducationalApplication",
-            operatingSystem: "Web",
-            description: baseSeo.description,
-          });
-        }
-      })();
+      synchronizeDocumentMetadata();
     </script>
   </head>
   <body>
