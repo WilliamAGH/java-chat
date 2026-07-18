@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/svelte";
 import { tick } from "svelte";
-import { canonicalUrlForPath, pageMetadataForPath } from "./lib/services/pageMetadata";
+import { pageMetadataForPath } from "./lib/services/pageMetadata";
 
 const refreshCsrfTokenMock = vi.fn(async () => true);
 
@@ -14,9 +14,9 @@ vi.mock("./lib/services/csrf", async () => {
   };
 });
 
-function expectCurrentRouteMetadata(): void {
+function expectCurrentRouteMetadata(expectedCanonicalPath: string): void {
   const expectedPageMetadata = pageMetadataForPath(globalThis.location.pathname);
-  const expectedCanonicalUrl = canonicalUrlForPath(globalThis.location.pathname);
+  const expectedCanonicalUrl = `${globalThis.location.origin}${expectedCanonicalPath}`;
 
   expect(document.title).toBe(expectedPageMetadata.title);
   expect(
@@ -49,6 +49,9 @@ function expectCurrentRouteMetadata(): void {
       .querySelector<HTMLMetaElement>('meta[name="twitter:description"]')
       ?.getAttribute("content"),
   ).toBe(expectedPageMetadata.description);
+  expect(
+    document.head.querySelector<HTMLScriptElement>("#java-chat-structured-data")?.textContent,
+  ).toContain(`"url":"${expectedCanonicalUrl}"`);
 }
 
 beforeEach(() => {
@@ -83,7 +86,7 @@ describe("App route synchronization", () => {
       "true",
     );
     expect(globalThis.location.pathname).toBe("/learn/");
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/learn");
   });
 
   it("preserves a direct guided route while synchronizing its metadata", async () => {
@@ -97,19 +100,31 @@ describe("App route synchronization", () => {
       "true",
     );
     expect(globalThis.location.pathname).toBe("/guided");
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/learn");
   });
 
-  it("honors a direct chat route with a trailing slash", async () => {
-    globalThis.history.replaceState({}, "", "/chat/");
+  it("honors a direct chat alias", async () => {
+    globalThis.history.replaceState({}, "", "/chat");
     const App = (await import("./App.svelte")).default;
     const application = render(App);
 
     await tick();
 
     expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
-    expect(globalThis.location.pathname).toBe("/chat/");
-    expectCurrentRouteMetadata();
+    expect(globalThis.location.pathname).toBe("/chat");
+    expectCurrentRouteMetadata("/");
+  });
+
+  it("projects an unknown route to the chat canonical metadata", async () => {
+    globalThis.history.replaceState({}, "", "/unknown-route/");
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    await tick();
+
+    expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+    expect(globalThis.location.pathname).toBe("/unknown-route/");
+    expectCurrentRouteMetadata("/");
   });
 
   it("synchronizes tab selection, canonical paths, and document metadata", async () => {
@@ -118,11 +133,11 @@ describe("App route synchronization", () => {
 
     await fireEvent.click(application.getByRole("tab", { name: "Learn" }));
     expect(globalThis.location.pathname).toBe("/learn");
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/learn");
 
     await fireEvent.click(application.getByRole("tab", { name: "Chat" }));
     expect(globalThis.location.pathname).toBe("/");
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/");
   });
 
   it("restores the selected tab and metadata when browser history changes", async () => {
@@ -136,7 +151,7 @@ describe("App route synchronization", () => {
       "aria-selected",
       "true",
     );
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/learn");
 
     globalThis.history.replaceState({}, "", "/chat/");
     globalThis.dispatchEvent(new PopStateEvent("popstate"));
@@ -145,6 +160,6 @@ describe("App route synchronization", () => {
       "aria-selected",
       "true",
     );
-    expectCurrentRouteMetadata();
+    expectCurrentRouteMetadata("/");
   });
 });

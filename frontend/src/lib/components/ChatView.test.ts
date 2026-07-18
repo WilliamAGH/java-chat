@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
+import {
+  CITATION_PARTIAL_FAILURE_STATUS_CODE,
+  CitationPartialFailureStatusSchema,
+} from "../validation/schemas";
+import { validateWithSchema } from "../validation/validate";
 
 type StreamChatFunction = typeof import("../services/chat").streamChat;
 
+const TERMINAL_STREAM_FAILURE_MESSAGE = "The provider ended the stream";
 const streamChatMock = vi.fn<StreamChatFunction>();
 
 vi.mock("../services/chat", async () => {
@@ -30,6 +36,26 @@ async function sendChatMessage(
   }
   await fireEvent.input(messageInput, { target: { value: chatMessage } });
   await fireEvent.click(renderedChatView.getByRole("button", { name: "Send message" }));
+}
+
+function validatedCitationWarning() {
+  const citationWarningValidation = validateWithSchema(
+    CitationPartialFailureStatusSchema,
+    {
+      message: "Some citations could not be loaded (1 failed)",
+      details: "Citations could not be loaded",
+      code: CITATION_PARTIAL_FAILURE_STATUS_CODE,
+      retryable: false,
+      stage: "citation",
+    },
+    "ChatView citation warning fixture",
+  );
+
+  if (!citationWarningValidation.success) {
+    throw new Error("Expected the citation warning fixture to satisfy its canonical schema");
+  }
+
+  return citationWarningValidation.validated;
 }
 
 describe("ChatView streaming stability", () => {
@@ -82,21 +108,65 @@ describe("ChatView streaming stability", () => {
     expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
   });
 
-  it("shows structured retrieval status details", async () => {
-    streamChatMock.mockImplementation(async (_sessionId, _message, _onChunk, options) => {
-      options?.onStatus?.({
-        message: "Some citations could not be loaded",
-        details: "Citations could not be loaded",
+  it("keeps a citation warning visible after response text and stream completion", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected stream completion callback to be set");
+    };
+    const citationWarning = validatedCitationWarning();
+
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
+      options?.onStatus?.(citationWarning);
+      onChunk("Records are immutable data carriers.");
+      return new Promise<void>((resolve) => {
+        completeStream = resolve;
       });
-      return new Promise<void>(() => {});
     });
 
     const renderedChatView = await renderChatView();
-    const { findByText } = renderedChatView;
     await sendChatMessage(renderedChatView, "Explain records");
 
-    expect(await findByText("Some citations could not be loaded")).toBeTruthy();
-    expect(await findByText("Citations could not be loaded")).toBeTruthy();
+    expect(await renderedChatView.findByText("Records are immutable data carriers.")).toBeTruthy();
+    const warningRegion = await renderedChatView.findByRole("status", {
+      name: "Citation warning",
+    });
+    expect(warningRegion).toHaveTextContent(citationWarning.message);
+    expect(warningRegion).toHaveTextContent(citationWarning.details ?? "");
+
+    completeStream();
+    await vi.waitFor(() =>
+      expect(
+        renderedChatView.container.querySelector(".message.assistant .cursor.visible"),
+      ).toBeNull(),
+    );
+
+    expect(renderedChatView.getByRole("status", { name: "Citation warning" })).toBe(warningRegion);
+  });
+
+  it("removes a citation warning when the response stream fails", async () => {
+    let failResponseStream: () => void = () => {
+      throw new Error("Expected stream failure callback to be set");
+    };
+    const citationWarning = validatedCitationWarning();
+
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
+      options?.onStatus?.(citationWarning);
+      onChunk("Incomplete response");
+      return new Promise<void>((_resolve, reject) => {
+        failResponseStream = () => reject(new Error(TERMINAL_STREAM_FAILURE_MESSAGE));
+      });
+    });
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    expect(
+      await renderedChatView.findByRole("status", { name: "Citation warning" }),
+    ).toHaveTextContent(citationWarning.message);
+
+    failResponseStream();
+
+    expect(await renderedChatView.findByText(TERMINAL_STREAM_FAILURE_MESSAGE)).toBeTruthy();
+    expect(renderedChatView.queryByRole("status", { name: "Citation warning" })).toBeNull();
   });
 
   it("shows the provider selected for the active stream", async () => {

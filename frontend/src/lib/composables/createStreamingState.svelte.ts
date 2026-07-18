@@ -5,7 +5,12 @@
  * with optional timer-based status message persistence.
  */
 
-import type { ProviderEvent, StreamStatus } from "../validation/schemas";
+import {
+  CITATION_PARTIAL_FAILURE_STATUS_CODE,
+  type CitationPartialFailureStatus,
+  type ProviderEvent,
+  type StreamStatus,
+} from "../validation/schemas";
 
 /** Configuration options for streaming state behavior. */
 export interface StreamingStateOptions {
@@ -28,6 +33,8 @@ export interface StreamingState {
   readonly statusMessage: string;
   /** Additional status details. */
   readonly statusDetails: string;
+  /** Citation warning that remains visible after response text and stream completion. */
+  readonly citationWarning: CitationPartialFailureStatus | null;
 
   /** Marks stream as active and resets content/status. */
   startStream: () => void;
@@ -37,6 +44,8 @@ export interface StreamingState {
   updateProvider: (providerEvent: ProviderEvent) => void;
   /** Marks stream as complete and schedules status clearing. */
   finishStream: () => void;
+  /** Marks stream as failed and removes status that only applies to a completed response. */
+  failStream: () => void;
   /** Immediately resets all state (cancels any pending timers). */
   reset: () => void;
   /** Cleanup function to clear timers - call from $effect cleanup. */
@@ -84,6 +93,7 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
   let statusDetails = $state("");
   let statusDescription = $state("");
   let selectedProviderName = $state("");
+  let citationWarning = $state.raw<CitationPartialFailureStatus | null>(null);
 
   // Timer for delayed status clearing
   let statusClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -124,6 +134,12 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     }, statusClearDelayMs);
   }
 
+  function isCitationPartialFailureStatus(
+    streamStatus: StreamStatus,
+  ): streamStatus is CitationPartialFailureStatus {
+    return streamStatus.code === CITATION_PARTIAL_FAILURE_STATUS_CODE;
+  }
+
   return {
     // Reactive getters
     get isStreaming() {
@@ -135,6 +151,9 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
     get statusDetails() {
       return statusDetails;
     },
+    get citationWarning() {
+      return citationWarning;
+    },
 
     // Actions
     startStream() {
@@ -144,11 +163,15 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
       statusDetails = "";
       statusDescription = "";
       selectedProviderName = "";
+      citationWarning = null;
     },
 
-    updateStatus(status: StreamStatus) {
-      statusMessage = status.message;
-      statusDescription = status.details ?? "";
+    updateStatus(streamStatus: StreamStatus) {
+      if (isCitationPartialFailureStatus(streamStatus)) {
+        citationWarning = streamStatus;
+      }
+      statusMessage = streamStatus.message;
+      statusDescription = streamStatus.details ?? "";
       refreshStatusDetails();
     },
 
@@ -162,6 +185,12 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
       clearStatusDelayed();
     },
 
+    failStream() {
+      isStreaming = false;
+      clearStatusNow();
+      citationWarning = null;
+    },
+
     reset() {
       cancelStatusTimer();
       isStreaming = false;
@@ -169,6 +198,7 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
       statusDetails = "";
       statusDescription = "";
       selectedProviderName = "";
+      citationWarning = null;
     },
 
     cleanup() {

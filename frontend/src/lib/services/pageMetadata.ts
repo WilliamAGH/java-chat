@@ -168,12 +168,14 @@ export function pageMetadataForPath(pathname: string): PageMetadata {
   return applicationRouteForPath(pathname).pageMetadata;
 }
 
-/** Resolves the normalized public URL used for canonical and social metadata. */
+/** Resolves the canonical public URL for a browser pathname and its fallback route. */
 export function canonicalUrlForPath(
   pathname: string,
   pageOrigin: string = globalThis.location.origin,
 ): string {
-  return `${pageOrigin}${normalizeApplicationPath(pathname)}`;
+  const applicationRoute = applicationRouteForPath(pathname);
+  const canonicalPath = canonicalPathForApplicationView(applicationRoute.view);
+  return `${pageOrigin}${canonicalPath}`;
 }
 
 /** Synchronizes document title, canonical URL, social tags, and structured data with the active route. */

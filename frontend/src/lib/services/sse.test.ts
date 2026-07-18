@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CITATION_PARTIAL_FAILURE_STATUS_CODE } from "../validation/schemas";
 import { streamSse, streamSseGet } from "./sse";
 
 const SSE_STREAM_RESPONSE_STATUS = 200;
@@ -8,7 +9,7 @@ const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
 const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
 const STATUS_EVENT_MESSAGE = "Some citations could not be loaded";
 const STATUS_EVENT_DETAILS = "Citations could not be loaded";
-const STATUS_EVENT_CODE = "citation.partial-failure";
+const STATUS_EVENT_CODE = CITATION_PARTIAL_FAILURE_STATUS_CODE;
 const STATUS_EVENT_RETRYABLE = false;
 const STATUS_EVENT_STAGE = "citation";
 const SELECTED_PROVIDER_NAME = "OpenAI";
@@ -265,6 +266,34 @@ describe("streamSse payload validation", () => {
       stage: STATUS_EVENT_STAGE,
     });
   });
+
+  it.each([
+    { retryable: true, stage: STATUS_EVENT_STAGE },
+    { retryable: STATUS_EVENT_RETRYABLE, stage: "retrieval" },
+  ])(
+    "rejects citation partial-failure status fields that violate the specialized contract",
+    async ({ retryable, stage }) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            createSseStreamResponse(
+              `event: status\ndata: {"message":"${STATUS_EVENT_MESSAGE}","details":"${STATUS_EVENT_DETAILS}","code":"${STATUS_EVENT_CODE}","retryable":${retryable},"stage":"${stage}"}\n\n`,
+            ),
+          ),
+      );
+      const onText = vi.fn();
+      const onStatus = vi.fn();
+
+      await expect(
+        streamSse("/api/test/stream", {}, { onText, onStatus }, "sse.test.ts"),
+      ).rejects.toThrow("Received an invalid SSE event from the server");
+      expect(onText).not.toHaveBeenCalled();
+      expect(onStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("dispatches the selected provider from a valid provider event", async () => {
     vi.stubGlobal(

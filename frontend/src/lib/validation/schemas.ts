@@ -23,8 +23,35 @@ const sseEventFieldShape = {
   stage: z.string().nullish(),
 };
 
+/** Canonical backend status code for a response with incomplete citations. */
+export const CITATION_PARTIAL_FAILURE_STATUS_CODE = "citation.partial-failure";
+
+/** Validates the canonical citation partial-failure status code. */
+export const CitationPartialFailureStatusCodeSchema = z.literal(
+  CITATION_PARTIAL_FAILURE_STATUS_CODE,
+);
+
+/** Validates citation partial-failure statuses before they enter durable UI state. */
+export const CitationPartialFailureStatusSchema = z.object({
+  ...sseEventFieldShape,
+  code: CitationPartialFailureStatusCodeSchema,
+  retryable: z.literal(false),
+  stage: z.literal("citation"),
+});
+
+/** Generic status message for status codes without specialized UI behavior. */
+const GenericStreamStatusSchema = z
+  .object(sseEventFieldShape)
+  .refine(
+    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CODE,
+    "Citation partial-failure statuses must satisfy their specialized contract",
+  );
+
 /** Status message from SSE status events. */
-export const StreamStatusSchema = z.object(sseEventFieldShape);
+export const StreamStatusSchema = z.union([
+  CitationPartialFailureStatusSchema,
+  GenericStreamStatusSchema,
+]);
 
 /** Error response from SSE error events. */
 export const StreamErrorSchema = z.object(sseEventFieldShape);
@@ -93,6 +120,7 @@ export const ApiErrorResponseSchema = z.object({
 // =============================================================================
 
 export type StreamStatus = z.infer<typeof StreamStatusSchema>;
+export type CitationPartialFailureStatus = z.infer<typeof CitationPartialFailureStatusSchema>;
 export type StreamError = z.infer<typeof StreamErrorSchema>;
 export type TextChunk = z.infer<typeof TextChunkSchema>;
 export type ProviderEvent = z.infer<typeof ProviderEventSchema>;

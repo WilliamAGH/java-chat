@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ChatMessage, Citation } from "../services/chat";
+    import type { CitationPartialFailureStatus } from "../validation/schemas";
     import ChatInput from "./ChatInput.svelte";
     import CitationPanel from "./CitationPanel.svelte";
     import MessageBubble from "./MessageBubble.svelte";
@@ -16,6 +17,7 @@
         isStreaming: boolean;
         statusMessage: string;
         statusDetails: string;
+        citationWarning: CitationPartialFailureStatus | null;
         hasContent: boolean;
         streamingMessageId: string | null;
         lessonTitle: string;
@@ -34,6 +36,7 @@
         isStreaming,
         statusMessage,
         statusDetails,
+        citationWarning,
         hasContent,
         streamingMessageId,
         lessonTitle,
@@ -109,6 +112,7 @@
                     {isStreaming}
                     {statusMessage}
                     {statusDetails}
+                    {citationWarning}
                     {hasContent}
                     {streamingMessageId}
                 >

@@ -513,6 +513,7 @@
             if (selectedLesson?.slug !== streamLessonSlug) return;
             if (guidedChatStreamVersion !== activeStreamVersion) return;
             if (abortSignal.aborted) return;
+            streaming.failStream();
             const errorMessage =
                 error instanceof Error
                     ? error.message
@@ -530,7 +531,9 @@
                 guidedChatStreamVersion === activeStreamVersion &&
                 !abortSignal.aborted
             ) {
-                streaming.finishStream();
+                if (streaming.isStreaming) {
+                    streaming.finishStream();
+                }
                 activeStreamingMessageId = null;
                 // No final scroll - user maintains their position
             }
@@ -686,6 +689,7 @@
                     isStreaming={streaming.isStreaming}
                     statusMessage={streaming.statusMessage}
                     statusDetails={streaming.statusDetails}
+                    citationWarning={streaming.citationWarning}
                     hasContent={hasStreamingContent}
                     streamingMessageId={activeStreamingMessageId}
                     lessonTitle={selectedLesson.title}
@@ -706,6 +710,7 @@
                 isStreaming={streaming.isStreaming}
                 statusMessage={streaming.statusMessage}
                 statusDetails={streaming.statusDetails}
+                citationWarning={streaming.citationWarning}
                 hasContent={hasStreamingContent}
                 streamingMessageId={activeStreamingMessageId}
                 title="Ask about this lesson"
