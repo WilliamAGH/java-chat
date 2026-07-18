@@ -80,6 +80,27 @@ parse_fetch_arguments() {
     done
 }
 
+create_documentation_quarantine_directory() {
+    local quarantine_basename="$1"
+    local quarantine_category="$2"
+    local quarantine_root
+    quarantine_root="$(dirname "$DOCS_ROOT")/.quarantine"
+    local timestamp
+    timestamp="$(date -u +%Y%m%d_%H%M%S)"
+
+    if ! mkdir -p "$quarantine_root"; then
+        return 1
+    fi
+
+    local quarantine_directory
+    if ! quarantine_directory="$(mktemp -d "$quarantine_root/${quarantine_basename}.${quarantine_category}.${timestamp}.XXXXXX")" \
+        || [[ "$quarantine_directory" != "$quarantine_root/"* ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "$quarantine_directory"
+}
+
 quarantine_incomplete_dir() {
     local dir="$1"
     local name="$2"
@@ -96,16 +117,19 @@ quarantine_incomplete_dir() {
         return 0
     fi
 
-    local quarantine_root="$DOCS_ROOT/.quarantine"
-    local timestamp
-    timestamp="$(date -u +%Y%m%d_%H%M%S)"
-    mkdir -p "$quarantine_root"
-
     local base
     base="$(basename "$dir")"
-    local quarantine_dir="$quarantine_root/${base}.${timestamp}"
-    log "${YELLOW}⚠ Quarantining incomplete mirror: $name ($html_count HTML files; expected $min_files+) -> $quarantine_dir${NC}"
-    mv "$dir" "$quarantine_dir"
+    local quarantine_directory
+    if ! quarantine_directory="$(create_documentation_quarantine_directory "$base" "incomplete")"; then
+        log "${RED}✗ Could not create incomplete-mirror quarantine for $name${NC}"
+        return 1
+    fi
+    local quarantine_path="$quarantine_directory/$base"
+    log "${YELLOW}⚠ Quarantining incomplete mirror: $name ($html_count HTML files; expected $min_files+) -> $quarantine_path${NC}"
+    if ! mv "$dir" "$quarantine_path"; then
+        log "${RED}✗ Could not quarantine incomplete mirror: $name${NC}"
+        return 1
+    fi
 }
 
 quarantine_path() {
@@ -119,16 +143,40 @@ quarantine_path() {
         return 0
     fi
 
-    local quarantine_root="$DOCS_ROOT/.quarantine"
-    local timestamp
-    timestamp="$(date -u +%Y%m%d_%H%M%S)"
-    mkdir -p "$quarantine_root"
-
     local base
     base="$(basename "$dir")"
-    local quarantine_dir="$quarantine_root/${base}.${timestamp}"
-    log "${YELLOW}⚠ Quarantining legacy mirror path: $name -> $quarantine_dir${NC}"
-    mv "$dir" "$quarantine_dir"
+    local quarantine_directory
+    if ! quarantine_directory="$(create_documentation_quarantine_directory "$base" "legacy")"; then
+        log "${RED}✗ Could not create legacy-mirror quarantine for $name${NC}"
+        return 1
+    fi
+    local quarantine_path="$quarantine_directory/$base"
+    log "${YELLOW}⚠ Quarantining legacy mirror path: $name -> $quarantine_path${NC}"
+    if ! mv "$dir" "$quarantine_path"; then
+        log "${RED}✗ Could not quarantine legacy mirror path: $name${NC}"
+        return 1
+    fi
+}
+
+# Moves one manifest-declared superseded mirror outside data/docs so recursive ingestion cannot retain it.
+quarantine_superseded_mirror_path() {
+    local superseded_mirror_path="$1"
+    local documentation_source_name="$2"
+    local superseded_relative_mirror_path="$3"
+    local quarantine_dir
+    if ! quarantine_dir="$(create_documentation_quarantine_directory \
+        "documentation-source-migration" \
+        "superseded")"; then
+        log "${RED}✗ Could not create a safe superseded-mirror quarantine directory${NC}"
+        return 1
+    fi
+    local quarantine_path="$quarantine_dir/$superseded_relative_mirror_path"
+    if ! mkdir -p "$(dirname "$quarantine_path")"; then
+        log "${RED}✗ Could not create superseded-mirror quarantine parents: $quarantine_path${NC}"
+        return 1
+    fi
+    log "${YELLOW}⚠ Quarantining superseded mirror outside data/docs: $documentation_source_name -> $quarantine_path${NC}"
+    mv "$superseded_mirror_path" "$quarantine_path"
 }
 
 quarantine_versioned_reference_subdirs() {
@@ -231,8 +279,77 @@ write_java_api_seed_mirror_paths() {
     fi
 }
 
-# Quarantines Java API HTML files that are absent from the current canonical seed.
+# Quarantines HTML files absent from an exact current seed projection.
 # The quarantine is a sibling of data/docs because local ingestion recursively scans data/docs.
+reconcile_seeded_html_mirror() {
+    local target_dir="$1"
+    local documentation_source_name="$2"
+    local mirror_paths_file="$3"
+    local quarantine_category="$4"
+    if [ ! -d "$target_dir" ] || [ ! -s "$mirror_paths_file" ]; then
+        log "${RED}✗ Seed mirror reconciliation requires nonempty current paths for $documentation_source_name${NC}"
+        return 1
+    fi
+    local quarantine_dir=""
+    local quarantined_html_count=0
+    local stale_html_file
+    while IFS= read -r -d '' stale_html_file; do
+        local stale_relative_path="${stale_html_file#"$target_dir"/}"
+        if grep -Fqx -- "$stale_relative_path" "$mirror_paths_file"; then
+            continue
+        fi
+
+        if [ -z "$quarantine_dir" ]; then
+            local mirror_basename
+            mirror_basename="$(basename "$target_dir")"
+            if ! quarantine_dir="$(create_documentation_quarantine_directory \
+                "$mirror_basename" \
+                "$quarantine_category")"; then
+                log "${RED}✗ Could not create a safe seeded-mirror quarantine directory${NC}"
+                return 1
+            fi
+        fi
+
+        local quarantine_file="$quarantine_dir/$stale_relative_path"
+        if ! mkdir -p "$(dirname "$quarantine_file")"; then
+            log "${RED}✗ Could not create seeded-mirror quarantine parents: $quarantine_file${NC}"
+            return 1
+        fi
+        if ! mv "$stale_html_file" "$quarantine_file"; then
+            return 1
+        fi
+        quarantined_html_count=$((quarantined_html_count + 1))
+    done < <(find "$target_dir" -type f \( -name "*.html" -o -name "*.htm" \) -print0)
+
+    if [ "$quarantined_html_count" -gt 0 ]; then
+        log "${YELLOW}⚠ Quarantined $quarantined_html_count unseeded HTML file(s) for $documentation_source_name -> $quarantine_dir${NC}"
+    fi
+}
+
+# Requires the on-disk HTML inventory to equal the current seed projection.
+verify_seeded_html_mirror() {
+    local target_dir="$1"
+    local documentation_source_name="$2"
+    local mirror_paths_file="$3"
+    local expected_mirror_path
+    while IFS= read -r expected_mirror_path || [ -n "$expected_mirror_path" ]; do
+        if [ -z "$expected_mirror_path" ] || [ ! -f "$target_dir/$expected_mirror_path" ]; then
+            log "${RED}✗ $documentation_source_name is missing seeded HTML path: $expected_mirror_path${NC}"
+            return 1
+        fi
+    done < "$mirror_paths_file"
+
+    local mirrored_html_file
+    while IFS= read -r -d '' mirrored_html_file; do
+        local mirrored_relative_path="${mirrored_html_file#"$target_dir"/}"
+        if ! grep -Fqx -- "$mirrored_relative_path" "$mirror_paths_file"; then
+            log "${RED}✗ $documentation_source_name contains an unseeded HTML path: $mirrored_relative_path${NC}"
+            return 1
+        fi
+    done < <(find "$target_dir" -type f \( -name "*.html" -o -name "*.htm" \) -print0)
+}
+
+# Quarantines Java API HTML files that are absent from the current canonical seed.
 reconcile_java_api_seed_mirror() {
     local remote_base_url="$1"
     local target_dir="$2"
@@ -247,44 +364,39 @@ reconcile_java_api_seed_mirror() {
 
     local mirror_paths_file
     mirror_paths_file="$(mktemp "$target_dir/.java-api-seed-paths.XXXXXX")"
-    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file"; then
+    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+        || ! reconcile_seeded_html_mirror \
+            "$target_dir" "$documentation_source_name" "$mirror_paths_file" "unseeded-java-api"; then
         rm -f "$mirror_paths_file"
         return 1
     fi
-
-    local quarantine_dir=""
-    local quarantined_html_count=0
-    local stale_html_file
-    while IFS= read -r -d '' stale_html_file; do
-        local stale_relative_path="${stale_html_file#"$target_dir"/}"
-        if grep -Fqx -- "$stale_relative_path" "$mirror_paths_file"; then
-            continue
-        fi
-
-        if [ -z "$quarantine_dir" ]; then
-            local quarantine_root
-            quarantine_root="$(dirname "$DOCS_ROOT")/.quarantine"
-            local timestamp
-            timestamp="$(date -u +%Y%m%d_%H%M%S)"
-            local mirror_basename
-            mirror_basename="$(basename "$target_dir")"
-            mkdir -p "$quarantine_root"
-            quarantine_dir="$(mktemp -d "$quarantine_root/${mirror_basename}.unseeded-java-api.${timestamp}.XXXXXX")"
-        fi
-
-        local quarantine_file="$quarantine_dir/$stale_relative_path"
-        mkdir -p "$(dirname "$quarantine_file")"
-        if ! mv "$stale_html_file" "$quarantine_file"; then
-            rm -f "$mirror_paths_file"
-            return 1
-        fi
-        quarantined_html_count=$((quarantined_html_count + 1))
-    done < <(find "$target_dir" -type f \( -name "*.html" -o -name "*.htm" \) -print0)
-
     rm -f "$mirror_paths_file"
-    if [ "$quarantined_html_count" -gt 0 ]; then
-        log "${YELLOW}⚠ Quarantined $quarantined_html_count unseeded Java API HTML file(s) for $documentation_source_name -> $quarantine_dir${NC}"
+}
+
+# Requires every canonical Java API seed path, and no unseeded HTML path, to exist in the mirror.
+verify_java_api_seed_mirror() {
+    local remote_base_url="$1"
+    local target_dir="$2"
+    local documentation_source_name="$3"
+    local cut_directories="$4"
+    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+
+    if [ ! -d "$target_dir" ] || [ ! -s "$seed_file" ]; then
+        log "${RED}✗ Java API mirror verification requires a nonempty current seed for $documentation_source_name${NC}"
+        return 1
     fi
+
+    local mirror_paths_file
+    if ! mirror_paths_file="$(mktemp "$target_dir/.java-api-seed-paths.XXXXXX")"; then
+        log "${RED}✗ Could not create Java API mirror paths for $documentation_source_name${NC}"
+        return 1
+    fi
+    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file" \
+        || ! verify_seeded_html_mirror "$target_dir" "$documentation_source_name" "$mirror_paths_file"; then
+        rm -f "$mirror_paths_file"
+        return 1
+    fi
+    rm -f "$mirror_paths_file"
 }
 
 # Generates the explicit Java API URL seed from the manifest-owned remote base.
@@ -292,9 +404,31 @@ generate_java_api_javadoc_seed() {
     local remote_base_url="$1"
     local target_dir="$2"
     local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local generated_seed_file
+    generated_seed_file="$(mktemp "$target_dir/.oracle-javadoc-seed.XXXXXX")"
 
     log "${BLUE}ℹ Java API Javadoc source; generating explicit URL seed list...${NC}"
-    python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$remote_base_url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
+    local generator_exit_code
+    if python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" \
+        --base-url "$remote_base_url" \
+        --output "$generated_seed_file" 2>&1 | tee -a "$LOG_FILE"; then
+        generator_exit_code="${PIPESTATUS[0]}"
+    else
+        generator_exit_code="${PIPESTATUS[0]}"
+        rm -f "$generated_seed_file"
+        log "${RED}✗ Java API Javadoc seed generation failed (exit code: $generator_exit_code)${NC}"
+        return 1
+    fi
+    if [ "$generator_exit_code" -ne 0 ] || [ ! -s "$generated_seed_file" ]; then
+        rm -f "$generated_seed_file"
+        log "${RED}✗ Java API Javadoc seed generation produced no URLs${NC}"
+        return 1
+    fi
+    if ! mv "$generated_seed_file" "$seed_file"; then
+        rm -f "$generated_seed_file"
+        log "${RED}✗ Java API Javadoc seed could not replace the active seed${NC}"
+        return 1
+    fi
     local seed_url_count
     seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
     log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
@@ -316,6 +450,7 @@ generate_java_api_javadoc_seed() {
 #   $9 - structured seed document type, blank for recursive mirroring
 #   $10 - structured seed discovery URL
 #   $11 - exact source prefix mapped onto the canonical URL
+#   $12 - exact superseded mirror path quarantined during source migration
 fetch_docs() {
     local java_release="$1"
     local url="$2"
@@ -328,10 +463,33 @@ fetch_docs() {
     local seed_document_type="${9:-}"
     local seed_discovery_url="${10:-}"
     local seed_source_prefix="${11:-}"
+    local superseded_relative_mirror_path="${12:-}"
     local target_dir="$DOCS_ROOT/$relative_mirror_path"
 
     # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
     reject_regex="${reject_regex//__OR__/|}"
+
+    # Canonical manifest loading proves this lifecycle root cannot overlap another active source root.
+    if [ -n "$superseded_relative_mirror_path" ] \
+        && ! require_lifecycle_root_disjoint_from_external_fetch_roots \
+            "$superseded_relative_mirror_path"; then
+        log "${RED}✗ Superseded mirror overlaps an external active mirror: $superseded_relative_mirror_path${NC}"
+        return 1
+    fi
+    if [ -n "$superseded_relative_mirror_path" ] \
+        && [ -e "$DOCS_ROOT/$superseded_relative_mirror_path" ]; then
+        if [ "$CLEAN_INCOMPLETE" != "true" ]; then
+            log "${RED}✗ Superseded mirror remains while cleanup is disabled: $superseded_relative_mirror_path${NC}"
+            return 1
+        fi
+        if ! quarantine_superseded_mirror_path \
+            "$DOCS_ROOT/$superseded_relative_mirror_path" \
+            "$name superseded mirror $superseded_relative_mirror_path" \
+            "$superseded_relative_mirror_path"; then
+            log "${RED}✗ Failed to quarantine superseded mirror: $superseded_relative_mirror_path${NC}"
+            return 1
+        fi
+    fi
 
     # ── Pre-fetch: check existing mirror and quarantine if incomplete ──
     local existing_count
@@ -360,14 +518,31 @@ fetch_docs() {
 
     # ── Dispatch to strategy ──
     if [ -n "$java_release" ]; then
-        generate_java_api_javadoc_seed "$url" "$target_dir"
-        reconcile_java_api_seed_mirror "$url" "$target_dir" "$name" "$cut_dirs"
+        if ! generate_java_api_javadoc_seed "$url" "$target_dir" \
+            || ! reconcile_java_api_seed_mirror "$url" "$target_dir" "$name" "$cut_dirs"; then
+            cd - > /dev/null
+            return 1
+        fi
         existing_count="$(count_html_files "$target_dir")"
         if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
-            log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
-            return 0
+            if verify_java_api_seed_mirror "$url" "$target_dir" "$name" "$cut_dirs"; then
+                log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
+                if ! cd - > /dev/null; then
+                    log "${RED}✗ Could not restore the working directory after checking $name${NC}"
+                    return 1
+                fi
+                return 0
+            fi
+            log "${YELLOW}⚠ $name cached mirror is missing canonical seed paths; refetching${NC}"
         fi
-        fetch_java_api_javadoc_seed "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+        fetch_java_api_javadoc_seed \
+            "$target_dir" \
+            "$name" \
+            "$cut_dirs" \
+            "$min_files" \
+            "$reject_regex" \
+            "$partial_mirror_allowed" \
+            "$url"
     elif [ -n "$seed_discovery_url" ]; then
         fetch_discovered_documentation_seed \
             "$url" \
@@ -387,6 +562,10 @@ fetch_docs() {
 
 build_documentation_fetch_sources() {
     DOC_SOURCES=()
+    load_builtin_documentation_fetch_projections
+    if ! validate_documentation_source_lifecycle_external_roots; then
+        return 1
+    fi
     if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
         append_manifest_documentation_fetch_sources "$DOCUMENTATION_DOC_SET_SELECTOR"
         return

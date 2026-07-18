@@ -76,10 +76,11 @@ Deduplication is based on per-chunk SHA-256 markers stored locally:
 - `data/index/file_*.marker` records the file size, modification time, content SHA-256,
   extractor-semantics version, and chunk hashes.
 
-A file is skipped only when every file-level marker value, including the extractor-semantics version,
-matches the current ingestion contract. Changing extraction behavior therefore invalidates otherwise
+A file is skipped only when every file-level marker value, including the extractor-semantics version and
+the content fingerprint bound to canonical ingestion provenance, matches the current ingestion contract.
+Changing extraction behavior or manifest provenance therefore invalidates otherwise
 identical HTML: the prior vectors and local chunks are pruned, then the file is re-chunked and upserted.
-Older markers without an extractor-semantics version are intentionally reindexed once.
+Older markers with a missing or prior extractor-semantics version are intentionally reindexed once.
 
 See [local store directories](domains/local-store-directories.md) for details.
 

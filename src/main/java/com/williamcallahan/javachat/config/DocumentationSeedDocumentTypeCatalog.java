@@ -37,7 +37,7 @@ final class DocumentationSeedDocumentTypeCatalog {
             while ((seedDocumentType = catalogReader.readLine()) != null) {
                 catalogLineNumber++;
                 try {
-                    DocumentationManifestFieldRules.requireManifestText(seedDocumentType, "seedDocumentType", false);
+                    DocumentationManifestFieldRules.requireCanonicalSeedDocumentType(seedDocumentType);
                 } catch (IllegalArgumentException invalidDocumentType) {
                     throw invalidCatalogLine(catalogLineNumber, invalidDocumentType.getMessage());
                 }

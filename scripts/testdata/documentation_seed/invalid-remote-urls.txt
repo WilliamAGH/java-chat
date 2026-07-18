@@ -1,0 +1,17 @@
+https://user@example.invalid/reference/
+https://example.invalid:0/reference/
+https://example.invalid:65536/reference/
+https://example.invalid/reference/?
+https://example.invalid/reference/#
+https://-example.invalid/reference/
+https://example-.invalid/reference/
+https://example..invalid/reference/
+https://.example.invalid/reference/
+https://example.invalid./reference/
+https://[::::]/reference/
+https://[2001:db8::1::2]/reference/
+https://[v1.invalid]/reference/
+https://[::1]garbage/reference/
+https://2001:db8::1/reference/
+https://example.invalid:/reference/
+https://[2001:db8::1]:/reference/

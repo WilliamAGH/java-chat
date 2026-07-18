@@ -142,6 +142,12 @@ count_html_files() {
 if ! validate_fetch_result 0 "$TEST_DOCS_ROOT/complete-partial-allowed" "Complete partial-allowed mirror" 10 true; then
     fail_java_api_fetch_projection_test "allowPartial=true rejected a complete mirror"
 fi
+if validate_fetch_result 8 "$TEST_DOCS_ROOT/seed-server-error" "Seed server error" 10 false false; then
+    fail_java_api_fetch_projection_test "seed validation accepted Wget server-error status"
+fi
+if ! validate_fetch_result 8 "$TEST_DOCS_ROOT/recursive-server-error" "Recursive server error" 10 false true; then
+    fail_java_api_fetch_projection_test "recursive mirror validation rejected Wget server-error status"
+fi
 
 count_html_files() {
     printf '5\n'
@@ -225,6 +231,9 @@ wget() {
 validate_fetch_result() {
     printf '%s\n' "$5" > "$java_api_validation_capture_file"
 }
+verify_java_api_seed_mirror() {
+    return 0
+}
 
 mkdir -p "$TEST_DOCS_ROOT/java-api-validation"
 if ! (cd "$TEST_DOCS_ROOT/java-api-validation" \
@@ -234,7 +243,8 @@ if ! (cd "$TEST_DOCS_ROOT/java-api-validation" \
         5 \
         10 \
         "excluded-path" \
-        true); then
+        true \
+        "https://example.invalid/"); then
     fail_java_api_fetch_projection_test "Java API Javadoc validation boundary failed"
 fi
 if [ "$(cat "$java_api_validation_capture_file")" != "true" ]; then
@@ -242,6 +252,40 @@ if [ "$(cat "$java_api_validation_capture_file")" != "true" ]; then
 fi
 if ! grep -Fxq -- '--reject-regex=excluded-path' "$java_api_wget_arguments_capture_file"; then
     fail_java_api_fetch_projection_test "Java API seed fetch dropped the manifest reject regex"
+fi
+if ! grep -Fxq -- '--max-redirect=0' "$java_api_wget_arguments_capture_file"; then
+    fail_java_api_fetch_projection_test "Java API seed fetch must reject redirects"
+fi
+
+set --
+# shellcheck source=fetch_all_docs.sh
+source "$FETCH_SCRIPT"
+
+log() {
+    :
+}
+
+LOG_FILE="$TEST_DOCS_ROOT/java-api-missing-post-wget.log"
+missing_post_wget_target_directory="$TEST_DOCS_ROOT/java-api-missing-post-wget"
+mkdir -p "$missing_post_wget_target_directory"
+printf '%s\n' \
+    "https://example.invalid/Record.html" \
+    "https://example.invalid/String.html" \
+    > "$missing_post_wget_target_directory/.oracle-javadoc-seed.txt"
+wget() {
+    printf '<html><body>Record</body></html>\n' > "$missing_post_wget_target_directory/Record.html"
+    return 0
+}
+if (cd "$missing_post_wget_target_directory" \
+    && fetch_java_api_javadoc_seed \
+        "$missing_post_wget_target_directory" \
+        "Java API missing post-wget seed" \
+        0 \
+        1 \
+        "" \
+        false \
+        "https://example.invalid/") > /dev/null 2>&1; then
+    fail_java_api_fetch_projection_test "Java API post-wget success accepted a missing canonical seed path"
 fi
 
 set --
@@ -299,6 +343,237 @@ for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
         fail_java_api_fetch_projection_test "Java API mirror was declared complete before stale files were excluded from its count"
     fi
 done
+
+cached_missing_seed_refetch_capture_file="$TEST_DOCS_ROOT/cached-missing-seed-refetch"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/cached-missing-seed"
+    cached_missing_seed_target_directory="$DOCS_ROOT/java/java21-complete"
+    mkdir -p "$cached_missing_seed_target_directory"
+    printf '<html><body>Record</body></html>\n' > "$cached_missing_seed_target_directory/Record.html"
+    generate_java_api_javadoc_seed() {
+        local remote_base_url="$1"
+        local target_dir="$2"
+        printf '%s\n' \
+            "${remote_base_url}Record.html" \
+            "${remote_base_url}String.html" \
+            > "$target_dir/.oracle-javadoc-seed.txt"
+    }
+    fetch_java_api_javadoc_seed() {
+        printf 'refetch-required\n' > "$cached_missing_seed_refetch_capture_file"
+        return 0
+    }
+    fetch_docs \
+        21 \
+        "https://example.invalid/" \
+        "java/java21-complete" \
+        "Java 21 API" \
+        0 \
+        1 \
+        "" \
+        false
+); then
+    fail_java_api_fetch_projection_test "cached Java API missing-seed refetch failed"
+fi
+if [ ! -f "$cached_missing_seed_refetch_capture_file" ]; then
+    fail_java_api_fetch_projection_test "cached Java API success accepted a missing canonical seed path"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_WORK_ROOT/quarantine-location/data/docs"
+    CLEAN_INCOMPLETE="true"
+    date() { printf '20260718_090000\n'; }
+    mkdir -p \
+        "$DOCS_ROOT/incomplete-one/reference" \
+        "$DOCS_ROOT/incomplete-two/reference" \
+        "$DOCS_ROOT/legacy-one/reference" \
+        "$DOCS_ROOT/legacy-two/reference"
+    printf 'incomplete-one\n' > "$DOCS_ROOT/incomplete-one/reference/index.html"
+    printf 'incomplete-two\n' > "$DOCS_ROOT/incomplete-two/reference/index.html"
+    printf 'legacy-one\n' > "$DOCS_ROOT/legacy-one/reference/index.html"
+    printf 'legacy-two\n' > "$DOCS_ROOT/legacy-two/reference/index.html"
+    quarantine_incomplete_dir "$DOCS_ROOT/incomplete-one/reference" "Incomplete one" 0 1
+    quarantine_incomplete_dir "$DOCS_ROOT/incomplete-two/reference" "Incomplete two" 0 1
+    quarantine_path "$DOCS_ROOT/legacy-one/reference" "Legacy one"
+    quarantine_path "$DOCS_ROOT/legacy-two/reference" "Legacy two"
+    if [ -e "$DOCS_ROOT/.quarantine" ]; then
+        exit 1
+    fi
+    quarantine_root="$(dirname "$DOCS_ROOT")/.quarantine"
+    quarantine_batch_count="$(find "$quarantine_root" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+    quarantined_file_count="$(find "$quarantine_root" -type f -name index.html | wc -l | tr -d ' ')"
+    [ "$quarantine_batch_count" -eq 4 ] && [ "$quarantined_file_count" -eq 4 ]
+); then
+    fail_java_api_fetch_projection_test \
+        "incomplete and legacy quarantines must be collision-safe siblings outside data/docs"
+fi
+
+superseded_quarantine_move_capture_file="$TEST_DOCS_ROOT/superseded-quarantine-move"
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/superseded-quarantine-setup-failure"
+    mkdir -p "$DOCS_ROOT/rolling/1.0"
+    mktemp() { return 71; }
+    mv() {
+        printf 'move-invoked\n' > "$superseded_quarantine_move_capture_file"
+        return 0
+    }
+    quarantine_superseded_mirror_path \
+        "$DOCS_ROOT/rolling/1.0" \
+        "Rolling documentation" \
+        "rolling/1.0"
+); then
+    fail_java_api_fetch_projection_test "superseded quarantine accepted mktemp failure"
+fi
+if [ -e "$superseded_quarantine_move_capture_file" ]; then
+    fail_java_api_fetch_projection_test "superseded quarantine moved files after mktemp failure"
+fi
+
+seeded_quarantine_move_capture_file="$TEST_DOCS_ROOT/seeded-quarantine-move"
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/seeded-quarantine-setup-failure"
+    seeded_quarantine_target_directory="$DOCS_ROOT/reference"
+    seeded_quarantine_paths_file="$DOCS_ROOT/current-seed-paths"
+    mkdir -p "$seeded_quarantine_target_directory"
+    printf '<html><body>Stale</body></html>\n' > "$seeded_quarantine_target_directory/stale.html"
+    printf 'current.html\n' > "$seeded_quarantine_paths_file"
+    mktemp() { return 72; }
+    mv() {
+        printf 'move-invoked\n' > "$seeded_quarantine_move_capture_file"
+        return 0
+    }
+    reconcile_seeded_html_mirror \
+        "$seeded_quarantine_target_directory" \
+        "Seeded Reference" \
+        "$seeded_quarantine_paths_file" \
+        "unseeded-documentation"
+); then
+    fail_java_api_fetch_projection_test "seeded quarantine accepted mktemp failure"
+fi
+if [ -e "$seeded_quarantine_move_capture_file" ]; then
+    fail_java_api_fetch_projection_test "seeded quarantine moved files after mktemp failure"
+fi
+
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/quarantine-failure"
+    mkdir -p "$DOCS_ROOT/rolling/1.0"
+    quarantine_superseded_mirror_path() { return 77; }
+    fetch_docs_mirror() {
+        fail_java_api_fetch_projection_test "fetch continued after superseded-mirror quarantine failed"
+    }
+    fetch_docs \
+        "" \
+        "https://example.invalid/" \
+        "rolling" \
+        "Rolling documentation" \
+        0 \
+        1 \
+        "" \
+        false \
+        "" \
+        "" \
+        "" \
+        "rolling/1.0"
+); then
+    fail_java_api_fetch_projection_test "superseded-mirror quarantine failure was not propagated"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/cached-working-directory"
+    mkdir -p "$DOCS_ROOT/java/java21-complete"
+    count_html_files() { printf '10\n'; }
+    generate_java_api_javadoc_seed() { :; }
+    reconcile_java_api_seed_mirror() { :; }
+    verify_java_api_seed_mirror() { :; }
+    starting_working_directory="$PWD"
+    fetch_docs \
+        21 \
+        "https://example.invalid/" \
+        "java/java21-complete" \
+        "Java 21 API" \
+        0 \
+        10 \
+        "" \
+        false
+    [ "$PWD" = "$starting_working_directory" ]
+); then
+    fail_java_api_fetch_projection_test "cached Java API success did not restore the caller working directory"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    LOG_FILE="$TEST_DOCS_ROOT/atomic-seed.log"
+    atomic_seed_target="$TEST_DOCS_ROOT/atomic-seed"
+    mkdir -p "$atomic_seed_target"
+    printf 'retained-seed\n' > "$atomic_seed_target/.oracle-javadoc-seed.txt"
+    python3() {
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--output" ]; then
+                shift
+                printf 'incomplete-seed\n' > "$1"
+                break
+            fi
+            shift
+        done
+        return 42
+    }
+    if generate_java_api_javadoc_seed "https://example.invalid/" "$atomic_seed_target"; then
+        exit 1
+    fi
+    [ "$(cat "$atomic_seed_target/.oracle-javadoc-seed.txt")" = "retained-seed" ]
+); then
+    fail_java_api_fetch_projection_test "failed seed generation replaced the active Java API seed"
+fi
+
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    LOG_FILE="$TEST_DOCS_ROOT/atomic-seed-move.log"
+    atomic_seed_target="$TEST_DOCS_ROOT/atomic-seed-move"
+    mkdir -p "$atomic_seed_target"
+    python3() {
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--output" ]; then
+                shift
+                printf 'generated-seed\n' > "$1"
+                return 0
+            fi
+            shift
+        done
+        return 1
+    }
+    mv() { return 73; }
+    generate_java_api_javadoc_seed "https://example.invalid/" "$atomic_seed_target"
+); then
+    fail_java_api_fetch_projection_test "failed atomic seed replacement was not propagated"
+fi
 
 run_summary_capture_file="$TEST_DOCS_ROOT/run-summary"
 LOG_FILE="$TEST_DOCS_ROOT/full-run.log"

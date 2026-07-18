@@ -10,6 +10,36 @@ DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS=(
     --retry-connrefused
 )
 
+LEGACY_DOCUMENTATION_FETCH_PROJECTIONS=()
+QUICK_DOCUMENTATION_FETCH_PROJECTIONS=()
+BUILTIN_DOCUMENTATION_FETCH_PROJECTIONS_LOADED="false"
+
+load_builtin_documentation_fetch_projections() {
+    LEGACY_DOCUMENTATION_FETCH_PROJECTIONS=(
+        "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai-reference|Spring AI Reference (stable)|1|80|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
+        "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-reference-2|Spring AI Reference (2.0)|1|80|/spring-ai/reference/[^/]*SNAPSHOT|false"
+        "|${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|spring-ai-api-stable|Spring AI API (stable)|1|200||false"
+        "|${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|spring-ai-api-2|Spring AI API (2.x)|1|200||false"
+        "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
+        "|${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|spring-framework-complete|Spring Framework Javadoc (current)|1|7000||false"
+        "|${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|oracle/javase|Java 25 Release Notes Issues|3|1||false"
+        "|${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|ibm/articles|IBM Java 25 Overview|1|1||false"
+        "|${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1||false"
+    )
+    QUICK_DOCUMENTATION_FETCH_PROJECTIONS=(
+        "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework|Spring Framework Quick (reference landing)|1|1|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
+        "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai|Spring AI Quick (reference landing)|1|1|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
+        "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-2|Spring AI Quick (2.0 landing)|1|1|/spring-ai/reference/[^/]*SNAPSHOT|false"
+    )
+    BUILTIN_DOCUMENTATION_FETCH_PROJECTIONS_LOADED="true"
+}
+
+ensure_builtin_documentation_fetch_projections_loaded() {
+    if [ "$BUILTIN_DOCUMENTATION_FETCH_PROJECTIONS_LOADED" != "true" ]; then
+        load_builtin_documentation_fetch_projections
+    fi
+}
+
 append_manifest_documentation_fetch_sources() {
     local selected_doc_sets="${1:-}"
     local selection_enabled="false"
@@ -91,25 +121,59 @@ append_manifest_documentation_fetch_sources() {
 }
 
 append_legacy_documentation_fetch_sources() {
-    DOC_SOURCES+=(
-        "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai-reference|Spring AI Reference (stable)|1|80|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-reference-2|Spring AI Reference (2.0)|1|80|/spring-ai/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|spring-ai-api-stable|Spring AI API (stable)|1|200||false"
-        "|${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|spring-ai-api-2|Spring AI API (2.x)|1|200||false"
-        "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|spring-framework-complete|Spring Framework Javadoc (current)|1|7000||false"
-        "|${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|oracle/javase|Java 25 Release Notes Issues|3|1||false"
-        "|${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|ibm/articles|IBM Java 25 Overview|1|1||false"
-        "|${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1||false"
-    )
+    ensure_builtin_documentation_fetch_projections_loaded
+    DOC_SOURCES+=("${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}")
 }
 
 append_quick_documentation_fetch_sources() {
-    DOC_SOURCES+=(
-        "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework|Spring Framework Quick (reference landing)|1|1|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai|Spring AI Quick (reference landing)|1|1|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-2|Spring AI Quick (2.0 landing)|1|1|/spring-ai/reference/[^/]*SNAPSHOT|false"
+    ensure_builtin_documentation_fetch_projections_loaded
+    DOC_SOURCES+=("${QUICK_DOCUMENTATION_FETCH_PROJECTIONS[@]}")
+}
+
+documentation_fetch_projection_relative_mirror_path() {
+    local documentation_fetch_projection="$1"
+    local projection_after_java_release="${documentation_fetch_projection#*|}"
+    local projection_after_documentation_url="${projection_after_java_release#*|}"
+    local relative_mirror_path="${projection_after_documentation_url%%|*}"
+    printf '%s\n' "$relative_mirror_path"
+}
+
+require_lifecycle_root_disjoint_from_external_fetch_roots() {
+    local superseded_relative_mirror_path="$1"
+    ensure_builtin_documentation_fetch_projections_loaded
+    local -a external_fetch_projections=(
+        "${JAVA_API_SOURCE_PROJECTIONS[@]+"${JAVA_API_SOURCE_PROJECTIONS[@]}"}"
+        "${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}"
+        "${QUICK_DOCUMENTATION_FETCH_PROJECTIONS[@]}"
     )
+    local external_fetch_projection
+    for external_fetch_projection in "${external_fetch_projections[@]}"; do
+        local external_relative_mirror_path
+        external_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path "$external_fetch_projection")"
+        if documentation_mirror_roots_overlap \
+            "$superseded_relative_mirror_path" \
+            "$external_relative_mirror_path"; then
+            printf 'Documentation source superseded mirror path overlaps external active mirror path: %s -> %s\n' \
+                "$superseded_relative_mirror_path" \
+                "$external_relative_mirror_path" >&2
+            return 1
+        fi
+    done
+}
+
+validate_documentation_source_lifecycle_external_roots() {
+    local documentation_source_projection
+    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+        local superseded_relative_mirror_path
+        superseded_relative_mirror_path="$(documentation_source_manifest_field \
+            "$documentation_source_projection" \
+            "supersededRelativeMirrorPath")"
+        if [ -n "$superseded_relative_mirror_path" ] \
+            && ! require_lifecycle_root_disjoint_from_external_fetch_roots \
+                "$superseded_relative_mirror_path"; then
+            return 1
+        fi
+    done
 }
 
 # Validates the crawler exit status and manifest-owned completeness policy.
@@ -119,10 +183,12 @@ validate_fetch_result() {
     local name="$3"
     local minimum_html_files="$4"
     local partial_mirror_allowed="$5"
+    local recursive_server_errors_allowed="${6:-false}"
     local fetched_html_count
     fetched_html_count="$(count_html_files "$target_dir")"
 
-    if [ "$wget_exit_code" -ne 0 ] && [ "$wget_exit_code" -ne 8 ]; then
+    if [ "$wget_exit_code" -ne 0 ] \
+        && { [ "$recursive_server_errors_allowed" != "true" ] || [ "$wget_exit_code" -ne 8 ]; }; then
         log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
         return 1
     fi
@@ -149,6 +215,7 @@ fetch_java_api_javadoc_seed() {
     local minimum_html_files="$4"
     local reject_regex="${5:-}"
     local partial_mirror_allowed="$6"
+    local remote_base_url="$7"
     local seed_file="$target_dir/.oracle-javadoc-seed.txt"
     local wget_seed_args=(
         --timestamping
@@ -157,6 +224,7 @@ fetch_java_api_javadoc_seed() {
         --cut-dirs="$cut_dirs"
         --input-file="$seed_file"
         --directory-prefix="$target_dir"
+        --max-redirect=0
         --show-progress
         --progress=bar:force
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
@@ -166,13 +234,23 @@ fetch_java_api_javadoc_seed() {
         wget_seed_args+=(--reject-regex="$reject_regex")
     fi
 
+    local wget_exit_code
     wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
+    wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+    local fetched_html_count
+    fetched_html_count="$(count_html_files "$target_dir")"
+    if [ "$wget_exit_code" -eq 0 ] \
+        && [ "$fetched_html_count" -gt 0 ] \
+        && { [ "$minimum_html_files" -le 0 ] || [ "$fetched_html_count" -ge "$minimum_html_files" ]; } \
+        && ! verify_java_api_seed_mirror "$remote_base_url" "$target_dir" "$name" "$cut_dirs"; then
+        return 1
+    fi
+    validate_fetch_result \
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" false
 }
 
-# Fetches generic documentation recursively, retaining extensionless pages and their page requisites.
+# Fetches generic HTML documentation recursively, retaining extensionless pages without binary requisites.
 fetch_docs_mirror() {
     local url="$1"
     local target_dir="$2"
@@ -185,11 +263,10 @@ fetch_docs_mirror() {
         --mirror
         --convert-links
         --adjust-extension
-        --page-requisites
         --no-parent
         --no-host-directories
         --cut-dirs="$cut_dirs"
-        --reject="index.html?*"
+        --reject="index.html?*,css,js,mjs,png,jpg,jpeg,gif,svg,webp,ico,woff,woff2,ttf,eot,map,pdf,zip,gz,tgz,tar,jar"
         --quiet
         --show-progress
         --progress=bar:force
@@ -206,10 +283,12 @@ fetch_docs_mirror() {
         wget_args+=(--reject-regex="$reject_regex")
     fi
 
+    local wget_exit_code
     wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
+    wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+    validate_fetch_result \
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" true
 }
 
 # Fetches an explicit manifest-governed seed discovered from structured XML or HTML.
@@ -225,16 +304,35 @@ fetch_discovered_documentation_seed() {
     local seed_discovery_url="$9"
     local seed_source_prefix="${10}"
     local discovery_file
-    discovery_file="$(mktemp "$target_dir/.documentation-discovery.XXXXXX")"
+    if ! discovery_file="$(mktemp "$target_dir/.documentation-discovery.XXXXXX")"; then
+        cd - > /dev/null
+        log "${RED}✗ Could not create a structured discovery file for $name${NC}"
+        return 1
+    fi
     local seed_file="$target_dir/.documentation-seed.txt"
+    local generated_seed_file
+    if ! generated_seed_file="$(mktemp "$target_dir/.documentation-seed.XXXXXX")"; then
+        rm -f "$discovery_file"
+        cd - > /dev/null
+        log "${RED}✗ Could not create a generated seed file for $name${NC}"
+        return 1
+    fi
+    local mirror_paths_file
+    if ! mirror_paths_file="$(mktemp "$target_dir/.documentation-seed-paths.XXXXXX")"; then
+        rm -f "$discovery_file" "$generated_seed_file"
+        cd - > /dev/null
+        log "${RED}✗ Could not create generated mirror paths for $name${NC}"
+        return 1
+    fi
     local wget_discovery_arguments=(
         --quiet
         --output-document="$discovery_file"
+        --max-redirect=0
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
     )
 
     if ! wget "${wget_discovery_arguments[@]}" "$seed_discovery_url"; then
-        rm -f "$discovery_file"
+        rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null
         log "${RED}✗ Failed to fetch structured discovery document for $name${NC}"
         return 1
@@ -245,13 +343,34 @@ fetch_discovered_documentation_seed() {
         --discovery-url "$seed_discovery_url" \
         --source-prefix "$seed_source_prefix" \
         --canonical-prefix "$canonical_prefix" \
-        --output "$seed_file"; then
-        rm -f "$discovery_file"
+        --reject-regex "$reject_regex" \
+        --output "$generated_seed_file" \
+        --mirror-path-output "$mirror_paths_file" \
+        --cut-directories "$cut_directories"; then
+        rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
         cd - > /dev/null
         log "${RED}✗ Structured discovery failed for $name${NC}"
         return 1
     fi
+    if [ ! -s "$generated_seed_file" ] || [ ! -s "$mirror_paths_file" ]; then
+        rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
+        cd - > /dev/null
+        log "${RED}✗ Structured discovery produced incomplete seed outputs for $name${NC}"
+        return 1
+    fi
+    if ! mv "$generated_seed_file" "$seed_file"; then
+        rm -f "$discovery_file" "$generated_seed_file" "$mirror_paths_file"
+        cd - > /dev/null
+        log "${RED}✗ Structured discovery could not replace the active seed for $name${NC}"
+        return 1
+    fi
     rm -f "$discovery_file"
+    if ! reconcile_seeded_html_mirror \
+        "$target_dir" "$name" "$mirror_paths_file" "unseeded-documentation"; then
+        rm -f "$mirror_paths_file"
+        cd - > /dev/null
+        return 1
+    fi
 
     local wget_seed_arguments=(
         --timestamping
@@ -262,6 +381,7 @@ fetch_discovered_documentation_seed() {
         --directory-prefix="$target_dir"
         --adjust-extension
         --convert-links
+        --max-redirect=0
         --show-progress
         --progress=bar:force
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
@@ -270,19 +390,30 @@ fetch_discovered_documentation_seed() {
     if [ -n "$reject_regex" ]; then
         wget_seed_arguments+=(--reject-regex="$reject_regex")
     fi
+    local wget_exit_code
     wget "${wget_seed_arguments[@]}" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
+    wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null
+    if [ "$wget_exit_code" -ne 0 ]; then
+        rm -f "$mirror_paths_file"
+        log "${RED}✗ Failed to fetch $name seed URLs (exit code: $wget_exit_code)${NC}"
+        return 1
+    fi
+    if ! verify_seeded_html_mirror "$target_dir" "$name" "$mirror_paths_file"; then
+        rm -f "$mirror_paths_file"
+        return 1
+    fi
+    rm -f "$mirror_paths_file"
     validate_fetch_result \
-        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" false
 }
 
 fetch_documentation_source() {
     local documentation_source_projection="$1"
     local fetch_projection_delimiters="${documentation_source_projection//[^|]/}"
     if [ "${#fetch_projection_delimiters}" -ne 7 ] \
-        && [ "${#fetch_projection_delimiters}" -ne 10 ]; then
-        log "${RED}✗ Documentation source projection must contain exactly eight or eleven fields${NC}"
+        && [ "${#fetch_projection_delimiters}" -ne 11 ]; then
+        log "${RED}✗ Documentation source projection must contain exactly eight or twelve fields${NC}"
         return 1
     fi
 
@@ -297,7 +428,8 @@ fetch_documentation_source() {
     local seed_document_type
     local seed_discovery_url
     local seed_source_prefix
-    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed seed_document_type seed_discovery_url seed_source_prefix <<< "$documentation_source_projection"
+    local superseded_relative_mirror_path
+    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed seed_document_type seed_discovery_url seed_source_prefix superseded_relative_mirror_path <<< "$documentation_source_projection"
 
     if [ -z "$documentation_source_url" ] || [ -z "$relative_mirror_path" ] || [ -z "$documentation_source_name" ]; then
         log "${RED}✗ Documentation source projection has a blank required field${NC}"
@@ -310,13 +442,15 @@ fetch_documentation_source() {
         || has_boundary_whitespace "$seed_document_type" \
         || has_boundary_whitespace "$seed_discovery_url" \
         || has_boundary_whitespace "$seed_source_prefix" \
+        || has_boundary_whitespace "$superseded_relative_mirror_path" \
         || has_manifest_control_character "$documentation_source_url" \
         || has_manifest_control_character "$relative_mirror_path" \
         || has_manifest_control_character "$documentation_source_name" \
         || has_manifest_control_character "$reject_regex" \
         || has_manifest_control_character "$seed_document_type" \
         || has_manifest_control_character "$seed_discovery_url" \
-        || has_manifest_control_character "$seed_source_prefix"; then
+        || has_manifest_control_character "$seed_source_prefix" \
+        || has_manifest_control_character "$superseded_relative_mirror_path"; then
         log "${RED}✗ Documentation source projection has invalid text fields${NC}"
         return 1
     fi
@@ -327,6 +461,12 @@ fetch_documentation_source() {
     fi
     if ! is_normalized_relative_mirror_path "$relative_mirror_path"; then
         log "${RED}✗ Documentation source mirror path must be normalized and relative${NC}"
+        return 1
+    fi
+    if [ -n "$superseded_relative_mirror_path" ] \
+        && { ! is_normalized_relative_mirror_path "$superseded_relative_mirror_path" \
+            || [ "$superseded_relative_mirror_path" = "$relative_mirror_path" ]; }; then
+        log "${RED}✗ Documentation source superseded mirror path is invalid${NC}"
         return 1
     fi
     if [ -n "$java_release" ] && ! is_absolute_https_remote_base_url "$documentation_source_url"; then
@@ -364,7 +504,7 @@ fetch_documentation_source() {
     log "URL: $documentation_source_url"
     log "Target: $DOCS_ROOT/$relative_mirror_path"
 
-    if [ "${#fetch_projection_delimiters}" -eq 10 ]; then
+    if [ "${#fetch_projection_delimiters}" -eq 11 ]; then
         fetch_docs \
             "$java_release" \
             "$documentation_source_url" \
@@ -376,7 +516,8 @@ fetch_documentation_source() {
             "$partial_mirror_allowed" \
             "$seed_document_type" \
             "$seed_discovery_url" \
-            "$seed_source_prefix"
+            "$seed_source_prefix" \
+            "$superseded_relative_mirror_path"
         return
     fi
     fetch_docs \

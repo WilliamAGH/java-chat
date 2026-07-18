@@ -2,11 +2,15 @@
 
 DOCUMENTATION_SOURCE_LIBRARY_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG="$DOCUMENTATION_SOURCE_LIBRARY_DIRECTORY/../../src/main/resources/documentation-seed-document-types.manifest"
+DOCUMENTATION_SOURCE_FIELD_CATALOG="$DOCUMENTATION_SOURCE_LIBRARY_DIRECTORY/../../src/main/resources/documentation-source-fields.manifest"
 JAVA_API_SOURCE_MANIFEST_HEADER='javaRelease|remoteBaseUrl|relativeMirrorPath|displayName|cutDirectories|minimumHtmlFiles|rejectRegex|allowPartial'
 JAVA_API_SOURCE_MAX_INTEGER='2147483647'
+DOCUMENTATION_REMOTE_URL_MINIMUM_PORT='1'
+DOCUMENTATION_REMOTE_URL_MAXIMUM_PORT='65535'
 JAVA_API_SOURCE_PROJECTIONS=()
-DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS=()
-DOCUMENTATION_SOURCE_MANIFEST_HEADER_LOADED="false"
+DOCUMENTATION_SOURCE_FIELDS=()
+DOCUMENTATION_SOURCE_FIELDS_LOADED="false"
+DOCUMENTATION_SOURCE_MANIFEST_HEADER=""
 DOCUMENTATION_SOURCE_PROJECTIONS=()
 DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS=()
 DOCUMENTATION_SOURCE_FETCH_PROJECTIONS=()
@@ -43,7 +47,8 @@ load_documentation_seed_document_types() {
         seed_document_type="${seed_document_type%$'\r'}"
         if is_blank_manifest_line "$seed_document_type" \
             || has_boundary_whitespace "$seed_document_type" \
-            || has_manifest_control_character "$seed_document_type"; then
+            || has_manifest_control_character "$seed_document_type" \
+            || [[ ! "$seed_document_type" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
             echo "Documentation seed document type catalog line $catalog_line_number is invalid" >&2
             return 1
         fi
@@ -61,58 +66,91 @@ load_documentation_seed_document_types() {
     fi
 }
 
-documentation_source_manifest_field_index() {
-    local canonical_field_name="$1"
-    if [ "$DOCUMENTATION_SOURCE_MANIFEST_HEADER_LOADED" != "true" ]; then
-        return 1
-    fi
-    local header_field_index
-    for header_field_index in "${!DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS[@]}"; do
-        if [ "${DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS[$header_field_index]}" = "$canonical_field_name" ]; then
-            printf '%s\n' "$header_field_index"
+is_retained_documentation_source_field() {
+    local requested_field_name="$1"
+    local retained_field_name
+    for retained_field_name in "${DOCUMENTATION_SOURCE_FIELDS[@]+"${DOCUMENTATION_SOURCE_FIELDS[@]}"}"; do
+        if [ "$retained_field_name" = "$requested_field_name" ]; then
             return 0
         fi
     done
     return 1
 }
 
-documentation_source_manifest_field_value() {
-    local manifest_row="$1"
-    local canonical_field_name="$2"
-    local header_field_index
-    if ! header_field_index="$(documentation_source_manifest_field_index "$canonical_field_name")"; then
+load_documentation_source_fields() {
+    local field_catalog_file="$1"
+    if [ ! -f "$field_catalog_file" ]; then
+        echo "Documentation source field catalog not found: $field_catalog_file" >&2
         return 1
     fi
 
-    local -a manifest_fields
-    IFS='|' read -r -a manifest_fields <<< "$manifest_row"
-    printf '%s' "${manifest_fields[$header_field_index]-}"
+    DOCUMENTATION_SOURCE_FIELDS=()
+    DOCUMENTATION_SOURCE_FIELDS_LOADED="false"
+    DOCUMENTATION_SOURCE_MANIFEST_HEADER=""
+    local catalog_line_number=0
+    local canonical_field_name
+    while IFS= read -r canonical_field_name || [ -n "$canonical_field_name" ]; do
+        catalog_line_number=$((catalog_line_number + 1))
+        canonical_field_name="${canonical_field_name%$'\r'}"
+        if is_blank_manifest_line "$canonical_field_name" \
+            || has_boundary_whitespace "$canonical_field_name" \
+            || has_manifest_control_character "$canonical_field_name" \
+            || [[ ! "$canonical_field_name" =~ ^[a-z][A-Za-z0-9]*$ ]]; then
+            echo "Documentation source field catalog line $catalog_line_number is invalid" >&2
+            return 1
+        fi
+        if is_retained_documentation_source_field "$canonical_field_name"; then
+            echo "Documentation source field catalog line $catalog_line_number duplicates $canonical_field_name" >&2
+            return 1
+        fi
+        DOCUMENTATION_SOURCE_FIELDS+=("$canonical_field_name")
+        if [ -z "$DOCUMENTATION_SOURCE_MANIFEST_HEADER" ]; then
+            DOCUMENTATION_SOURCE_MANIFEST_HEADER="$canonical_field_name"
+        else
+            DOCUMENTATION_SOURCE_MANIFEST_HEADER+="|$canonical_field_name"
+        fi
+    done < "$field_catalog_file"
+
+    if [ -z "$DOCUMENTATION_SOURCE_MANIFEST_HEADER" ]; then
+        echo "Documentation source field catalog has no records: $field_catalog_file" >&2
+        return 1
+    fi
+    DOCUMENTATION_SOURCE_FIELDS_LOADED="true"
 }
 
 load_documentation_source_manifest_header() {
     local manifest_header="$1"
-    if [ -z "$manifest_header" ]; then
+    [ "$DOCUMENTATION_SOURCE_FIELDS_LOADED" = "true" ] \
+        && [ "$manifest_header" = "$DOCUMENTATION_SOURCE_MANIFEST_HEADER" ]
+}
+
+documentation_source_manifest_field_index() {
+    local canonical_field_name="$1"
+    if [ "$DOCUMENTATION_SOURCE_FIELDS_LOADED" != "true" ]; then
         return 1
     fi
 
-    DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS=()
-    DOCUMENTATION_SOURCE_MANIFEST_HEADER_LOADED="false"
-    local -a manifest_header_fields
-    IFS='|' read -r -a manifest_header_fields <<< "$manifest_header"
-    local canonical_field_name
-    for canonical_field_name in "${manifest_header_fields[@]}"; do
-        if is_blank_manifest_line "$canonical_field_name" \
-            || has_boundary_whitespace "$canonical_field_name" \
-            || has_manifest_control_character "$canonical_field_name"; then
-            return 1
+    local canonical_field_index
+    for canonical_field_index in "${!DOCUMENTATION_SOURCE_FIELDS[@]}"; do
+        if [ "${DOCUMENTATION_SOURCE_FIELDS[$canonical_field_index]}" = "$canonical_field_name" ]; then
+            printf '%s\n' "$canonical_field_index"
+            return 0
         fi
-        if documentation_source_manifest_field_index "$canonical_field_name" > /dev/null; then
-            return 1
-        fi
-        DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS+=("$canonical_field_name")
-        DOCUMENTATION_SOURCE_MANIFEST_HEADER_LOADED="true"
     done
-    [ "$DOCUMENTATION_SOURCE_MANIFEST_HEADER_LOADED" = "true" ]
+    return 1
+}
+
+documentation_source_manifest_field() {
+    local manifest_projection="$1"
+    local canonical_field_name="$2"
+    local canonical_field_index
+    if ! canonical_field_index="$(documentation_source_manifest_field_index "$canonical_field_name")"; then
+        return 1
+    fi
+
+    local -a manifest_fields
+    IFS='|' read -r -a manifest_fields <<< "$manifest_projection"
+    printf '%s' "${manifest_fields[$canonical_field_index]-}"
 }
 
 documentation_fetch_cut_directories() {
@@ -162,33 +200,124 @@ is_absolute_https_remote_base_url() {
     if [[ "$remote_base_url" != https://* || "$remote_base_url" != */ ]]; then
         return 1
     fi
-    if [[ "$remote_base_url" == *[[:space:]]* || "$remote_base_url" == *\\* ]]; then
+    if [[ "$remote_base_url" == *[[:space:]]* \
+        || "$remote_base_url" == *\\* \
+        || "$remote_base_url" == *\?* \
+        || "$remote_base_url" == *\#* ]]; then
         return 1
     fi
 
     local remote_authority_and_path="${remote_base_url#https://}"
     local remote_authority="${remote_authority_and_path%%[/?#]*}"
-    if [ -z "$remote_authority" ]; then
+    if [ -z "$remote_authority" ] || [[ "$remote_authority" == *@* ]]; then
         return 1
     fi
 
-    local remote_host_and_port="${remote_authority##*@}"
-    if [ -z "$remote_host_and_port" ]; then
+    local remote_host
+    local remote_port=""
+    if [[ "$remote_authority" == \[* ]]; then
+        local remote_host_and_suffix="${remote_authority#\[}"
+        remote_host="${remote_host_and_suffix%%]*}"
+        local remote_port_suffix="${remote_host_and_suffix#*]}"
+        if [ -z "$remote_host" ] \
+            || [ "$remote_authority" != "[$remote_host]$remote_port_suffix" ]; then
+            return 1
+        fi
+        if [ -n "$remote_port_suffix" ]; then
+            if [[ ! "$remote_port_suffix" =~ ^:([0-9]+)$ ]]; then
+                return 1
+            fi
+            remote_port="${BASH_REMATCH[1]}"
+        fi
+        if ! is_valid_remote_ipv6_host "$remote_host"; then
+            return 1
+        fi
+    else
+        if [[ "$remote_authority" == *'['* || "$remote_authority" == *']'* ]]; then
+            return 1
+        fi
+        local authority_without_colons="${remote_authority//:/}"
+        local remote_colon_count=$(( ${#remote_authority} - ${#authority_without_colons} ))
+        if [ "$remote_colon_count" -gt 1 ]; then
+            return 1
+        fi
+        if [ "$remote_colon_count" -eq 1 ]; then
+            remote_host="${remote_authority%:*}"
+            remote_port="${remote_authority##*:}"
+            if [ -z "$remote_port" ]; then
+                return 1
+            fi
+        else
+            remote_host="$remote_authority"
+        fi
+        if ! has_valid_remote_dns_labels "$remote_host"; then
+            return 1
+        fi
+    fi
+    is_valid_optional_remote_port "$remote_port"
+}
+
+is_valid_remote_ipv6_host() {
+    local remote_ipv6_host="$1"
+    python3 -c 'import ipaddress, sys; ipaddress.IPv6Address(sys.argv[1])' \
+        "$remote_ipv6_host" > /dev/null 2>&1
+}
+
+has_valid_remote_dns_labels() {
+    local remote_dns_host="$1"
+    if [ -z "$remote_dns_host" ] \
+        || [[ "$remote_dns_host" == .* \
+        || "$remote_dns_host" == *. \
+        || "$remote_dns_host" == *..* ]]; then
         return 1
     fi
-    if [[ "$remote_host_and_port" == \[* ]]; then
-        [[ "$remote_host_and_port" =~ ^\[[0-9A-Fa-f:.]+\](:[0-9]+)?$ ]]
-        return
+
+    local IFS='.'
+    local -a remote_dns_labels
+    read -r -a remote_dns_labels <<< "$remote_dns_host"
+    local remote_dns_label
+    local LC_ALL=C
+    for remote_dns_label in "${remote_dns_labels[@]}"; do
+        if [[ ! "$remote_dns_label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+            return 1
+        fi
+    done
+}
+
+is_valid_optional_remote_port() {
+    local remote_port="$1"
+    if [ -z "$remote_port" ]; then
+        return 0
     fi
-    [[ "$remote_host_and_port" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?$ ]]
+    if [[ ! "$remote_port" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    local normalized_remote_port="$remote_port"
+    while [ "${#normalized_remote_port}" -gt 1 ] && [[ "$normalized_remote_port" == 0* ]]; do
+        normalized_remote_port="${normalized_remote_port#0}"
+    done
+    if [ "${#normalized_remote_port}" -gt "${#DOCUMENTATION_REMOTE_URL_MAXIMUM_PORT}" ]; then
+        return 1
+    fi
+    [ "$normalized_remote_port" -ge "$DOCUMENTATION_REMOTE_URL_MINIMUM_PORT" ] \
+        && [ "$normalized_remote_port" -le "$DOCUMENTATION_REMOTE_URL_MAXIMUM_PORT" ]
 }
 
 is_absolute_https_remote_url() {
     local remote_url="$1"
-    if [[ "$remote_url" != https://* ]]; then
+    if [[ "$remote_url" != https://* \
+        || "$remote_url" == *[[:space:]]* \
+        || "$remote_url" == *\\* \
+        || "$remote_url" == *\?* \
+        || "$remote_url" == *\#* ]]; then
         return 1
     fi
-    is_absolute_https_remote_base_url "${remote_url%/}/"
+    local remote_authority_and_path="${remote_url#https://}"
+    local remote_authority="${remote_authority_and_path%%/*}"
+    if [ -z "$remote_authority" ] || [[ "$remote_authority" == *@* ]]; then
+        return 1
+    fi
+    is_absolute_https_remote_base_url "https://$remote_authority/"
 }
 
 is_absolute_http_remote_base_url() {
@@ -223,6 +352,20 @@ is_normalized_relative_mirror_path() {
             return 1
         fi
     done
+}
+
+documentation_mirror_root_contains() {
+    local containing_mirror_root="$1"
+    local candidate_mirror_root="$2"
+    [[ "$candidate_mirror_root" = "$containing_mirror_root" \
+        || "$candidate_mirror_root" == "$containing_mirror_root/"* ]]
+}
+
+documentation_mirror_roots_overlap() {
+    local first_mirror_root="$1"
+    local second_mirror_root="$2"
+    documentation_mirror_root_contains "$first_mirror_root" "$second_mirror_root" \
+        || documentation_mirror_root_contains "$second_mirror_root" "$first_mirror_root"
 }
 
 is_blank_manifest_line() {
@@ -347,14 +490,14 @@ load_java_api_documentation_sources() {
             return 1
         fi
         local retained_java_release
-        for retained_java_release in "${retained_java_releases[@]}"; do
+        for retained_java_release in "${retained_java_releases[@]+"${retained_java_releases[@]}"}"; do
             if [ "$retained_java_release" = "$javaRelease" ]; then
                 echo "Java API source manifest line $manifest_line_number duplicates Java release $javaRelease" >&2
                 return 1
             fi
         done
         local retained_relative_mirror_path
-        for retained_relative_mirror_path in "${retained_relative_mirror_paths[@]}"; do
+        for retained_relative_mirror_path in "${retained_relative_mirror_paths[@]+"${retained_relative_mirror_paths[@]}"}"; do
             if [ "$retained_relative_mirror_path" = "$relativeMirrorPath" ]; then
                 echo "Java API source manifest line $manifest_line_number duplicates mirror path $relativeMirrorPath" >&2
                 return 1
@@ -389,6 +532,9 @@ load_documentation_sources() {
         echo "Documentation source manifest not found: $source_manifest_file" >&2
         return 1
     fi
+    if ! load_documentation_source_fields "$DOCUMENTATION_SOURCE_FIELD_CATALOG"; then
+        return 1
+    fi
     if ! load_documentation_seed_document_types "$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG"; then
         return 1
     fi
@@ -396,12 +542,16 @@ load_documentation_sources() {
     DOCUMENTATION_SOURCE_PROJECTIONS=()
     DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS=()
     DOCUMENTATION_SOURCE_FETCH_PROJECTIONS=()
+    local loaded_documentation_source_projections=()
+    local loaded_documentation_source_doc_set_projections=()
+    local loaded_documentation_source_fetch_projections=()
     local manifest_header=""
     local expected_manifest_column_count=0
     local manifest_line_number=0
     local manifest_line
-    local retained_relative_mirror_paths=("")
-    local retained_doc_sets=("")
+    local retained_relative_mirror_paths=()
+    local retained_superseded_relative_mirror_paths=()
+    local retained_doc_sets=()
     while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
         manifest_line_number=$((manifest_line_number + 1))
         manifest_line="${manifest_line%$'\r'}"
@@ -415,7 +565,7 @@ load_documentation_sources() {
                 echo "Documentation source manifest header is invalid: $source_manifest_file" >&2
                 return 1
             fi
-            expected_manifest_column_count=${#DOCUMENTATION_SOURCE_MANIFEST_HEADER_FIELDS[@]}
+            expected_manifest_column_count=${#DOCUMENTATION_SOURCE_FIELDS[@]}
             continue
         fi
         if is_blank_manifest_line "$manifest_line"; then
@@ -443,23 +593,15 @@ load_documentation_sources() {
         local seedDocumentType
         local seedDiscoveryUrl
         local seedSourcePrefix
-        if ! fetchUrl="$(documentation_source_manifest_field_value "$manifest_line" "fetchUrl")" \
-            || ! citationBaseUrl="$(documentation_source_manifest_field_value "$manifest_line" "citationBaseUrl")" \
-            || ! relativeMirrorPath="$(documentation_source_manifest_field_value "$manifest_line" "relativeMirrorPath")" \
-            || ! displayName="$(documentation_source_manifest_field_value "$manifest_line" "displayName")" \
-            || ! docSet="$(documentation_source_manifest_field_value "$manifest_line" "docSet")" \
-            || ! sourceKind="$(documentation_source_manifest_field_value "$manifest_line" "sourceKind")" \
-            || ! docType="$(documentation_source_manifest_field_value "$manifest_line" "docType")" \
-            || ! docVersion="$(documentation_source_manifest_field_value "$manifest_line" "docVersion")" \
-            || ! minimumHtmlFiles="$(documentation_source_manifest_field_value "$manifest_line" "minimumHtmlFiles")" \
-            || ! rejectRegex="$(documentation_source_manifest_field_value "$manifest_line" "rejectRegex")" \
-            || ! allowPartial="$(documentation_source_manifest_field_value "$manifest_line" "allowPartial")" \
-            || ! seedDocumentType="$(documentation_source_manifest_field_value "$manifest_line" "seedDocumentType")" \
-            || ! seedDiscoveryUrl="$(documentation_source_manifest_field_value "$manifest_line" "seedDiscoveryUrl")" \
-            || ! seedSourcePrefix="$(documentation_source_manifest_field_value "$manifest_line" "seedSourcePrefix")"; then
-            echo "Documentation source manifest header is missing a required canonical field: $source_manifest_file" >&2
-            return 1
-        fi
+        local supersededRelativeMirrorPath
+        local -a manifest_fields
+        IFS='|' read -r -a manifest_fields <<< "$manifest_line"
+        local manifest_field_index
+        for manifest_field_index in "${!DOCUMENTATION_SOURCE_FIELDS[@]}"; do
+            printf -v "${DOCUMENTATION_SOURCE_FIELDS[$manifest_field_index]}" \
+                '%s' \
+                "${manifest_fields[$manifest_field_index]-}"
+        done
 
         if [ -z "$fetchUrl" ] \
             || [ -z "$citationBaseUrl" ] \
@@ -485,6 +627,7 @@ load_documentation_sources() {
             || has_boundary_whitespace "$seedDocumentType" \
             || has_boundary_whitespace "$seedDiscoveryUrl" \
             || has_boundary_whitespace "$seedSourcePrefix" \
+            || has_boundary_whitespace "$supersededRelativeMirrorPath" \
             || has_manifest_control_character "$fetchUrl" \
             || has_manifest_control_character "$citationBaseUrl" \
             || has_manifest_control_character "$relativeMirrorPath" \
@@ -496,7 +639,8 @@ load_documentation_sources() {
             || has_manifest_control_character "$rejectRegex" \
             || has_manifest_control_character "$seedDocumentType" \
             || has_manifest_control_character "$seedDiscoveryUrl" \
-            || has_manifest_control_character "$seedSourcePrefix"; then
+            || has_manifest_control_character "$seedSourcePrefix" \
+            || has_manifest_control_character "$supersededRelativeMirrorPath"; then
             echo "Documentation source manifest line $manifest_line_number has invalid text fields" >&2
             return 1
         fi
@@ -510,6 +654,19 @@ load_documentation_sources() {
         fi
         if ! is_normalized_relative_mirror_path "$relativeMirrorPath"; then
             echo "Documentation source manifest line $manifest_line_number has an invalid relative mirror path" >&2
+            return 1
+        fi
+        if [ -n "$supersededRelativeMirrorPath" ]; then
+            if ! is_normalized_relative_mirror_path "$supersededRelativeMirrorPath" \
+                || documentation_mirror_root_contains \
+                    "$supersededRelativeMirrorPath" \
+                    "$relativeMirrorPath"; then
+                echo "Documentation source manifest line $manifest_line_number has an invalid superseded mirror path" >&2
+                return 1
+            fi
+        fi
+        if [[ "$docSet" == *,* ]]; then
+            echo "Documentation source manifest line $manifest_line_number has an invalid comma-delimited docSet" >&2
             return 1
         fi
         if ! is_canonical_manifest_integer "$minimumHtmlFiles" || [ "$minimumHtmlFiles" = "0" ]; then
@@ -542,28 +699,38 @@ load_documentation_sources() {
             return 1
         fi
         local retained_relative_mirror_path
-        for retained_relative_mirror_path in "${retained_relative_mirror_paths[@]}"; do
+        for retained_relative_mirror_path in "${retained_relative_mirror_paths[@]+"${retained_relative_mirror_paths[@]}"}"; do
             if [ "$retained_relative_mirror_path" = "$relativeMirrorPath" ]; then
                 echo "Documentation source manifest line $manifest_line_number duplicates mirror path $relativeMirrorPath" >&2
                 return 1
             fi
         done
         local retained_doc_set
-        for retained_doc_set in "${retained_doc_sets[@]}"; do
+        for retained_doc_set in "${retained_doc_sets[@]+"${retained_doc_sets[@]}"}"; do
             if [ "$retained_doc_set" = "$docSet" ]; then
                 echo "Documentation source manifest line $manifest_line_number duplicates docSet $docSet" >&2
                 return 1
             fi
         done
+        if [ -n "$supersededRelativeMirrorPath" ]; then
+            local retained_superseded_relative_mirror_path
+            for retained_superseded_relative_mirror_path in "${retained_superseded_relative_mirror_paths[@]+"${retained_superseded_relative_mirror_paths[@]}"}"; do
+                if [ "$retained_superseded_relative_mirror_path" = "$supersededRelativeMirrorPath" ]; then
+                    echo "Documentation source manifest line $manifest_line_number duplicates superseded mirror path $supersededRelativeMirrorPath" >&2
+                    return 1
+                fi
+            done
+        fi
 
         retained_relative_mirror_paths+=("$relativeMirrorPath")
+        retained_superseded_relative_mirror_paths+=("$supersededRelativeMirrorPath")
         retained_doc_sets+=("$docSet")
-        DOCUMENTATION_SOURCE_PROJECTIONS+=("$manifest_line")
-        DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS+=("$docSet")
+        loaded_documentation_source_projections+=("$manifest_line")
+        loaded_documentation_source_doc_set_projections+=("$docSet")
         local cutDirectories
         cutDirectories="$(documentation_fetch_cut_directories "$fetchUrl")"
-        DOCUMENTATION_SOURCE_FETCH_PROJECTIONS+=(
-            "|$fetchUrl|$relativeMirrorPath|$displayName|$cutDirectories|$minimumHtmlFiles|$rejectRegex|$allowPartial|$seedDocumentType|$seedDiscoveryUrl|$seedSourcePrefix"
+        loaded_documentation_source_fetch_projections+=(
+            "|$fetchUrl|$relativeMirrorPath|$displayName|$cutDirectories|$minimumHtmlFiles|$rejectRegex|$allowPartial|$seedDocumentType|$seedDiscoveryUrl|$seedSourcePrefix|$supersededRelativeMirrorPath"
         )
     done < "$source_manifest_file"
 
@@ -571,10 +738,33 @@ load_documentation_sources() {
         echo "Documentation source manifest is empty: $source_manifest_file" >&2
         return 1
     fi
-    if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -eq 0 ]; then
+    if [ "${#loaded_documentation_source_projections[@]}" -eq 0 ]; then
         echo "No canonical documentation sources found in $source_manifest_file" >&2
         return 1
     fi
+    local source_index
+    for source_index in "${!retained_superseded_relative_mirror_paths[@]}"; do
+        local retained_superseded_relative_mirror_path="${retained_superseded_relative_mirror_paths[$source_index]}"
+        if [ -z "$retained_superseded_relative_mirror_path" ]; then
+            continue
+        fi
+        local active_source_index
+        for active_source_index in "${!retained_relative_mirror_paths[@]}"; do
+            if [ "$active_source_index" -eq "$source_index" ]; then
+                continue
+            fi
+            local retained_relative_mirror_path="${retained_relative_mirror_paths[$active_source_index]}"
+            if documentation_mirror_roots_overlap \
+                "$retained_superseded_relative_mirror_path" \
+                "$retained_relative_mirror_path"; then
+                echo "Documentation source superseded mirror path overlaps active mirror path: $retained_superseded_relative_mirror_path" >&2
+                return 1
+            fi
+        done
+    done
+    DOCUMENTATION_SOURCE_PROJECTIONS=("${loaded_documentation_source_projections[@]}")
+    DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS=("${loaded_documentation_source_doc_set_projections[@]}")
+    DOCUMENTATION_SOURCE_FETCH_PROJECTIONS=("${loaded_documentation_source_fetch_projections[@]}")
 }
 
 render_java_javadoc_versions_metadata() {

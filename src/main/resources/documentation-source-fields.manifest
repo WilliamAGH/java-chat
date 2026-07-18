@@ -1,0 +1,15 @@
+fetchUrl
+citationBaseUrl
+relativeMirrorPath
+displayName
+docSet
+sourceKind
+docType
+docVersion
+minimumHtmlFiles
+rejectRegex
+allowPartial
+seedDocumentType
+seedDiscoveryUrl
+seedSourcePrefix
+supersededRelativeMirrorPath

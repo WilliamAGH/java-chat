@@ -41,11 +41,21 @@ The non-Java manifest is the single semantic owner of each official source's fet
 mirror path, display name, ingestion provenance, minimum HTML-file count, rejection expression, and
 partial-mirror policy. The optional `seedDocumentType`, `seedDiscoveryUrl`, and `seedSourcePrefix` fields
 also own structured sitemap or navigation discovery for sources whose recursive landing page is incomplete.
+The optional `supersededRelativeMirrorPath` field owns one exact prior mirror root that the fetcher quarantines
+during a source migration. Manifest loading rejects duplicate lifecycle roots and any segment-boundary overlap
+with another active source before exposing fetch projections. A strict child of the same source's new stable root
+is allowed so a prior versioned subdirectory can be quarantined without touching another canonical source.
+Rolling upstream aliases use stable mirror roots and a blank `docVersion`; only
+immutable release URLs carry release-specific mirror roots and provenance versions.
 `src/main/resources/documentation-seed-document-types.manifest` is the single semantic owner of supported
 `seedDocumentType` values; do not restate that inventory in Java, shell, Python, tests, or documentation.
-Discovered URLs must match the exact source prefix and are deterministically mapped onto the pinned fetch URL
-before `wget` receives the seed list. Recursive mirrors retain linked page requisites but intentionally omit an
-extension allow-list so extensionless documentation pages remain eligible; `--no-parent` still bounds each crawl
+Each catalog token selects a convention-named Python reader, and a missing reader fails catalog validation.
+Discovered URLs must match the exact source prefix and are deterministically mapped onto the canonical fetch URL
+before `wget` receives the seed list. Seeded fetches reject redirects and every nonzero `wget` status, reconcile
+stale HTML against the exact current seed paths before fetching, and verify exact path coverage afterward.
+Recursive mirrors convert local HTML links, omit page requisites, and reject known binary asset extensions while
+leaving extensionless documentation pages eligible;
+`--no-parent` still bounds each crawl
 to its declared source path. Add, change, or remove an official non-Java source by
 editing one manifest row only. Do not duplicate its field values in Java constants, shell arrays, tests, or
 documentation. Run `./scripts/fetch_all_docs.sh --list-documentation-sources` to inspect the exact rows
@@ -84,6 +94,7 @@ and unknown selector tokens are rejected.
 - Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
 - Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
 - Manifest-governed Java API sources (those with a `javaRelease` field) use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Structured non-Java seed sources accept only an exact current seed mirror; an old aggregate HTML count cannot satisfy completeness.
 
 ---
 
