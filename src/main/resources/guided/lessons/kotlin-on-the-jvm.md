@@ -23,7 +23,41 @@ fun main() {
 
 The Kotlin compiler reads the Java class's JVM signature. Java getter and setter methods also appear as Kotlin properties, so a Java `getTitle()` method can usually be written as `lesson.title` from Kotlin.
 
-This workspace does not have a Kotlin compiler installed, so these snippets have not been compiled here.
+## Model values with data classes
+
+A `data class` makes its primary-constructor properties the value's public meaning. Kotlin generates `equals`, `hashCode`, `toString`, `componentN`, and `copy` from those properties, so use it for a transparent value rather than an object with independent identity or mutable lifecycle.
+
+```kotlin
+data class LessonCard(
+    val title: String,
+    val estimatedMinutes: Int
+) {
+    init {
+        require(title.isNotBlank()) { "Lesson title is required." }
+        require(estimatedMinutes >= 0) { "Estimated minutes cannot be negative." }
+    }
+}
+
+fun main() {
+    val originalLessonCard = LessonCard("Kotlin data classes", 20)
+    val revisedLessonCard = originalLessonCard.copy(estimatedMinutes = 30)
+    val (lessonTitle, lessonMinutes) = revisedLessonCard
+
+    println("$lessonTitle needs $lessonMinutes minutes.")
+}
+```
+
+`copy` is shallow: if a primary-constructor property refers to a mutable object, both copies refer to that same object. Keep value components immutable or make an explicit defensive copy at the boundary.
+
+On the JVM, Java can construct this class and call the getters that Kotlin generates for its `val` properties:
+
+```java
+LessonCard lessonCard = new LessonCard("Kotlin data classes", 20);
+String lessonTitle = lessonCard.getTitle();
+int estimatedMinutes = lessonCard.getEstimatedMinutes();
+```
+
+Kotlin callers can use named arguments and default parameters, but Java callers cannot rely on either feature. Design the Java-facing constructor and methods deliberately, then verify them with a Java call-site test.
 
 ## Keep the Java boundary intentional
 
@@ -72,5 +106,6 @@ Create a small Java interface with one non-null input and one nullable return. D
 
 - [Kotlin version FAQ](https://kotlinlang.org/docs/faq.html)
 - [Add Kotlin to a Java project](https://kotlinlang.org/docs/mixing-java-kotlin-intellij.html)
+- [Kotlin data classes](https://kotlinlang.org/docs/data-classes.html)
 - [Call Java from Kotlin](https://kotlinlang.org/docs/java-interop.html)
 - [Call Kotlin from Java](https://kotlinlang.org/docs/java-to-kotlin-interop.html)

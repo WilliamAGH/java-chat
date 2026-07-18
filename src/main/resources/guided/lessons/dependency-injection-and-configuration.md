@@ -29,7 +29,7 @@ public class StudyReminderService {
         this.reminderProperties = reminderProperties;
     }
 
-    /** Schedules a reminder before a future class begins. */
+    /** Schedules a reminder for a class that begins at or after current instant. */
     public StudyReminder nextReminderFor(Instant classStartsAt) {
         if (classStartsAt.isBefore(studyClock.instant())) {
             throw new IllegalArgumentException("A class cannot start in the past.");
@@ -61,46 +61,25 @@ Use ConfigurationProperties for a cohesive group of settings. It provides typed 
 package com.example.study;
 
 import java.time.Duration;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.validation.annotation.Validated;
 
 /** Holds the reminder settings supplied outside the compiled application. */
 @ConfigurationProperties(prefix = "study.reminder")
-@Validated
 public record StudyReminderProperties(
-        @NotBlank String courseName,
-        @NotNull Duration leadTime) {
-}
-~~~
-
-Register property scanning on the application class so Spring creates the configuration-properties bean. Add the validation starter when the type uses Bean Validation constraints.
-
-~~~java
-package com.example.study;
-
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
-
-/** Starts the application and discovers its typed configuration groups. */
-@SpringBootApplication
-@ConfigurationPropertiesScan
-public class StudyApplication {
-
-    /** Starts the application from the supplied command-line arguments. */
-    public static void main(String[] arguments) {
-        SpringApplication.run(StudyApplication.class, arguments);
+        String courseName,
+        Duration leadTime) {
+    public StudyReminderProperties {
+        if (courseName == null || courseName.isBlank()) {
+            throw new IllegalArgumentException("Reminder course name is required.");
+        }
+        if (leadTime == null || leadTime.isNegative()) {
+            throw new IllegalArgumentException("Reminder lead time cannot be null or negative.");
+        }
     }
 }
 ~~~
 
-~~~groovy
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-validation'
-}
-~~~
+Keep the one root-package `StudyApplication` configuration class from Spring Boot Fundamentals. Add `@ConfigurationPropertiesScan` to that class so Spring creates the configuration-properties bean. The compact constructor is the one runtime validation owner: it protects both bound configuration and direct construction without duplicating Bean Validation constraints.
 
 The non-secret application settings can then live in application.properties:
 
@@ -112,6 +91,8 @@ study.reminder.lead-time=PT15M
 The property prefix belongs in lower-case kebab case. Spring Boot's relaxed binding maps that file form to the record accessors. Its environment-variable form removes dashes, replaces dots with underscores, and uses upper case, so the course-name setting maps to STUDY_REMINDER_COURSENAME.
 
 Do not put credentials, tokens, or private connection strings in a tracked application-properties file. Supply secrets through the deployment environment or a secret-management mechanism, then bind only the settings the application actually owns.
+
+`Instant.isBefore` rejects only an instant that is strictly earlier than the injected clock. A class beginning at or after current instant is valid; equality is not in the past.
 
 ## Register infrastructure at the composition boundary
 
@@ -146,6 +127,8 @@ The service's calculation is ordinary Java. Test it without starting Spring, usi
 package com.example.study;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -172,6 +155,36 @@ class StudyReminderServiceTest {
                 Instant.parse("2026-07-17T09:45:00Z"),
                 reminder.scheduledAt());
         assertEquals("Java foundations", reminder.courseName());
+    }
+
+    @Test
+    void shouldAllowClassStartAtCurrentInstant() {
+        Instant currentInstant = Instant.parse("2026-07-17T09:00:00Z");
+        Clock fixedClock = Clock.fixed(currentInstant, ZoneOffset.UTC);
+        StudyReminderProperties reminderProperties =
+                new StudyReminderProperties("Java foundations", Duration.ofMinutes(15));
+        StudyReminderService reminderService =
+                new StudyReminderService(fixedClock, reminderProperties);
+
+        assertDoesNotThrow(() -> reminderService.nextReminderFor(currentInstant));
+    }
+
+    @Test
+    void shouldAllowZeroLeadTime() {
+        assertDoesNotThrow(() -> new StudyReminderProperties("Java foundations", Duration.ZERO));
+    }
+
+    @Test
+    void shouldRejectMissingCourseNameOrInvalidLeadTime() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new StudyReminderProperties(" ", Duration.ofMinutes(15)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new StudyReminderProperties("Java foundations", null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new StudyReminderProperties("Java foundations", Duration.ofSeconds(-1)));
     }
 }
 ~~~

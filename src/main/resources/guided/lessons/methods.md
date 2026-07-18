@@ -32,7 +32,9 @@ Next lesson: 5
 
 The declaration `String welcomeFor(String learnerName, int completedLessons)` has a return type, a descriptive name, and parameters. Parameters are inputs named by the method; the call `welcomeFor("Mina", completedLessons)` supplies arguments in the same order and types.
 
-`return` finishes the method and sends a computed value back to its caller. `welcomeFor` returns a `String`; `nextLessonNumber` returns an `int`.
+At a call, Java evaluates each argument and gives its value to the corresponding parameter. Reassigning a primitive parameter changes only that method's local parameter, not the caller's variable; return a new value when the caller should receive a change.
+
+`return` finishes the method and sends a computed value back to its caller; it does not print the value. `welcomeFor` returns a `String`; `nextLessonNumber` returns an `int`.
 
 ## Use `void` for an action without a returned value
 

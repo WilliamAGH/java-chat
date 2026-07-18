@@ -50,9 +50,9 @@ Compile and run it with `javac ModernJavaPatternMatching.java` and `java ModernJ
 
 ## Read patterns as proof
 
-`candidate instanceof String title` tests that the candidate is a string and introduces `title` only on the path where that fact is true. The right side of `&&` can use `title` because the compiler knows the type match succeeded there. This eliminates a separate cast and prevents a cast from being used outside its safe scope.
+`candidate instanceof String title` tests that the candidate is a string and introduces `title` only on the path where that fact is true. The right side of `&&` can use `title` because the compiler knows the type match succeeded there. The right side of `||` cannot use `title`: it runs when the match may have failed, so no binding is available. This eliminates a separate cast and prevents a cast from being used outside its safe scope.
 
-`case QuizSubmitted(String topicTitle, int score)` matches both the record type and its components. The `when` clause is a guard: it refines a matching pattern with an additional boolean condition. Guards are checked in source order, so the passing quiz case must appear before the general quiz case.
+`case QuizSubmitted(String topicTitle, int score)` matches both the record type and its components. The `when` clause is a guard: it refines a matching pattern with an additional boolean condition. A guard can be false, so it never covers the general case by itself; the unguarded quiz case handles the remaining scores. Guards are checked in source order, so the passing quiz case must appear before the general quiz case.
 
 Because `StudyEvent` is sealed and both permitted record types appear in the switch, the expression is exhaustive without a `default`. If `studyEvent` can be `null`, decide that behavior explicitly with `case null -> ...`; otherwise a pattern switch with a null selector throws `NullPointerException`.
 

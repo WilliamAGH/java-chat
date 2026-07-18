@@ -21,8 +21,6 @@ class ProgressPrinter {
 
 Groovy's list literal creates a collection, the closure passed to `each` visits every name, and the double-quoted string interpolates `${languageName}`. The `@CompileStatic` annotation tells the compiler to use static compilation for this class rather than the normal dynamic Groovy meta-object protocol.
 
-This workspace does not have Groovy or `groovyc` installed, so the snippet has not been compiled here.
-
 ## Interoperate with Java without hiding the boundary
 
 Groovy can use Java classes and Java libraries naturally. Java can call compiled Groovy classes, but dynamic behavior is not automatically a stable Java API. Runtime metaprogramming can add behavior visible to Groovy while leaving no corresponding method in a Java class contract.

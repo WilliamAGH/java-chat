@@ -48,6 +48,51 @@ Import-on-demand syntax, such as `import java.util.*;`, considers direct types i
 
 `import static` can bring a static member into scope, for example `import static java.lang.Math.max;`. Use it only when the shorter name remains obvious; a qualified call such as `Math.max` is often clearer.
 
+## Import an application type across packages
+
+Imports work the same way for your own types. Save this public catalog as `src/learning/catalog/LessonCatalog.java`:
+
+```java
+package learning.catalog;
+
+/** Provides a public catalog API for a consumer in a different package. */
+public final class LessonCatalog {
+    private LessonCatalog() {}
+
+    /** Keeps consumers dependent on the catalog's public API rather than its implementation. */
+    public static String firstTitle() {
+        return "Packages and Imports";
+    }
+}
+```
+
+Save the consumer as `src/learning/application/Main.java`:
+
+```java
+package learning.application;
+
+import learning.catalog.LessonCatalog;
+
+/** Serves as a separate-package consumer of the catalog's public API. */
+public class Main {
+    /** Exercises the package boundary so an import cannot bypass public access. */
+    public static void main(String[] arguments) {
+        System.out.println(LessonCatalog.firstTitle());
+    }
+}
+```
+
+Compile both source files into one classpath root, then run the consumer by its qualified name:
+
+```sh
+javac -d out \
+    src/learning/catalog/LessonCatalog.java \
+    src/learning/application/Main.java
+java -cp out learning.application.Main
+```
+
+The program prints `Packages and Imports`. Removing `public` from either `LessonCatalog` or `firstTitle` makes the consumer fail to compile because `learning.application` is a different package. Adding an import cannot bypass that access boundary.
+
 ## Package boundaries and access
 
 `public` types and members can be used from other packages when normal module and classpath rules allow it. A declaration with no access modifier has package-private access: only code in its own package can use it. Package membership is therefore more than folder organization; it is one of Java's access-control boundaries.

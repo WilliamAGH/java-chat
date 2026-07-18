@@ -46,6 +46,20 @@ The list prints `Collections` twice because duplicate positions are meaningful. 
 
 Declare a variable as `List<String>`, `Set<String>`, or `Map<String, Integer>` unless code genuinely needs an implementation-specific operation. That gives callers a useful contract while leaving room to change an implementation later.
 
+`List` and `Set` extend the `Collection` interface; `Map` is a separate key-to-value abstraction. Use the enhanced `for` loop when every member should be visited in iteration order:
+
+```java
+for (String topicTitle : studyQueue) {
+    System.out.println(topicTitle);
+}
+
+for (Map.Entry<String, Integer> studyEntry : minutesByTopic.entrySet()) {
+    System.out.println(studyEntry.getKey() + ": " + studyEntry.getValue());
+}
+```
+
+Iterating `entrySet()` obtains each map key and value together without performing a second lookup. The observed order comes from the concrete collection's contract: the example's linked implementations preserve insertion order, while hash implementations do not promise one.
+
 - `ArrayList` provides fast indexed access and is a practical general-purpose mutable list.
 - `LinkedHashSet` and `LinkedHashMap` retain insertion order.
 - `HashSet` and `HashMap` do not promise an iteration order; never make visible behavior depend on their current order.

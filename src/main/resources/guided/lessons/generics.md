@@ -5,6 +5,38 @@ Generics let code describe the type of objects it accepts and produces. `List<St
 - Collections, especially `List`.
 - Classes and method parameters.
 
+## Name the reusable type relationship
+
+A **type parameter** is a placeholder in a generic declaration; a **type argument** supplies that placeholder at a use. In `StudyNote<T>`, `T` is the type parameter. In `StudyNote<String>`, `String` is the type argument, so the compiler knows `note()` returns a `String` without a cast.
+
+```java
+/** Demonstrates how a type parameter preserves a note's value type through construction and retrieval. */
+public class GenericStudyNote {
+    /** Contrasts concrete note types to show that retrieval needs no cast. */
+    public static void main(String[] arguments) {
+        StudyNote<String> titleNote = new StudyNote<>("Generics");
+        StudyNote<Integer> exerciseNote = new StudyNote<>(3);
+
+        System.out.println(titleNote.note());
+        System.out.println(exerciseNote.note());
+    }
+
+    static final class StudyNote<T> {
+        private final T note;
+
+        StudyNote(T note) {
+            this.note = note;
+        }
+
+        T note() {
+            return note;
+        }
+    }
+}
+```
+
+A named bound narrows what the generic declaration may use: `static <Text extends CharSequence> int characterCount(Text text)` can call `text.length()`. Use a named type parameter when the same type relationship appears in multiple positions; use a wildcard when the method only needs a safe relationship at one boundary.
+
 ## Keep a collection's element type visible
 
 This example copies readable titles into a destination that can accept strings. The wildcards describe what the method can safely read and write.
@@ -47,7 +79,7 @@ Java generics work with reference types, so write `List<Integer>`, not `List<int
 
 ## Know the runtime boundary
 
-Java implements generics primarily through type erasure. The compiler checks type arguments and inserts the necessary casts, but most type arguments are not distinct at runtime. That is why code cannot test `candidate instanceof List<String>` or create `new T()` for an unconstrained type parameter. Preserve type information in method signatures rather than trying to rediscover it later with casts.
+Java implements generics primarily through type erasure. The compiler checks type arguments and inserts the necessary casts, but most type arguments are not distinct at runtime. That is why code cannot test `candidate instanceof List<String>` or create `new T()` from a type parameter. Preserve type information in method signatures rather than trying to rediscover it later with casts.
 
 ## Common misconceptions
 

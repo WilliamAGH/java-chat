@@ -27,6 +27,8 @@ Read lesson 3
 
 Read the `while` loop as: while `lessonNumber` is at most `3`, run the body. `lessonNumber++` adds one after each pass. Without that update, the condition would remain true and the loop would never finish.
 
+Java checks a `while` condition before the first pass, so its body can run zero times. If `lessonNumber` began at `4`, this loop would skip its body entirely.
+
 ## Put counting steps in a `for` loop
 
 Save this program as `ReviewPlan.java`, then run `java ReviewPlan.java`.

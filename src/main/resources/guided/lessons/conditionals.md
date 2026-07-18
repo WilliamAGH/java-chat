@@ -32,7 +32,11 @@ You passed the practice set.
 You are ready for the next lesson.
 ```
 
+`reflectionSubmitted` is a `boolean`, so its value is either `true` or `false`. Every condition in an `if` must produce one of those answers.
+
 Java evaluates an `if`/`else if`/`else` chain from top to bottom. It runs the first branch whose condition is `true` and skips the rest of that chain. The final `else` handles every remaining case.
+
+Use one chain for mutually exclusive outcomes. Separate `if` statements are independent, so more than one separately written `if` can run.
 
 ## Decide boundary behavior before writing conditions
 
@@ -69,6 +73,8 @@ At exactly `2.0`, the first condition is false and the second condition is true.
 - `!` reverses a boolean answer.
 
 The expression `practiceScore >= 70 && reflectionSubmitted` is true only when both requirements are met. Parentheses make longer conditions easier to read, especially when `&&` and `||` appear together.
+
+Each side of `&&` or `||` must be a complete boolean expression. Write `practiceScore >= 70 && practiceScore <= 100`, not `70 <= practiceScore <= 100`; Java does not support mathematical chained comparisons. `!reflectionSubmitted` means that the reflection has not been submitted.
 
 ## Avoid common conditional mistakes
 

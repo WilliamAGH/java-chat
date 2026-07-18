@@ -53,7 +53,10 @@ Save this program as `ReviewScores.java`, then run `java ReviewScores.java`.
 
 ```java
 void main() {
-    int[] reviewScores = {92, 87, 95};
+    int[] reviewScores = new int[3];
+    reviewScores[0] = 92;
+    reviewScores[1] = 87;
+    reviewScores[2] = 95;
 
     reviewScores[1] = 90;
 
@@ -69,7 +72,7 @@ Updated second score: 90
 Number of scores: 3
 ```
 
-A particular array's length cannot change after creation, but an entry can change when its replacement has the same declared type. An index outside the valid range causes an `ArrayIndexOutOfBoundsException`.
+`new int[3]` creates three `int` slots. Each starts as `0`, so initialize a slot before treating it as a real score. A particular array's length cannot change after creation, but an entry can change when its replacement has the same declared type. To use a different length, create a new array: `reviewScores = new int[4]` gives the variable a different four-slot array; it does not enlarge the original. An index outside the valid range causes an `ArrayIndexOutOfBoundsException`.
 
 ## Check your understanding
 

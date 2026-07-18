@@ -9,6 +9,8 @@ Java manages heap memory automatically, but automatic does not mean invisible. A
 
 The local `practiceBuffer` in this program has no reference that escapes `calculateFirstByte`. After that method returns, the buffer is eligible for garbage collection. Eligibility does not promise when a collector will reclaim it.
 
+The collector starts from live roots such as references on active thread stacks, static fields, and references held through native code, then follows the object graph. An object remains live if any path from a root reaches it. Two otherwise unreachable objects can point at each other and still be collected; Java does not rely on reference counting, so cycles alone are not leaks.
+
 ```java
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -66,6 +68,7 @@ Start diagnosis with measurements. Compare heap usage over a repeatable workload
 ## Common misconceptions
 
 - **“Out of scope means immediately freed.”** It means eligible for collection when no reachable reference remains; collection timing is deliberately unspecified.
+- **“A reference cycle can never be collected.”** Cycles are reclaimable when no live root can reach any object in the cycle.
 - **“The collector closes resources.”** No. Use `close` or try-with-resources for `AutoCloseable` resources, and release a `Lock` in `finally`.
 - **“`System.gc()` fixes a leak.”** It cannot break a live reference path. It may merely postpone the symptom or add pause and CPU cost.
 

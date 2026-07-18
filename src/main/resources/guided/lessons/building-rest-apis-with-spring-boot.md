@@ -126,6 +126,8 @@ tasks.named('test') {
 
 The dependency-management plugin imports the Spring Boot 4.1.0 BOM. The modular MVC test starter brings the standard test starter and the MVC-specific test support used by `WebMvcTest`.
 
+A standalone project still needs one root-package `@SpringBootApplication` configuration class so Spring Boot test slices can locate the application's configuration. Use the canonical `StudyApplication` example in the Spring Boot Fundamentals lesson rather than creating a second copy here.
+
 ## Make failure behavior intentional
 
 Validation failure, missing resources, and unexpected infrastructure failure are different outcomes. Do not catch exceptions in a controller and return a success-shaped fallback. Translate expected domain failures in one HTTP-boundary advice class and let unexpected failures remain observable.
@@ -187,19 +189,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestConstructor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(StudySessionController.class)
+@MockitoBean(types = CreateStudySession.class)
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class StudySessionControllerTest {
-    @Autowired
-    private MockMvc mockMvc;
+    private final MockMvc mockMvc;
+    private final CreateStudySession createStudySession;
 
-    @MockitoBean
-    private CreateStudySession createStudySession;
+    StudySessionControllerTest(
+            MockMvc mockMvc,
+            CreateStudySession createStudySession) {
+        this.mockMvc = mockMvc;
+        this.createStudySession = createStudySession;
+    }
 
     @Test
     void shouldCreateValidatedStudySession() throws Exception {

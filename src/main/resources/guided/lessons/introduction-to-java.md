@@ -20,11 +20,12 @@ Expected output:
 Hello, Java!
 ```
 
-`java HelloJava.java` uses the source-file launcher: it compiles the source for that launch and starts the program. `IO.println` writes one line to the terminal.
+`java HelloJava.java` uses the source-file launcher: it compiles the source for that launch and starts the program. If compilation reports an error, `main` does not start. `IO.println` writes one line to the terminal.
 
 ## Read the program
 
 - `main` is the entry point: Java starts executing this program there.
+- `void` says this entry method performs its work without returning a value.
 - The parentheses hold a method's inputs. This `main` method needs none yet, so they are empty.
 - Curly braces enclose the method body: the instructions Java executes.
 - A semicolon ends the `IO.println` statement.

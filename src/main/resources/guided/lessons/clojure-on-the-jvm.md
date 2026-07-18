@@ -16,8 +16,6 @@ Clojure code is made of forms that evaluate to values. A namespace can import a 
 
 `defn` defines a function, `[learner-name]` is its parameter vector, and `str` joins values into text. `(LocalDate/now)` calls Java's static `LocalDate.now()` method. Clojure's Java interop also supports instance calls such as `(.length greeting)` and constructors such as `(StringBuilder.)`.
 
-This workspace does not have the Clojure CLI or a Clojure runtime installed, so the snippet has not been compiled or evaluated here.
-
 ## Declare the language dependency
 
 The Clojure CLI uses `deps.edn` to resolve libraries and construct the JVM classpath. A project can pin Clojure 1.12.5 explicitly:

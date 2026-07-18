@@ -7,7 +7,30 @@ JUnit tests turn behavior into an executable contract. A good test sets up a sma
 
 ## Test behavior, including failures
 
-Place this file at `src/test/java/learning/testing/LessonDurationTest.java` in a Gradle project that includes JUnit Jupiter. The value type appears beside the test only to make this lesson self-contained. In production, place the real `LessonDuration` type in main source and import it into the test instead of recreating its field inventory.
+Place the production value type at `src/main/java/learning/duration/LessonDuration.java`:
+
+```java
+package learning.duration;
+
+/** Models a lesson's planned reading and practice time while rejecting invalid negative durations. */
+public record LessonDuration(int readingMinutes, int practiceMinutes) {
+    public LessonDuration {
+        if (readingMinutes < 0) {
+            throw new IllegalArgumentException("Reading minutes cannot be negative.");
+        }
+        if (practiceMinutes < 0) {
+            throw new IllegalArgumentException("Practice minutes cannot be negative.");
+        }
+    }
+
+    /** Returns the combined duration used to plan a complete lesson. */
+    public int totalMinutes() {
+        return readingMinutes + practiceMinutes;
+    }
+}
+```
+
+Then place this test at `src/test/java/learning/testing/LessonDurationTest.java` in a Gradle project that includes JUnit Jupiter. The test imports the production type instead of recreating its field inventory.
 
 ```java
 package learning.testing;
@@ -15,7 +38,10 @@ package learning.testing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import learning.duration.LessonDuration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class LessonDurationTest {
     @Test
@@ -23,6 +49,19 @@ class LessonDurationTest {
         LessonDuration lessonDuration = new LessonDuration(20, 15);
 
         assertEquals(35, lessonDuration.totalMinutes());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "0, 0, 0",
+            "0, 15, 15",
+            "20, 0, 20"
+    })
+    void shouldCalculateTotalAtZeroMinuteBoundaries(
+            int readingMinutes, int practiceMinutes, int expectedTotalMinutes) {
+        LessonDuration lessonDuration = new LessonDuration(readingMinutes, practiceMinutes);
+
+        assertEquals(expectedTotalMinutes, lessonDuration.totalMinutes());
     }
 
     @Test
@@ -34,24 +73,9 @@ class LessonDurationTest {
         assertEquals("Reading minutes cannot be negative.", exception.getMessage());
     }
 }
-
-record LessonDuration(int readingMinutes, int practiceMinutes) {
-    LessonDuration {
-        if (readingMinutes < 0) {
-            throw new IllegalArgumentException("Reading minutes cannot be negative.");
-        }
-        if (practiceMinutes < 0) {
-            throw new IllegalArgumentException("Practice minutes cannot be negative.");
-        }
-    }
-
-    int totalMinutes() {
-        return readingMinutes + practiceMinutes;
-    }
-}
 ```
 
-Run this test class with `./gradlew test --tests learning.testing.LessonDurationTest`. JUnit discovers methods annotated with `@Test`; plain Java does not execute them merely because they have that annotation. `assertEquals` receives the expected value first and actual value second. `assertThrows` both proves the failure path and gives back the exception for a precise message or state assertion.
+Run this test class with `./gradlew test --tests learning.testing.LessonDurationTest`. JUnit discovers methods annotated with `@Test` or `@ParameterizedTest`; plain Java does not execute them merely because they have an annotation. `@ParameterizedTest` runs once for every `@CsvSource` row and requires `junit-jupiter-params` on the test classpath; this project's Spring Boot test dependency provides it. `assertEquals` receives the expected value first and actual value second. `assertThrows` both proves the failure path and gives back the exception for a precise message or state assertion.
 
 ## Keep each test honest
 

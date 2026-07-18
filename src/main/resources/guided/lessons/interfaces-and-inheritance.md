@@ -13,9 +13,14 @@ Interfaces describe a capability that several unrelated types may provide. Inher
 public class InterfacesAndInheritance {
     public static void main(String[] arguments) {
         LearningActivity learningActivity = new VideoLesson("Generics overview", 24);
-        ProgressReporter progressReporter = new PlainTextProgressReporter();
+        ProgressReporter[] progressReporters = {
+            new PlainTextProgressReporter(),
+            new CompactProgressReporter()
+        };
 
-        System.out.println(progressReporter.describe(learningActivity));
+        for (ProgressReporter progressReporter : progressReporters) {
+            System.out.println(progressReporter.describe(learningActivity));
+        }
     }
 }
 
@@ -70,9 +75,16 @@ final class PlainTextProgressReporter implements ProgressReporter {
         return learningActivity.title() + " is a " + sessionKind + " session.";
     }
 }
+
+final class CompactProgressReporter implements ProgressReporter {
+    @Override
+    public String describe(LearningActivity learningActivity) {
+        return learningActivity.title() + "|minutes=" + learningActivity.estimatedMinutes();
+    }
+}
 ```
 
-Compile and run it with `javac InterfacesAndInheritance.java` and `java InterfacesAndInheritance`. The variables in `main` use abstraction types, while the constructors choose concrete implementations.
+Compile and run it with `javac InterfacesAndInheritance.java` and `java InterfacesAndInheritance`. The variables in `main` use abstraction types, while the constructors choose concrete implementations. The loop stays unchanged when it receives either reporter; that observable substitution is polymorphism.
 
 ## Read the contracts
 
@@ -84,7 +96,7 @@ Use `@Override` whenever implementing or replacing an inherited instance method.
 
 ## Resolve default-method conflicts explicitly
 
-If two implemented interfaces provide the same default method and neither is more specific, the class must override the method and choose behavior. Java does not guess which contract wins. Keep default methods small and behaviorally coherent so such conflicts remain rare.
+If two implemented interfaces provide the same default method and neither is more specific, the class must override the method and choose behavior. Java does not guess which contract wins. That override may explicitly call a chosen inherited default with `FirstContract.super.label()`. Keep default methods small and behaviorally coherent so such conflicts remain rare.
 
 Favor composition when one type merely needs another type's behavior. Inheritance is appropriate only when the subtype truly satisfies every promise of the supertype; it is not a shortcut for reusing a few methods.
 
@@ -97,7 +109,7 @@ Favor composition when one type merely needs another type's behavior. Inheritanc
 ## Practice prompts
 
 1. Add an `Article` subclass whose estimated time is based on a word count.
-2. Implement a second `ProgressReporter` that produces a compact machine-readable string without changing `LearningActivity`.
+2. Create a `StudyPlan` that receives several `LearningActivity` objects and totals their estimated minutes through composition rather than inheritance.
 3. Make two interfaces with conflicting default `label()` methods, then write the required explicit override in one implementing class.
 
 Read [JLS 8.1.5: Superinterfaces](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.1.5), [JLS 8.4.8: Inheritance, Overriding, and Hiding](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.4.8), and [JLS 9: Interfaces](https://docs.oracle.com/javase/specs/jls/se25/html/jls-9.html).

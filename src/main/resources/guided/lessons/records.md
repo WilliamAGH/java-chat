@@ -10,17 +10,23 @@ Records are concise classes for transparent, shallowly immutable values. A recor
 `LessonProgress` has two components: a learner name and the topics already completed. Its compact canonical constructor validates the name and makes an unmodifiable snapshot of the supplied list.
 
 ```java
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 public class RecordProgress {
     public static void main(String[] arguments) {
-        LessonProgress progress = new LessonProgress(
+        List<String> selectedTopics = new ArrayList<>(List.of("Variables", "Methods", "Collections"));
+        LessonProgress progress = new LessonProgress("Mina", selectedTopics);
+        selectedTopics.add("Records");
+        LessonProgress matchingProgress = new LessonProgress(
                 "Mina",
                 List.of("Variables", "Methods", "Collections"));
 
         System.out.println(progress.learnerName());
         System.out.println("Completed topics: " + progress.completedTopicCount());
+        System.out.println("Equal value: " + progress.equals(matchingProgress));
+        System.out.println("Topics after source mutation: " + progress.completedTopics());
     }
 
     record LessonProgress(String learnerName, List<String> completedTopics) {
@@ -39,19 +45,19 @@ public class RecordProgress {
 }
 ```
 
-Compile and run it with `javac RecordProgress.java` and `java RecordProgress`. The accessor is `progress.learnerName()`, not `getLearnerName()`: a record component's name is its accessor's name.
+Compile and run it with `javac RecordProgress.java` and `java RecordProgress`. The accessor is `progress.learnerName()`, not `getLearnerName()`: a record component's name is its accessor's name. The last two lines show value-based `equals` and that mutating the caller's list after construction does not alter the record's snapshot.
 
 ## What Java supplies
 
 For a record header such as `record LessonProgress(String learnerName, List<String> completedTopics)`, Java supplies a field and accessor for each component plus a canonical constructor whose parameters match the header. Unless you declare alternatives, it also derives `equals`, `hashCode`, and `toString` from every component.
 
-The compact constructor in the example runs before Java assigns the component fields. Reassigning the `completedTopics` parameter means the generated assignment stores the snapshot, not the caller's mutable list. A normal canonical constructor gives more control when assignments need to be written explicitly.
+The compact constructor in the example runs before Java assigns the component fields. Reassigning the `completedTopics` parameter means the generated assignment stores the snapshot, not the caller's mutable list. A normal canonical constructor gives more control when assignments need to be written explicitly. Equality follows the components too: two `LessonProgress` values with equal names and topic lists compare equal even when they were constructed separately.
 
-Records may declare ordinary methods, implement interfaces, and validate invariants. They cannot extend another class; every record already extends `java.lang.Record`. Use a record when its declared components are the value's public meaning, not merely to make an existing mutable class shorter.
+Records may declare ordinary methods, implement interfaces, and validate invariants. They cannot extend another class; every record already extends `java.lang.Record`. They also cannot add instance fields beyond their components, although static members are allowed. Use a record when its declared components are the value's public meaning, not merely to make an existing mutable class shorter.
 
 ## Shallow immutability needs deliberate design
 
-A record's component fields cannot be reassigned, but the objects referenced by those fields may still be mutable. `List.copyOf` prevents callers from adding or removing topics through the original list, but it would not deep-copy mutable topic objects. Choose immutable component types, make defensive copies at the boundary, or document the ownership rule.
+A record's component fields cannot be reassigned, but the objects referenced by those fields may still be mutable. `List.copyOf` stores an unmodifiable snapshot whose structure is independent of later changes to the caller's source list; it does not make that source list unmodifiable, and it does not deep-copy mutable topic objects. Choose immutable component types, make defensive copies at the boundary, or document the ownership rule.
 
 ## Common misconceptions
 
@@ -62,7 +68,7 @@ A record's component fields cannot be reassigned, but the objects referenced by 
 ## Practice prompts
 
 1. Add a `nextTopic()` method that returns an `Optional<String>` without exposing a mutable list.
-2. Change the input list to an `ArrayList`, mutate that list after construction, and verify that `LessonProgress` keeps its snapshot.
+2. Add a `Set<String>` of tags, copy it with `Set.copyOf` in the compact constructor, and verify that later mutations to the caller's set do not change the record.
 3. Create a `StudySession` record with a non-negative duration invariant and test its generated equality with two equal instances.
 
 Read [JLS 8.10: Record Classes](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.10) and the Java 25 [`Record`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Record.html) API for the full contract.

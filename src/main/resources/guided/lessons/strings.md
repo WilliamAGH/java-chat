@@ -2,6 +2,10 @@
 
 A `String` represents text. Names, messages, file labels, and source code text use strings. A string literal uses double quotes, while a single `char` uses single quotes.
 
+`String` is the standard Java text type; lowercase `string` is not a built-in Java text type.
+
+Quotes choose the type: `'A'` is a `char`, whereas `"A"` is a one-character `String`; they are not interchangeable.
+
 ## Join, measure, and slice text
 
 Save this program as `StringBasics.java`, then run `java StringBasics.java`.
@@ -29,7 +33,7 @@ First three topic code units: rec
 Java Foundations: recursion
 ```
 
-`+` joins strings. `length()` counts `char` values, which are UTF-16 code units. `charAt(0)` returns the `char` at index `0`, and `substring(0, 3)` includes index `0` but stops before index `3`. For these ASCII examples, those code units match the visible characters; Java's exact indexing unit remains a UTF-16 code unit.
+`+` joins strings. Once a string appears, Java evaluates `+` from left to right: `"Total: " + 3 + 4` is `"Total: 34"`; write `"Total: " + (3 + 4)` when addition must happen first. `length()` counts `char` values, which are UTF-16 code units. `charAt(0)` returns the `char` at index `0`, and `substring(0, 3)` includes index `0` but stops before index `3`. The one-argument form, `substring(3)`, returns from index `3` through the end. For these ASCII examples, those code units match the visible characters; Java's exact indexing unit remains a UTF-16 code unit.
 
 ## Store the text returned by a string operation
 
@@ -59,7 +63,7 @@ Topics match: true
 
 Strings are immutable. `replace` returns a new string; it does not alter `courseName`. Store the returned string when you want to use the changed text.
 
-Use `equals` to compare string contents. Do not use `==` for that question: `==` checks whether two references point to the same `String` object, not whether their characters match.
+Use `equals` to compare string contents. It is case-sensitive, so `"Java".equals("java")` is `false`. Do not use `==` for that question: `==` checks whether two references point to the same `String` object, not whether their characters match.
 
 ## Avoid indexing mistakes
 

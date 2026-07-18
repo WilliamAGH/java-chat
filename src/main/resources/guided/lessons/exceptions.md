@@ -52,17 +52,32 @@ Every exception is a `Throwable`, but not every throwable should be handled in t
 
 Catch the most specific type that can make a meaningful recovery. A broad `catch (Exception exception)` can accidentally hide a failure that deserves different handling.
 
+`throw` and `throws` have different jobs. A `throw` statement raises one specific failure now, as `parseLessonNumber` does. A `throws IOException` declaration tells callers that a checked failure may leave the method; it neither creates nor handles that failure. If no matching `catch` handles an exception, stack unwinding reaches the thread boundary and Java reports a stack trace. Read that trace from the exception type and message through the first frame in your own code, then follow each `Caused by` section to the original failure.
+
 ## Clean up resources deterministically
 
 Use try-with-resources for anything that implements `AutoCloseable`, including streams, readers, database connections, and executors. Java closes the resources when the block exits, including when the block throws. If both the body and closing a resource fail, Java keeps the body failure primary and attaches the closing failure as a suppressed exception.
 
 ```java
-try (var lessonLines = Files.lines(lessonPath)) {
-    return lessonLines.count();
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+
+/** Demonstrates deterministic reader cleanup despite a checked I/O boundary. */
+public class ResourceSafetyDemo {
+    /** Keeps the checked read failure visible while proving the reader closes at scope exit. */
+    public static void main(String[] arguments) throws IOException {
+        String lessonText = "Exceptions\nResource safety";
+
+        try (BufferedReader lessonReader =
+                new BufferedReader(new StringReader(lessonText))) {
+            System.out.println(lessonReader.readLine());
+        }
+    }
 }
 ```
 
-The fragment needs `java.nio.file.Files`, a `Path` named `lessonPath`, and a method that catches or declares `IOException`. The File I/O lesson develops the full program.
+Compile and run it with `javac ResourceSafetyDemo.java` and `java ResourceSafetyDemo`; it prints `Exceptions`. `readLine()` declares `IOException`, so `main` declares that checked failure. The try-with-resources statement owns the reader and closes it before `main` returns. The File I/O lesson applies the same pattern to filesystem resources.
 
 ## Common misconceptions
 

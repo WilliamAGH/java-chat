@@ -13,7 +13,29 @@ Scala CLI can pin a script to the Scala version it needs. Save this source as `G
 
 The `@main` annotation identifies the entry point. `Unit` is Scala's no-meaningful-value type, similar to Java's `void`. A Scala CLI installation can run the file with `scala-cli run Greeting.scala`.
 
-This workspace does not have Scala CLI or a Scala compiler installed, so the snippets have not been compiled here.
+## Model values with case classes and enums
+
+A `case class` models an immutable value. Scala generates structural equality, `hashCode`, `toString`, `copy`, and the pattern-matching support that lets the constructor shape be used in a `match` expression.
+
+```scala
+case class StudyLesson(title: String, estimatedMinutes: Int):
+  require(estimatedMinutes >= 0, "Estimated minutes cannot be negative.")
+
+enum StudyState extends Enum[StudyState]:
+  case Planned, Completed
+
+@main def modelValues(): Unit =
+  val plannedLesson = StudyLesson("Scala case classes", 20)
+  val completedLesson = plannedLesson.copy(estimatedMinutes = 30)
+  val StudyLesson(lessonTitle, lessonMinutes) = completedLesson
+  val studyState: StudyState = StudyState.Completed
+
+  println(s"$lessonTitle needs $lessonMinutes minutes and is $studyState.")
+```
+
+The `case class` fields are immutable `val` accessors by default. `copy` creates a related value instead of mutating the first one, and the `StudyLesson(lessonTitle, lessonMinutes)` pattern destructures the same public shape.
+
+`StudyState` is a closed set of choices. The `extends Enum[StudyState]` form is deliberate: for simple cases, it gives Java callers Java-enum semantics. A Scala case class still exposes Scala-shaped JVM methods rather than JavaBean conventions, so prove a public Scala boundary with a Java call-site test instead of assuming the generated method names or default-argument behavior.
 
 ## Use a Java collection from Scala
 
@@ -55,5 +77,7 @@ Use the Java `List` example as a boundary test. Change it to accept a `java.util
 
 - [Scala 3.8.4 release and installation options](https://www.scala-lang.org/download/3.8.4.html)
 - [Scala JDK compatibility](https://docs.scala-lang.org/overviews/jdk-compatibility/overview.html)
+- [Scala 3 case classes](https://docs.scala-lang.org/scala3/book/domain-modeling-tools.html)
+- [Scala 3 enumerations](https://docs.scala-lang.org/scala3/reference/enums/enums.html)
 - [Scala and Java interoperability](https://docs.scala-lang.org/scala3/book/interacting-with-java.html)
 - [Scala binary compatibility](https://docs.scala-lang.org/overviews/core/binary-compatibility-of-scala-releases.html)

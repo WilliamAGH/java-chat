@@ -29,7 +29,7 @@ Expected output:
 4! = 24
 ```
 
-The base case, `nonNegativeNumber <= 1`, returns a known answer without another recursive call. The recursive case multiplies by the current number and asks for the factorial of one smaller number. Each call moves toward the base case, so every non-negative input terminates.
+The negative-number check is a guard, not a base case: it rejects an input for which this lesson does not define a factorial. The base case, `nonNegativeNumber <= 1`, returns a known answer without another recursive call. For factorial, `0!` is defined as `1`, and `1!` has that same value, so both inputs safely end the recursion. The recursive case multiplies by the current number and asks for the factorial of one smaller number. Each call moves toward the base case, so every non-negative input terminates.
 
 ## Trace pending calls
 
@@ -82,7 +82,7 @@ Every recursive method needs all three properties:
 2. A recursive case that calls the same method.
 3. Progress toward the base case on every recursive call.
 
-If a base case is missing or an argument does not get closer to it, calls continue until the program exhausts the call stack. Even a correct recursive method can use too much stack space for a deeply nested input, so use recursion when the smaller-problem rule is clear.
+If a base case is missing or an argument does not get closer to it, calls continue until Java exhausts call-stack space and throws a `StackOverflowError`. Even a correct recursive method can use too much stack space for a deeply nested input, so use recursion when the smaller-problem rule is clear.
 
 `long` keeps the factorial example useful only for small teaching inputs: factorial values grow quickly and eventually exceed its range.
 

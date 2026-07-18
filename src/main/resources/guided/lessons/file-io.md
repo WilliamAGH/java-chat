@@ -46,7 +46,7 @@ Compile and run it with `javac FileIo.java` and `java FileIo`. The explicit `UTF
 
 `Path.of("notes", "week-one.txt")` creates a path value; it does not create a file or prove that one exists. `Files` performs the actual operation and can fail because of permissions, missing parents, concurrent changes, storage limits, or provider-specific behavior.
 
-Use whole-file methods such as `readString` for bounded, small text. For large content, process incrementally with a reader or stream so the program does not need to hold the entire file in memory. Streams returned by `Files.lines` own a file resource, so they must be closed with try-with-resources.
+Whole-file methods such as `readString` and `writeString` open and close the file internally; use them for bounded, small text. For large content, process incrementally with a reader or stream so the program does not need to hold the entire file in memory. A stream returned by `Files.lines` owns a live file resource, so it must be closed with try-with-resources.
 
 Create parent directories before writing a nested new path with `Files.createDirectories(parentPath)`. Do not use a pre-check such as `Files.exists` as proof that a later operation will succeed: the filesystem can change between the check and the operation. Handle the operation's actual exception instead.
 
@@ -54,12 +54,13 @@ Create parent directories before writing a nested new path with `Files.createDir
 
 Text is bytes plus a charset. A file written in UTF-8 must be read as UTF-8 unless its format says otherwise. Never rely on a machine's default charset for an interoperable file format.
 
-Garbage collection does not provide timely resource cleanup. A file handle, network stream, or database connection belongs in a try-with-resources block so it closes at the end of the lexical scope even if reading or parsing fails.
+Garbage collection does not provide timely resource cleanup. A stream from `Files.lines`, a network stream, or a database connection belongs in a try-with-resources block so it closes at the end of the lexical scope even if reading or parsing fails.
 
 ## Common misconceptions
 
 - **“`Path` is an open file.”** No. It is a location value. `Files` performs the I/O.
 - **“A stream always fits in memory.”** A stream can process values lazily; `Files.readString` intentionally reads the whole file.
+- **“Every `Files` call needs try-with-resources.”** No. Whole-file methods return completed values after closing internally; `Files.lines` returns a live stream that must be closed.
 - **“The garbage collector will close the file soon enough.”** Resource lifetime must be explicit; use try-with-resources.
 
 ## Practice prompts

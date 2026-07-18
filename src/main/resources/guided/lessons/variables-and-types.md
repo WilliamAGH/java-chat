@@ -45,6 +45,10 @@ Module grade: A
 
 The first four are primitive types. `String` is a reference type, but you can use it directly at this stage. Java uses the declared type to catch mismatches: an `int` variable cannot later receive text.
 
+The quote style distinguishes the two text-related types: `'A'` is a `char`, while `"A"` is a one-character `String`.
+
+Arithmetic also follows the operand types. When both operands of `/` are `int`, Java uses whole-number division: `7 / 2` is `3`. Use a `double` operand when the fractional part matters: `7.0 / 2` is `3.5`.
+
 ## Keep values that should not change
 
 Use `final` for a variable that must not be assigned a different value. Save this program as `ModulePlan.java`, then run `java ModulePlan.java`.
@@ -76,7 +80,7 @@ Use lower camel case for local variable names: begin with a lowercase letter and
 - Assignment changes the value held by an existing variable.
 - `=` assigns; it does not ask whether two values are equal. A later lesson uses `==` to compare primitive values.
 
-Local variables must be definitely assigned before Java lets you read them. Predict a program's output before running it; the run can then confirm or correct your reasoning.
+Local variables must be definitely assigned before Java lets you read them. For example, `int lessonCount;` followed by `IO.println(lessonCount);` does not compile, because Java cannot prove that `lessonCount` has a value. Predict a program's output before running it; the run can then confirm or correct your reasoning.
 
 ## Check your understanding
 

@@ -5,6 +5,12 @@ Concurrency lets more than one task make progress during the same period. Virtua
 - Methods, exceptions, and try-with-resources.
 - Interfaces and collections are helpful for understanding executors and futures.
 
+## Distinguish platform and virtual threads
+
+A platform thread is typically backed by an operating-system thread for its lifetime. A virtual thread is still a Java `Thread`, but the JVM schedules many virtual threads over a smaller set of platform threads. When a virtual thread reaches a supported blocking operation, the JVM can usually let its platform thread run different work until the blocked operation is ready to continue.
+
+That scheduling difference makes thread-per-task code practical at much higher I/O concurrency. It does not change the Java Memory Model: virtual threads have the same visibility, atomicity, interruption, and locking rules as platform threads. Code should choose virtual threads because its tasks spend substantial time waiting, not merely because it has many iterations.
+
 ## Start independent tasks with virtual threads
 
 `Executors.newVirtualThreadPerTaskExecutor()` creates a virtual thread for each submitted task. The `try` block owns the executor, and each `Future` represents one task's eventual completion or failure.
@@ -49,7 +55,11 @@ Compile and run it with `javac VirtualThreadStudyTasks.java` and `java VirtualTh
 
 Tasks that only use local immutable values are easy to run concurrently. A data race occurs when threads access shared mutable state without a correct coordination rule. Choose one clear owner or use an appropriate mechanism such as immutable messages, synchronization, a lock, an atomic type, or a concurrent collection. Do not make a mutable `ArrayList` safe by hoping tasks happen to run in a favorable order.
 
+Even a short expression can contain several operations. `completedCount++` reads the old value, calculates a new value, and writes it back. Two threads can read the same old value and both write the same incremented value, silently losing one update. `AtomicInteger.incrementAndGet()` is appropriate for that single-counter invariant; a `synchronized` block or lock is needed when several related updates must remain consistent together. Returning independent values through `Future` objects is simpler still because it avoids shared mutation.
+
 Interruption is a request to stop waiting or finish cooperatively. Code that catches `InterruptedException` and cannot propagate it should restore the interrupted status with `Thread.currentThread().interrupt()` before returning or throwing, as the example does.
+
+`Future.cancel(true)` requests cancellation by interrupting a task that has started, but it cannot force arbitrary code to stop. The task must respond to interruptible blocking calls or check `Thread.currentThread().isInterrupted()` during long-running work. After successful cancellation, `Future.get()` throws `CancellationException`; callers should treat that as a distinct outcome rather than as a completed value.
 
 ## Know where virtual threads help
 

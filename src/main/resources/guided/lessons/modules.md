@@ -45,6 +45,79 @@ java --module-path out --module com.example.greeting/com.example.greeting.Main
 
 `java.base` is implicitly required by every named module, so this descriptor does not need to declare it for `String` or `System`.
 
+## Connect a provider module to a consumer
+
+A dependency becomes visible when one module exports an API package and another module requires it:
+
+```text
+src/
+├── com.example.library/
+│   ├── module-info.java
+│   └── com/example/library/api/Greeting.java
+└── com.example.application/
+    ├── module-info.java
+    └── com/example/application/Main.java
+```
+
+The library descriptor exports exactly one package:
+
+```java
+module com.example.library {
+    exports com.example.library.api;
+}
+```
+
+Its exported type is an ordinary public class:
+
+```java
+package com.example.library.api;
+
+/** Provides the exported library API consumed by the application module. */
+public final class Greeting {
+    private Greeting() {}
+
+    /** Provides an exported greeting so consumers depend on the API rather than library internals. */
+    public static String messageFor(String learnerName) {
+        return "Welcome, " + learnerName + ".";
+    }
+}
+```
+
+The application descriptor names the dependency:
+
+```java
+module com.example.application {
+    requires com.example.library;
+}
+```
+
+The application can now import the exported API:
+
+```java
+package com.example.application;
+
+import com.example.library.api.Greeting;
+
+/** Starts the consumer module through the library's exported package. */
+public class Main {
+    /** Exercises the module boundary so the consumer relies only on the exported API. */
+    public static void main(String[] arguments) {
+        System.out.println(Greeting.messageFor("Maya"));
+    }
+}
+```
+
+Compile both modules and run the consumer from the directory containing `src`:
+
+```sh
+javac -d out --module-source-path src \
+    -m com.example.library,com.example.application
+java --module-path out \
+    --module com.example.application/com.example.application.Main
+```
+
+The program prints `Welcome, Maya.`. If the library also contains a public class in `com.example.library.internal`, the application still cannot import it unless the library exports that package. `public` controls access within Java's type system; `exports` controls whether another module can reach the public types in the package at all.
+
 ## Declare dependencies and boundaries
 
 Use `requires module.name;` when code in one module needs to read types from another module. Use `exports package.name;` to make a package's public types available to other reading modules. Public classes in a package that is not exported remain strongly encapsulated from other modules.
