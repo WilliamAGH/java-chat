@@ -25,7 +25,7 @@ The base case is `nonNegativeNumber <= 1`. It returns a known answer without ano
 
 For `factorial(4)`, Java must wait for smaller calls to finish before it can multiply the answers:
 
-```text
+```
 factorial(4)
 = 4 * factorial(3)
 = 4 * 3 * factorial(2)
