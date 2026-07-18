@@ -41,12 +41,13 @@ The non-Java manifest is the single semantic owner of each official source's fet
 mirror path, display name, ingestion provenance, minimum HTML-file count, rejection expression, and
 partial-mirror policy. The optional `seedDocumentType`, `seedDiscoveryUrl`, and `seedSourcePrefix` fields
 also own structured sitemap or navigation discovery for sources whose recursive landing page is incomplete.
-The optional `supersededRelativeMirrorPath` field owns one exact prior mirror root that the fetcher quarantines
-during a source migration. Manifest loading rejects duplicate lifecycle roots and any segment-boundary overlap
-with another active source before exposing fetch projections. A strict child of the same source's new stable root
-is allowed so a prior versioned subdirectory can be quarantined without touching another canonical source.
-Rolling upstream aliases use stable mirror roots and a blank `docVersion`; only
-immutable release URLs carry release-specific mirror roots and provenance versions.
+The optional `supersededRelativeMirrorPath` field owns one exact prior mirror root. Manifest loading rejects
+duplicate lifecycle roots and segment-boundary overlap with every other active source root before exposing list
+or fetch projections. A strict child of the same source's new stable root remains valid for one-way migrations
+from prior versioned subdirectories. The fetcher quarantines that prior root only after the canonical replacement
+passes its strategy-specific validation; a failed replacement leaves the prior mirror untouched. Rolling upstream
+aliases use stable mirror roots and a blank `docVersion`; only immutable release URLs retain release-specific
+mirror roots and provenance versions.
 `src/main/resources/documentation-seed-document-types.manifest` is the single semantic owner of supported
 `seedDocumentType` values; do not restate that inventory in Java, shell, Python, tests, or documentation.
 Each catalog token selects a convention-named Python reader, and a missing reader fails catalog validation.
@@ -173,12 +174,12 @@ non-Java doc sets are:
 ### What "incremental" means for ingestion
 
 - Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
-- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256, and
-  extractor-semantics version as the current ingestion contract.
+- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256,
+  extractor-semantics version, and provenance-aware ingestion fingerprint as the current ingestion contract.
 - File-level markers (`data/index/file_*.marker`) include those values plus the ingested chunk hashes.
-  A source-content change or extractor-semantics change triggers strict stale-vector and parsed-chunk
-  pruning before re-chunking and upserting to Qdrant. Markers created before the semantics field existed
-  are reindexed once.
+  A source-content, provenance, or extractor-semantics change triggers strict stale-vector and parsed-chunk
+  pruning before re-chunking and upserting to Qdrant. Older markers missing a current contract field are
+  reindexed once.
 
 ---
 

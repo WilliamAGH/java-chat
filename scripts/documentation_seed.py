@@ -9,6 +9,7 @@ import html.parser
 import ipaddress
 import pathlib
 import re
+import sys
 import urllib.parse
 import xml.etree.ElementTree as element_tree
 
@@ -85,10 +86,11 @@ def read_html_links_urls(discovery_file: pathlib.Path) -> list[str]:
     return link_parser.discovered_urls
 
 
-def load_seed_document_types() -> tuple[str, ...]:
+def load_seed_document_types(document_type_catalog: pathlib.Path | None = None) -> tuple[str, ...]:
     """Loads the manifest-owned document types that select implemented discovery readers."""
+    catalog_path = document_type_catalog or DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG
     seed_document_types = tuple(
-        DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG.read_text(encoding="utf-8").splitlines()
+        catalog_path.read_text(encoding="utf-8").splitlines()
     )
     if not seed_document_types:
         raise ValueError("Documentation seed document type catalog has no records")
@@ -282,7 +284,49 @@ def build_seed_urls(
     return sorted(seed_urls)
 
 
+def validate_remote_url_command(command_arguments: list[str]) -> int:
+    """Validates one manifest URL for shell consumers without duplicating URL grammar."""
+    validation_parser = argparse.ArgumentParser()
+    validation_parser.add_argument("remote_url")
+    validation_parser.add_argument("--allow-http", action="store_true")
+    validation_parser.add_argument("--require-trailing-slash", action="store_true")
+    validation_arguments = validation_parser.parse_args(command_arguments)
+    require_remote_url(
+        validation_arguments.remote_url,
+        allow_http=validation_arguments.allow_http,
+        require_trailing_slash=validation_arguments.require_trailing_slash,
+    )
+    return 0
+
+
+def validate_seed_document_types_command(command_arguments: list[str]) -> int:
+    """Validates the canonical seed document type catalog for non-Python consumers."""
+    validation_parser = argparse.ArgumentParser()
+    validation_parser.add_argument("--catalog", type=pathlib.Path, default=DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG)
+    validation_arguments = validation_parser.parse_args(command_arguments)
+    load_seed_document_types(validation_arguments.catalog)
+    return 0
+
+
+def project_mirror_path_command(command_arguments: list[str]) -> int:
+    """Projects one canonical seed URL onto its GNU Wget mirror path."""
+    projection_parser = argparse.ArgumentParser()
+    projection_parser.add_argument("seed_url")
+    projection_parser.add_argument("cut_directories", type=int)
+    projection_arguments = projection_parser.parse_args(command_arguments)
+    if projection_arguments.cut_directories < 0:
+        projection_parser.error("cut_directories cannot be negative")
+    print(seed_url_to_mirror_path(projection_arguments.seed_url, projection_arguments.cut_directories))
+    return 0
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["--validate-seed-document-types"]:
+        return validate_seed_document_types_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--validate-remote-url"]:
+        return validate_remote_url_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--project-mirror-path"]:
+        return project_mirror_path_command(sys.argv[2:])
     seed_document_types = load_seed_document_types()
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--document-type", required=True, choices=seed_document_types)

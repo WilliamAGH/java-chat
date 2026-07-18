@@ -187,9 +187,8 @@ public final class DocsSourceRegistry {
      * @param seedDocumentType structured discovery document type, or blank for recursive mirroring
      * @param seedDiscoveryUrl structured discovery document URL, or blank for recursive mirroring
      * @param seedSourcePrefix exact discovered URL prefix mapped onto {@code fetchUrl}
-     * @param supersededRelativeMirrorPath canonical lifecycle metadata naming one prior mirror root that must be
-     *     quarantined before this source is fetched; manifest validation keeps lifecycle roots unique and disjoint
-     *     from every active source root
+     * @param supersededRelativeMirrorPath prior mirror root quarantined only after its canonical replacement succeeds;
+     *     manifest validation keeps lifecycle roots unique and disjoint from every other active source root
      */
     public record DocumentationSource(
             String fetchUrl,
@@ -242,29 +241,6 @@ public final class DocsSourceRegistry {
             }
         }
 
-        static DocumentationSource fromManifestProjection(
-                DocumentationSourceLocation sourceLocation,
-                DocumentationSourceMetadata sourceMetadata,
-                DocumentationMirrorPolicy mirrorPolicy,
-                DocumentationSourceLifecycle sourceLifecycle) {
-            return new DocumentationSource(
-                    sourceLocation.fetchUrl(),
-                    sourceLocation.citationBaseUrl(),
-                    sourceLocation.relativeMirrorPath(),
-                    sourceMetadata.displayName(),
-                    sourceMetadata.docSet(),
-                    sourceMetadata.sourceKind(),
-                    sourceMetadata.docType(),
-                    sourceMetadata.docVersion(),
-                    mirrorPolicy.minimumHtmlFiles(),
-                    mirrorPolicy.rejectRegex(),
-                    mirrorPolicy.allowPartial(),
-                    sourceLifecycle.seedDocumentType(),
-                    sourceLifecycle.seedDiscoveryUrl(),
-                    sourceLifecycle.seedSourcePrefix(),
-                    sourceLifecycle.supersededRelativeMirrorPath());
-        }
-
         static boolean mirrorRootContains(String containingMirrorRoot, String candidateMirrorRoot) {
             return candidateMirrorRoot.equals(containingMirrorRoot)
                     || candidateMirrorRoot.startsWith(containingMirrorRoot + RELATIVE_MIRROR_PATH_SEPARATOR);
@@ -274,19 +250,6 @@ public final class DocsSourceRegistry {
             return mirrorRootContains(firstMirrorRoot, secondMirrorRoot)
                     || mirrorRootContains(secondMirrorRoot, firstMirrorRoot);
         }
-
-        record DocumentationSourceLocation(String fetchUrl, String citationBaseUrl, String relativeMirrorPath) {}
-
-        record DocumentationSourceMetadata(
-                String displayName, String docSet, String sourceKind, String docType, String docVersion) {}
-
-        record DocumentationMirrorPolicy(int minimumHtmlFiles, String rejectRegex, boolean allowPartial) {}
-
-        record DocumentationSourceLifecycle(
-                String seedDocumentType,
-                String seedDiscoveryUrl,
-                String seedSourcePrefix,
-                String supersededRelativeMirrorPath) {}
 
         /**
          * Serializes this validated source with the canonical manifest grammar.
@@ -339,15 +302,11 @@ public final class DocsSourceRegistry {
         }
         String normalizedDocumentPath = relativeDocumentPath.replace('\\', '/');
         return DOCUMENTATION_SOURCES.stream()
-                .filter(documentationSource ->
-                        isWithinDocumentationSource(normalizedDocumentPath, documentationSource.relativeMirrorPath()))
+                .filter(documentationSource -> normalizedDocumentPath.equals(documentationSource.relativeMirrorPath())
+                        || normalizedDocumentPath.startsWith(
+                                documentationSource.relativeMirrorPath() + RELATIVE_MIRROR_PATH_SEPARATOR))
                 .max(Comparator.comparingInt(documentationSource ->
                         documentationSource.relativeMirrorPath().length()));
-    }
-
-    private static boolean isWithinDocumentationSource(String relativeDocumentPath, String relativeMirrorPath) {
-        return relativeDocumentPath.equals(relativeMirrorPath)
-                || relativeDocumentPath.startsWith(relativeMirrorPath + RELATIVE_MIRROR_PATH_SEPARATOR);
     }
 
     static void validateLifecycleMirrorRoots(List<DocumentationSource> candidateDocumentationSources) {
@@ -441,11 +400,7 @@ public final class DocsSourceRegistry {
         return prefixLookup;
     }
 
-    /**
-     * If the given local filesystem-like path contains an embedded known host,
-     * reconstruct an HTTPS URL to that embedded path.
-     */
-    public static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
+    private static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
         Optional<String> reconstructedUrl = Optional.empty();
         if (localPath != null) {
             final String normalizedPath = localPath.replace('\\', '/');
@@ -465,13 +420,7 @@ public final class DocsSourceRegistry {
         return reconstructedUrl;
     }
 
-    /**
-     * Map a local mirrored path to its authoritative remote base URL.
-     *
-     * @param localPath local filesystem-like path
-     * @return authoritative remote URL when a mapping is found
-     */
-    public static Optional<String> mapLocalPrefixToRemote(final String localPath) {
+    private static Optional<String> mapLocalPrefixToRemote(final String localPath) {
         Optional<String> mappedUrl = Optional.empty();
         if (localPath != null && !localPath.isBlank()) {
             mappedUrl = DocsLocalPathMapper.mapLocalPrefixToRemote(localPath, LOCAL_PREFIX_TO_REMOTE_BASE);

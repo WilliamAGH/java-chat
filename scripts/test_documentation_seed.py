@@ -100,6 +100,21 @@ class DocumentationSeedSecurityTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "XML sitemap exceeds"):
                 documentation_seed.read_xml_sitemap_urls(oversized_sitemap_path)
 
+    def test_rejects_invalid_seed_document_type_catalogs(self) -> None:
+        invalid_catalog_texts = (
+            "html-links\nhtml-links\n",
+            "html-links\nInvalid-Type\n",
+            "html-links\nunsupported-discovery\n",
+        )
+
+        for invalid_catalog_text in invalid_catalog_texts:
+            with self.subTest(invalid_catalog_text=invalid_catalog_text):
+                with tempfile.TemporaryDirectory() as temporary_directory_name:
+                    catalog_path = pathlib.Path(temporary_directory_name) / "seed-document-types.manifest"
+                    catalog_path.write_text(invalid_catalog_text, encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        documentation_seed.load_seed_document_types(catalog_path)
+
 
 if __name__ == "__main__":
     unittest.main()

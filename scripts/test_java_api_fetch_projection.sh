@@ -34,27 +34,16 @@ fetch_docs() {
 
 JAVA_API_SOURCE_PROJECTIONS=()
 load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-DOC_SOURCES=()
-append_java_api_fetch_sources
-
-if [ "${#JAVA_API_SOURCE_PROJECTIONS[@]}" -ne "${#DOC_SOURCES[@]}" ]; then
-    fail_java_api_fetch_projection_test "fetch projections did not preserve the complete manifest order"
-fi
 
 for java_api_source_index in "${!JAVA_API_SOURCE_PROJECTIONS[@]}"; do
     manifest_projection="${JAVA_API_SOURCE_PROJECTIONS[$java_api_source_index]}"
-    documentation_fetch_projection="${DOC_SOURCES[$java_api_source_index]}"
-    fetch_projection_delimiters="${documentation_fetch_projection//[^|]/}"
+    fetch_projection_delimiters="${manifest_projection//[^|]/}"
     if [ "${#fetch_projection_delimiters}" -ne 7 ]; then
         fail_java_api_fetch_projection_test "Java API fetch projection at index $java_api_source_index must contain exactly eight fields"
     fi
 
-    if [ "$documentation_fetch_projection" != "$manifest_projection" ]; then
-        fail_java_api_fetch_projection_test "Java API fetch projection at index $java_api_source_index diverged from the canonical manifest row"
-    fi
-
     fetch_execution_arguments=()
-    fetch_documentation_source "$documentation_fetch_projection" > /dev/null
+    fetch_projection_documentation_source "$manifest_projection" > /dev/null
     if [ "${#fetch_execution_arguments[@]}" -ne 8 ]; then
         fail_java_api_fetch_projection_test "Java API fetch execution at index $java_api_source_index must receive exactly eight fields"
     fi
@@ -77,7 +66,7 @@ done
 
 generic_fetch_projection="|https://example.invalid/reference.html|generic/reference|Generic Reference|1|1||false"
 fetch_execution_arguments=()
-fetch_documentation_source "$generic_fetch_projection" > /dev/null
+fetch_projection_documentation_source "$generic_fetch_projection" > /dev/null
 if [ "${#fetch_execution_arguments[@]}" -ne 8 ] \
     || [ -n "${fetch_execution_arguments[0]}" ] \
     || [ -n "${fetch_execution_arguments[6]}" ]; then
@@ -85,7 +74,8 @@ if [ "${#fetch_execution_arguments[@]}" -ne 8 ] \
 fi
 
 fetch_execution_arguments=()
-if fetch_documentation_source "https://example.invalid/|generic|Generic|1|1||false" > /dev/null; then
+if fetch_projection_documentation_source \
+    "https://example.invalid/|generic|Generic|1|1||false" > /dev/null; then
     fail_java_api_fetch_projection_test "legacy seven-field projection was accepted"
 fi
 if [ "${#fetch_execution_arguments[@]}" -ne 0 ]; then
@@ -94,7 +84,8 @@ fi
 
 for invalid_relative_mirror_path in "../outside" "/absolute" 'backslash\path'; do
     fetch_execution_arguments=()
-    if fetch_documentation_source "|https://example.invalid/|$invalid_relative_mirror_path|Invalid path|1|1||false" > /dev/null; then
+    if fetch_projection_documentation_source \
+        "|https://example.invalid/|$invalid_relative_mirror_path|Invalid path|1|1||false" > /dev/null; then
         fail_java_api_fetch_projection_test "unsafe mirror path reached fetch execution: $invalid_relative_mirror_path"
     fi
     if [ "${#fetch_execution_arguments[@]}" -ne 0 ]; then
@@ -423,20 +414,23 @@ if (
     log() { :; }
     DOCS_ROOT="$TEST_DOCS_ROOT/superseded-quarantine-setup-failure"
     mkdir -p "$DOCS_ROOT/rolling/1.0"
+    replacement_staging_directory="$(dirname "$DOCS_ROOT")/.documentation-fetch-staging/rolling.replacement.test"
+    mkdir -p "$replacement_staging_directory"
     mktemp() { return 71; }
     mv() {
         printf 'move-invoked\n' > "$superseded_quarantine_move_capture_file"
         return 0
     }
-    quarantine_superseded_mirror_path \
-        "$DOCS_ROOT/rolling/1.0" \
-        "Rolling documentation" \
-        "rolling/1.0"
+    publish_staged_documentation_mirror \
+        "$replacement_staging_directory" \
+        rolling \
+        "rolling/1.0" \
+        "Rolling documentation"
 ); then
-    fail_java_api_fetch_projection_test "superseded quarantine accepted mktemp failure"
+    fail_java_api_fetch_projection_test "replacement publication accepted quarantine setup failure"
 fi
 if [ -e "$superseded_quarantine_move_capture_file" ]; then
-    fail_java_api_fetch_projection_test "superseded quarantine moved files after mktemp failure"
+    fail_java_api_fetch_projection_test "replacement publication moved files after quarantine setup failure"
 fi
 
 seeded_quarantine_move_capture_file="$TEST_DOCS_ROOT/seeded-quarantine-move"
@@ -468,6 +462,7 @@ if [ -e "$seeded_quarantine_move_capture_file" ]; then
     fail_java_api_fetch_projection_test "seeded quarantine moved files after mktemp failure"
 fi
 
+replacement_fetch_capture_file="$TEST_DOCS_ROOT/replacement-fetch-before-quarantine"
 if (
     set --
     # shellcheck source=fetch_all_docs.sh
@@ -475,10 +470,11 @@ if (
     log() { :; }
     DOCS_ROOT="$TEST_DOCS_ROOT/quarantine-failure"
     mkdir -p "$DOCS_ROOT/rolling/1.0"
-    quarantine_superseded_mirror_path() { return 77; }
     fetch_docs_mirror() {
-        fail_java_api_fetch_projection_test "fetch continued after superseded-mirror quarantine failed"
+        printf 'replacement-fetch-complete\n' > "$replacement_fetch_capture_file"
+        return 0
     }
+    publish_staged_documentation_mirror() { return 77; }
     fetch_docs \
         "" \
         "https://example.invalid/" \
@@ -493,7 +489,10 @@ if (
         "" \
         "rolling/1.0"
 ); then
-    fail_java_api_fetch_projection_test "superseded-mirror quarantine failure was not propagated"
+    fail_java_api_fetch_projection_test "staged mirror publication failure was not propagated"
+fi
+if [ ! -e "$replacement_fetch_capture_file" ]; then
+    fail_java_api_fetch_projection_test "staged publication ran before replacement fetch completed"
 fi
 
 if ! (
@@ -577,7 +576,10 @@ fi
 
 run_summary_capture_file="$TEST_DOCS_ROOT/run-summary"
 LOG_FILE="$TEST_DOCS_ROOT/full-run.log"
-fetch_documentation_source() {
+fetch_projection_documentation_source() {
+    return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
+}
+fetch_manifest_documentation_source() {
     return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
 }
 write_documentation_fetch_metadata() {

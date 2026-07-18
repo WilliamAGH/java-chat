@@ -78,9 +78,10 @@ append_manifest_documentation_fetch_sources() {
     local -a matched_doc_sets=("")
     local -a selected_fetch_projections=()
     local documentation_source_index
-    for documentation_source_index in "${!DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[@]}"; do
-        local docSet="${DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS[$documentation_source_index]}"
-        local documentation_fetch_projection="${DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[$documentation_source_index]}"
+    for documentation_source_index in "${!DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+        local documentation_fetch_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[$documentation_source_index]}"
+        local docSet
+        docSet="$(documentation_source_manifest_field "$documentation_fetch_projection" "docSet")"
 
         if [ "$selection_enabled" = "true" ]; then
             local doc_set_requested="false"
@@ -120,22 +121,11 @@ append_manifest_documentation_fetch_sources() {
     DOC_SOURCES+=("${selected_fetch_projections[@]}")
 }
 
-append_legacy_documentation_fetch_sources() {
-    ensure_builtin_documentation_fetch_projections_loaded
-    DOC_SOURCES+=("${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}")
-}
-
-append_quick_documentation_fetch_sources() {
-    ensure_builtin_documentation_fetch_projections_loaded
-    DOC_SOURCES+=("${QUICK_DOCUMENTATION_FETCH_PROJECTIONS[@]}")
-}
-
 documentation_fetch_projection_relative_mirror_path() {
     local documentation_fetch_projection="$1"
     local projection_after_java_release="${documentation_fetch_projection#*|}"
     local projection_after_documentation_url="${projection_after_java_release#*|}"
-    local relative_mirror_path="${projection_after_documentation_url%%|*}"
-    printf '%s\n' "$relative_mirror_path"
+    printf '%s\n' "${projection_after_documentation_url%%|*}"
 }
 
 require_lifecycle_root_disjoint_from_external_fetch_roots() {
@@ -149,7 +139,8 @@ require_lifecycle_root_disjoint_from_external_fetch_roots() {
     local external_fetch_projection
     for external_fetch_projection in "${external_fetch_projections[@]}"; do
         local external_relative_mirror_path
-        external_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path "$external_fetch_projection")"
+        external_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
+            "$external_fetch_projection")"
         if documentation_mirror_roots_overlap \
             "$superseded_relative_mirror_path" \
             "$external_relative_mirror_path"; then
@@ -432,15 +423,13 @@ fetch_discovered_documentation_seed() {
         "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" false
 }
 
-fetch_documentation_source() {
+fetch_projection_documentation_source() {
     local documentation_source_projection="$1"
-    local fetch_projection_delimiters="${documentation_source_projection//[^|]/}"
-    if [ "${#fetch_projection_delimiters}" -ne 7 ] \
-        && [ "${#fetch_projection_delimiters}" -ne 11 ]; then
-        log "${RED}✗ Documentation source projection must contain exactly eight or twelve fields${NC}"
+    local projection_delimiters="${documentation_source_projection//[^|]/}"
+    if [ "${#projection_delimiters}" -ne 7 ]; then
+        log "${RED}✗ Documentation source projection must contain exactly eight fields${NC}"
         return 1
     fi
-
     local java_release
     local documentation_source_url
     local relative_mirror_path
@@ -449,77 +438,56 @@ fetch_documentation_source() {
     local minimum_html_files
     local reject_regex
     local partial_mirror_allowed
-    local seed_document_type
-    local seed_discovery_url
-    local seed_source_prefix
-    local superseded_relative_mirror_path
-    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed seed_document_type seed_discovery_url seed_source_prefix superseded_relative_mirror_path <<< "$documentation_source_projection"
+    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed <<< "$documentation_source_projection"
 
-    if [ -z "$documentation_source_url" ] || [ -z "$relative_mirror_path" ] || [ -z "$documentation_source_name" ]; then
+    if [ -z "$documentation_source_url" ] \
+        || [ -z "$relative_mirror_path" ] \
+        || [ -z "$documentation_source_name" ]; then
         log "${RED}✗ Documentation source projection has a blank required field${NC}"
         return 1
     fi
-    if has_boundary_whitespace "$documentation_source_url" \
-        || has_boundary_whitespace "$relative_mirror_path" \
-        || has_boundary_whitespace "$documentation_source_name" \
-        || has_boundary_whitespace "$reject_regex" \
-        || has_boundary_whitespace "$seed_document_type" \
-        || has_boundary_whitespace "$seed_discovery_url" \
-        || has_boundary_whitespace "$seed_source_prefix" \
-        || has_boundary_whitespace "$superseded_relative_mirror_path" \
-        || has_manifest_control_character "$documentation_source_url" \
-        || has_manifest_control_character "$relative_mirror_path" \
-        || has_manifest_control_character "$documentation_source_name" \
-        || has_manifest_control_character "$reject_regex" \
-        || has_manifest_control_character "$seed_document_type" \
-        || has_manifest_control_character "$seed_discovery_url" \
-        || has_manifest_control_character "$seed_source_prefix" \
-        || has_manifest_control_character "$superseded_relative_mirror_path"; then
-        log "${RED}✗ Documentation source projection has invalid text fields${NC}"
-        return 1
-    fi
+    local projection_text
+    for projection_text in \
+        "$documentation_source_url" \
+        "$relative_mirror_path" \
+        "$documentation_source_name" \
+        "$reject_regex"; do
+        if has_boundary_whitespace "$projection_text" \
+            || has_manifest_control_character "$projection_text"; then
+            log "${RED}✗ Documentation source projection has invalid text fields${NC}"
+            return 1
+        fi
+    done
     if [ -n "$java_release" ] \
         && { ! is_canonical_manifest_integer "$java_release" || [ "$java_release" = "0" ]; }; then
         log "${RED}✗ Documentation source Java release must be blank or a positive canonical integer${NC}"
+        return 1
+    fi
+    if [ -n "$java_release" ]; then
+        if ! is_absolute_https_remote_base_url "$documentation_source_url"; then
+            log "${RED}✗ Java API documentation source URL must be an absolute HTTPS base URL${NC}"
+            return 1
+        fi
+    elif ! is_absolute_https_remote_url "$documentation_source_url"; then
+        log "${RED}✗ Documentation source URL must be an absolute HTTPS URL${NC}"
         return 1
     fi
     if ! is_normalized_relative_mirror_path "$relative_mirror_path"; then
         log "${RED}✗ Documentation source mirror path must be normalized and relative${NC}"
         return 1
     fi
-    if [ -n "$superseded_relative_mirror_path" ] \
-        && { ! is_normalized_relative_mirror_path "$superseded_relative_mirror_path" \
-            || [ "$superseded_relative_mirror_path" = "$relative_mirror_path" ]; }; then
-        log "${RED}✗ Documentation source superseded mirror path is invalid${NC}"
-        return 1
-    fi
-    if [ -n "$java_release" ] && ! is_absolute_https_remote_base_url "$documentation_source_url"; then
-        log "${RED}✗ Java API documentation source URL must be an absolute HTTPS base URL${NC}"
-        return 1
-    fi
     if ! is_canonical_manifest_integer "$cut_directories"; then
         log "${RED}✗ Documentation source cut-directories value must be a canonical integer${NC}"
         return 1
     fi
-    if ! is_canonical_manifest_integer "$minimum_html_files" || [ "$minimum_html_files" = "0" ]; then
+    if ! is_canonical_manifest_integer "$minimum_html_files" \
+        || [ "$minimum_html_files" = "0" ]; then
         log "${RED}✗ Documentation source minimum HTML files must be a positive canonical integer${NC}"
         return 1
     fi
-    if [ "$partial_mirror_allowed" != "true" ] && [ "$partial_mirror_allowed" != "false" ]; then
+    if [ "$partial_mirror_allowed" != "true" ] \
+        && [ "$partial_mirror_allowed" != "false" ]; then
         log "${RED}✗ Documentation source partial-mirror policy must be true or false${NC}"
-        return 1
-    fi
-    if [ -n "$seed_discovery_url" ]; then
-        if [ -n "$java_release" ] \
-            || [ -z "$seed_document_type" ] \
-            || [ -z "$seed_source_prefix" ] \
-            || ! is_absolute_https_remote_url "$seed_discovery_url" \
-            || ! is_absolute_http_remote_base_url "$seed_source_prefix"; then
-            log "${RED}✗ Documentation source seed discovery fields are invalid${NC}"
-            return 1
-        fi
-    elif [ -n "$seed_document_type" ] || [ -n "$seed_source_prefix" ]; then
-        log "${RED}✗ Documentation source seed discovery fields are incomplete${NC}"
         return 1
     fi
 
@@ -528,22 +496,6 @@ fetch_documentation_source() {
     log "URL: $documentation_source_url"
     log "Target: $DOCS_ROOT/$relative_mirror_path"
 
-    if [ "${#fetch_projection_delimiters}" -eq 11 ]; then
-        fetch_docs \
-            "$java_release" \
-            "$documentation_source_url" \
-            "$relative_mirror_path" \
-            "$documentation_source_name" \
-            "$cut_directories" \
-            "$minimum_html_files" \
-            "$reject_regex" \
-            "$partial_mirror_allowed" \
-            "$seed_document_type" \
-            "$seed_discovery_url" \
-            "$seed_source_prefix" \
-            "$superseded_relative_mirror_path"
-        return
-    fi
     fetch_docs \
         "$java_release" \
         "$documentation_source_url" \
@@ -553,4 +505,48 @@ fetch_documentation_source() {
         "$minimum_html_files" \
         "$reject_regex" \
         "$partial_mirror_allowed"
+}
+
+fetch_manifest_documentation_source() {
+    local documentation_source_projection="$1"
+    local fetch_url
+    local relative_mirror_path
+    local display_name
+    local minimum_html_files
+    local reject_regex
+    local allow_partial
+    local seed_document_type
+    local seed_discovery_url
+    local seed_source_prefix
+    local superseded_relative_mirror_path
+    fetch_url="$(documentation_source_manifest_field "$documentation_source_projection" "fetchUrl")"
+    relative_mirror_path="$(documentation_source_manifest_field "$documentation_source_projection" "relativeMirrorPath")"
+    display_name="$(documentation_source_manifest_field "$documentation_source_projection" "displayName")"
+    minimum_html_files="$(documentation_source_manifest_field "$documentation_source_projection" "minimumHtmlFiles")"
+    reject_regex="$(documentation_source_manifest_field "$documentation_source_projection" "rejectRegex")"
+    allow_partial="$(documentation_source_manifest_field "$documentation_source_projection" "allowPartial")"
+    seed_document_type="$(documentation_source_manifest_field "$documentation_source_projection" "seedDocumentType")"
+    seed_discovery_url="$(documentation_source_manifest_field "$documentation_source_projection" "seedDiscoveryUrl")"
+    seed_source_prefix="$(documentation_source_manifest_field "$documentation_source_projection" "seedSourcePrefix")"
+    superseded_relative_mirror_path="$(documentation_source_manifest_field \
+        "$documentation_source_projection" \
+        "supersededRelativeMirrorPath")"
+
+    echo ""
+    log "Processing: $display_name"
+    log "URL: $fetch_url"
+    log "Target: $DOCS_ROOT/$relative_mirror_path"
+    fetch_docs \
+        "" \
+        "$fetch_url" \
+        "$relative_mirror_path" \
+        "$display_name" \
+        "$(documentation_fetch_cut_directories "$fetch_url")" \
+        "$minimum_html_files" \
+        "$reject_regex" \
+        "$allow_partial" \
+        "$seed_document_type" \
+        "$seed_discovery_url" \
+        "$seed_source_prefix" \
+        "$superseded_relative_mirror_path"
 }

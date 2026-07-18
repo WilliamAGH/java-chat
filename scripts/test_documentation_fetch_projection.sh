@@ -34,47 +34,95 @@ fetch_docs() {
     fetch_execution_arguments=("$@")
 }
 
-duplicate_field_catalog="$TEST_WORK_ROOT/duplicate-documentation-source-fields.manifest"
-cp "$DOCUMENTATION_SOURCE_FIELD_CATALOG" "$duplicate_field_catalog"
-duplicate_field_name="$(sed -n '1p' "$DOCUMENTATION_SOURCE_FIELD_CATALOG")"
-printf '%s\n' "$duplicate_field_name" >> "$duplicate_field_catalog"
-if load_documentation_source_fields "$duplicate_field_catalog" > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "duplicate canonical documentation source fields must be rejected"
+if [ -e "$PROJECT_ROOT/src/main/resources/documentation-source-fields.manifest" ]; then
+    fail_documentation_fetch_projection_test "redundant documentation source field catalog must remain removed"
+fi
+
+canonical_seed_document_type_catalog="$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG"
+duplicate_seed_document_type_catalog="$TEST_WORK_ROOT/duplicate-seed-document-types.manifest"
+malformed_seed_document_type_catalog="$TEST_WORK_ROOT/malformed-seed-document-types.manifest"
+missing_reader_seed_document_type_catalog="$TEST_WORK_ROOT/missing-reader-seed-document-types.manifest"
+printf 'html-links\nxml-sitemap\nhtml-links\n' > "$duplicate_seed_document_type_catalog"
+printf 'html-links\nInvalid-Type\n' > "$malformed_seed_document_type_catalog"
+printf 'html-links\nunsupported-discovery\n' > "$missing_reader_seed_document_type_catalog"
+for invalid_seed_document_type_catalog in \
+    "$duplicate_seed_document_type_catalog" \
+    "$malformed_seed_document_type_catalog" \
+    "$missing_reader_seed_document_type_catalog"; do
+    DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG="$invalid_seed_document_type_catalog"
+    if load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST" > /dev/null 2>&1; then
+        fail_documentation_fetch_projection_test \
+            "shell manifest loading accepted an invalid canonical seed document type catalog"
+    fi
+done
+DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG="$canonical_seed_document_type_catalog"
+
+canonical_documentation_source_header="$(sed -n '1p' "$DOCUMENTATION_SOURCES_MANIFEST")"
+overlapping_active_mirror_paths_manifest="$TEST_WORK_ROOT/overlapping-active-mirror-paths.manifest"
+printf '%s\n' \
+    "$canonical_documentation_source_header" \
+    'https://docs.example.test/language/|https://docs.example.test/language/|language|Language|language|official|language-reference||1||false||||' \
+    'https://docs.example.test/language/reference/|https://docs.example.test/language/reference/|language/reference|Language Reference|language-reference|official|language-reference||1||false||||' \
+    > "$overlapping_active_mirror_paths_manifest"
+if load_documentation_sources "$overlapping_active_mirror_paths_manifest" > /dev/null 2>&1; then
+    fail_documentation_fetch_projection_test \
+        "manifest loading accepted segment-boundary-overlapping active mirror paths"
+fi
+
+valid_sibling_mirror_paths_manifest="$TEST_WORK_ROOT/valid-sibling-mirror-paths.manifest"
+printf '%s\n' \
+    "$canonical_documentation_source_header" \
+    'https://docs.example.test/language/|https://docs.example.test/language/|language|Language|language|official|language-reference||1||false||||' \
+    'https://docs.example.test/language-reference/|https://docs.example.test/language-reference/|language-reference|Language Reference|language-reference|official|language-reference||1||false||||' \
+    > "$valid_sibling_mirror_paths_manifest"
+DOCUMENTATION_SOURCE_PROJECTIONS=()
+if ! load_documentation_sources "$valid_sibling_mirror_paths_manifest"; then
+    fail_documentation_fetch_projection_test \
+        "manifest loading rejected segment-disjoint active mirror path siblings"
+fi
+if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -ne 2 ]; then
+    fail_documentation_fetch_projection_test \
+        "valid active mirror path siblings did not preserve both canonical projections"
 fi
 
 DOCUMENTATION_SOURCE_PROJECTIONS=()
 load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
-seed_fetch_document_type="${DOCUMENTATION_SEED_DOCUMENT_TYPES[0]}"
+seed_fetch_document_type="$(sed -n '1p' "$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG")"
 DOC_SOURCES=()
 append_manifest_documentation_fetch_sources
 
-if [ "${#DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[@]}" -ne "${#DOC_SOURCES[@]}" ]; then
+if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -ne "${#DOC_SOURCES[@]}" ]; then
     fail_documentation_fetch_projection_test "fetch projections did not preserve the complete manifest order"
 fi
-if [ "${#DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS[@]}" -ne "${#DOC_SOURCES[@]}" ]; then
-    fail_documentation_fetch_projection_test "docSet projections did not preserve manifest ownership"
-fi
 
-for documentation_source_index in "${!DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[@]}"; do
-    expected_fetch_projection="${DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[$documentation_source_index]}"
+for documentation_source_index in "${!DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+    expected_manifest_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[$documentation_source_index]}"
     documentation_fetch_projection="${DOC_SOURCES[$documentation_source_index]}"
 
-    if [ "$documentation_fetch_projection" != "$expected_fetch_projection" ]; then
-        fail_documentation_fetch_projection_test "fetch projection at index $documentation_source_index diverged from the manifest parser projection"
+    if [ "$documentation_fetch_projection" != "$expected_manifest_projection" ]; then
+        fail_documentation_fetch_projection_test "fetch projection at index $documentation_source_index diverged from the canonical manifest row"
     fi
 
     fetch_execution_arguments=()
-    fetch_documentation_source "$documentation_fetch_projection" > /dev/null
+    fetch_manifest_documentation_source "$documentation_fetch_projection" > /dev/null
     if [ "${#fetch_execution_arguments[@]}" -ne 12 ]; then
-        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index must receive exactly twelve fields"
+        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index must receive exactly twelve arguments"
     fi
 
+    expected_fetch_projection="|$(documentation_source_manifest_field "$expected_manifest_projection" "fetchUrl")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "relativeMirrorPath")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "displayName")"
+    expected_fetch_projection+="|$(documentation_fetch_cut_directories "$(documentation_source_manifest_field "$expected_manifest_projection" "fetchUrl")")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "minimumHtmlFiles")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "rejectRegex")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "allowPartial")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedDocumentType")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedDiscoveryUrl")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedSourcePrefix")"
+    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "supersededRelativeMirrorPath")"
     actual_fetch_projection="$(IFS='|'; printf '%s' "${fetch_execution_arguments[*]}")"
     if [ "$actual_fetch_projection" != "$expected_fetch_projection" ]; then
-        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index diverged from the projected source"
-    fi
-    if [ -n "${fetch_execution_arguments[0]}" ]; then
-        fail_documentation_fetch_projection_test "non-Java fetch execution at index $documentation_source_index received a Java release"
+        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index diverged from canonical named fields"
     fi
 done
 
@@ -121,25 +169,21 @@ if [ "$seeded_doc_set_count" -eq 0 ]; then
     fail_documentation_fetch_projection_test "canonical manifest must retain at least one structured seed source"
 fi
 
-load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="true"
-DOCUMENTATION_DOC_SET_SELECTOR="$seeded_doc_set_selector"
-INCLUDE_QUICK="true"
-build_documentation_fetch_sources
+DOC_SOURCES=()
+append_manifest_documentation_fetch_sources "$seeded_doc_set_selector"
 
 if [ "${#DOC_SOURCES[@]}" -ne "$seeded_doc_set_count" ]; then
     fail_documentation_fetch_projection_test "selected fetch must contain every manifest-owned structured seed row"
 fi
 
 selected_projection_index=0
-for documentation_source_index in "${!DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[@]}"; do
+for documentation_source_index in "${!DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
     documentation_source_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[$documentation_source_index]}"
     seed_document_type="$(documentation_source_manifest_field "$documentation_source_projection" "seedDocumentType")"
     if [ -z "$seed_document_type" ]; then
         continue
     fi
-    expected_fetch_projection="${DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[$documentation_source_index]}"
-    if [ "${DOC_SOURCES[$selected_projection_index]}" != "$expected_fetch_projection" ]; then
+    if [ "${DOC_SOURCES[$selected_projection_index]}" != "$documentation_source_projection" ]; then
         fail_documentation_fetch_projection_test "selected fetch diverged from canonical manifest order"
     fi
     selected_projection_index=$((selected_projection_index + 1))
@@ -507,9 +551,9 @@ for external_active_mirror_root in java oracle; do
         DOCS_ROOT="$TEST_WORK_ROOT/external-overlap-docs"
         mkdir -p "$DOCS_ROOT/$external_active_mirror_root"
         load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-        quarantine_superseded_mirror_path() {
-            printf 'quarantine-invoked\n' > "$external_overlap_quarantine_capture"
-            return 0
+        create_documentation_fetch_staging_directory() {
+            printf 'staging-invoked\n' > "$external_overlap_quarantine_capture"
+            return 1
         }
         fetch_docs \
             "" \
@@ -530,21 +574,49 @@ for external_active_mirror_root in java oracle; do
     fi
     if [ -e "$external_overlap_quarantine_capture" ]; then
         fail_documentation_fetch_projection_test \
-            "external active mirror overlap reached quarantine: $external_active_mirror_root"
+            "external active mirror overlap reached replacement staging: $external_active_mirror_root"
     fi
 done
 
-superseded_mirror_docs_root="$TEST_WORK_ROOT/superseded-mirror-docs"
-mkdir -p "$superseded_mirror_docs_root/language/1.0"
-printf '<html><body>Superseded</body></html>\n' \
-    > "$superseded_mirror_docs_root/language/1.0/index.html"
-if ! (
+for documentation_list_option in --list-java-api-sources --list-documentation-sources; do
+    set +e
+    (
+        set --
+        # shellcheck source=fetch_all_docs.sh
+        source "$FETCH_SCRIPT"
+        load_builtin_documentation_fetch_projections() {
+            LEGACY_DOCUMENTATION_FETCH_PROJECTIONS=(
+                "|https://example.invalid/|kotlin/2.4.10|Lifecycle collision|0|1||false"
+            )
+            QUICK_DOCUMENTATION_FETCH_PROJECTIONS=()
+            BUILTIN_DOCUMENTATION_FETCH_PROJECTIONS_LOADED="true"
+        }
+        run_documentation_fetch "$documentation_list_option"
+    ) > /dev/null 2>&1
+    documentation_list_status=$?
+    set -e
+    if [ "$documentation_list_status" -eq 0 ]; then
+        fail_documentation_fetch_projection_test \
+            "list mode bypassed external lifecycle-root validation: $documentation_list_option"
+    fi
+done
+
+generic_failure_docs_root="$TEST_WORK_ROOT/generic-failure-docs"
+mkdir -p "$generic_failure_docs_root/language/1.0"
+for superseded_page_name in one two three four; do
+    printf '<html><body>Superseded</body></html>\n' \
+        > "$generic_failure_docs_root/language/1.0/$superseded_page_name.html"
+done
+if (
     set --
+    # shellcheck source=fetch_all_docs.sh
     source "$FETCH_SCRIPT"
-    DOCS_ROOT="$superseded_mirror_docs_root"
-    LOG_FILE="$TEST_WORK_ROOT/superseded-fetch.log"
+    log() { :; }
+    DOCS_ROOT="$generic_failure_docs_root"
+    LOG_FILE="$TEST_WORK_ROOT/generic-failed-fetch.log"
     CLEAN_INCOMPLETE="true"
-    fetch_docs_mirror() {
+    wget() {
+        printf '<html><body>Incomplete replacement</body></html>\n' > replacement.html
         return 0
     }
     fetch_docs \
@@ -553,7 +625,97 @@ if ! (
         "language" \
         "Rolling Language Reference" \
         1 \
+        4 \
+        "" \
+        false \
+        "" \
+        "" \
+        "" \
+        "language/1.0"
+); then
+    fail_documentation_fetch_projection_test \
+        "generic replacement counted superseded HTML toward staged completeness"
+fi
+if [ "$(count_html_files "$generic_failure_docs_root/language/1.0")" -ne 4 ] \
+    || [ -e "$generic_failure_docs_root/language/replacement.html" ]; then
+    fail_documentation_fetch_projection_test "failed generic replacement mutated the prior valid mirror"
+fi
+
+seeded_failure_docs_root="$TEST_WORK_ROOT/seeded-failure-docs"
+mkdir -p "$seeded_failure_docs_root/language/1.0"
+printf '<html><body>Superseded</body></html>\n' \
+    > "$seeded_failure_docs_root/language/1.0/index.html"
+printf 'retained-seed\n' > "$seeded_failure_docs_root/language/.documentation-seed.txt"
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$seeded_failure_docs_root"
+    LOG_FILE="$TEST_WORK_ROOT/seeded-failed-fetch.log"
+    CLEAN_INCOMPLETE="true"
+    seeded_failure_wget_call_count=0
+    wget() {
+        seeded_failure_wget_call_count=$((seeded_failure_wget_call_count + 1))
+        if [ "$seeded_failure_wget_call_count" -eq 1 ]; then
+            local wget_argument
+            for wget_argument in "$@"; do
+                case "$wget_argument" in
+                    --output-document=*)
+                        cp "$DOCUMENTATION_SEED_FIXTURES/html-links.input" \
+                            "${wget_argument#--output-document=}"
+                        ;;
+                esac
+            done
+            return 0
+        fi
+        return 8
+    }
+    fetch_docs \
+        "" \
+        "https://docs.example.test/reference/" \
+        "language" \
+        "Rolling Seeded Language Reference" \
         1 \
+        1 \
+        "" \
+        false \
+        html-links \
+        "https://docs.example.test/navigation" \
+        "https://docs.example.test/reference/" \
+        "language/1.0"
+); then
+    fail_documentation_fetch_projection_test "failed seeded replacement fetch was accepted"
+fi
+if [ ! -f "$seeded_failure_docs_root/language/1.0/index.html" ] \
+    || [ "$(< "$seeded_failure_docs_root/language/.documentation-seed.txt")" != "retained-seed" ]; then
+    fail_documentation_fetch_projection_test "failed seeded replacement mutated the prior mirror or seed"
+fi
+
+superseded_mirror_docs_root="$TEST_WORK_ROOT/superseded-mirror-docs"
+mkdir -p "$superseded_mirror_docs_root/language/1.0"
+printf '<html><body>Superseded</body></html>\n' \
+    > "$superseded_mirror_docs_root/language/1.0/index.html"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$superseded_mirror_docs_root"
+    LOG_FILE="$TEST_WORK_ROOT/superseded-fetch.log"
+    CLEAN_INCOMPLETE="true"
+    wget() {
+        printf '<html><body>Replacement one</body></html>\n' > replacement-one.html
+        printf '<html><body>Replacement two</body></html>\n' > replacement-two.html
+        return 0
+    }
+    fetch_docs \
+        "" \
+        "https://docs.example.test/reference/" \
+        "language" \
+        "Rolling Language Reference" \
+        1 \
+        2 \
         "" \
         false \
         "" \
@@ -565,6 +727,9 @@ if ! (
 fi
 if [ -e "$superseded_mirror_docs_root/language/1.0" ]; then
     fail_documentation_fetch_projection_test "superseded mirror migration retained the prior local root"
+fi
+if [ "$(count_html_files "$superseded_mirror_docs_root/language")" -ne 2 ]; then
+    fail_documentation_fetch_projection_test "published generic replacement failed post-quarantine completeness"
 fi
 if ! find "$TEST_WORK_ROOT/.quarantine" -path '*/language/1.0/index.html' -type f -print -quit \
     | grep -q .; then

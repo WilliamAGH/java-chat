@@ -20,6 +20,19 @@ import org.junit.jupiter.api.Test;
 class DocumentationSourceCatalogParityTest {
 
     @Test
+    void executesPythonSeedContractInDefaultGradleTestLane() throws IOException, InterruptedException {
+        Path seedContractPath = Path.of("scripts", "test_documentation_seed.py").toAbsolutePath();
+        ProcessBuilder seedContractCommand = new ProcessBuilder("python3", seedContractPath.toString());
+        seedContractCommand.redirectErrorStream(true);
+        Process seedContractProcess = seedContractCommand.start();
+        String seedContractStandardOutput =
+                new String(seedContractProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int seedContractExitCode = seedContractProcess.waitFor();
+
+        assertEquals(0, seedContractExitCode, seedContractStandardOutput);
+    }
+
+    @Test
     void projectsCanonicalDocumentationSourcesIntoCliCatalogAndFetchScript() throws IOException, InterruptedException {
         List<DocumentationSource> canonicalDocumentationSources = DocsSourceRegistry.documentationSources();
         List<DocumentationSet> expectedCliDocumentationSets = canonicalDocumentationSources.stream()

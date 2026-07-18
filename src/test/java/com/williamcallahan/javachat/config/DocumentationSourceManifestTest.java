@@ -21,8 +21,6 @@ class DocumentationSourceManifestTest {
 
     private static final Path CANONICAL_MANIFEST_PATH =
             Path.of("src", "main", "resources", "documentation-sources.manifest");
-    private static final Path FIELD_CATALOG_PATH =
-            Path.of("src", "main", "resources", "documentation-source-fields.manifest");
     private static final Path SHELL_INTERPRETER_PATH = Path.of("scripts", "lib", "documentation_sources.sh");
     private static final Path SEED_DOCUMENT_TYPE_CATALOG_PATH =
             Path.of("src", "main", "resources", "documentation-seed-document-types.manifest");
@@ -33,17 +31,16 @@ class DocumentationSourceManifestTest {
     Path temporaryDirectory;
 
     @Test
-    void canonicalFieldCatalogOwnsManifestHeaderAndJavaRecordProjection() throws IOException {
-        List<String> canonicalFieldNames = Files.readAllLines(FIELD_CATALOG_PATH, StandardCharsets.UTF_8);
+    void canonicalManifestHeaderOwnsJavaRecordProjection() throws IOException {
+        String canonicalManifestHeader = Files.readAllLines(CANONICAL_MANIFEST_PATH, StandardCharsets.UTF_8)
+                .getFirst();
+        List<String> canonicalFieldNames = List.of(canonicalManifestHeader.split("\\|", -1));
         List<String> documentationSourceComponentNames = Arrays.stream(DocumentationSource.class.getRecordComponents())
                 .map(recordComponent -> recordComponent.getName())
                 .toList();
-        String canonicalManifestHeader = Files.readAllLines(CANONICAL_MANIFEST_PATH, StandardCharsets.UTF_8)
-                .getFirst();
 
         assertEquals(canonicalFieldNames, DocumentationSourceManifest.canonicalManifestFields());
         assertEquals(canonicalFieldNames, documentationSourceComponentNames);
-        assertEquals(String.join("|", canonicalFieldNames), canonicalManifestHeader);
         assertEquals(canonicalManifestHeader, DocumentationSourceManifest.canonicalManifestHeader());
     }
 
