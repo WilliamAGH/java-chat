@@ -122,6 +122,32 @@ describe("LearnView guided chat streaming stability", () => {
     expect(await findByRole("button", { name: /test lesson/i })).toBeInTheDocument();
   });
 
+  it("returns focus to the mobile chat trigger after closing the drawer", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamCallbacks.onChunk("# Lesson");
+    });
+    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const mobileChatTrigger = learnView.getByRole("button", {
+      name: "Ask questions about this lesson",
+    });
+    mobileChatTrigger.focus();
+    await fireEvent.click(mobileChatTrigger);
+
+    const closeChatButton = await learnView.findByRole("button", { name: "Close chat" });
+    closeChatButton.focus();
+    await fireEvent.click(closeChatButton);
+    await tick();
+
+    expect(mobileChatTrigger).toHaveFocus();
+  });
+
   it("keeps the guided assistant message DOM node stable when the stream completes", async () => {
     fetchTocMock.mockResolvedValue([
       { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
