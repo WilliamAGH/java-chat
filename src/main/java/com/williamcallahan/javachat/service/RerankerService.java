@@ -143,8 +143,8 @@ public class RerankerService {
         for (int docIndex = 0; docIndex < documents.size(); docIndex++) {
             Document document = documents.get(docIndex);
             Map<String, ?> metadata = document.getMetadata();
-            String title = extractMetadataString(metadata, "title");
-            String url = extractMetadataString(metadata, "url");
+            String title = extractMetadataString(metadata, QdrantPayloadFieldSchema.TITLE_FIELD);
+            String url = extractMetadataString(metadata, QdrantPayloadFieldSchema.URL_FIELD);
             String text = document.getText();
             prompt.append("[")
                     .append(docIndex)
@@ -234,7 +234,7 @@ public class RerankerService {
         }
         StringBuilder hashBuilder = new StringBuilder();
         for (Document document : documents) {
-            Object url = document.getMetadata().get("url");
+            Object url = document.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
             String text = document.getText();
             hashBuilder.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
             hashBuilder.append("|");

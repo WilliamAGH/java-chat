@@ -31,6 +31,7 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
@@ -98,7 +99,7 @@ class GuidedSseCitationEventTest {
         Document lessonContextDocument = Document.builder()
                 .id("official-guided-context")
                 .text("Official lesson context")
-                .metadata("sourceKind", "official")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "official")
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
@@ -138,7 +139,7 @@ class GuidedSseCitationEventTest {
         Document lessonContextDocument = Document.builder()
                 .id("official-guided-context")
                 .text("Official lesson context")
-                .metadata("sourceKind", "official")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "official")
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);

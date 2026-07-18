@@ -14,10 +14,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class QdrantCollectionRouter {
 
-    private static final String METADATA_DOC_SET = "docSet";
-    private static final String METADATA_DOC_PATH = "docPath";
-    private static final String METADATA_DOC_TYPE = "docType";
-
     /**
      * Determines the collection bucket for a document based on its metadata.
      *
@@ -26,9 +22,9 @@ public class QdrantCollectionRouter {
      * @return collection kind for routing
      */
     public QdrantCollectionKind route(Map<String, ?> metadata, String url) {
-        String docSet = stringMetadata(metadata, METADATA_DOC_SET);
-        String docPath = stringMetadata(metadata, METADATA_DOC_PATH);
-        String docType = stringMetadata(metadata, METADATA_DOC_TYPE);
+        String docSet = stringMetadata(metadata, QdrantPayloadFieldSchema.DOC_SET_FIELD);
+        String docPath = stringMetadata(metadata, QdrantPayloadFieldSchema.DOC_PATH_FIELD);
+        String docType = stringMetadata(metadata, QdrantPayloadFieldSchema.DOC_TYPE_FIELD);
 
         return route(docSet, docPath, docType, url);
     }

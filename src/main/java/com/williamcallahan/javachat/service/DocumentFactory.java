@@ -40,11 +40,11 @@ public class DocumentFactory {
             String text, String url, String title, int chunkIndex, String packageName, String hash) {
 
         Map<String, ?> metadata = Map.of(
-                "url", url,
-                "title", title,
-                "chunkIndex", chunkIndex,
-                "package", packageName,
-                "hash", hash);
+                QdrantPayloadFieldSchema.URL_FIELD, url,
+                QdrantPayloadFieldSchema.TITLE_FIELD, title,
+                QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, chunkIndex,
+                QdrantPayloadFieldSchema.PACKAGE_FIELD, packageName,
+                QdrantPayloadFieldSchema.HASH_FIELD, hash);
 
         // Create and configure the document
         var document = createDocumentWithOptionalId(text, hash);
@@ -62,7 +62,8 @@ public class DocumentFactory {
      * @return A properly configured Spring AI Document
      */
     public org.springframework.ai.document.Document createLocalDocument(String text, String url) {
-        Map<String, ?> metadata = Map.of("url", url, "title", "Local Doc");
+        Map<String, ?> metadata =
+                Map.of(QdrantPayloadFieldSchema.URL_FIELD, url, QdrantPayloadFieldSchema.TITLE_FIELD, "Local Doc");
 
         var document = new org.springframework.ai.document.Document(text);
         document.getMetadata().putAll(metadata);
@@ -107,8 +108,8 @@ public class DocumentFactory {
             int pageStart,
             int pageEnd) {
         var doc = createDocument(text, url, title, chunkIndex, packageName, hash);
-        doc.getMetadata().put("pageStart", pageStart);
-        doc.getMetadata().put("pageEnd", pageEnd);
+        doc.getMetadata().put(QdrantPayloadFieldSchema.PAGE_START_FIELD, pageStart);
+        doc.getMetadata().put(QdrantPayloadFieldSchema.PAGE_END_FIELD, pageEnd);
         return doc;
     }
 

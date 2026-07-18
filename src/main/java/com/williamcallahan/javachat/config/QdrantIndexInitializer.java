@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,22 +49,22 @@ public class QdrantIndexInitializer {
     private static final String VECTOR_DISTANCE_COSINE = "Cosine";
     private static final String SPARSE_MODIFIER_IDF = "idf";
     private static final List<PayloadIndexSpec> REQUIRED_PAYLOAD_INDEXES = List.of(
-            new PayloadIndexSpec("url", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("hash", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("chunkIndex", SCHEMA_TYPE_INTEGER),
-            new PayloadIndexSpec("docSet", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("docPath", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("sourceName", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("sourceKind", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("docVersion", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("docType", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("repoUrl", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("repoOwner", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("repoName", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("repoKey", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("repoBranch", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("commitHash", SCHEMA_TYPE_KEYWORD),
-            new PayloadIndexSpec("license", SCHEMA_TYPE_KEYWORD));
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.URL_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.HASH_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, SCHEMA_TYPE_INTEGER),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.DOC_SET_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.DOC_PATH_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.REPO_URL_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.REPO_OWNER_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.REPO_NAME_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.REPO_KEY_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.REPO_BRANCH_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.COMMIT_HASH_FIELD, SCHEMA_TYPE_KEYWORD),
+            new PayloadIndexSpec(QdrantPayloadFieldSchema.LICENSE_FIELD, SCHEMA_TYPE_KEYWORD));
 
     private final QdrantRestConnection qdrantRestConnection;
     private final AppProperties appProperties;

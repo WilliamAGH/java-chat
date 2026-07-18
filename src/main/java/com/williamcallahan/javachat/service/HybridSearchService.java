@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static io.qdrant.client.QueryFactory.nearest;
 import static io.qdrant.client.QueryFactory.rrf;
 
+import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
@@ -175,8 +176,9 @@ public class HybridSearchService {
             return new SearchOutcome(List.of(), List.of());
         }
 
+        String expandedCitationQuery = JavaApiMethodSelector.expandForSparseCitationQuery(query);
         LexicalSparseVectorEncoder.SparseVector sparseVector =
-                queryEncoding.sparseVectorEncoder().encode(query);
+                queryEncoding.sparseVectorEncoder().encode(expandedCitationQuery);
         if (sparseVector.indices().isEmpty()) {
             return new SearchOutcome(List.of(), List.of());
         }

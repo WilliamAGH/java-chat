@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Test;
 /** Verifies that manifest-governed mirrors retain their declared ingestion provenance. */
 class IngestionProvenanceDeriverTest {
 
+    private static final String FINGERPRINT_TEST_DOCUMENT_PATH = "gamma";
+    private static final String FINGERPRINT_TEST_SOURCE_NAME = "oracle";
+    private static final String FINGERPRINT_TEST_SOURCE_KIND = "official";
+
     @Test
     void usesCanonicalManifestMetadataForEveryDocumentationSource() {
         IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
@@ -35,11 +39,29 @@ class IngestionProvenanceDeriverTest {
     }
 
     @Test
+    void projectsTheCanonicalJavaApiDocumentTypeForJavaApiMirrors() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
+        DocsSourceRegistry.JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path javaApiDocument = documentationRoot
+                .resolve(javaApiDocumentationSource.relativeMirrorPath())
+                .resolve("index.html");
+
+        IngestionProvenance provenance = provenanceDeriver.derive(
+                documentationRoot, javaApiDocument, javaApiDocumentationSource.remoteBaseUrl());
+
+        assertEquals(DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE, provenance.docType());
+    }
+
+    @Test
     void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
+        String representedJavaRelease =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().javaRelease();
         IngestionProvenance embeddedSeparatorProvenance =
-                new IngestionProvenance("alpha\u001fbeta", "gamma", "oracle", "official", "21", "api-docs");
+                javaApiProvenanceForDocumentSet("alpha\u001fbeta", representedJavaRelease);
         IngestionProvenance shiftedSeparatorProvenance =
-                new IngestionProvenance("beta", "gamma", "oracle", "official", "21", "api-docs");
+                javaApiProvenanceForDocumentSet("beta", representedJavaRelease);
 
         String embeddedSeparatorFingerprintInput = embeddedSeparatorProvenance.fingerprintInput("fingerprint");
         String shiftedSeparatorFingerprintInput = shiftedSeparatorProvenance.fingerprintInput("fingerprint\u001falpha");
@@ -47,5 +69,16 @@ class IngestionProvenanceDeriverTest {
         assertNotEquals(embeddedSeparatorFingerprintInput, shiftedSeparatorFingerprintInput);
         assertFalse(embeddedSeparatorFingerprintInput.contains("\u001f"));
         assertEquals(embeddedSeparatorFingerprintInput, embeddedSeparatorProvenance.fingerprintInput("fingerprint"));
+    }
+
+    private static IngestionProvenance javaApiProvenanceForDocumentSet(
+            String documentationSet, String representedJavaRelease) {
+        return new IngestionProvenance(
+                documentationSet,
+                FINGERPRINT_TEST_DOCUMENT_PATH,
+                FINGERPRINT_TEST_SOURCE_NAME,
+                FINGERPRINT_TEST_SOURCE_KIND,
+                representedJavaRelease,
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
     }
 }

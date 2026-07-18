@@ -189,7 +189,7 @@ public class ChatService {
         List<ContextDocumentSegment> segments = new ArrayList<>();
         for (int docIndex = 0; docIndex < contextDocs.size(); docIndex++) {
             Document doc = contextDocs.get(docIndex);
-            Object rawUrlValue = doc.getMetadata().get("url");
+            Object rawUrlValue = doc.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
             String rawUrl = rawUrlValue != null ? rawUrlValue.toString() : "";
             String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
             String documentText = doc.getText();

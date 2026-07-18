@@ -90,6 +90,14 @@ public final class DocsSourceRegistry {
     private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
             projectOfficialDocumentationSourceIdentities(DOCUMENTATION_SOURCES, JAVA_API_DOCUMENTATION_SOURCES);
 
+    /**
+     * Canonical provenance type for Java API documentation projected from Java API source mirrors.
+     *
+     * <p>Ingestion and citation retrieval share this value so Java API pages retain one semantic
+     * classification across the document lifecycle.</p>
+     */
+    public static final String JAVA_API_DOCUMENT_TYPE = "api-docs";
+
     public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
     public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
     public static final String JETBRAINS_IDEA_2025_09_BASE =

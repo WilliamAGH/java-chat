@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.support;
 
 import com.williamcallahan.javachat.domain.RetrievedContent;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,8 +14,6 @@ import org.springframework.ai.document.Document;
  * infrastructure layer handles the Spring AI integration.</p>
  */
 public final class DocumentContentAdapter implements RetrievedContent {
-
-    private static final String METADATA_URL = "url";
 
     private final Document document;
 
@@ -57,6 +56,7 @@ public final class DocumentContentAdapter implements RetrievedContent {
     @Override
     public Optional<String> getSourceUrl() {
         Map<String, ?> metadata = document.getMetadata();
-        return Optional.ofNullable(metadata.get(METADATA_URL)).map(String::valueOf);
+        return Optional.ofNullable(metadata.get(QdrantPayloadFieldSchema.URL_FIELD))
+                .map(String::valueOf);
     }
 }

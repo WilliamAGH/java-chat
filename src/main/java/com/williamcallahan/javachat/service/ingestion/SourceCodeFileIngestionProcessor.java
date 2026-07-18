@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.domain.ingestion.SourceFileProcessingResult;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.ProgressTracker;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.MalformedInputException;
@@ -440,39 +441,39 @@ public class SourceCodeFileIngestionProcessor {
             String documentType) {
         for (Document indexedDocument : indexedDocuments) {
             var metadata = indexedDocument.getMetadata();
-            metadata.put("filePath", relativePath);
+            metadata.put(QdrantPayloadFieldSchema.FILE_PATH_FIELD, relativePath);
             if (!sourceLanguage.isEmpty()) {
-                metadata.put("language", sourceLanguage);
+                metadata.put(QdrantPayloadFieldSchema.LANGUAGE_FIELD, sourceLanguage);
             }
-            metadata.put("docType", documentType);
-            metadata.put("docSet", DOCUMENT_SET_PREFIX + repositoryMetadata.repoKey());
-            metadata.put("sourceKind", "github");
-            metadata.put("sourceName", repositoryMetadata.repoOwner());
-            metadata.put("repoUrl", repositoryMetadata.repoUrl());
-            metadata.put("repoOwner", repositoryMetadata.repoOwner());
-            metadata.put("repoName", repositoryMetadata.repoName());
-            metadata.put("repoKey", repositoryMetadata.repoKey());
+            metadata.put(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, documentType);
+            metadata.put(QdrantPayloadFieldSchema.DOC_SET_FIELD, DOCUMENT_SET_PREFIX + repositoryMetadata.repoKey());
+            metadata.put(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "github");
+            metadata.put(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, repositoryMetadata.repoOwner());
+            metadata.put(QdrantPayloadFieldSchema.REPO_URL_FIELD, repositoryMetadata.repoUrl());
+            metadata.put(QdrantPayloadFieldSchema.REPO_OWNER_FIELD, repositoryMetadata.repoOwner());
+            metadata.put(QdrantPayloadFieldSchema.REPO_NAME_FIELD, repositoryMetadata.repoName());
+            metadata.put(QdrantPayloadFieldSchema.REPO_KEY_FIELD, repositoryMetadata.repoKey());
             if (!repositoryMetadata.repoBranch().isBlank()) {
-                metadata.put("repoBranch", repositoryMetadata.repoBranch());
+                metadata.put(QdrantPayloadFieldSchema.REPO_BRANCH_FIELD, repositoryMetadata.repoBranch());
             }
             if (!repositoryMetadata.commitHash().isBlank()) {
-                metadata.put("commitHash", repositoryMetadata.commitHash());
+                metadata.put(QdrantPayloadFieldSchema.COMMIT_HASH_FIELD, repositoryMetadata.commitHash());
             }
             if (!repositoryMetadata.license().isBlank()) {
-                metadata.put("license", repositoryMetadata.license());
+                metadata.put(QdrantPayloadFieldSchema.LICENSE_FIELD, repositoryMetadata.license());
             }
             if (!repositoryMetadata.repoDescription().isBlank()) {
-                metadata.put("repoDescription", repositoryMetadata.repoDescription());
+                metadata.put(QdrantPayloadFieldSchema.REPO_DESCRIPTION_FIELD, repositoryMetadata.repoDescription());
             }
         }
     }
 
     private void markDocumentsIngested(List<Document> indexedDocuments) {
         for (Document indexedDocument : indexedDocuments) {
-            Object hashMetadata = indexedDocument.getMetadata().get("hash");
+            Object hashMetadata = indexedDocument.getMetadata().get(QdrantPayloadFieldSchema.HASH_FIELD);
             if (hashMetadata == null) {
-                String sourceUrl =
-                        Objects.toString(indexedDocument.getMetadata().get("url"), "(unknown)");
+                String sourceUrl = Objects.toString(
+                        indexedDocument.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD), "(unknown)");
                 throw new IllegalStateException(
                         "Document missing required 'hash' metadata after chunking pipeline; url=" + sourceUrl);
             }

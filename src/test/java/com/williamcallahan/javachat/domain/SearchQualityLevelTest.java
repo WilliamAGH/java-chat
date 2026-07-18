@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +28,8 @@ class SearchQualityLevelTest {
 
     @Test
     void determineReturnsKeywordSearchWhenUrlContainsKeyword() {
-        Document keywordDoc = new Document("some content", Map.of("url", "local-search://query"));
+        Document keywordDoc =
+                new Document("some content", Map.of(QdrantPayloadFieldSchema.URL_FIELD, "local-search://query"));
         SearchQualityLevel level =
                 SearchQualityLevel.determine(DocumentContentAdapter.fromDocuments(List.of(keywordDoc)));
         assertThat(level).isEqualTo(SearchQualityLevel.KEYWORD_SEARCH);
@@ -36,8 +38,10 @@ class SearchQualityLevelTest {
     @Test
     void determineReturnsHighQualityWhenAllDocsHaveSubstantialContent() {
         String longContent = "a".repeat(150);
-        Document doc1 = new Document(longContent, Map.of("url", "https://example.com/doc1"));
-        Document doc2 = new Document(longContent, Map.of("url", "https://example.com/doc2"));
+        Document doc1 =
+                new Document(longContent, Map.of(QdrantPayloadFieldSchema.URL_FIELD, "https://example.com/doc1"));
+        Document doc2 =
+                new Document(longContent, Map.of(QdrantPayloadFieldSchema.URL_FIELD, "https://example.com/doc2"));
         SearchQualityLevel level =
                 SearchQualityLevel.determine(DocumentContentAdapter.fromDocuments(List.of(doc1, doc2)));
         assertThat(level).isEqualTo(SearchQualityLevel.HIGH_QUALITY);
@@ -47,8 +51,10 @@ class SearchQualityLevelTest {
     void determineReturnsMixedQualityWhenSomeDocsHaveShortContent() {
         String longContent = "a".repeat(150);
         String shortContent = "short";
-        Document highQualityDoc = new Document(longContent, Map.of("url", "https://example.com/doc1"));
-        Document lowQualityDoc = new Document(shortContent, Map.of("url", "https://example.com/doc2"));
+        Document highQualityDoc =
+                new Document(longContent, Map.of(QdrantPayloadFieldSchema.URL_FIELD, "https://example.com/doc1"));
+        Document lowQualityDoc =
+                new Document(shortContent, Map.of(QdrantPayloadFieldSchema.URL_FIELD, "https://example.com/doc2"));
         SearchQualityLevel level = SearchQualityLevel.determine(
                 DocumentContentAdapter.fromDocuments(List.of(highQualityDoc, lowQualityDoc)));
         assertThat(level).isEqualTo(SearchQualityLevel.MIXED_QUALITY);

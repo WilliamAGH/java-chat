@@ -152,12 +152,12 @@ public class DocsIngestionService {
 
     private void markDocumentsIngested(List<org.springframework.ai.document.Document> documents) {
         for (org.springframework.ai.document.Document doc : documents) {
-            Object hashMetadata = doc.getMetadata().get("hash");
+            Object hashMetadata = doc.getMetadata().get(QdrantPayloadFieldSchema.HASH_FIELD);
             if (hashMetadata == null) {
                 continue;
             }
-            String title = DocumentFactory.metadataText(doc, "title");
-            String packageName = DocumentFactory.metadataText(doc, "package");
+            String title = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.TITLE_FIELD);
+            String packageName = DocumentFactory.metadataText(doc, QdrantPayloadFieldSchema.PACKAGE_FIELD);
             try {
                 localStore.markHashIngested(hashMetadata.toString(), title, packageName);
             } catch (IOException markHashException) {

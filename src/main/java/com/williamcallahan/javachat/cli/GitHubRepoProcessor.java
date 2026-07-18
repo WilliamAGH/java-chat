@@ -8,6 +8,7 @@ import com.williamcallahan.javachat.domain.ingestion.SourceFileLanguage;
 import com.williamcallahan.javachat.domain.ingestion.SourceFileProcessingResult;
 import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.ProgressTracker;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.service.ingestion.GitHubRepositoryIdentityResolver;
 import com.williamcallahan.javachat.service.ingestion.IngestedFilePruneService;
 import com.williamcallahan.javachat.service.ingestion.LocalDocsFileOutcome;
@@ -251,17 +252,22 @@ public class GitHubRepoProcessor {
     private void refreshCollectionMetadata(String collectionName, GitHubRepoMetadata repoMetadata) {
         Map<String, Value> metadataUpdates = new LinkedHashMap<>();
         if (!repoMetadata.commitHash().isBlank()) {
-            metadataUpdates.put("commitHash", ValueFactory.value(Objects.requireNonNull(repoMetadata.commitHash())));
+            metadataUpdates.put(
+                    QdrantPayloadFieldSchema.COMMIT_HASH_FIELD,
+                    ValueFactory.value(Objects.requireNonNull(repoMetadata.commitHash())));
         }
         if (!repoMetadata.repoBranch().isBlank()) {
-            metadataUpdates.put("repoBranch", ValueFactory.value(Objects.requireNonNull(repoMetadata.repoBranch())));
+            metadataUpdates.put(
+                    QdrantPayloadFieldSchema.REPO_BRANCH_FIELD,
+                    ValueFactory.value(Objects.requireNonNull(repoMetadata.repoBranch())));
         }
         if (metadataUpdates.isEmpty()) {
             return;
         }
 
         Filter repoFilter = Filter.newBuilder()
-                .addMust(matchKeyword("repoName", Objects.requireNonNull(repoMetadata.repoName())))
+                .addMust(matchKeyword(
+                        QdrantPayloadFieldSchema.REPO_NAME_FIELD, Objects.requireNonNull(repoMetadata.repoName())))
                 .build();
 
         hybridVectorService.updatePayloadByFilter(collectionName, metadataUpdates, repoFilter);
