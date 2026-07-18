@@ -71,9 +71,9 @@ class RetrievalServiceCitationTest {
         Document encodedAnchorDocument = Document.builder()
                 .id("encoded-anchor-document")
                 .text("Array method reference")
-                .metadata("url", citationPageUrl + "#" + encodedCitationAnchor)
-                .metadata("title", "Array method")
-                .metadata("docType", "tutorial")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, citationPageUrl + "#" + encodedCitationAnchor)
+                .metadata(QdrantPayloadFieldSchema.TITLE_FIELD, "Array method")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
                 .build();
 
         Citation projectedCitation = citationService()
@@ -94,9 +94,9 @@ class RetrievalServiceCitationTest {
         Document recordDocument = Document.builder()
                 .id("record-equals-invocation")
                 .text("return equals(this.SomeField, r.OTHER_FIELD);")
-                .metadata("url", recordJavadocUrl)
-                .metadata("package", "java.lang")
-                .metadata("docType", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, recordJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .build();
 
         RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(recordDocument));
@@ -113,9 +113,9 @@ class RetrievalServiceCitationTest {
         Document tutorialDocument = Document.builder()
                 .id("tutorial-substring-chunk")
                 .text("substring(int,int)")
-                .metadata("url", stringJavadocUrl)
-                .metadata("package", "java.lang")
-                .metadata("docType", "tutorial")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, stringJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
                 .build();
 
         RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(tutorialDocument));
@@ -134,9 +134,9 @@ class RetrievalServiceCitationTest {
         Document tutorialDocument = Document.builder()
                 .id("tutorial-map-entry-chunk")
                 .text("Map.Entry")
-                .metadata("url", mapJavadocUrl)
-                .metadata("package", "java.util")
-                .metadata("docType", "tutorial")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, mapJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
                 .build();
 
         RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(tutorialDocument));
@@ -169,12 +169,12 @@ class RetrievalServiceCitationTest {
                         Document.builder()
                                 .id("first-pdf-page-chunk")
                                 .text("First PDF page")
-                                .metadata("url", pdfCitationUrl + "#page=1")
+                                .metadata(QdrantPayloadFieldSchema.URL_FIELD, pdfCitationUrl + "#page=1")
                                 .build(),
                         Document.builder()
                                 .id("second-pdf-page-chunk")
                                 .text("Second PDF page")
-                                .metadata("url", pdfCitationUrl + "#page=2")
+                                .metadata(QdrantPayloadFieldSchema.URL_FIELD, pdfCitationUrl + "#page=2")
                                 .build()));
 
         assertEquals(
@@ -193,13 +193,13 @@ class RetrievalServiceCitationTest {
                 .id("malformed-doc")
                 .text("Malformed metadata")
                 .build();
-        malformedDocument.getMetadata().put("url", new BrokenUrlValue());
-        malformedDocument.getMetadata().put("title", "Broken citation");
+        malformedDocument.getMetadata().put(QdrantPayloadFieldSchema.URL_FIELD, new BrokenUrlValue());
+        malformedDocument.getMetadata().put(QdrantPayloadFieldSchema.TITLE_FIELD, "Broken citation");
 
         Document validDocument =
                 Document.builder().id("valid-doc").text("Valid snippet").build();
-        validDocument.getMetadata().put("url", javaLangStringJavadocUrl());
-        validDocument.getMetadata().put("title", "String");
+        validDocument.getMetadata().put(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl());
+        validDocument.getMetadata().put(QdrantPayloadFieldSchema.TITLE_FIELD, "String");
 
         RetrievalService.CitationOutcome citationOutcome;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RETRIEVAL_SERVICE_LOGGER)) {
@@ -247,9 +247,9 @@ class RetrievalServiceCitationTest {
         return Document.builder()
                 .id(documentId)
                 .text(sourceText)
-                .metadata("url", javaLangStringJavadocUrl())
-                .metadata("package", "java.lang")
-                .metadata("docType", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl())
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .build();
     }
 

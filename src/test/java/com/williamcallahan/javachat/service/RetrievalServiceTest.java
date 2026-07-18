@@ -216,8 +216,8 @@ class RetrievalServiceTest {
         return Document.builder()
                 .id(documentId)
                 .text(sourceText)
-                .metadata("hash", contentHash)
-                .metadata("url", sourceUrl)
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, sourceUrl)
                 .build();
     }
 
@@ -250,8 +250,10 @@ class RetrievalServiceTest {
 
         Document candidateDocument =
                 Document.builder().id("candidate-1").text("Stream tutorial").build();
-        candidateDocument.getMetadata().put("url", "https://docs.example.com/java/streams");
-        candidateDocument.getMetadata().put("hash", "hash-1");
+        candidateDocument
+                .getMetadata()
+                .put(QdrantPayloadFieldSchema.URL_FIELD, "https://docs.example.com/java/streams");
+        candidateDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "hash-1");
 
         HybridSearchService.HybridSearchNotice searchNotice =
                 new HybridSearchService.HybridSearchNotice("Partial retrieval failure", "Timeout: java-docs");
@@ -282,30 +284,30 @@ class RetrievalServiceTest {
         Document urlOnlyDocument = Document.builder()
                 .id("url-only")
                 .text("URL-only candidate")
-                .metadata("url", "https://example.org/java/reference")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://example.org/java/reference")
                 .build();
         Document canonicalUrlDuplicateWithoutHash = Document.builder()
                 .id("url-only-duplicate")
                 .text("URL-only duplicate candidate")
-                .metadata("url", "https://example.org//java/reference")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://example.org//java/reference")
                 .build();
         Document firstJavadocChunk = Document.builder()
                 .id("first-javadoc-chunk")
                 .text("First Javadoc chunk")
-                .metadata("url", stringJavadocUrl)
-                .metadata("hash", "first-content-hash")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, stringJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "first-content-hash")
                 .build();
         Document secondJavadocChunkWithDistinctHash = Document.builder()
                 .id("second-javadoc-chunk")
                 .text("Second Javadoc chunk")
-                .metadata("url", stringJavadocUrl + "#assert(...)")
-                .metadata("hash", "second-content-hash")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, stringJavadocUrl + "#assert(...)")
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "second-content-hash")
                 .build();
         Document sameContentHashWithDifferentUrl = Document.builder()
                 .id("same-content-hash")
                 .text("Duplicate content under another URL")
-                .metadata("url", javaApiBaseUrl + "java.base/java/lang/Object.html")
-                .metadata("hash", "first-content-hash")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiBaseUrl + "java.base/java/lang/Object.html")
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "first-content-hash")
                 .build();
         List<Document> retrievalCandidates = List.of(
                 urlOnlyDocument,
@@ -348,12 +350,12 @@ class RetrievalServiceTest {
         Document firstUnmappedLocalDocument = Document.builder()
                 .id("first-unmapped-local")
                 .text("First local document")
-                .metadata("url", firstUnmappedLocalUrl)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, firstUnmappedLocalUrl)
                 .build();
         Document secondUnmappedLocalDocument = Document.builder()
                 .id("second-unmapped-local")
                 .text("Second local document")
-                .metadata("url", secondUnmappedLocalUrl)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, secondUnmappedLocalUrl)
                 .build();
         List<Document> retrievalCandidates = List.of(firstUnmappedLocalDocument, secondUnmappedLocalDocument);
         when(hybridSearchService.searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class)))

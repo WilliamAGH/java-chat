@@ -41,12 +41,12 @@ class QdrantRetrievalConstraintBuilderTest {
         assertTrue(optionalFilter.isPresent());
         Filter qdrantFilter = optionalFilter.get();
         assertFalse(qdrantFilter.getMustList().isEmpty());
-        assertTrue(qdrantFilter.toString().contains("docVersion"));
-        assertTrue(qdrantFilter.toString().contains("sourceKind"));
-        assertTrue(qdrantFilter.toString().contains("docType"));
+        assertTrue(qdrantFilter.toString().contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
+        assertTrue(qdrantFilter.toString().contains(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD));
+        assertTrue(qdrantFilter.toString().contains(QdrantPayloadFieldSchema.DOC_TYPE_FIELD));
         Condition docSetCondition = qdrantFilter.getMustList().stream()
-                .filter(mustCondition ->
-                        "docSet".equals(mustCondition.getField().getKey()))
+                .filter(mustCondition -> QdrantPayloadFieldSchema.DOC_SET_FIELD.equals(
+                        mustCondition.getField().getKey()))
                 .findFirst()
                 .orElseThrow();
         assertEquals(

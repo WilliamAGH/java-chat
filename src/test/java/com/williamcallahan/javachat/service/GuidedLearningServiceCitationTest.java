@@ -251,11 +251,13 @@ class GuidedLearningServiceCitationTest {
         return Document.builder()
                 .id("official-string-source")
                 .text(OFFICIAL_SOURCE_TEXT)
-                .metadata("url", officialSourceUrl(guidedLesson))
-                .metadata("title", "Strings")
-                .metadata("sourceKind", "official")
-                .metadata("docSet", guidedLesson.getDocSet().getFirst())
-                .metadata("docType", "tutorial")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, officialSourceUrl(guidedLesson))
+                .metadata(QdrantPayloadFieldSchema.TITLE_FIELD, "Strings")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "official")
+                .metadata(
+                        QdrantPayloadFieldSchema.DOC_SET_FIELD,
+                        guidedLesson.getDocSet().getFirst())
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
                 .build();
     }
 

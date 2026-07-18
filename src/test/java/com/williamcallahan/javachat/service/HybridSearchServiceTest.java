@@ -113,7 +113,7 @@ class HybridSearchServiceTest {
         QueryPoints capturedQuery = capturedQueries.getFirst();
         assertEquals(77, capturedQuery.getQuery().getRrf().getK());
         assertTrue(capturedQuery.hasFilter());
-        assertTrue(capturedQuery.getFilter().toString().contains("docVersion"));
+        assertTrue(capturedQuery.getFilter().toString().contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
         assertFalse(capturedQuery.getPrefetchList().isEmpty());
         for (PrefetchQuery prefetchQuery : capturedQuery.getPrefetchList()) {
             assertTrue(prefetchQuery.hasFilter());
@@ -166,9 +166,9 @@ class HybridSearchServiceTest {
                 List.of(2, 7), citationQuery.getQuery().getNearest().getSparse().getIndicesList());
         assertTrue(citationQuery.hasFilter());
         String officialFilter = citationQuery.getFilter().toString();
-        assertTrue(officialFilter.contains("sourceKind"));
+        assertTrue(officialFilter.contains(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD));
         assertTrue(officialFilter.contains("official"));
-        assertTrue(officialFilter.contains("docSet"));
+        assertTrue(officialFilter.contains(QdrantPayloadFieldSchema.DOC_SET_FIELD));
         assertTrue(officialFilter.contains(REPRESENTED_JAVA_API_SOURCE.relativeMirrorPath()));
         assertEquals(1, citationSearchOutcome.documents().size());
         assertEquals(
@@ -200,7 +200,7 @@ class HybridSearchServiceTest {
         assertEquals(1, capturedQueries.size());
         assertTrue(capturedQueries.getFirst().hasFilter());
         String versionFilter = capturedQueries.getFirst().getFilter().toString();
-        assertTrue(versionFilter.contains("docVersion"));
+        assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
         assertTrue(versionFilter.contains(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
         verify(sparseEncoder).encode(VERSIONED_SELECTOR_CITATION_QUERY + " List");
         verifyNoInteractions(embeddingClient);
@@ -388,9 +388,13 @@ class HybridSearchServiceTest {
         return ScoredPoint.newBuilder()
                 .setId(io.qdrant.client.PointIdFactory.id(SCORED_POINT_UUID))
                 .setScore(0.9f)
-                .putPayload("doc_content", io.qdrant.client.ValueFactory.value("Java stream examples"))
-                .putPayload("url", io.qdrant.client.ValueFactory.value("https://docs.example.com/java/streams"))
-                .putPayload("title", io.qdrant.client.ValueFactory.value("Streams"))
+                .putPayload(
+                        QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
+                        io.qdrant.client.ValueFactory.value("Java stream examples"))
+                .putPayload(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        io.qdrant.client.ValueFactory.value("https://docs.example.com/java/streams"))
+                .putPayload(QdrantPayloadFieldSchema.TITLE_FIELD, io.qdrant.client.ValueFactory.value("Streams"))
                 .build();
     }
 }

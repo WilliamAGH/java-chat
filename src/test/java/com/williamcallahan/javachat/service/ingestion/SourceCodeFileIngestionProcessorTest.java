@@ -24,6 +24,7 @@ import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionRouter;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -93,7 +94,7 @@ class SourceCodeFileIngestionProcessorTest {
         when(progressTracker.formatPercent()).thenReturn("100%");
 
         Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
-        indexedDocument.getMetadata().put("hash", "newhash");
+        indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "newhash");
 
         ChunkProcessingService.ChunkProcessingOutcome chunkProcessingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(List.of(indexedDocument), List.of("newhash"), 1, 0);
@@ -174,7 +175,7 @@ class SourceCodeFileIngestionProcessorTest {
         when(progressTracker.formatPercent()).thenReturn("100%");
 
         Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
-        indexedDocument.getMetadata().put("hash", "existing-hash");
+        indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, "existing-hash");
         ChunkProcessingService.ChunkProcessingOutcome chunkProcessingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("existing-hash"), 1, 0);
