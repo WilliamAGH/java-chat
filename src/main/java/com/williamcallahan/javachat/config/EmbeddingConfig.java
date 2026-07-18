@@ -84,14 +84,14 @@ public class EmbeddingConfig {
         boolean hasRemoteServerUrl = !remoteServerUrl.isBlank();
         boolean hasRemoteApiKey = !remoteApiKey.isBlank();
 
-        if (hasRemoteServerUrl != hasRemoteApiKey) {
+        if (hasRemoteApiKey && !hasRemoteServerUrl) {
             throw new EmbeddingServiceUnavailableException(
                     "Invalid remote embedding configuration: " + REMOTE_EMBEDDING_SERVER_URL_PROPERTY + " and "
                             + REMOTE_EMBEDDING_API_KEY_ENVIRONMENT_VARIABLE
                             + " must be configured together.");
         }
 
-        if (hasRemoteServerUrl) {
+        if (hasRemoteApiKey) {
             rejectGitHubModelsEmbeddingEndpoint(remoteServerUrl, REMOTE_EMBEDDING_SERVER_URL_PROPERTY);
             log.info(
                     "[EMBEDDING] Using remote OpenAI-compatible provider (urlId={})",

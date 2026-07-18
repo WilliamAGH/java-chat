@@ -16,6 +16,13 @@ normalize_embedding_probe_endpoint() {
     esac
 }
 
+trim_embedding_credential() {
+    local embedding_credential="$1"
+    embedding_credential="${embedding_credential#"${embedding_credential%%[![:space:]]*}"}"
+    embedding_credential="${embedding_credential%"${embedding_credential##*[![:space:]]}"}"
+    printf '%s' "$embedding_credential"
+}
+
 # Reads a non-secret embedding setting from the application configuration that owns it.
 read_embedding_application_property() {
     local property_name="$1"
@@ -55,6 +62,8 @@ resolve_embedding_probe_configuration() {
     local remote_embedding_model
     local open_ai_embedding_base_url
     local open_ai_embedding_model
+    local remote_embedding_api_key
+    local open_ai_api_key
 
     if ! remote_embedding_server_url="$(read_embedding_application_property "app.remote-embedding.server-url")" \
         || ! remote_embedding_model="$(read_embedding_application_property "app.remote-embedding.model")" \
@@ -63,18 +72,21 @@ resolve_embedding_probe_configuration() {
         return 1
     fi
 
-    if [ -n "$remote_embedding_server_url" ] || [ -n "${REMOTE_EMBEDDING_API_KEY:-}" ]; then
+    remote_embedding_api_key="$(trim_embedding_credential "${REMOTE_EMBEDDING_API_KEY:-}")"
+    open_ai_api_key="$(trim_embedding_credential "${OPENAI_API_KEY:-}")"
+
+    if [ -n "$remote_embedding_api_key" ]; then
         resolved_provider_label="remote_openai_compatible"
         if [ -n "$remote_embedding_server_url" ]; then
             resolved_endpoint="$(normalize_embedding_probe_endpoint "$remote_embedding_server_url")"
         fi
         resolved_model_name="$remote_embedding_model"
-        resolved_api_key="${REMOTE_EMBEDDING_API_KEY:-}"
-    elif [ -n "${OPENAI_API_KEY:-}" ]; then
+        resolved_api_key="$remote_embedding_api_key"
+    elif [ -n "$open_ai_api_key" ]; then
         resolved_provider_label="openai_embeddings"
         resolved_endpoint="$(normalize_embedding_probe_endpoint "$open_ai_embedding_base_url")"
         resolved_model_name="$open_ai_embedding_model"
-        resolved_api_key="${OPENAI_API_KEY:-}"
+        resolved_api_key="$open_ai_api_key"
     fi
 
     printf -v "$provider_label_ref" "%s" "$resolved_provider_label"

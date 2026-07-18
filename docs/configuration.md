@@ -65,7 +65,7 @@ and ingestion/retrieval stops so invalid vectors are never cached.
 Selection order:
 
 1) Local embedding server when `APP_LOCAL_EMBEDDING_ENABLED=true`
-2) Remote OpenAI-compatible provider when `app.remote-embedding.server-url` and `REMOTE_EMBEDDING_API_KEY` are set
+2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_API_KEY` is set; its endpoint and model come from `application.properties`
 3) OpenAI embeddings when `OPENAI_API_KEY` and `app.embeddings.open-ai-model` are set
 
 `GITHUB_TOKEN` / GitHub Models is never used for embeddings. GitHub Models does not expose an embeddings API in this project.
@@ -86,6 +86,7 @@ Common variables:
 - `REMOTE_EMBEDDING_API_KEY` (optional credential loaded from the environment or `.env`)
 - `app.remote-embedding.server-url`, `app.remote-embedding.model`, and `app.remote-embedding.dimensions` in `application.properties`
   - `app.remote-embedding.server-url` accepts either `.../v1` or `.../v1/embeddings`; both normalize correctly.
+  - The remote credential activates this provider. A configured non-secret endpoint without that credential does not override an explicitly configured OpenAI embedding provider.
 - `app.embeddings.open-ai-base-url` and `app.embeddings.open-ai-model` in `application.properties`
   - `app.embeddings.open-ai-model` must be set before selecting OpenAI embeddings with `OPENAI_API_KEY`.
 
