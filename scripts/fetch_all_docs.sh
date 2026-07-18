@@ -147,6 +147,148 @@ quarantine_versioned_reference_subdirs() {
     shopt -u nullglob
 }
 
+# Converts one canonical Java API seed URL into the exact relative filesystem path
+# wget writes when it receives the manifest-owned --cut-dirs setting.
+java_api_seed_url_to_mirror_path() {
+    local seed_url="$1"
+    local cut_directories="$2"
+
+    if [[ "$seed_url" != https://* || "$seed_url" == *\?* || "$seed_url" == *\#* ]]; then
+        printf 'Java API seed URL must be an absolute query-free HTTPS URL: %s\n' "$seed_url" >&2
+        return 1
+    fi
+
+    local authority_and_path="${seed_url#https://}"
+    local remote_path="${authority_and_path#*/}"
+    if [ "$remote_path" = "$authority_and_path" ] || [ -z "$remote_path" ]; then
+        printf 'Java API seed URL must contain a remote path: %s\n' "$seed_url" >&2
+        return 1
+    fi
+
+    local IFS='/'
+    local -a remote_path_segments
+    read -r -a remote_path_segments <<< "$remote_path"
+    if [ "${#remote_path_segments[@]}" -le "$cut_directories" ]; then
+        printf 'Java API seed URL has fewer path segments than --cut-dirs: %s\n' "$seed_url" >&2
+        return 1
+    fi
+
+    local mirror_path=""
+    local path_segment_index
+    for ((path_segment_index = cut_directories; path_segment_index < ${#remote_path_segments[@]}; path_segment_index++)); do
+        local remote_path_segment="${remote_path_segments[$path_segment_index]}"
+        if [ -z "$remote_path_segment" ] \
+            || [ "$remote_path_segment" = "." ] \
+            || [ "$remote_path_segment" = ".." ]; then
+            printf 'Java API seed URL has an unsafe path segment: %s\n' "$seed_url" >&2
+            return 1
+        fi
+        if [ -n "$mirror_path" ]; then
+            mirror_path+="/"
+        fi
+        mirror_path+="$remote_path_segment"
+    done
+
+    printf '%s\n' "$mirror_path"
+}
+
+# Writes the manifest-governed local paths represented by the current Java API seed.
+write_java_api_seed_mirror_paths() {
+    local remote_base_url="$1"
+    local seed_file="$2"
+    local cut_directories="$3"
+    local mirror_paths_file="$4"
+
+    : > "$mirror_paths_file"
+    local seed_url
+    while IFS= read -r seed_url || [ -n "$seed_url" ]; do
+        if [ -z "$seed_url" ] || [[ "$seed_url" != "$remote_base_url"* ]]; then
+            log "${RED}✗ Java API seed contains a URL outside its manifest-owned remote base${NC}"
+            return 1
+        fi
+
+        local mirror_path
+        if ! mirror_path="$(java_api_seed_url_to_mirror_path "$seed_url" "$cut_directories")"; then
+            return 1
+        fi
+        printf '%s\n' "$mirror_path" >> "$mirror_paths_file"
+    done < "$seed_file"
+
+    if [ ! -s "$mirror_paths_file" ]; then
+        log "${RED}✗ Java API seed produced no mirror paths${NC}"
+        return 1
+    fi
+}
+
+# Quarantines Java API HTML files that are absent from the current canonical seed.
+# The quarantine is a sibling of data/docs because local ingestion recursively scans data/docs.
+reconcile_java_api_seed_mirror() {
+    local remote_base_url="$1"
+    local target_dir="$2"
+    local documentation_source_name="$3"
+    local cut_directories="$4"
+    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+
+    if [ ! -d "$target_dir" ] || [ ! -s "$seed_file" ]; then
+        log "${RED}✗ Java API mirror reconciliation requires a nonempty current seed for $documentation_source_name${NC}"
+        return 1
+    fi
+
+    local mirror_paths_file
+    mirror_paths_file="$(mktemp "$target_dir/.java-api-seed-paths.XXXXXX")"
+    if ! write_java_api_seed_mirror_paths "$remote_base_url" "$seed_file" "$cut_directories" "$mirror_paths_file"; then
+        rm -f "$mirror_paths_file"
+        return 1
+    fi
+
+    local quarantine_dir=""
+    local quarantined_html_count=0
+    local stale_html_file
+    while IFS= read -r -d '' stale_html_file; do
+        local stale_relative_path="${stale_html_file#"$target_dir"/}"
+        if grep -Fqx -- "$stale_relative_path" "$mirror_paths_file"; then
+            continue
+        fi
+
+        if [ -z "$quarantine_dir" ]; then
+            local quarantine_root
+            quarantine_root="$(dirname "$DOCS_ROOT")/.quarantine"
+            local timestamp
+            timestamp="$(date -u +%Y%m%d_%H%M%S)"
+            local mirror_basename
+            mirror_basename="$(basename "$target_dir")"
+            mkdir -p "$quarantine_root"
+            quarantine_dir="$(mktemp -d "$quarantine_root/${mirror_basename}.unseeded-java-api.${timestamp}.XXXXXX")"
+        fi
+
+        local quarantine_file="$quarantine_dir/$stale_relative_path"
+        mkdir -p "$(dirname "$quarantine_file")"
+        if ! mv "$stale_html_file" "$quarantine_file"; then
+            rm -f "$mirror_paths_file"
+            return 1
+        fi
+        quarantined_html_count=$((quarantined_html_count + 1))
+    done < <(find "$target_dir" -type f \( -name "*.html" -o -name "*.htm" \) -print0)
+
+    rm -f "$mirror_paths_file"
+    if [ "$quarantined_html_count" -gt 0 ]; then
+        log "${YELLOW}⚠ Quarantined $quarantined_html_count unseeded Java API HTML file(s) for $documentation_source_name -> $quarantine_dir${NC}"
+    fi
+}
+
+# Generates the explicit Java API URL seed from the manifest-owned remote base.
+generate_java_api_javadoc_seed() {
+    local remote_base_url="$1"
+    local target_dir="$2"
+    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+
+    log "${BLUE}ℹ Java API Javadoc source; generating explicit URL seed list...${NC}"
+    python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$remote_base_url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
+    local seed_url_count
+    seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
+    log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
+}
+
 # Validates a wget fetch result: checks exit code, counts HTML files, and
 # enforces the minimum-files threshold. Returns 0 on success, 2 for a retained
 # partial mirror, and 1 for any other failure.
@@ -191,32 +333,25 @@ validate_fetch_result() {
     return 0
 }
 
-# Fetches a manifest-governed Java API using an explicit seed list derived from the Javadoc
-# search indices.  This avoids incomplete recursive crawls that miss pages.
+# Fetches a manifest-governed Java API using the current explicit Javadoc seed.
+# Reconciliation has already removed unseeded HTML files before this function runs.
 #
 # Arguments:
-#   $1 - Java API Javadoc base URL
-#   $2 - target directory
-#   $3 - human-readable name
-#   $4 - --cut-dirs value
-#   $5 - minimum required HTML files
-#   $6 - reject regex (optional)
-#   $7 - whether a validated partial mirror is accepted
+#   $1 - target directory
+#   $2 - human-readable name
+#   $3 - --cut-dirs value
+#   $4 - minimum required HTML files
+#   $5 - reject regex (optional)
+#   $6 - whether a validated partial mirror is accepted
 fetch_java_api_javadoc_seed() {
-    local url="$1"
-    local target_dir="$2"
-    local name="$3"
-    local cut_dirs="$4"
-    local min_files="$5"
-    local reject_regex="${6:-}"
-    local partial_mirror_allowed="$7"
+    local target_dir="$1"
+    local name="$2"
+    local cut_dirs="$3"
+    local min_files="$4"
+    local reject_regex="${5:-}"
+    local partial_mirror_allowed="$6"
 
     local seed_file="$target_dir/.oracle-javadoc-seed.txt"
-    log "${BLUE}ℹ Java API Javadoc source; generating explicit URL seed list...${NC}"
-    python3 "$SCRIPT_DIR/oracle_javadoc_seed.py" --base-url "$url" --output "$seed_file" 2>&1 | tee -a "$LOG_FILE"
-    local seed_url_count
-    seed_url_count="$(wc -l "$seed_file" | awk '{print $1}')"
-    log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
 
     local wget_seed_args=(
         --timestamping
@@ -353,11 +488,14 @@ fetch_docs() {
 
     # ── Dispatch to strategy ──
     if [ -n "$java_release" ]; then
+        generate_java_api_javadoc_seed "$url" "$target_dir"
+        reconcile_java_api_seed_mirror "$url" "$target_dir" "$name" "$cut_dirs"
+        existing_count="$(count_html_files "$target_dir")"
         if [ "$FORCE_REFRESH" != "true" ] && [ "$min_files" -gt 0 ] && [ "$existing_count" -ge "$min_files" ]; then
             log "${GREEN}✓ $name already fetched: $existing_count HTML files (minimum: $min_files)${NC}"
             return 0
         fi
-        fetch_java_api_javadoc_seed "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+        fetch_java_api_javadoc_seed "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
     else
         fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
     fi

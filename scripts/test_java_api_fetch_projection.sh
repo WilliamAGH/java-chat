@@ -8,8 +8,10 @@ TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TEST_SCRIPT_DIRECTORY/.." && pwd)"
 FETCH_SCRIPT="$PROJECT_ROOT/scripts/fetch_all_docs.sh"
 JAVA_API_SOURCES_MANIFEST="$PROJECT_ROOT/src/main/resources/java-api-documentation-sources.manifest"
-TEST_DOCS_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_DOCS_ROOT"' EXIT
+TEST_WORK_ROOT="$(mktemp -d)"
+TEST_DOCS_ROOT="$TEST_WORK_ROOT/docs"
+mkdir -p "$TEST_DOCS_ROOT"
+trap 'rm -rf "$TEST_WORK_ROOT"' EXIT
 
 fail_java_api_fetch_projection_test() {
     local failure_message="$1"
@@ -171,7 +173,13 @@ fi
 
 java_api_dispatch_capture_file="$TEST_DOCS_ROOT/java-api-dispatch"
 fetch_java_api_javadoc_seed() {
-    printf '%s|%s|%s\n' "$1" "$6" "$7" > "$java_api_dispatch_capture_file"
+    printf '%s|%s|%s\n' "$1" "$5" "$6" > "$java_api_dispatch_capture_file"
+}
+generate_java_api_javadoc_seed() {
+    : > "$2/.oracle-javadoc-seed.txt"
+}
+reconcile_java_api_seed_mirror() {
+    :
 }
 if ! (fetch_docs \
     "21" \
@@ -184,7 +192,7 @@ if ! (fetch_docs \
     true); then
     fail_java_api_fetch_projection_test "manifest-governed Java API fetch dispatch failed"
 fi
-if [ "$(cat "$java_api_dispatch_capture_file")" != "https://example.invalid/javadoc/||true" ]; then
+if [ "$(cat "$java_api_dispatch_capture_file")" != "$TEST_DOCS_ROOT/java/java21-complete||true" ]; then
     fail_java_api_fetch_projection_test "Java API dispatch did not preserve manifest identity independently of URL host"
 fi
 
@@ -210,9 +218,6 @@ source "$FETCH_SCRIPT"
 LOG_FILE="$TEST_DOCS_ROOT/java-api-seed-fetch.log"
 java_api_validation_capture_file="$TEST_DOCS_ROOT/java-api-validation-policy"
 java_api_wget_arguments_capture_file="$TEST_DOCS_ROOT/java-api-wget-arguments"
-python3() {
-    : > "$5"
-}
 wget() {
     printf '%s\n' "$@" > "$java_api_wget_arguments_capture_file"
     return 0
@@ -224,7 +229,6 @@ validate_fetch_result() {
 mkdir -p "$TEST_DOCS_ROOT/java-api-validation"
 if ! (cd "$TEST_DOCS_ROOT/java-api-validation" \
     && fetch_java_api_javadoc_seed \
-        "https://docs.oracle.com/en/java/javase/21/docs/api/" \
         "$TEST_DOCS_ROOT/java-api-validation" \
         "Java 21 API" \
         5 \
@@ -239,6 +243,62 @@ fi
 if ! grep -Fxq -- '--reject-regex=excluded-path' "$java_api_wget_arguments_capture_file"; then
     fail_java_api_fetch_projection_test "Java API seed fetch dropped the manifest reject regex"
 fi
+
+set --
+# shellcheck source=fetch_all_docs.sh
+source "$FETCH_SCRIPT"
+
+log() {
+    :
+}
+
+DOCS_ROOT="$TEST_DOCS_ROOT"
+load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
+JAVA_API_RECORD_RELATIVE_PATH="java.base/java/lang/Record.html"
+java_api_refetch_capture_file="$TEST_DOCS_ROOT/java-api-refetch"
+generate_java_api_javadoc_seed() {
+    local remote_base_url="$1"
+    local target_dir="$2"
+    printf '%s%s\n' "$remote_base_url" "$JAVA_API_RECORD_RELATIVE_PATH" > "$target_dir/.oracle-javadoc-seed.txt"
+}
+fetch_java_api_javadoc_seed() {
+    printf 'refetch-required\n' > "$java_api_refetch_capture_file"
+}
+
+for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
+    IFS='|' read -r java_release remote_base_url relative_mirror_path display_name cut_directories minimum_html_files reject_regex allow_partial <<< "$java_api_source_projection"
+    java_api_target_dir="$DOCS_ROOT/$relative_mirror_path"
+    mkdir -p "$java_api_target_dir/api/java.base/java/lang"
+    : > "$java_api_target_dir/api/$JAVA_API_RECORD_RELATIVE_PATH"
+    : > "$java_api_target_dir/Record.html"
+
+    rm -f "$java_api_refetch_capture_file"
+    if ! (fetch_docs \
+        "$java_release" \
+        "$remote_base_url" \
+        "$relative_mirror_path" \
+        "$display_name" \
+        "$cut_directories" \
+        2 \
+        "$reject_regex" \
+        "$allow_partial"); then
+        fail_java_api_fetch_projection_test "Java API seed reconciliation fetch dispatch failed"
+    fi
+    if [ -e "$java_api_target_dir/Record.html" ]; then
+        fail_java_api_fetch_projection_test "unseeded flat Record.html remained in the active Java API mirror"
+    fi
+    if [ ! -f "$java_api_target_dir/api/$JAVA_API_RECORD_RELATIVE_PATH" ]; then
+        fail_java_api_fetch_projection_test "canonical modular Record.html was removed during Java API seed reconciliation"
+    fi
+    java_api_quarantine_pattern="*/$(basename "$java_api_target_dir").unseeded-java-api.*/Record.html"
+    quarantined_record_file="$(find "$TEST_WORK_ROOT/.quarantine" -type f -path "$java_api_quarantine_pattern" -print -quit)"
+    if [ -z "$quarantined_record_file" ]; then
+        fail_java_api_fetch_projection_test "unseeded flat Record.html was not quarantined outside data/docs"
+    fi
+    if [ ! -f "$java_api_refetch_capture_file" ]; then
+        fail_java_api_fetch_projection_test "Java API mirror was declared complete before stale files were excluded from its count"
+    fi
+done
 
 run_summary_capture_file="$TEST_DOCS_ROOT/run-summary"
 LOG_FILE="$TEST_DOCS_ROOT/full-run.log"
@@ -258,4 +318,4 @@ if [ "$aggregated_fetched_count" -ne 0 ] || [ "$aggregated_partial_count" -le 0 
     fail_java_api_fetch_projection_test "a full fetch run did not aggregate retained partial mirrors separately from failures"
 fi
 
-printf 'PASS: Java API fetch projections preserve all eight manifest fields and partial-mirror semantics.\n'
+printf 'PASS: Java API fetch projections preserve canonical manifest ownership, partial-mirror semantics, and seed-bound Java API mirrors.\n'
