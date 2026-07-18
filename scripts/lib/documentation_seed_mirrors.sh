@@ -134,13 +134,6 @@ publish_staged_documentation_mirror() {
     fi
 }
 
-java_api_seed_url_to_mirror_path() {
-    local seed_url="$1"
-    local cut_directories="$2"
-    python3 "$SCRIPT_DIR/documentation_seed.py" \
-        --project-mirror-path "$seed_url" "$cut_directories"
-}
-
 # Writes the manifest-governed local paths represented by the current Java API seed.
 write_java_api_seed_mirror_paths() {
     local remote_base_url="$1"
@@ -148,20 +141,15 @@ write_java_api_seed_mirror_paths() {
     local cut_directories="$3"
     local mirror_paths_file="$4"
 
-    : > "$mirror_paths_file"
-    local seed_url
-    while IFS= read -r seed_url || [ -n "$seed_url" ]; do
-        if [ -z "$seed_url" ] || [[ "$seed_url" != "$remote_base_url"* ]]; then
-            log "${RED}✗ Java API seed contains a URL outside its manifest-owned remote base${NC}"
-            return 1
-        fi
-
-        local mirror_path
-        if ! mirror_path="$(java_api_seed_url_to_mirror_path "$seed_url" "$cut_directories")"; then
-            return 1
-        fi
-        printf '%s\n' "$mirror_path" >> "$mirror_paths_file"
-    done < "$seed_file"
+    if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+        --project-mirror-paths-file \
+        --input "$seed_file" \
+        --output "$mirror_paths_file" \
+        --required-prefix "$remote_base_url" \
+        --cut-directories "$cut_directories"; then
+        log "${RED}✗ Java API seed mirror-path projection failed${NC}"
+        return 1
+    fi
 
     if [ ! -s "$mirror_paths_file" ]; then
         log "${RED}✗ Java API seed produced no mirror paths${NC}"

@@ -64,6 +64,106 @@ for java_api_source_index in "${!JAVA_API_SOURCE_PROJECTIONS[@]}"; do
     fi
 done
 
+DOCUMENTATION_SOURCE_PROJECTIONS=()
+load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
+selected_documentation_source_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[0]}"
+selected_documentation_doc_set="$(documentation_source_manifest_field \
+    "$selected_documentation_source_projection" \
+    "docSet")"
+selected_java_api_source_projection="${JAVA_API_SOURCE_PROJECTIONS[0]}"
+selected_java_api_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
+    "$selected_java_api_source_projection")"
+
+selector_routing_capture_file="$TEST_DOCS_ROOT/selector-routing"
+selector_routing_expected_file="$TEST_DOCS_ROOT/selector-routing.expected"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/selector-routing-docs"
+    LOG_FILE="$TEST_DOCS_ROOT/selector-routing.log"
+    fetch_manifest_documentation_source() {
+        printf 'documentation|%s\n' "$1" >> "$selector_routing_capture_file"
+    }
+    fetch_projection_documentation_source() {
+        printf 'java-api|%s\n' "$1" >> "$selector_routing_capture_file"
+    }
+    write_documentation_fetch_metadata() { :; }
+    run_documentation_fetch \
+        --doc-sets="$selected_java_api_relative_mirror_path,$selected_documentation_doc_set" \
+        > /dev/null
+); then
+    fail_java_api_fetch_projection_test \
+        "a scoped selector did not dispatch its canonical non-Java and Java API rows"
+fi
+printf 'documentation|%s\njava-api|%s\n' \
+    "$selected_documentation_source_projection" \
+    "$selected_java_api_source_projection" \
+    > "$selector_routing_expected_file"
+if ! diff -u "$selector_routing_expected_file" "$selector_routing_capture_file"; then
+    fail_java_api_fetch_projection_test \
+        "a scoped selector did not preserve canonical source-family dispatch order"
+fi
+
+java_only_selector_capture_file="$TEST_DOCS_ROOT/java-only-selector-routing"
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/java-only-selector-routing-docs"
+    LOG_FILE="$TEST_DOCS_ROOT/java-only-selector-routing.log"
+    fetch_manifest_documentation_source() {
+        printf 'documentation|%s\n' "$1" >> "$java_only_selector_capture_file"
+    }
+    fetch_projection_documentation_source() {
+        printf 'java-api|%s\n' "$1" >> "$java_only_selector_capture_file"
+    }
+    write_documentation_fetch_metadata() { :; }
+    run_documentation_fetch --doc-sets="$selected_java_api_relative_mirror_path" > /dev/null
+); then
+    fail_java_api_fetch_projection_test \
+        "a Java-only scoped selector did not complete the fetch run"
+fi
+printf 'java-api|%s\n' "$selected_java_api_source_projection" \
+    > "$selector_routing_expected_file"
+if ! diff -u "$selector_routing_expected_file" "$java_only_selector_capture_file"; then
+    fail_java_api_fetch_projection_test \
+        "a Java-only scoped selector did not dispatch exactly one Java API projection"
+fi
+
+invalid_java_api_selector="${selected_java_api_relative_mirror_path//\//-}"
+if [ "$invalid_java_api_selector" = "$selected_java_api_relative_mirror_path" ]; then
+    fail_java_api_fetch_projection_test "Java API selector test did not construct a non-canonical alias"
+fi
+invalid_selector_capture_file="$TEST_DOCS_ROOT/invalid-selector-routing"
+if (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() { :; }
+    DOCS_ROOT="$TEST_DOCS_ROOT/invalid-selector-routing-docs"
+    LOG_FILE="$TEST_DOCS_ROOT/invalid-selector-routing.log"
+    fetch_manifest_documentation_source() {
+        printf 'documentation|%s\n' "$1" >> "$invalid_selector_capture_file"
+    }
+    fetch_projection_documentation_source() {
+        printf 'java-api|%s\n' "$1" >> "$invalid_selector_capture_file"
+    }
+    write_documentation_fetch_metadata() { :; }
+    run_documentation_fetch \
+        --doc-sets="$selected_java_api_relative_mirror_path,$invalid_java_api_selector" \
+        > /dev/null 2>&1
+); then
+    fail_java_api_fetch_projection_test \
+        "a non-canonical Java API selector alias was accepted"
+fi
+if [ -e "$invalid_selector_capture_file" ]; then
+    fail_java_api_fetch_projection_test \
+        "an invalid scoped selector dispatched sources before validation completed"
+fi
+
 generic_fetch_projection="|https://example.invalid/reference.html|generic/reference|Generic Reference|1|1||false"
 fetch_execution_arguments=()
 fetch_projection_documentation_source "$generic_fetch_projection" > /dev/null

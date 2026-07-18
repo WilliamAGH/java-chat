@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class IngestedFilePruneService {
+    private static final String PARSED_CHUNK_FILE_EXTENSION = ".txt";
 
     private final HybridVectorService hybridVectorService;
     private final LocalStoreService localStoreService;
@@ -84,6 +86,52 @@ public class IngestedFilePruneService {
         pruneFileStrict(List.copyOf(collectionNames), sourceUrl, previousFileRecord);
     }
 
+    /**
+     * Removes superseded vectors and local chunk state after a complete replacement was stored.
+     *
+     * <p>The current collection is intentionally absent from {@code supersededCollectionNames}; its URL-scoped
+     * replacement is owned by {@link HybridVectorService#replaceUrlDocuments}. The file marker is also retained so
+     * the caller can atomically replace it only after every vector and chunk-state operation succeeds. Marker cleanup
+     * precedes parsed-chunk deletion so a failed cleanup retains the stored hash-prefix evidence required for retry.</p>
+     *
+     * @param supersededCollectionNames prior collections that no longer own the source URL
+     * @param sourceUrl authoritative URL key for local state and vectors
+     * @param previousFileRecord previous file marker record, or {@code null} when no marker existed
+     * @param replacementChunkHashes complete hash inventory for the stored replacement
+     * @throws IOException when obsolete parsed chunks or hash markers cannot be deleted
+     */
+    public void pruneObsoleteStateAfterReplacement(
+            List<String> supersededCollectionNames,
+            String sourceUrl,
+            FileIngestionRecord previousFileRecord,
+            List<String> replacementChunkHashes)
+            throws IOException {
+        Objects.requireNonNull(supersededCollectionNames, "supersededCollectionNames");
+        Objects.requireNonNull(sourceUrl, "sourceUrl");
+        Set<String> replacementHashSet = validatedChunkHashSet(replacementChunkHashes, "replacementChunkHashes");
+
+        for (String supersededCollectionName : supersededCollectionNames) {
+            if (supersededCollectionName == null || supersededCollectionName.isBlank()) {
+                throw new IllegalArgumentException("Superseded collection names must not be blank");
+            }
+            hybridVectorService.deleteByUrl(supersededCollectionName, sourceUrl);
+        }
+
+        List<ParsedChunkReference> parsedChunkReferences = readParsedChunkReferences(sourceUrl);
+        Set<String> obsoleteChunkHashes = new LinkedHashSet<>();
+        if (previousFileRecord != null) {
+            obsoleteChunkHashes.addAll(previousFileRecord.chunkHashes());
+        }
+        obsoleteChunkHashes.removeAll(replacementHashSet);
+        if (!obsoleteChunkHashes.isEmpty()) {
+            localStoreService.deleteChunkIngestionMarkers(List.copyOf(obsoleteChunkHashes));
+        }
+        localStoreService.deleteObsoleteChunkIngestionMarkersByHashPrefixes(
+                obsoleteStoredHashPrefixes(parsedChunkReferences, replacementHashSet),
+                List.copyOf(replacementChunkHashes));
+        deleteObsoleteParsedChunks(parsedChunkReferences, replacementHashSet);
+    }
+
     private void pruneFileStrict(List<String> collectionNames, String sourceUrl, FileIngestionRecord previousFileRecord)
             throws IOException {
         Objects.requireNonNull(sourceUrl, "sourceUrl");
@@ -117,6 +165,14 @@ public class IngestedFilePruneService {
     }
 
     private List<String> reconstructChunkHashesFromParsedChunks(String sourceUrl) throws IOException {
+        Set<String> reconstructedHashSet = new LinkedHashSet<>();
+        readParsedChunkReferences(sourceUrl).stream()
+                .map(ParsedChunkReference::reconstructedChunkHash)
+                .forEach(reconstructedHashSet::add);
+        return List.copyOf(reconstructedHashSet);
+    }
+
+    private List<ParsedChunkReference> readParsedChunkReferences(String sourceUrl) throws IOException {
         if (sourceUrl == null || sourceUrl.isBlank()) {
             return List.of();
         }
@@ -128,7 +184,7 @@ public class IngestedFilePruneService {
 
         String safeSourceName = localStoreService.toSafeName(sourceUrl);
         String parsedChunkPrefix = safeSourceName + "_";
-        Set<String> reconstructedHashSet = new LinkedHashSet<>();
+        List<ParsedChunkReference> parsedChunkReferences = new ArrayList<>();
 
         try (var parsedChunkDirectoryStream = Files.newDirectoryStream(parsedChunkDirectory, parsedChunkPath -> {
             Path parsedChunkFileNamePath = parsedChunkPath.getFileName();
@@ -136,7 +192,8 @@ public class IngestedFilePruneService {
                 return false;
             }
             String parsedChunkFileName = parsedChunkFileNamePath.toString();
-            return parsedChunkFileName.startsWith(parsedChunkPrefix) && parsedChunkFileName.endsWith(".txt");
+            return parsedChunkFileName.startsWith(parsedChunkPrefix)
+                    && parsedChunkFileName.endsWith(PARSED_CHUNK_FILE_EXTENSION);
         })) {
             for (Path parsedChunkPath : parsedChunkDirectoryStream) {
                 Path parsedChunkFileNamePath = parsedChunkPath.getFileName();
@@ -144,12 +201,18 @@ public class IngestedFilePruneService {
                     continue;
                 }
                 String parsedChunkFileName = parsedChunkFileNamePath.toString();
-                String remainder = parsedChunkFileName.substring(parsedChunkPrefix.length());
-                int firstUnderscorePosition = remainder.indexOf('_');
+                String parsedChunkIdentitySuffix = parsedChunkFileName.substring(parsedChunkPrefix.length());
+                int firstUnderscorePosition = parsedChunkIdentitySuffix.indexOf('_');
                 if (firstUnderscorePosition <= 0) {
                     continue;
                 }
-                String chunkIndexToken = remainder.substring(0, firstUnderscorePosition);
+                int hashPrefixStart = firstUnderscorePosition + 1;
+                int hashPrefixEnd = parsedChunkIdentitySuffix.length() - PARSED_CHUNK_FILE_EXTENSION.length();
+                if (hashPrefixStart >= hashPrefixEnd) {
+                    continue;
+                }
+                String chunkIndexToken = parsedChunkIdentitySuffix.substring(0, firstUnderscorePosition);
+                String storedChunkHashPrefix = parsedChunkIdentitySuffix.substring(hashPrefixStart, hashPrefixEnd);
                 int chunkIndex;
                 try {
                     chunkIndex = Integer.parseInt(chunkIndexToken);
@@ -159,10 +222,62 @@ public class IngestedFilePruneService {
                 String chunkText = Files.readString(parsedChunkPath, StandardCharsets.UTF_8);
                 String reconstructedHash = contentHasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
                 if (!reconstructedHash.isBlank()) {
-                    reconstructedHashSet.add(reconstructedHash);
+                    parsedChunkReferences.add(
+                            new ParsedChunkReference(parsedChunkPath, storedChunkHashPrefix, reconstructedHash));
                 }
             }
         }
-        return List.copyOf(reconstructedHashSet);
+        return List.copyOf(parsedChunkReferences);
     }
+
+    private static Set<String> validatedChunkHashSet(List<String> chunkHashes, String parameterName) {
+        Objects.requireNonNull(chunkHashes, parameterName);
+        Set<String> validatedHashes = new LinkedHashSet<>();
+        for (String chunkHash : chunkHashes) {
+            if (chunkHash == null || chunkHash.isBlank()) {
+                throw new IllegalArgumentException(parameterName + " must not contain blank hashes");
+            }
+            validatedHashes.add(chunkHash);
+        }
+        return Set.copyOf(validatedHashes);
+    }
+
+    private static void deleteObsoleteParsedChunks(
+            List<ParsedChunkReference> parsedChunkReferences, Set<String> replacementHashSet) throws IOException {
+        IOException firstDeleteFailure = null;
+        for (ParsedChunkReference parsedChunkReference : parsedChunkReferences) {
+            if (belongsToReplacement(parsedChunkReference, replacementHashSet)) {
+                continue;
+            }
+            try {
+                Files.deleteIfExists(parsedChunkReference.parsedChunkPath());
+            } catch (IOException deleteFailure) {
+                if (firstDeleteFailure == null) {
+                    firstDeleteFailure = deleteFailure;
+                }
+            }
+        }
+        if (firstDeleteFailure != null) {
+            throw firstDeleteFailure;
+        }
+    }
+
+    private static List<String> obsoleteStoredHashPrefixes(
+            List<ParsedChunkReference> parsedChunkReferences, Set<String> replacementHashSet) {
+        return parsedChunkReferences.stream()
+                .filter(parsedChunkReference -> !belongsToReplacement(parsedChunkReference, replacementHashSet))
+                .map(ParsedChunkReference::storedChunkHashPrefix)
+                .distinct()
+                .toList();
+    }
+
+    private static boolean belongsToReplacement(
+            ParsedChunkReference parsedChunkReference, Set<String> replacementHashSet) {
+        return replacementHashSet.stream()
+                .anyMatch(replacementChunkHash ->
+                        replacementChunkHash.startsWith(parsedChunkReference.storedChunkHashPrefix()));
+    }
+
+    private record ParsedChunkReference(
+            Path parsedChunkPath, String storedChunkHashPrefix, String reconstructedChunkHash) {}
 }

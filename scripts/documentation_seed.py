@@ -320,6 +320,39 @@ def project_mirror_path_command(command_arguments: list[str]) -> int:
     return 0
 
 
+def project_mirror_paths_file_command(command_arguments: list[str]) -> int:
+    """Projects one canonical seed file onto GNU Wget mirror paths in one process."""
+    projection_parser = argparse.ArgumentParser()
+    projection_parser.add_argument("--input", required=True, type=pathlib.Path)
+    projection_parser.add_argument("--output", required=True, type=pathlib.Path)
+    projection_parser.add_argument("--required-prefix", required=True)
+    projection_parser.add_argument("--cut-directories", required=True, type=int)
+    projection_arguments = projection_parser.parse_args(command_arguments)
+    if projection_arguments.cut_directories < 0:
+        projection_parser.error("--cut-directories cannot be negative")
+    require_remote_url(
+        projection_arguments.required_prefix,
+        allow_http=False,
+        require_trailing_slash=True,
+    )
+    seed_urls = projection_arguments.input.read_text(encoding="utf-8").splitlines()
+    if not seed_urls or any(not seed_url for seed_url in seed_urls):
+        raise ValueError("Seed URL file must contain nonempty URL lines")
+    if any(not seed_url.startswith(projection_arguments.required_prefix) for seed_url in seed_urls):
+        raise ValueError("Seed URL file contains a URL outside its required remote prefix")
+    mirror_paths = [
+        seed_url_to_mirror_path(seed_url, projection_arguments.cut_directories)
+        for seed_url in seed_urls
+    ]
+    if len(set(mirror_paths)) != len(mirror_paths):
+        raise ValueError("Seed URL file maps multiple URLs onto one mirror path")
+    projection_arguments.output.write_text(
+        "".join(f"{mirror_path}\n" for mirror_path in mirror_paths),
+        encoding="utf-8",
+    )
+    return 0
+
+
 def main() -> int:
     if sys.argv[1:2] == ["--validate-seed-document-types"]:
         return validate_seed_document_types_command(sys.argv[2:])
@@ -327,6 +360,8 @@ def main() -> int:
         return validate_remote_url_command(sys.argv[2:])
     if sys.argv[1:2] == ["--project-mirror-path"]:
         return project_mirror_path_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--project-mirror-paths-file"]:
+        return project_mirror_paths_file_command(sys.argv[2:])
     seed_document_types = load_seed_document_types()
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--document-type", required=True, choices=seed_document_types)

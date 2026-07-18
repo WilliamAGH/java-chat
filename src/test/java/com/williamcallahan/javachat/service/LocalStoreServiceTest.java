@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -24,6 +25,20 @@ class LocalStoreServiceTest {
     private static final String SAMPLE_PACKAGE = "java.util";
     private static final String DIFFERENT_TITLE = "java.util.List";
     private static final String DIFFERENT_PACKAGE = "java.util.stream";
+    private static final String OBSOLETE_CHUNK_HASH =
+            "fedcba654321cccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    private static final String OBSOLETE_CHUNK_HASH_PREFIX = "fedcba654321";
+    private static final String REPLACEMENT_CHUNK_HASH =
+            "abcdef123456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private static final String REPLACEMENT_CHUNK_HASH_PREFIX = "abcdef123456";
+    private static final String SHARED_PREFIX_STALE_CHUNK_HASH =
+            "abcdef123456bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private static final String AMBIGUOUS_OBSOLETE_CHUNK_HASH =
+            "fedcba654321dddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    private static final String UNAMBIGUOUS_OBSOLETE_CHUNK_HASH =
+            "0123456789abeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    private static final String UNAMBIGUOUS_OBSOLETE_CHUNK_HASH_PREFIX = "0123456789ab";
+    private static final String FILE_INGESTION_MARKER_FILE_NAME = "file_source.marker";
 
     @TempDir
     Path tempDir;
@@ -133,5 +148,39 @@ class LocalStoreServiceTest {
         assertTrue(
                 localStoreService.hasHashMetadataChanged(SAMPLE_HASH, "ASCII title", unicodePackage),
                 "Changed title should be detected even when package contains Unicode");
+    }
+
+    @Test
+    void deletesObsoleteFullHashMarkersAndRetainsReplacementHashPrefixes() throws IOException {
+        localStoreService.markHashIngested(OBSOLETE_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+        localStoreService.markHashIngested(REPLACEMENT_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+        localStoreService.markHashIngested(SHARED_PREFIX_STALE_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+        Path fileIngestionMarkerPath = tempDir.resolve("index").resolve(FILE_INGESTION_MARKER_FILE_NAME);
+        Files.writeString(fileIngestionMarkerPath, "file marker", StandardCharsets.UTF_8);
+
+        localStoreService.deleteObsoleteChunkIngestionMarkersByHashPrefixes(
+                List.of(OBSOLETE_CHUNK_HASH_PREFIX, REPLACEMENT_CHUNK_HASH_PREFIX), List.of(REPLACEMENT_CHUNK_HASH));
+
+        assertFalse(localStoreService.isHashIngested(OBSOLETE_CHUNK_HASH));
+        assertTrue(localStoreService.isHashIngested(REPLACEMENT_CHUNK_HASH));
+        assertTrue(localStoreService.isHashIngested(SHARED_PREFIX_STALE_CHUNK_HASH));
+        assertTrue(Files.exists(fileIngestionMarkerPath));
+    }
+
+    @Test
+    void failsClosedWhenMultipleMarkersShareAnObsoleteHashPrefix() throws IOException {
+        localStoreService.markHashIngested(OBSOLETE_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+        localStoreService.markHashIngested(AMBIGUOUS_OBSOLETE_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+        localStoreService.markHashIngested(UNAMBIGUOUS_OBSOLETE_CHUNK_HASH, SAMPLE_TITLE, SAMPLE_PACKAGE);
+
+        IOException thrown = assertThrows(
+                IOException.class,
+                () -> localStoreService.deleteObsoleteChunkIngestionMarkersByHashPrefixes(
+                        List.of(OBSOLETE_CHUNK_HASH_PREFIX, UNAMBIGUOUS_OBSOLETE_CHUNK_HASH_PREFIX), List.of()));
+
+        assertTrue(thrown.getMessage().contains(OBSOLETE_CHUNK_HASH_PREFIX));
+        assertTrue(localStoreService.isHashIngested(OBSOLETE_CHUNK_HASH));
+        assertTrue(localStoreService.isHashIngested(AMBIGUOUS_OBSOLETE_CHUNK_HASH));
+        assertTrue(localStoreService.isHashIngested(UNAMBIGUOUS_OBSOLETE_CHUNK_HASH));
     }
 }

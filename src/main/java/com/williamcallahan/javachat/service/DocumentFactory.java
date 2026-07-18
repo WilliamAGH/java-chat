@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -38,19 +39,32 @@ public class DocumentFactory {
      */
     public org.springframework.ai.document.Document createDocument(
             String text, String url, String title, int chunkIndex, String packageName, String hash) {
+        return createDocument(text, ChunkDocumentMetadata.withoutAnchor(url, title, chunkIndex, packageName, hash));
+    }
 
-        Map<String, ?> metadata = Map.of(
-                QdrantPayloadFieldSchema.URL_FIELD, url,
-                QdrantPayloadFieldSchema.TITLE_FIELD, title,
-                QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, chunkIndex,
-                QdrantPayloadFieldSchema.PACKAGE_FIELD, packageName,
-                QdrantPayloadFieldSchema.HASH_FIELD, hash);
+    /**
+     * Creates a Spring AI Document using the canonical metadata contract for one indexed chunk.
+     *
+     * <p>The structured contract keeps a Javadoc member anchor separate from its fragmentless page URL so
+     * file pruning, chunk hashing, and citation rendering can each use the identity they require.</p>
+     *
+     * @param text chunk text that will be embedded
+     * @param chunkDocumentMetadata canonical metadata for the indexed chunk
+     * @return a document with the supplied metadata
+     */
+    public org.springframework.ai.document.Document createDocument(
+            String text, ChunkDocumentMetadata chunkDocumentMetadata) {
+        Objects.requireNonNull(text, "text");
+        ChunkDocumentMetadata metadata = Objects.requireNonNull(chunkDocumentMetadata, "chunkDocumentMetadata");
 
-        // Create and configure the document
-        var document = createDocumentWithOptionalId(text, hash);
-        // Persist hash alongside metadata (used for audit and dedup checks)
-        document.getMetadata().putAll(metadata);
-
+        var document = createDocumentWithOptionalId(text, metadata.contentHash());
+        document.getMetadata().put(QdrantPayloadFieldSchema.URL_FIELD, metadata.sourceUrl());
+        document.getMetadata().put(QdrantPayloadFieldSchema.TITLE_FIELD, metadata.title());
+        document.getMetadata().put(QdrantPayloadFieldSchema.CHUNK_INDEX_FIELD, metadata.chunkIndex());
+        document.getMetadata().put(QdrantPayloadFieldSchema.PACKAGE_FIELD, metadata.packageName());
+        document.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, metadata.contentHash());
+        metadata.javadocAnchor()
+                .ifPresent(anchor -> document.getMetadata().put(QdrantPayloadFieldSchema.ANCHOR_FIELD, anchor));
         return document;
     }
 
@@ -134,5 +148,101 @@ public class DocumentFactory {
         }
         String documentId = hasher.uuidFromHash(hash);
         return new org.springframework.ai.document.Document(documentId, text, new HashMap<>());
+    }
+
+    /**
+     * Defines the complete metadata contract for one indexed document chunk.
+     *
+     * <p>The source URL remains fragmentless. A Javadoc member identifier, when present, is stored in
+     * {@link QdrantPayloadFieldSchema#ANCHOR_FIELD} so citation construction can append it without changing
+     * local storage or vector-pruning identities.</p>
+     *
+     * @param sourceUrl fragmentless source page URL
+     * @param title human-readable page title
+     * @param chunkIndex zero-based page-wide chunk position
+     * @param packageName Java package name when applicable
+     * @param contentHash deterministic hash of URL, chunk index, and text
+     * @param javadocAnchor exact optional Javadoc DOM member identifier
+     */
+    public record ChunkDocumentMetadata(
+            String sourceUrl,
+            String title,
+            int chunkIndex,
+            String packageName,
+            String contentHash,
+            Optional<String> javadocAnchor) {
+
+        /**
+         * Validates the metadata values before they can enter the document/Qdrant round-trip.
+         */
+        public ChunkDocumentMetadata {
+            sourceUrl = requireText(sourceUrl, "sourceUrl");
+            title = Objects.requireNonNull(title, "title");
+            if (chunkIndex < 0) {
+                throw new IllegalArgumentException("chunkIndex must be non-negative");
+            }
+            packageName = Objects.requireNonNull(packageName, "packageName");
+            contentHash = requireText(contentHash, "contentHash");
+            javadocAnchor = Objects.requireNonNull(javadocAnchor, "javadocAnchor");
+            javadocAnchor.ifPresent(ChunkDocumentMetadata::requireExactJavadocAnchor);
+        }
+
+        /**
+         * Defines a document chunk that cites its containing page rather than a member fragment.
+         *
+         * @param sourceUrl fragmentless source page URL
+         * @param title human-readable page title
+         * @param chunkIndex zero-based page-wide chunk position
+         * @param packageName Java package name when applicable
+         * @param contentHash deterministic hash of URL, chunk index, and text
+         * @return metadata with no Javadoc member anchor
+         */
+        public static ChunkDocumentMetadata withoutAnchor(
+                String sourceUrl, String title, int chunkIndex, String packageName, String contentHash) {
+            return new ChunkDocumentMetadata(sourceUrl, title, chunkIndex, packageName, contentHash, Optional.empty());
+        }
+
+        /**
+         * Defines a document chunk that cites an exact member fragment on its source page.
+         *
+         * @param sourceUrl fragmentless source page URL
+         * @param title human-readable page title
+         * @param chunkIndex zero-based page-wide chunk position
+         * @param packageName Java package name when applicable
+         * @param contentHash deterministic hash of URL, chunk index, and text
+         * @param exactJavadocAnchor exact DOM member identifier without a leading hash
+         * @return metadata with the exact Javadoc member anchor
+         */
+        public static ChunkDocumentMetadata withAnchor(
+                String sourceUrl,
+                String title,
+                int chunkIndex,
+                String packageName,
+                String contentHash,
+                String exactJavadocAnchor) {
+            return new ChunkDocumentMetadata(
+                    sourceUrl,
+                    title,
+                    chunkIndex,
+                    packageName,
+                    contentHash,
+                    Optional.of(requireExactJavadocAnchor(exactJavadocAnchor)));
+        }
+
+        private static String requireText(String text, String fieldName) {
+            String requiredText = Objects.requireNonNull(text, fieldName);
+            if (requiredText.isBlank()) {
+                throw new IllegalArgumentException(fieldName + " must not be blank");
+            }
+            return requiredText;
+        }
+
+        private static String requireExactJavadocAnchor(String exactJavadocAnchor) {
+            String requiredAnchor = requireText(exactJavadocAnchor, "exactJavadocAnchor");
+            if (!requiredAnchor.equals(requiredAnchor.trim()) || requiredAnchor.indexOf('#') >= 0) {
+                throw new IllegalArgumentException("exactJavadocAnchor must be an unpadded DOM identifier without '#'");
+            }
+            return requiredAnchor;
+        }
     }
 }

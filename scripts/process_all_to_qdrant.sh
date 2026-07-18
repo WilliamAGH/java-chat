@@ -72,6 +72,12 @@ if ! check_embedding_server "log"; then
     exit 1
 fi
 
+# Java API refreshes must remove retired Javadoc vectors before the CLI can
+# re-ingest their canonical replacements. The prune script exits without a
+# Qdrant request for a non-Java-only selector.
+EFFECTIVE_DOCS_SETS_FILTER="${DOCS_SETS_FILTER:-${DOCS_SETS:-}}"
+"$SCRIPT_DIR/prune_retired_java_api_vectors.sh" --doc-sets="$EFFECTIVE_DOCS_SETS_FILTER"
+
 setup_pid_and_cleanup "$PID_FILE"
 
 log "${YELLOW}Building application...${NC}"

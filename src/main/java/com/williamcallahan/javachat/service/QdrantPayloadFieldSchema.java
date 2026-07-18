@@ -27,6 +27,9 @@ public final class QdrantPayloadFieldSchema {
     /** Payload metadata key for a Java package name. */
     public static final String PACKAGE_FIELD = "package";
 
+    /** Payload metadata key for an exact member anchor within a canonical Javadoc page. */
+    public static final String ANCHOR_FIELD = "anchor";
+
     /** Payload metadata key for the deterministic document content hash. */
     public static final String HASH_FIELD = "hash";
 
@@ -92,6 +95,7 @@ public final class QdrantPayloadFieldSchema {
             URL_FIELD,
             TITLE_FIELD,
             PACKAGE_FIELD,
+            ANCHOR_FIELD,
             HASH_FIELD,
             DOC_SET_FIELD,
             DOC_PATH_FIELD,

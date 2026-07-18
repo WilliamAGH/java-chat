@@ -32,8 +32,8 @@ CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
 LIST_DOCUMENTATION_SOURCES="false"
-DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="false"
-DOCUMENTATION_DOC_SET_SELECTOR=""
+DOCUMENTATION_SOURCE_SELECTOR_ENABLED="false"
+DOCUMENTATION_SOURCE_SELECTOR=""
 DOCUMENTATION_FETCH_PARTIAL_STATUS=2
 
 parse_fetch_arguments() {
@@ -56,19 +56,19 @@ parse_fetch_arguments() {
                 LIST_DOCUMENTATION_SOURCES="true"
                 ;;
             --doc-sets=*)
-                if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
+                if [ "$DOCUMENTATION_SOURCE_SELECTOR_ENABLED" = "true" ]; then
                     echo "--doc-sets can be specified only once"
                     exit 1
                 fi
-                DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="true"
-                DOCUMENTATION_DOC_SET_SELECTOR="${fetch_argument#--doc-sets=}"
+                DOCUMENTATION_SOURCE_SELECTOR_ENABLED="true"
+                DOCUMENTATION_SOURCE_SELECTOR="${fetch_argument#--doc-sets=}"
                 ;;
             --help|-h)
-                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]"
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=SOURCE_IDENTIFIER,...] [--list-java-api-sources] [--list-documentation-sources]"
                 echo "  --include-quick : Also refresh small 'quick' doc mirrors"
                 echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
                 echo "  --force         : Refresh even when mirrors look complete"
-                echo "  --doc-sets      : Fetch only selected canonical non-Java docSet rows"
+                echo "  --doc-sets      : Fetch only canonical non-Java docSet or Java API relativeMirrorPath rows"
                 echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
                 echo "  --list-documentation-sources : Print canonical non-Java source projections without fetching"
                 exit 0
@@ -375,6 +375,113 @@ record_documentation_fetch() {
     log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
 }
 
+# Selects exact canonical identities from both source manifests before any fetch begins.
+# Non-Java documentation retains its manifest-owned docSet identifier; Java APIs use
+# their manifest-owned relativeMirrorPath identifier. This keeps the CLI scoped while
+# preserving each source family's distinct fetch projection contract.
+select_canonical_documentation_fetch_sources() {
+    local requested_source_selector="$1"
+    local -a requested_source_identifiers=()
+    local -a retained_source_identifiers=("")
+    local -a selected_documentation_source_projections=()
+    local -a selected_java_api_source_projections=()
+
+    if [ -z "$requested_source_selector" ] \
+        || [[ "$requested_source_selector" == ,* ]] \
+        || [[ "$requested_source_selector" == *, ]] \
+        || [[ "$requested_source_selector" == *,,* ]]; then
+        echo "Documentation source selector contains a blank canonical identifier" >&2
+        return 1
+    fi
+
+    local IFS=','
+    read -r -a requested_source_identifiers <<< "$requested_source_selector"
+
+    local requested_source_identifier
+    local retained_source_identifier
+    for requested_source_identifier in "${requested_source_identifiers[@]}"; do
+        if has_boundary_whitespace "$requested_source_identifier" \
+            || has_manifest_control_character "$requested_source_identifier"; then
+            echo "Documentation source selector has an invalid canonical identifier: $requested_source_identifier" >&2
+            return 1
+        fi
+        for retained_source_identifier in "${retained_source_identifiers[@]}"; do
+            if [ "$retained_source_identifier" = "$requested_source_identifier" ]; then
+                echo "Documentation source selector duplicates canonical identifier: $requested_source_identifier" >&2
+                return 1
+            fi
+        done
+        retained_source_identifiers+=("$requested_source_identifier")
+    done
+
+    for requested_source_identifier in "${requested_source_identifiers[@]}"; do
+        local source_identifier_match_count=0
+        local documentation_source_projection
+        for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+            local documentation_doc_set
+            documentation_doc_set="$(documentation_source_manifest_field \
+                "$documentation_source_projection" \
+                "docSet")"
+            if [ "$documentation_doc_set" = "$requested_source_identifier" ]; then
+                source_identifier_match_count=$((source_identifier_match_count + 1))
+            fi
+        done
+
+        local java_api_source_projection
+        for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
+            local java_api_relative_mirror_path
+            java_api_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
+                "$java_api_source_projection")"
+            if [ "$java_api_relative_mirror_path" = "$requested_source_identifier" ]; then
+                source_identifier_match_count=$((source_identifier_match_count + 1))
+            fi
+        done
+
+        if [ "$source_identifier_match_count" -eq 0 ]; then
+            echo "Unknown documentation source identifier: $requested_source_identifier" >&2
+            return 1
+        fi
+        if [ "$source_identifier_match_count" -gt 1 ]; then
+            echo "Canonical documentation source identifier is ambiguous: $requested_source_identifier" >&2
+            return 1
+        fi
+    done
+
+    local documentation_source_projection
+    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
+        local documentation_doc_set
+        documentation_doc_set="$(documentation_source_manifest_field \
+            "$documentation_source_projection" \
+            "docSet")"
+        for requested_source_identifier in "${requested_source_identifiers[@]}"; do
+            if [ "$documentation_doc_set" = "$requested_source_identifier" ]; then
+                selected_documentation_source_projections+=("$documentation_source_projection")
+                break
+            fi
+        done
+    done
+
+    local java_api_source_projection
+    for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
+        local java_api_relative_mirror_path
+        java_api_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
+            "$java_api_source_projection")"
+        for requested_source_identifier in "${requested_source_identifiers[@]}"; do
+            if [ "$java_api_relative_mirror_path" = "$requested_source_identifier" ]; then
+                selected_java_api_source_projections+=("$java_api_source_projection")
+                break
+            fi
+        done
+    done
+
+    SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS=(
+        "${selected_documentation_source_projections[@]+"${selected_documentation_source_projections[@]}"}"
+    )
+    SELECTED_JAVA_API_SOURCE_PROJECTIONS=(
+        "${selected_java_api_source_projections[@]+"${selected_java_api_source_projections[@]}"}"
+    )
+}
+
 run_documentation_fetch() {
 set -euo pipefail
 if [ -f "$RES_PROPS" ]; then
@@ -415,11 +522,15 @@ echo ""
 log "Starting documentation fetch process..."
 echo "=============================================="
 
-if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
-    DOC_SOURCES=()
-    append_manifest_documentation_fetch_sources "$DOCUMENTATION_DOC_SET_SELECTOR"
-    for documentation_source_projection in "${DOC_SOURCES[@]}"; do
+if [ "$DOCUMENTATION_SOURCE_SELECTOR_ENABLED" = "true" ]; then
+    SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS=()
+    SELECTED_JAVA_API_SOURCE_PROJECTIONS=()
+    select_canonical_documentation_fetch_sources "$DOCUMENTATION_SOURCE_SELECTOR" || return 1
+    for documentation_source_projection in "${SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS[@]+"${SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS[@]}"}"; do
         record_documentation_fetch fetch_manifest_documentation_source "$documentation_source_projection"
+    done
+    for documentation_source_projection in "${SELECTED_JAVA_API_SOURCE_PROJECTIONS[@]+"${SELECTED_JAVA_API_SOURCE_PROJECTIONS[@]}"}"; do
+        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
     done
 else
     for documentation_source_projection in "${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}"; do

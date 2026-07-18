@@ -73,7 +73,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 ### Script flags
 
 ```bash
-./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]
+./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--doc-sets=SOURCE_IDENTIFIER,...] [--list-java-api-sources] [--list-documentation-sources]
 ```
 
 | Flag | Effect |
@@ -81,13 +81,20 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 | `--include-quick` | Also fetch small landing-page mirrors (Spring Framework/AI quick sets) |
 | `--no-clean` | Do not quarantine incomplete mirrors before refetching |
 | `--force` | Refresh all sources even if they look complete |
-| `--doc-sets=DOC_SET,...` | Fetch exactly the selected canonical non-Java `docSet` rows; omit Java API, legacy, and quick rows |
+| `--doc-sets=SOURCE_IDENTIFIER,...` | Fetch exactly the selected canonical non-Java `docSet` or Java API `relativeMirrorPath` rows; omit legacy and quick rows |
 | `--list-java-api-sources` | Print configured Java API source projections without fetching |
 | `--list-documentation-sources` | Print configured official non-Java source projections without fetching |
 | `--help` | Show usage |
 
-Copy selector tokens from the `docSet` column printed by `--list-documentation-sources`. Blank, duplicate,
-and unknown selector tokens are rejected.
+Copy non-Java selector tokens from the `docSet` column printed by `--list-documentation-sources`, or Java API
+selector tokens from the `relativeMirrorPath` column printed by `--list-java-api-sources`. Selectors are exact;
+blank, duplicate, and unknown tokens are rejected.
+
+```bash
+# Refresh the three canonical Java API mirrors only.
+./scripts/fetch_all_docs.sh \
+  --doc-sets=java/java21-complete,java/java24-complete,java/java25-complete
+```
 
 ### What "incremental" means for scraping
 

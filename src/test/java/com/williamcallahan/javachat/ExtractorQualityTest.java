@@ -110,16 +110,17 @@ public class ExtractorQualityTest {
                 for (int i = 0; i < sampleSize; i++) {
                     Path file = htmlFiles.get(i);
                     String html = Files.readString(file);
-                    Document doc = Jsoup.parse(html);
+                    Document document = Jsoup.parse(html);
 
                     // Old extraction
-                    String oldText = doc.body() != null ? doc.body().text() : "";
+                    String oldText = document.body() != null ? document.body().text() : "";
 
                     // New extraction
                     String path = file.toString();
                     boolean isApiDoc = path.contains("/api/") || path.contains("\\api\\");
-                    String newText =
-                            isApiDoc ? extractor.extractJavaApiContent(doc) : extractor.extractCleanContent(doc);
+                    String newText = isApiDoc
+                            ? extractor.extractJavaApiPage(document).combinedText()
+                            : extractor.extractCleanContent(document);
 
                     // Count noise patterns
                     String[] noisePatterns = {

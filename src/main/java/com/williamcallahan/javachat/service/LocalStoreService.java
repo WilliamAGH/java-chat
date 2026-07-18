@@ -5,13 +5,19 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +29,7 @@ public class LocalStoreService {
     private static final String SHA_256_ALGORITHM = "SHA-256";
     private static final int SHORT_SHA_BYTES = 6;
     private static final int HASH_PREFIX_LENGTH = 12;
+    private static final int FULL_SHA_256_HEX_LENGTH = 64;
     private static final int SAFE_NAME_MAX_LENGTH = 150;
     private static final int SAFE_NAME_PREFIX_LENGTH = 80;
     private static final int SAFE_NAME_SUFFIX_LENGTH = 40;
@@ -182,6 +189,31 @@ public class LocalStoreService {
     }
 
     /**
+     * Deletes obsolete canonical chunk-hash markers selected from stored parsed-chunk hash prefixes.
+     *
+     * <p>Only full lowercase SHA-256 marker filenames are eligible. Replacement hashes are reduced to
+     * their stored prefix length before matching, so a shared prefix never deletes a replacement marker. A prefix
+     * resolving to multiple marker files is ambiguous and fails before any marker is deleted.</p>
+     *
+     * @param obsoleteHashPrefixes stored prefixes for parsed chunks replaced by current content
+     * @param replacementChunkHashes full hashes retained by the replacement
+     * @throws IOException if any eligible marker cannot be deleted
+     */
+    public void deleteObsoleteChunkIngestionMarkersByHashPrefixes(
+            List<String> obsoleteHashPrefixes, List<String> replacementChunkHashes) throws IOException {
+        Objects.requireNonNull(obsoleteHashPrefixes, "obsoleteHashPrefixes");
+        Objects.requireNonNull(replacementChunkHashes, "replacementChunkHashes");
+        Set<String> canonicalObsoleteHashPrefixes = canonicalStoredHashPrefixes(obsoleteHashPrefixes);
+        if (canonicalObsoleteHashPrefixes.isEmpty() || !Files.isDirectory(indexDir)) {
+            return;
+        }
+        Set<String> replacementHashPrefixes = canonicalReplacementHashPrefixes(replacementChunkHashes);
+        List<Path> unambiguousMarkerPaths =
+                unambiguousObsoleteChunkHashMarkerPaths(canonicalObsoleteHashPrefixes, replacementHashPrefixes);
+        deleteIngestionPathsStrict(unambiguousMarkerPaths);
+    }
+
+    /**
      * Deletes locally parsed chunk text files for the provided URL.
      * Chunk filenames are prefixed with {@code safeName(url) + "_"}.
      *
@@ -222,6 +254,96 @@ public class LocalStoreService {
         if (firstDeleteFailure != null) {
             throw firstDeleteFailure;
         }
+    }
+
+    private static Set<String> canonicalStoredHashPrefixes(List<String> hashPrefixes) {
+        Set<String> canonicalHashPrefixes = new LinkedHashSet<>();
+        for (String hashPrefix : hashPrefixes) {
+            if (isStoredChunkHashPrefix(hashPrefix)) {
+                canonicalHashPrefixes.add(hashPrefix);
+            }
+        }
+        return Set.copyOf(canonicalHashPrefixes);
+    }
+
+    private static Set<String> canonicalReplacementHashPrefixes(List<String> replacementChunkHashes) {
+        Set<String> replacementHashPrefixes = new LinkedHashSet<>();
+        for (String replacementChunkHash : replacementChunkHashes) {
+            if (replacementChunkHash == null || replacementChunkHash.length() < HASH_PREFIX_LENGTH) {
+                continue;
+            }
+            String replacementHashPrefix = replacementChunkHash.substring(0, HASH_PREFIX_LENGTH);
+            if (isStoredChunkHashPrefix(replacementHashPrefix)) {
+                replacementHashPrefixes.add(replacementHashPrefix);
+            }
+        }
+        return Set.copyOf(replacementHashPrefixes);
+    }
+
+    private List<Path> unambiguousObsoleteChunkHashMarkerPaths(
+            Set<String> obsoleteHashPrefixes, Set<String> replacementHashPrefixes) throws IOException {
+        Set<String> unsharedObsoleteHashPrefixes = new LinkedHashSet<>(obsoleteHashPrefixes);
+        unsharedObsoleteHashPrefixes.removeAll(replacementHashPrefixes);
+        if (unsharedObsoleteHashPrefixes.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Path> markerPathByHashPrefix = new LinkedHashMap<>();
+        Set<String> ambiguousHashPrefixes = new LinkedHashSet<>();
+        try (var chunkMarkerPaths = Files.newDirectoryStream(
+                indexDir,
+                markerPath -> isCanonicalChunkHashMarkerForPrefix(markerPath, unsharedObsoleteHashPrefixes))) {
+            for (Path markerPath : chunkMarkerPaths) {
+                Path markerFileNamePath = markerPath.getFileName();
+                if (markerFileNamePath == null) {
+                    throw new IOException("Chunk hash marker path has no file name");
+                }
+                String markerHash = markerFileNamePath.toString();
+                String matchingHashPrefix = matchingHashPrefix(markerHash, unsharedObsoleteHashPrefixes);
+                Path existingMarkerPath = markerPathByHashPrefix.putIfAbsent(matchingHashPrefix, markerPath);
+                if (existingMarkerPath != null) {
+                    ambiguousHashPrefixes.add(matchingHashPrefix);
+                }
+            }
+        }
+        if (!ambiguousHashPrefixes.isEmpty()) {
+            throw new IOException("Ambiguous chunk hash marker prefixes: " + String.join(", ", ambiguousHashPrefixes));
+        }
+        return List.copyOf(markerPathByHashPrefix.values());
+    }
+
+    private static boolean isCanonicalChunkHashMarkerForPrefix(Path markerPath, Set<String> hashPrefixes) {
+        Path markerFileNamePath = markerPath.getFileName();
+        if (markerFileNamePath == null || !Files.isRegularFile(markerPath, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        String markerHash = markerFileNamePath.toString();
+        return isFullSha256Hash(markerHash) && startsWithAnyHashPrefix(markerHash, hashPrefixes);
+    }
+
+    private static boolean isStoredChunkHashPrefix(String hashPrefix) {
+        return hashPrefix != null
+                && hashPrefix.length() == HASH_PREFIX_LENGTH
+                && hashPrefix.chars().allMatch(LocalStoreService::isLowercaseHexadecimalCharacter);
+    }
+
+    private static boolean isFullSha256Hash(String hash) {
+        return hash.length() == FULL_SHA_256_HEX_LENGTH
+                && hash.chars().allMatch(LocalStoreService::isLowercaseHexadecimalCharacter);
+    }
+
+    private static boolean startsWithAnyHashPrefix(String hash, Set<String> hashPrefixes) {
+        return hashPrefixes.stream().anyMatch(hash::startsWith);
+    }
+
+    private static String matchingHashPrefix(String hash, Set<String> hashPrefixes) {
+        return hashPrefixes.stream()
+                .filter(hash::startsWith)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("No hash prefix matched marker hash: " + hash));
+    }
+
+    private static boolean isLowercaseHexadecimalCharacter(int characterCode) {
+        return (characterCode >= '0' && characterCode <= '9') || (characterCode >= 'a' && characterCode <= 'f');
     }
 
     private String buildHashMarkerPayload(String title, String packageName) {

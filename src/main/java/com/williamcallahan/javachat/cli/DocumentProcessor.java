@@ -1,8 +1,8 @@
 package com.williamcallahan.javachat.cli;
 
+import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
-import com.williamcallahan.javachat.service.DocsIngestionService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -92,7 +92,7 @@ public class DocumentProcessor {
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
             "Failed to enumerate files in %s - check directory permissions";
 
-    private final DocsIngestionService ingestionService;
+    private final DocumentationIngestionUseCase ingestionService;
     private final ProgressTracker progressTracker;
 
     /**
@@ -101,7 +101,8 @@ public class DocumentProcessor {
      * @param ingestionService service for ingesting documentation into the vector store
      * @param progressTracker tracker for monitoring ingestion progress
      */
-    public DocumentProcessor(final DocsIngestionService ingestionService, final ProgressTracker progressTracker) {
+    public DocumentProcessor(
+            final DocumentationIngestionUseCase ingestionService, final ProgressTracker progressTracker) {
         this.ingestionService = ingestionService;
         this.progressTracker = progressTracker;
     }

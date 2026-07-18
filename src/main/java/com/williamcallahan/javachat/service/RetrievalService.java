@@ -4,7 +4,6 @@ import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
-import com.williamcallahan.javachat.service.ingestion.JavaPackageExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
@@ -34,7 +33,6 @@ public class RetrievalService {
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
     private static final double TRUNCATION_BREAK_THRESHOLD = 0.8;
 
-    private static final String DOCUMENT_TYPE_API_DOCS = DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
 
@@ -416,8 +414,8 @@ public class RetrievalService {
                 Map<String, ?> sourceDocMetadata = sourceDocument.getMetadata();
                 String rawUrl = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.URL_FIELD);
                 String title = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.TITLE_FIELD);
-                String documentType = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.DOC_TYPE_FIELD);
-                String refinedCitationUrl = refineCitationUrl(rawUrl, sourceDocument.getText(), documentType);
+                String exactAnchor = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.ANCHOR_FIELD);
+                String refinedCitationUrl = refineCitationUrl(rawUrl, exactAnchor);
                 String citationIdentity = citationIdentityFor(rawUrl, refinedCitationUrl);
                 if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
@@ -474,18 +472,18 @@ public class RetrievalService {
     }
 
     /**
-     * Refines a raw document URL and gates Javadoc member anchors to {@code api-docs} metadata.
-     *
+     * Projects an authoritative ingested Javadoc anchor before applying legacy nested-type refinement.
      */
-    private String refineCitationUrl(String rawUrl, String documentText, String documentType) {
+    private String refineCitationUrl(String rawUrl, String exactAnchor) {
         String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
         String citationUrl = normalizedUrl;
-        if (DOCUMENT_TYPE_API_DOCS.equals(documentType)) {
-            String packageName = JavaPackageExtractor.extractJavaApiPackage(normalizedUrl);
-            String nestedTypeRefinedUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(
-                    citationUrl, documentText);
-            citationUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(
-                    nestedTypeRefinedUrl, documentText, packageName);
+        if (!exactAnchor.isBlank()) {
+            String citationSourceUrl = fragmentlessCitationSourceUrl(citationUrl);
+            String canonicalCitationSourceUrl =
+                    citationSourceUrl.startsWith("http://") || citationSourceUrl.startsWith("https://")
+                            ? DocsSourceRegistry.canonicalizeHttpDocUrl(citationSourceUrl)
+                            : citationSourceUrl;
+            return canonicalCitationSourceUrl + URL_FRAGMENT_DELIMITER + exactAnchor;
         }
         if (citationUrl.startsWith("http://") || citationUrl.startsWith("https://")) {
             return DocsSourceRegistry.canonicalizeHttpDocUrl(citationUrl);

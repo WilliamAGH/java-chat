@@ -7,6 +7,7 @@ import com.williamcallahan.javachat.service.DocumentFactory;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
+import com.williamcallahan.javachat.service.JavaApiPageExtraction;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionKind;
@@ -17,6 +18,7 @@ import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -40,7 +42,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v2";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v3";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;
@@ -129,46 +131,28 @@ public class LocalDocsFileIngestionProcessor {
                     failureFactory.failure(file, "file-marker-read", markerReadException));
         }
 
-        boolean unchangedByFingerprint = priorIngestionRecord
-                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == fileSizeBytes
-                        && ingestionRecord.lastModifiedMillis() == lastModifiedMillis
-                        && provenanceAwareIngestionFingerprint.equals(ingestionRecord.ingestionFingerprint())
-                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
-                        && collectionName.equals(ingestionRecord.collectionName()))
-                .orElse(false);
-
-        if (unchangedByFingerprint) {
-            try {
-                long storedPointCount = storage.hybridVector().countPointsForUrl(collectionKind, url);
-                int expectedChunkCount = priorIngestionRecord
-                        .map(ingestionRecord -> ingestionRecord.chunkHashes().size())
-                        .orElse(0);
-                boolean sufficientPointCoverage = expectedChunkCount <= 0 || storedPointCount >= expectedChunkCount;
-                if (storedPointCount > 0 && sufficientPointCoverage) {
-                    INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
-                    return LocalDocsFileOutcome.skippedFile();
-                }
-            } catch (RuntimeException consistencyException) {
-                return LocalDocsFileOutcome.failedFile(
-                        failureFactory.failure(file, "qdrant-consistency-check", consistencyException));
-            }
-            INDEXING_LOG.warn("[INDEXING] Marker exists but Qdrant has no points for URL; forcing reindex");
+        MarkerContext markerContext = new MarkerContext(
+                file,
+                url,
+                fileSizeBytes,
+                lastModifiedMillis,
+                provenanceAwareIngestionFingerprint,
+                collectionKind,
+                collectionName,
+                priorIngestionRecord);
+        ReindexDecision markerDecision = inspectExistingMarker(markerContext);
+        if (markerDecision.terminalOutcome().isPresent()) {
+            return markerDecision.terminalOutcome().orElseThrow();
         }
 
-        boolean requiresFullReindex = priorIngestionRecord.isPresent() && !unchangedByFingerprint;
-        if (requiresFullReindex) {
-            try {
-                prunePreviouslyIngestedFileStrict(url, priorIngestionRecord.orElseThrow());
-            } catch (IOException ioException) {
-                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-local", ioException));
-            } catch (RuntimeException runtimeException) {
-                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-runtime", runtimeException));
-            }
-        }
+        boolean requiresFullReindex = markerDecision.requiresFullReindex();
 
         String title;
         String bodyText = "";
         String packageName;
+        boolean isJavaApiPage = JavaPackageExtractor.isJavaApiUrl(url);
+        boolean excludedJavaApiPage = false;
+        List<ChunkProcessingService.JavaApiPageSegment> javaApiPageSegments = List.of();
 
         if (fileName.endsWith(".pdf")) {
             try {
@@ -192,9 +176,16 @@ public class LocalDocsFileIngestionProcessor {
                 String html = fileOps.readTextFile(file);
                 parsedDocument = Jsoup.parse(html);
                 title = Optional.ofNullable(parsedDocument.title()).orElse("");
-                bodyText = JavaPackageExtractor.isJavaApiUrl(url)
-                        ? htmlExtractor.extractJavaApiContent(parsedDocument)
-                        : htmlExtractor.extractCleanContent(parsedDocument);
+                if (isJavaApiPage) {
+                    JavaApiPageExtraction javaApiPageExtraction = htmlExtractor.extractJavaApiPage(parsedDocument);
+                    excludedJavaApiPage = javaApiPageExtraction.excluded();
+                    bodyText = javaApiPageExtraction.combinedText();
+                    if (!excludedJavaApiPage) {
+                        javaApiPageSegments = segmentsForJavaApiPage(javaApiPageExtraction);
+                    }
+                } else {
+                    bodyText = htmlExtractor.extractCleanContent(parsedDocument);
+                }
                 packageName = JavaPackageExtractor.extractPackage(url, bodyText);
             } catch (IOException htmlReadException) {
                 log.error(
@@ -203,26 +194,69 @@ public class LocalDocsFileIngestionProcessor {
                 return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "html-read", htmlReadException));
             }
 
-            var contentGuard = fileContentServices.contentGuard();
-            GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
-            if (!guardDecision.acceptable()) {
-                try {
-                    var quarantineService = fileContentServices.quarantine();
-                    IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(file);
-                    INDEXING_LOG.warn("[INDEXING] Content guard rejected file and copied it to quarantine");
-                    return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                            file.toString(),
-                            "content-guard",
-                            "quarantine copy " + quarantineCopy.quarantined() + ": "
-                                    + guardDecision.rejectionReason()));
-                } catch (IOException quarantineException) {
-                    log.warn(
-                            "Failed to quarantine invalid content (exception type: {})",
-                            quarantineException.getClass().getSimpleName());
-                    return LocalDocsFileOutcome.failedFile(
-                            failureFactory.failure(file, "content-guard", quarantineException));
+            if (!excludedJavaApiPage) {
+                var contentGuard = fileContentServices.contentGuard();
+                GuardDecision guardDecision = contentGuard.evaluate(new GuardInput(bodyText, parsedDocument));
+                if (!guardDecision.acceptable()) {
+                    try {
+                        var quarantineService = fileContentServices.quarantine();
+                        IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(file);
+                        INDEXING_LOG.warn("[INDEXING] Content guard rejected file and copied it to quarantine");
+                        return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
+                                file.toString(),
+                                "content-guard",
+                                "quarantine copy " + quarantineCopy.quarantined() + ": "
+                                        + guardDecision.rejectionReason()));
+                    } catch (IOException quarantineException) {
+                        log.warn(
+                                "Failed to quarantine invalid content (exception type: {})",
+                                quarantineException.getClass().getSimpleName());
+                        return LocalDocsFileOutcome.failedFile(
+                                failureFactory.failure(file, "content-guard", quarantineException));
+                    }
                 }
             }
+        }
+
+        if (priorIngestionRecord.isEmpty()) {
+            ReindexDecision unmarkedVectorDecision = inspectUnmarkedVectors(file, url);
+            if (unmarkedVectorDecision.terminalOutcome().isPresent()) {
+                return unmarkedVectorDecision.terminalOutcome().orElseThrow();
+            }
+            requiresFullReindex = unmarkedVectorDecision.requiresFullReindex();
+        }
+
+        List<String> supersededCollectionNames =
+                requiresFullReindex ? supersededCollectionNames(collectionName, priorIngestionRecord) : List.of();
+
+        if (excludedJavaApiPage) {
+            try {
+                if (requiresFullReindex) {
+                    storage.hybridVector().deleteByUrl(collectionKind, url);
+                    ingestedFilePruneService.pruneObsoleteStateAfterReplacement(
+                            supersededCollectionNames, url, priorIngestionRecord.orElse(null), List.of());
+                }
+            } catch (IOException pruneException) {
+                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-local", pruneException));
+            } catch (RuntimeException pruneException) {
+                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-runtime", pruneException));
+            }
+            try {
+                markFileIngested(
+                        url,
+                        new FileIngestionRecord(
+                                fileSizeBytes,
+                                lastModifiedMillis,
+                                provenanceAwareIngestionFingerprint,
+                                LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                                collectionName,
+                                List.of()));
+            } catch (RuntimeException markerTransitionException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(file, "marker-transition", markerTransitionException));
+            }
+            INDEXING_LOG.info("[INDEXING] Excluded Java API class-use page");
+            return LocalDocsFileOutcome.skippedFile();
         }
 
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
@@ -232,6 +266,12 @@ public class LocalDocsFileIngestionProcessor {
                 chunkingOutcome = requiresFullReindex
                         ? chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName)
                         : chunkProcessor.processPdfAndStoreWithPages(file, url, title, packageName);
+            } else if (isJavaApiPage) {
+                ChunkProcessingService.JavaApiPage extractedJavaApiPage =
+                        new ChunkProcessingService.JavaApiPage(url, title, packageName, javaApiPageSegments);
+                chunkingOutcome = requiresFullReindex
+                        ? chunkProcessor.processAndStoreJavaApiPageForce(extractedJavaApiPage)
+                        : chunkProcessor.processAndStoreJavaApiPage(extractedJavaApiPage);
             } else {
                 chunkingOutcome = requiresFullReindex
                         ? chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName)
@@ -247,41 +287,43 @@ public class LocalDocsFileIngestionProcessor {
         List<Document> documents = chunkingOutcome.documents();
         if (!documents.isEmpty()) {
             applyProvenanceMetadata(documents, provenance);
-            return processDocuments(
-                    collectionKind,
-                    collectionName,
-                    file,
-                    url,
-                    fileSizeBytes,
-                    lastModifiedMillis,
-                    provenanceAwareIngestionFingerprint,
+            return processDocuments(new DocumentProcessingRequest(
+                    markerContext,
+                    requiresFullReindex,
+                    supersededCollectionNames,
                     documents,
                     chunkingOutcome.allChunkHashes(),
-                    fileStartMillis);
+                    fileStartMillis));
         }
         if (chunkingOutcome.skippedAllChunks()) {
             try {
-                long storedPointCount = storage.hybridVector().countPointsForUrl(collectionKind, url);
-                long expectedChunkCount = chunkingOutcome.allChunkHashes().size();
-                if (storedPointCount < expectedChunkCount) {
+                boolean hasExactPointIds = storage.hybridVector()
+                        .hasExactPointIdsForUrl(
+                                collectionKind, url, expectedPointUuids(chunkingOutcome.allChunkHashes()));
+                if (!hasExactPointIds) {
                     INDEXING_LOG.warn(
-                            "[INDEXING] Hash markers exist but Qdrant has insufficient points for URL; forcing reindex");
-                    ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
-                            forceChunking(file, fileName, bodyText, url, title, packageName);
+                            "[INDEXING] Hash markers exist but Qdrant point identities differ; forcing reindex");
+                    ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome;
+                    if (fileName.endsWith(".pdf")) {
+                        forcedChunkingOutcome =
+                                chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName);
+                    } else if (isJavaApiPage) {
+                        forcedChunkingOutcome = chunkProcessor.processAndStoreJavaApiPageForce(
+                                new ChunkProcessingService.JavaApiPage(url, title, packageName, javaApiPageSegments));
+                    } else {
+                        forcedChunkingOutcome =
+                                chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName);
+                    }
                     List<Document> forcedDocuments = forcedChunkingOutcome.documents();
                     if (!forcedDocuments.isEmpty()) {
                         applyProvenanceMetadata(forcedDocuments, provenance);
-                        return processDocuments(
-                                collectionKind,
-                                collectionName,
-                                file,
-                                url,
-                                fileSizeBytes,
-                                lastModifiedMillis,
-                                provenanceAwareIngestionFingerprint,
+                        return processDocuments(new DocumentProcessingRequest(
+                                markerContext,
+                                true,
+                                supersededCollectionNames(collectionName, priorIngestionRecord),
                                 forcedDocuments,
                                 forcedChunkingOutcome.allChunkHashes(),
-                                fileStartMillis);
+                                fileStartMillis));
                     }
                     if (forcedChunkingOutcome.generatedNoChunks()) {
                         return LocalDocsFileOutcome.failedFile(
@@ -316,43 +358,174 @@ public class LocalDocsFileIngestionProcessor {
                 new IngestionLocalFailure(file.toString(), "empty-document", "No chunks generated"));
     }
 
-    private void prunePreviouslyIngestedFileStrict(String url, FileIngestionRecord priorIngestionRecord)
-            throws IOException {
-        if (priorIngestionRecord.hasCollectionIdentity()) {
-            ingestedFilePruneService.pruneCollectionFileStrict(
-                    priorIngestionRecord.collectionName(), url, priorIngestionRecord);
-            return;
+    private ReindexDecision inspectExistingMarker(MarkerContext markerContext) {
+        Optional<FileIngestionRecord> priorIngestionRecord = markerContext.priorIngestionRecord();
+        boolean unchangedByFingerprint = priorIngestionRecord
+                .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == markerContext.fileSizeBytes()
+                        && ingestionRecord.lastModifiedMillis() == markerContext.lastModifiedMillis()
+                        && markerContext.ingestionFingerprint().equals(ingestionRecord.ingestionFingerprint())
+                        && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion())
+                        && markerContext.collectionName().equals(ingestionRecord.collectionName()))
+                .orElse(false);
+        if (!unchangedByFingerprint) {
+            return ReindexDecision.continueWith(priorIngestionRecord.isPresent());
         }
-        List<String> governedCollectionNames = Arrays.stream(QdrantCollectionKind.values())
-                .map(storage.hybridVector()::resolveCollectionName)
-                .toList();
-        ingestedFilePruneService.pruneCollectionsFileStrict(governedCollectionNames, url, priorIngestionRecord);
+
+        try {
+            List<String> expectedChunkHashes =
+                    priorIngestionRecord.orElseThrow().chunkHashes();
+            boolean hasExactPointIds = storage.hybridVector()
+                    .hasExactPointIdsForUrl(
+                            markerContext.collectionKind(),
+                            markerContext.url(),
+                            expectedPointUuids(expectedChunkHashes));
+            if (hasExactPointIds && expectedChunkHashes.isEmpty()) {
+                INDEXING_LOG.debug("[INDEXING] Skipping unchanged excluded Java API page");
+                return ReindexDecision.terminal(LocalDocsFileOutcome.skippedFile());
+            }
+            if (hasExactPointIds) {
+                INDEXING_LOG.debug("[INDEXING] Skipping unchanged file (already ingested)");
+                return ReindexDecision.terminal(LocalDocsFileOutcome.skippedFile());
+            }
+            INDEXING_LOG.warn("[INDEXING] Marker and Qdrant point identities differ; forcing safe replacement");
+            return ReindexDecision.continueWith(true);
+        } catch (RuntimeException consistencyException) {
+            return ReindexDecision.terminal(LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "qdrant-consistency-check", consistencyException)));
+        }
     }
 
-    private LocalDocsFileOutcome processDocuments(
-            QdrantCollectionKind collectionKind,
-            String collectionName,
+    private ReindexDecision inspectUnmarkedVectors(Path file, String url) {
+        try {
+            List<String> governedCollectionNames = governedCollectionNames();
+            long unmarkedPointCount = 0;
+            for (String governedCollectionName : governedCollectionNames) {
+                unmarkedPointCount += storage.hybridVector().countPointsForUrl(governedCollectionName, url);
+            }
+            if (unmarkedPointCount == 0) {
+                return ReindexDecision.continueWith(false);
+            }
+            INDEXING_LOG.warn(
+                    "[INDEXING] Found {} Qdrant points without a file marker; forcing safe replacement",
+                    unmarkedPointCount);
+            return ReindexDecision.continueWith(true);
+        } catch (RuntimeException consistencyException) {
+            return ReindexDecision.terminal(LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(file, "qdrant-consistency-check", consistencyException)));
+        }
+    }
+
+    private List<String> supersededCollectionNames(
+            String currentCollectionName, Optional<FileIngestionRecord> priorIngestionRecord) {
+        Optional<String> priorCollectionName = priorIngestionRecord
+                .filter(FileIngestionRecord::hasCollectionIdentity)
+                .map(FileIngestionRecord::collectionName);
+        if (priorCollectionName.isPresent()) {
+            return priorCollectionName
+                    .filter(collectionName -> !collectionName.equals(currentCollectionName))
+                    .map(List::of)
+                    .orElseGet(List::of);
+        }
+        return governedCollectionNames().stream()
+                .filter(collectionName -> !collectionName.equals(currentCollectionName))
+                .toList();
+    }
+
+    private List<String> expectedPointUuids(List<String> chunkHashes) {
+        return chunkHashes.stream().map(storage.hasher()::uuidFromHash).toList();
+    }
+
+    private List<String> governedCollectionNames() {
+        return Arrays.stream(QdrantCollectionKind.values())
+                .map(storage.hybridVector()::resolveCollectionName)
+                .distinct()
+                .toList();
+    }
+
+    private record MarkerContext(
             Path file,
             String url,
             long fileSizeBytes,
             long lastModifiedMillis,
             String ingestionFingerprint,
+            QdrantCollectionKind collectionKind,
+            String collectionName,
+            Optional<FileIngestionRecord> priorIngestionRecord) {}
+
+    private record ReindexDecision(boolean requiresFullReindex, Optional<LocalDocsFileOutcome> terminalOutcome) {
+
+        private ReindexDecision {
+            terminalOutcome = Objects.requireNonNull(terminalOutcome, "terminalOutcome");
+            if (requiresFullReindex && terminalOutcome.isPresent()) {
+                throw new IllegalArgumentException("A terminal outcome cannot require a reindex");
+            }
+        }
+
+        private static ReindexDecision continueWith(boolean requiresFullReindex) {
+            return new ReindexDecision(requiresFullReindex, Optional.empty());
+        }
+
+        private static ReindexDecision terminal(LocalDocsFileOutcome terminalOutcome) {
+            return new ReindexDecision(false, Optional.of(Objects.requireNonNull(terminalOutcome, "terminalOutcome")));
+        }
+    }
+
+    private record DocumentProcessingRequest(
+            MarkerContext markerContext,
+            boolean requiresFullReindex,
+            List<String> supersededCollectionNames,
             List<Document> documents,
             List<String> allChunkHashes,
             long fileStartMillis) {
+
+        private DocumentProcessingRequest {
+            markerContext = Objects.requireNonNull(markerContext, "markerContext");
+            supersededCollectionNames =
+                    List.copyOf(Objects.requireNonNull(supersededCollectionNames, "supersededCollectionNames"));
+            documents = List.copyOf(Objects.requireNonNull(documents, "documents"));
+            allChunkHashes = List.copyOf(Objects.requireNonNull(allChunkHashes, "allChunkHashes"));
+        }
+    }
+
+    private LocalDocsFileOutcome processDocuments(DocumentProcessingRequest processingRequest) {
+        MarkerContext markerContext = processingRequest.markerContext();
+        List<Document> documents = processingRequest.documents();
         INDEXING_LOG.info("[INDEXING] Processing file with {} chunks", documents.size());
 
         try {
-            storeDocumentsWithRetry(collectionKind, documents);
+            storeDocuments(
+                    markerContext.collectionKind(),
+                    markerContext.url(),
+                    documents,
+                    processingRequest.requiresFullReindex());
         } catch (EmbeddingServiceUnavailableException embeddingException) {
             log.error(
                     "Embedding service unavailable during upsert (exception type: {})",
                     embeddingException.getClass().getSimpleName());
             return LocalDocsFileOutcome.failedFile(
-                    failureFactory.failure(file, "embedding-unavailable", embeddingException));
+                    failureFactory.failure(markerContext.file(), "embedding-unavailable", embeddingException));
+        } catch (RuntimeException vectorStorageException) {
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "qdrant-replacement", vectorStorageException));
         }
 
-        long totalDuration = System.currentTimeMillis() - fileStartMillis;
+        if (processingRequest.requiresFullReindex()) {
+            try {
+                ingestedFilePruneService.pruneObsoleteStateAfterReplacement(
+                        processingRequest.supersededCollectionNames(),
+                        markerContext.url(),
+                        markerContext.priorIngestionRecord().orElse(null),
+                        processingRequest.allChunkHashes());
+            } catch (IOException localCleanupException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(markerContext.file(), "prune-local", localCleanupException));
+            } catch (RuntimeException replacementCleanupException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(markerContext.file(), "prune-runtime", replacementCleanupException));
+            }
+        }
+
+        long totalDuration = System.currentTimeMillis() - processingRequest.fileStartMillis();
         String formattedPercent = progressTracker.formatPercent();
         INDEXING_LOG.info(
                 "[INDEXING] Completed processing {}/{} chunks to Qdrant in {}ms (end-to-end) ({})",
@@ -361,34 +534,34 @@ public class LocalDocsFileIngestionProcessor {
                 totalDuration,
                 formattedPercent);
 
-        markDocumentsIngested(documents);
-        markFileIngested(
-                url,
-                new FileIngestionRecord(
-                        fileSizeBytes,
-                        lastModifiedMillis,
-                        ingestionFingerprint,
-                        LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
-                        collectionName,
-                        allChunkHashes));
+        try {
+            markDocumentsIngested(documents);
+            markFileIngested(
+                    markerContext.url(),
+                    new FileIngestionRecord(
+                            markerContext.fileSizeBytes(),
+                            markerContext.lastModifiedMillis(),
+                            markerContext.ingestionFingerprint(),
+                            LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                            markerContext.collectionName(),
+                            processingRequest.allChunkHashes()));
+        } catch (RuntimeException markerTransitionException) {
+            return LocalDocsFileOutcome.failedFile(
+                    failureFactory.failure(markerContext.file(), "marker-transition", markerTransitionException));
+        }
 
         return LocalDocsFileOutcome.processedFile();
     }
 
-    private ChunkProcessingService.ChunkProcessingOutcome forceChunking(
-            Path file, String fileName, String bodyText, String url, String title, String packageName)
-            throws IOException {
-        var chunkProcessor = storage.chunks();
-        if (fileName.endsWith(".pdf")) {
-            return chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName);
-        }
-        return chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName);
-    }
-
-    private void storeDocumentsWithRetry(QdrantCollectionKind collectionKind, List<Document> documents) {
+    private void storeDocuments(
+            QdrantCollectionKind collectionKind, String sourceUrl, List<Document> documents, boolean replaceExisting) {
         var hybridVector = storage.hybridVector();
         long startTime = System.currentTimeMillis();
-        hybridVector.upsert(collectionKind, documents);
+        if (replaceExisting) {
+            hybridVector.replaceUrlDocuments(collectionKind, sourceUrl, documents);
+        } else {
+            hybridVector.upsert(collectionKind, documents);
+        }
         long duration = System.currentTimeMillis() - startTime;
         String formattedPercent = progressTracker.formatPercent();
         INDEXING_LOG.info(
@@ -425,6 +598,19 @@ public class LocalDocsFileIngestionProcessor {
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to mark file as ingested: " + url, exception);
         }
+    }
+
+    private static List<ChunkProcessingService.JavaApiPageSegment> segmentsForJavaApiPage(
+            JavaApiPageExtraction javaApiPageExtraction) {
+        List<ChunkProcessingService.JavaApiPageSegment> segments = new ArrayList<>();
+        if (!javaApiPageExtraction.overviewText().isBlank()) {
+            segments.add(ChunkProcessingService.JavaApiPageSegment.overview(javaApiPageExtraction.overviewText()));
+        }
+        for (var anchoredSection : javaApiPageExtraction.anchoredSections()) {
+            segments.add(
+                    ChunkProcessingService.JavaApiPageSegment.member(anchoredSection.text(), anchoredSection.anchor()));
+        }
+        return List.copyOf(segments);
     }
 
     private static void applyProvenanceMetadata(List<Document> documents, IngestionProvenance provenance) {
