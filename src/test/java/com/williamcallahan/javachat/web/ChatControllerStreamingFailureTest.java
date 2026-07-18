@@ -4,6 +4,7 @@ import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_TEXT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
@@ -48,6 +49,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
@@ -57,6 +60,7 @@ import reactor.core.publisher.Operators;
 import reactor.test.StepVerifier;
 
 /** Verifies the chat request boundary does not duplicate the service-owned terminal stream alert. */
+@JsonTest
 class ChatControllerStreamingFailureTest {
     private static final String SESSION_ID = "session\nid";
     private static final String USER_QUERY = "explain sealed classes";
@@ -65,6 +69,10 @@ class ChatControllerStreamingFailureTest {
     private final Logger pipelineLogger = (Logger) LoggerFactory.getLogger("PIPELINE");
     private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
     private final Logger reactorOperatorsLogger = (Logger) LoggerFactory.getLogger(Operators.class);
+
+    @Autowired
+    ObjectMapper objectMapper;
+
     private ExpectedLogEvents pipelineLogEvents;
     private ExpectedLogEvents reactorHookLogEvents;
     private ExpectedLogEvents reactorOperatorLogEvents;
@@ -140,7 +148,7 @@ class ChatControllerStreamingFailureTest {
                 .orElseThrow();
         String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
         SseSupport.SseEventPayload providerCooldownEvent =
-                new ObjectMapper().readValue(serializedError, SseSupport.SseEventPayload.class);
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
         assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, providerCooldownEvent.message());
         assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, providerCooldownEvent.details());
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, providerCooldownEvent.code());
@@ -161,7 +169,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(new ObjectMapper()),
+                new SseSupport(objectMapper),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
 
@@ -172,10 +180,9 @@ class ChatControllerStreamingFailureTest {
                 .assertNext(streamEvent -> {
                     assertEquals(EVENT_STATUS, streamEvent.event());
                     assertDoesNotThrow(() -> {
-                        SseSupport.SseEventPayload preparationStatus = new ObjectMapper()
-                                .readValue(
-                                        Objects.requireNonNull(streamEvent.data(), "preparation status event data"),
-                                        SseSupport.SseEventPayload.class);
+                        SseSupport.SseEventPayload preparationStatus = objectMapper.readValue(
+                                Objects.requireNonNull(streamEvent.data(), "preparation status event data"),
+                                SseSupport.SseEventPayload.class);
                         assertEquals(STATUS_CODE_STREAM_PREPARING, preparationStatus.code());
                         assertEquals(STATUS_STAGE_RETRIEVAL, preparationStatus.stage());
                     });
@@ -184,6 +191,44 @@ class ChatControllerStreamingFailureTest {
                 .verify();
 
         verifyNoInteractions(chatMemoryService, chatService, streamingService, retrievalService);
+    }
+
+    @Test
+    void unavailableProviderEmitsPreparationStatusBeforeTheFatalConfigurationError() throws JsonProcessingException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                new SseSupport(objectMapper),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        when(streamingService.isAvailable()).thenReturn(false);
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "chat stream events");
+
+        assertEquals(2, streamEvents.size());
+        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
+        ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
+        assertEquals(EVENT_ERROR, terminalErrorEvent.event());
+        SseSupport.SseEventPayload terminalError = objectMapper.readValue(
+                Objects.requireNonNull(terminalErrorEvent.data(), "terminal error data"),
+                SseSupport.SseEventPayload.class);
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_MESSAGE, terminalError.message());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_DETAILS, terminalError.details());
+        assertEquals(STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR, terminalError.code());
+        assertEquals(Boolean.FALSE, terminalError.retryable());
+        assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
+        verify(chatMemoryService, never()).getHistory(SESSION_ID);
+        verifyNoInteractions(chatService, retrievalService);
     }
 
     @Test
@@ -197,7 +242,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(new ObjectMapper()),
+                new SseSupport(objectMapper),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
@@ -225,10 +270,9 @@ class ChatControllerStreamingFailureTest {
         assertTrue(streamEvents.stream().anyMatch(streamEvent -> EVENT_TEXT.equals(streamEvent.event())));
         ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
         assertEquals(EVENT_ERROR, terminalErrorEvent.event());
-        SseSupport.SseEventPayload terminalError = new ObjectMapper()
-                .readValue(
-                        Objects.requireNonNull(terminalErrorEvent.data(), "terminal error event data"),
-                        SseSupport.SseEventPayload.class);
+        SseSupport.SseEventPayload terminalError = objectMapper.readValue(
+                Objects.requireNonNull(terminalErrorEvent.data(), "terminal error event data"),
+                SseSupport.SseEventPayload.class);
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
         assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
@@ -245,7 +289,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(new ObjectMapper()),
+                new SseSupport(objectMapper),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
 

@@ -45,6 +45,20 @@ public class SseSupport {
     /** Safe retry guidance for configured-provider admission cooldowns. */
     static final String CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS = "Your request can be retried after a short wait.";
 
+    /** Stable client-facing message for a missing or invalid configured-provider client. */
+    static final String CONFIGURED_PROVIDER_CONFIGURATION_MESSAGE = "The configured AI provider is not available.";
+
+    /** Safe guidance for a configured-provider client that cannot start. */
+    static final String CONFIGURED_PROVIDER_CONFIGURATION_DETAILS =
+            "The service configuration must be corrected before streaming can continue.";
+
+    /** Details shared by every partial citation-conversion status event. */
+    private static final String CITATION_PARTIAL_FAILURE_DETAILS = "Citations could not be loaded";
+
+    /** Message template shared by every partial citation-conversion status event. */
+    private static final String CITATION_PARTIAL_FAILURE_MESSAGE_TEMPLATE =
+            "Some citations could not be loaded (%d failed)";
+
     private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
             Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
     private static final Counter DROPPED_HEARTBEAT_COUNTER =
@@ -281,17 +295,22 @@ public class SseSupport {
     }
 
     /**
-     * Creates a citation-partial-failure status event flux if a warning message is present.
+     * Creates the canonical non-retryable citation-conversion warning when conversions partially fail.
      *
-     * @param citationWarning user-facing warning message, or null if no warning
-     * @return flux with a single status event, or empty if no warning
+     * @param failedCitationConversionCount number of source documents that could not become citations
+     * @return flux with a single status event for failures, or empty when every citation converted
+     * @throws IllegalArgumentException when the failure count is negative
      */
-    public Flux<ServerSentEvent<String>> citationWarningStatusFlux(String citationWarning) {
-        if (citationWarning == null) {
+    public Flux<ServerSentEvent<String>> citationPartialFailureStatusFlux(int failedCitationConversionCount) {
+        if (failedCitationConversionCount == 0) {
             return Flux.empty();
         }
+        if (failedCitationConversionCount < 0) {
+            throw new IllegalArgumentException("Failed citation conversion count cannot be negative");
+        }
+        String citationWarning = CITATION_PARTIAL_FAILURE_MESSAGE_TEMPLATE.formatted(failedCitationConversionCount);
         return Flux.just(statusEvent(SseEventPayload.builder(citationWarning)
-                .details("Citations could not be loaded")
+                .details(CITATION_PARTIAL_FAILURE_DETAILS)
                 .code(STATUS_CODE_CITATION_PARTIAL_FAILURE)
                 .retryable(false)
                 .stage(STATUS_STAGE_CITATION)
@@ -328,6 +347,19 @@ public class SseSupport {
      */
     public Flux<ServerSentEvent<String>> configuredProviderUnavailableError() {
         return streamErrorEvent(CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, true);
+    }
+
+    /**
+     * Creates the stable fatal error used when no configured-provider client is available.
+     *
+     * <p>This configuration failure is distinct from an admission cooldown: clients must not retry
+     * it automatically because a deployment correction is required first.</p>
+     *
+     * @return a non-retryable terminal SSE error event
+     */
+    public Flux<ServerSentEvent<String>> configuredProviderConfigurationError() {
+        return streamErrorEvent(
+                CONFIGURED_PROVIDER_CONFIGURATION_MESSAGE, CONFIGURED_PROVIDER_CONFIGURATION_DETAILS, false);
     }
 
     /** Preserves text-chunk whitespace through JSON serialization. */

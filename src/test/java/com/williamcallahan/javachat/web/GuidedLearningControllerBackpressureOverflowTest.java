@@ -29,6 +29,7 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
@@ -39,6 +40,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
@@ -46,6 +49,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /** Verifies guided-chat persistence is skipped when SSE backpressure terminates a partial answer. */
+@JsonTest
 class GuidedLearningControllerBackpressureOverflowTest {
     private static final String SESSION_ID = "guided-session";
     private static final String LESSON_SLUG = "sealed-classes";
@@ -55,6 +59,9 @@ class GuidedLearningControllerBackpressureOverflowTest {
     private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
     private ExpectedLogEvents controllerLogEvents;
     private ExpectedLogEvents reactorHooksLogEvents;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @BeforeEach
     void captureExpectedOverflowLog() {
@@ -79,7 +86,7 @@ class GuidedLearningControllerBackpressureOverflowTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(new ObjectMapper()),
+                new SseSupport(objectMapper),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
         Flux<String> partialAnswerThenOverflow = Flux.just("partial guided answer")
@@ -91,7 +98,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(
                         Mono.just(new StreamingResult(partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI)));
@@ -107,10 +115,9 @@ class GuidedLearningControllerBackpressureOverflowTest {
         assertTrue(streamEvents.stream().anyMatch(streamEvent -> EVENT_TEXT.equals(streamEvent.event())));
         ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
         assertEquals(EVENT_ERROR, terminalErrorEvent.event());
-        SseSupport.SseEventPayload terminalError = new ObjectMapper()
-                .readValue(
-                        Objects.requireNonNull(terminalErrorEvent.data(), "terminal error event data"),
-                        SseSupport.SseEventPayload.class);
+        SseSupport.SseEventPayload terminalError = objectMapper.readValue(
+                Objects.requireNonNull(terminalErrorEvent.data(), "terminal error event data"),
+                SseSupport.SseEventPayload.class);
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
         assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());

@@ -37,8 +37,19 @@ public class GuidedTOCProvider {
     /**
      * Returns an immutable lesson snapshot, loading the table of contents lazily on first access.
      */
-    public synchronized List<GuidedLesson> getTOC() {
-        if (tocLoaded) return immutableLessonSnapshots(cachedLessons);
+    public List<GuidedLesson> getTOC() {
+        if (tocLoaded) {
+            return immutableLessonSnapshots(cachedLessons);
+        }
+        synchronized (this) {
+            if (!tocLoaded) {
+                loadToc();
+            }
+            return immutableLessonSnapshots(cachedLessons);
+        }
+    }
+
+    private void loadToc() {
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
@@ -52,7 +63,6 @@ public class GuidedTOCProvider {
             throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
         }
         tocLoaded = true;
-        return immutableLessonSnapshots(cachedLessons);
     }
 
     /**

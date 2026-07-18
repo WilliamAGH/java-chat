@@ -21,11 +21,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import reactor.test.subscriber.TestSubscriber;
 
 /** Verifies curated classpath lesson content remains the single source for guided lesson streaming. */
+@JsonTest
 class GuidedLessonCuratedContentTest {
     private static final String CURATED_LESSON_RESOURCE_DIRECTORY = "guided/lessons/";
     private static final String CURATED_LESSON_RESOURCE_PATTERN = "classpath*:guided/lessons/*.md";
@@ -33,6 +36,9 @@ class GuidedLessonCuratedContentTest {
     private static final String MISSING_CURATED_LESSON_SLUG = "missing-curated-lesson";
     private static final Duration SLOW_SUBSCRIBER_COMPLETION_TIMEOUT = Duration.ofSeconds(1);
     private static final String TEST_JDK_VERSION = "25";
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @Test
     void tocAndCuratedClasspathResourcesHaveExactSlugParity() throws IOException {
@@ -118,8 +124,8 @@ class GuidedLessonCuratedContentTest {
                 missingResourceFailure.getMessage());
     }
 
-    private static GuidedTOCProvider curatedTocProvider() {
-        return new GuidedTOCProvider(new ObjectMapper());
+    private GuidedTOCProvider curatedTocProvider() {
+        return new GuidedTOCProvider(objectMapper);
     }
 
     private static GuidedLearningService curatedLessonService(GuidedTOCProvider tocProvider) {

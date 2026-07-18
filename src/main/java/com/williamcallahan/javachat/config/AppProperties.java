@@ -589,6 +589,7 @@ public class AppProperties {
     public static class Llm {
         private static final double MIN_TEMPERATURE = 0.0;
         private static final double MAX_TEMPERATURE = 2.0;
+        private static final long MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 86_400L;
 
         private double temperature;
         private double rerankerTemperature;
@@ -658,6 +659,26 @@ public class AppProperties {
             this.configuredProviderBackoffSeconds = configuredProviderBackoffSeconds;
         }
 
+        /**
+         * Returns the validated configured-provider backoff duration.
+         *
+         * <p>Centralizing the operational bound here prevents downstream failure handling from
+         * discovering an unusable duration only after a provider outage begins.</p>
+         *
+         * @return configured-provider backoff duration
+         * @throws IllegalArgumentException when the configured duration is outside the supported range
+         */
+        public Duration configuredProviderBackoff() {
+            if (configuredProviderBackoffSeconds <= 0
+                    || configuredProviderBackoffSeconds > MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS) {
+                throw new IllegalArgumentException("app.llm.configured-provider-backoff-seconds must be in range [1, "
+                        + MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS
+                        + "], got: "
+                        + configuredProviderBackoffSeconds);
+            }
+            return Duration.ofSeconds(configuredProviderBackoffSeconds);
+        }
+
         Llm validateConfiguration() {
             if (temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
                 throw new IllegalArgumentException(String.format(
@@ -687,10 +708,7 @@ public class AppProperties {
                 throw new IllegalArgumentException(
                         "app.llm.reranker-output-token-budget must be positive, got: " + rerankerOutputTokenBudget);
             }
-            if (configuredProviderBackoffSeconds <= 0) {
-                throw new IllegalArgumentException("app.llm.configured-provider-backoff-seconds must be positive, got: "
-                        + configuredProviderBackoffSeconds);
-            }
+            configuredProviderBackoff();
             return this;
         }
     }

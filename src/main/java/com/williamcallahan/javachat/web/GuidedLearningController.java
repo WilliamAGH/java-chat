@@ -11,6 +11,7 @@ import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavail
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
@@ -255,15 +256,14 @@ public class GuidedLearningController extends BaseController {
                 request.userQuery().orElseThrow(() -> new IllegalArgumentException("User query is required"));
         String canonicalLessonSlug = listedLesson.getSlug();
 
-        if (!openAIStreamingService.isAvailable()) {
-            log.warn("OpenAI streaming service unavailable for guided session");
-            return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
-        }
-
         sseSupport.configureStreamingHeaders(response);
-        return Flux.concat(
-                sseSupport.responsePreparationStatus(),
-                streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug));
+        return Flux.concat(sseSupport.responsePreparationStatus(), Flux.defer(() -> {
+            if (!openAIStreamingService.isAvailable()) {
+                log.warn("OpenAI streaming service unavailable for guided session");
+                return sseSupport.configuredProviderConfigurationError();
+            }
+            return streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug);
+        }));
     }
 
     /**
@@ -282,8 +282,9 @@ public class GuidedLearningController extends BaseController {
                     GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                             guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-                    List<Citation> finalCitations =
-                            guidedService.citationsForContextDocuments(promptOutcome.lessonContextDocuments());
+                    RetrievalService.CitationOutcome citationOutcome =
+                            guidedService.citationOutcomeForContextDocuments(promptOutcome.lessonContextDocuments());
+                    List<Citation> finalCitations = citationOutcome.citations();
 
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
@@ -302,10 +303,16 @@ public class GuidedLearningController extends BaseController {
                                 Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
                                 Flux<ServerSentEvent<String>> citationEvent =
                                         Flux.just(sseSupport.citationEvent(finalCitations));
+                                Flux<ServerSentEvent<String>> statusEvents =
+                                        sseSupport.citationPartialFailureStatusFlux(
+                                                citationOutcome.failedConversionCount());
 
                                 // Start the selected-provider event before the ref-counted data stream.
                                 return Flux.concat(
-                                        Flux.just(providerEvent), Flux.merge(dataEvents, heartbeats), citationEvent);
+                                        Flux.just(providerEvent),
+                                        statusEvents,
+                                        Flux.merge(dataEvents, heartbeats),
+                                        citationEvent);
                             })
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })

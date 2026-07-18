@@ -1,21 +1,25 @@
 package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
-import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
-import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
-import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -36,7 +40,6 @@ public final class OpenAiProviderRoutingService {
 
     private static final String PROVIDER_SETTING_OPENAI = "openai";
     private static final String PROVIDER_SETTING_GITHUB_MODELS = "github_models";
-
     /**
      * Identifies the whole-call timeout message emitted by OkHttp 4.12 {@code RealCall.timeoutExit}.
      *
@@ -49,13 +52,17 @@ public final class OpenAiProviderRoutingService {
     private static final int HTTP_CONFLICT = 409;
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
     private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
 
     private final RateLimitService rateLimitService;
-    private final long configuredProviderBackoffSeconds;
+    private final Duration configuredProviderBackoff;
     private final RateLimitService.ApiProvider configuredProvider;
+    private final InstantSource instantSource;
 
-    /** Epoch millis until which the configured provider is temporarily disabled after failure. */
-    private volatile long configuredProviderBackoffUntilEpochMs;
+    /** Instant until which the configured provider is temporarily disabled after failure. */
+    private volatile Instant configuredProviderBackoffUntil;
 
     /**
      * Creates provider routing state using the configured provider and backoff values.
@@ -63,16 +70,27 @@ public final class OpenAiProviderRoutingService {
      * @param rateLimitService provider rate-limit state tracker
      * @param appProperties typed source of configured-provider backoff policy
      * @param configuredProviderSetting configured provider name
-     * @throws IllegalArgumentException when the configured provider is unsupported
+     * @throws IllegalArgumentException when the configured provider or its backoff configuration is invalid
      */
+    @Autowired
     public OpenAiProviderRoutingService(
             RateLimitService rateLimitService,
             AppProperties appProperties,
             @Value("${LLM_PRIMARY_PROVIDER:github_models}") String configuredProviderSetting) {
-        this.rateLimitService = rateLimitService;
-        this.configuredProviderBackoffSeconds = appProperties.getLlm().getConfiguredProviderBackoffSeconds();
+        this(rateLimitService, appProperties, configuredProviderSetting, InstantSource.system());
+    }
+
+    OpenAiProviderRoutingService(
+            RateLimitService rateLimitService,
+            AppProperties appProperties,
+            String configuredProviderSetting,
+            InstantSource instantSource) {
+        this.rateLimitService = Objects.requireNonNull(rateLimitService, "rateLimitService");
+        this.configuredProviderBackoff =
+                Objects.requireNonNull(appProperties, "appProperties").getLlm().configuredProviderBackoff();
         this.configuredProvider = resolveConfiguredProvider(configuredProviderSetting);
-        this.configuredProviderBackoffUntilEpochMs = 0L;
+        this.instantSource = Objects.requireNonNull(instantSource, "instantSource");
+        this.configuredProviderBackoffUntil = Instant.MIN;
     }
 
     /**
@@ -131,21 +149,7 @@ public final class OpenAiProviderRoutingService {
 
         if (throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
-            recordProviderRateLimitWhenTimingIsUsable(provider, serviceException);
-        }
-    }
-
-    private void recordProviderRateLimitWhenTimingIsUsable(
-            RateLimitService.ApiProvider provider, OpenAIServiceException serviceException) {
-        try {
             rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
-        } catch (RateLimitDecisionException rateLimitDecisionFailure) {
-            log.atWarn()
-                    .setMessage("Provider rate-limit timing could not be recorded; configured cooldown remains active")
-                    .addKeyValue("providerId", provider.ordinal())
-                    .addKeyValue(
-                            "exceptionType", rateLimitDecisionFailure.getClass().getSimpleName())
-                    .log();
         }
     }
 
@@ -156,16 +160,13 @@ public final class OpenAiProviderRoutingService {
      * @return true when the failure appears transient and retryable
      */
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
-        if (throwable == null || isCallerCancellation(throwable)) {
+        if (throwable == null || isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
             return false;
         }
         if (throwable instanceof ConfiguredProviderTemporarilyUnavailableException) {
             return true;
         }
-        if (throwable instanceof UnauthorizedException
-                || throwable instanceof PermissionDeniedException
-                || throwable instanceof RateLimitException
-                || throwable instanceof NotFoundException) {
+        if (throwable instanceof RateLimitException) {
             return false;
         }
         if (throwable instanceof OpenAIIoException
@@ -194,10 +195,10 @@ public final class OpenAiProviderRoutingService {
     }
 
     boolean shouldBackoffConfiguredProvider(Throwable throwable) {
-        if (isCallerCancellation(throwable)) {
+        if (isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
             return false;
         }
-        return isRateLimit(throwable) || throwable instanceof OpenAIIoException || isServerError(throwable);
+        return throwable instanceof OpenAIIoException || isServerError(throwable);
     }
 
     private OpenAIClient configuredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
@@ -239,10 +240,21 @@ public final class OpenAiProviderRoutingService {
                 "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received " + settingDescription + ".");
     }
 
-    private boolean isRateLimit(Throwable throwable) {
-        return throwable instanceof RateLimitException
-                || (throwable instanceof OpenAIServiceException serviceException
-                        && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS);
+    private boolean containsPermanentProviderFailure(Throwable throwable) {
+        Set<Throwable> visitedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable failureCandidate = throwable;
+        while (failureCandidate != null && visitedFailures.add(failureCandidate)) {
+            if (failureCandidate instanceof OpenAIServiceException serviceException
+                    && isPermanentProviderStatusCode(serviceException.statusCode())) {
+                return true;
+            }
+            failureCandidate = failureCandidate.getCause();
+        }
+        return false;
+    }
+
+    private static boolean isPermanentProviderStatusCode(int statusCode) {
+        return statusCode == HTTP_UNAUTHORIZED || statusCode == HTTP_FORBIDDEN || statusCode == HTTP_NOT_FOUND;
     }
 
     private boolean isServerError(Throwable throwable) {
@@ -251,8 +263,9 @@ public final class OpenAiProviderRoutingService {
     }
 
     private boolean isCallerCancellation(Throwable throwable) {
+        Set<Throwable> visitedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable cancellationCandidate = throwable;
-        while (cancellationCandidate != null) {
+        while (cancellationCandidate != null && visitedFailures.add(cancellationCandidate)) {
             if (cancellationCandidate instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
                 return true;
@@ -277,15 +290,20 @@ public final class OpenAiProviderRoutingService {
                 && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(interruptedIoException.getMessage());
     }
 
-    private boolean isConfiguredProviderInBackoff() {
-        return System.currentTimeMillis() < configuredProviderBackoffUntilEpochMs;
+    private synchronized boolean isConfiguredProviderInBackoff() {
+        return instantSource.instant().isBefore(configuredProviderBackoffUntil);
     }
 
-    private void markConfiguredProviderBackoff() {
-        long backoffEndsAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(configuredProviderBackoffSeconds);
-        this.configuredProviderBackoffUntilEpochMs = backoffEndsAt;
-        long backoffSecondsRemaining =
-                Math.max(1, TimeUnit.MILLISECONDS.toSeconds(backoffEndsAt - System.currentTimeMillis()));
+    private synchronized void markConfiguredProviderBackoff() {
+        Instant failureObservedAt = instantSource.instant();
+        Instant proposedBackoffDeadline = failureObservedAt.plus(configuredProviderBackoff);
+        if (proposedBackoffDeadline.isAfter(configuredProviderBackoffUntil)) {
+            configuredProviderBackoffUntil = proposedBackoffDeadline;
+        }
+        long backoffSecondsRemaining = Math.max(
+                1L,
+                Duration.between(failureObservedAt, configuredProviderBackoffUntil)
+                        .toSeconds());
         log.warn("Configured provider temporarily disabled for {}s due to failure", backoffSecondsRemaining);
     }
 }

@@ -27,10 +27,7 @@ class RetrievalConstraintTest {
 
     @Test
     void representsAbsentDocumentationSetsAsAnEmptyImmutableList() {
-        List<String> requestedDocSets = new ArrayList<>();
-
-        RetrievalConstraint retrievalConstraint = new RetrievalConstraint("", "", "", "", requestedDocSets);
-        requestedDocSets.add("dev-java");
+        RetrievalConstraint retrievalConstraint = RetrievalConstraint.none();
 
         assertTrue(retrievalConstraint.docSet().isEmpty());
         assertFalse(retrievalConstraint.hasServerSideConstraint());

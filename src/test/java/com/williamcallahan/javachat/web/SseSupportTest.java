@@ -1,17 +1,24 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_CITATION_PARTIAL_FAILURE;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
@@ -22,14 +29,18 @@ import reactor.test.subscriber.TestSubscriber;
 /**
  * Verifies SSE stream preparation semantics used by streaming chat controllers.
  */
+@JsonTest
 class SseSupportTest {
 
     private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
     private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
 
+    @Autowired
+    ObjectMapper objectMapper;
+
     @Test
     void prepareDataStreamPublishesAllChunksToBothSubscribers() {
-        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        SseSupport sseSupport = new SseSupport(objectMapper);
 
         List<String> upstreamChunks = List.of("```java\n", "int x = 10;\n", "```");
         List<String> consumedChunks = new CopyOnWriteArrayList<>();
@@ -54,7 +65,7 @@ class SseSupportTest {
 
     @Test
     void prepareDataStreamTerminatesWithOverflowInsteadOfDroppingCoalescedChunks() {
-        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        SseSupport sseSupport = new SseSupport(objectMapper);
         int coalescedChunkCount = (STREAM_BACKPRESSURE_BUFFER_CAPACITY * BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER) + 1;
         int rawChunkCount = coalescedChunkCount * STREAM_CHUNK_COALESCE_MAX_ITEMS;
         Flux<String> preparedStream = sseSupport.prepareDataStream(
@@ -84,7 +95,7 @@ class SseSupportTest {
 
     @Test
     void cancellingTextAndHeartbeatStreamCancelsUpstream() {
-        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        SseSupport sseSupport = new SseSupport(objectMapper);
         AtomicInteger upstreamSubscriptionCount = new AtomicInteger();
         AtomicInteger upstreamCancellationCount = new AtomicInteger();
         Flux<String> upstreamStream = Flux.<String>never()
@@ -106,7 +117,7 @@ class SseSupportTest {
 
     @Test
     void heartbeatsDoNotOverflowWhenDownstreamStartsWithZeroDemand() {
-        SseSupport sseSupport = new SseSupport(new ObjectMapper());
+        SseSupport sseSupport = new SseSupport(objectMapper);
         Flux<ServerSentEvent<String>> heartbeatStream = sseSupport.heartbeats(Flux.never());
 
         StepVerifier.withVirtualTime(() -> heartbeatStream, 0)
@@ -116,5 +127,32 @@ class SseSupportTest {
                 .assertNext(heartbeat -> assertTrue(!heartbeat.comment().isBlank()))
                 .thenCancel()
                 .verify();
+    }
+
+    @Test
+    void citationPartialFailureStatusFluxOwnsTheCanonicalNonRetryableWarning() throws JsonProcessingException {
+        SseSupport sseSupport = new SseSupport(objectMapper);
+
+        List<ServerSentEvent<String>> citationStatusEvents = Objects.requireNonNull(
+                sseSupport.citationPartialFailureStatusFlux(2).collectList().block(), "citation status events");
+
+        assertEquals(1, citationStatusEvents.size());
+        ServerSentEvent<String> citationStatusEvent = citationStatusEvents.getFirst();
+        assertEquals(EVENT_STATUS, citationStatusEvent.event());
+        SseSupport.SseEventPayload citationStatusPayload = objectMapper.readValue(
+                Objects.requireNonNull(citationStatusEvent.data(), "citation status data"),
+                SseSupport.SseEventPayload.class);
+        assertEquals("Some citations could not be loaded (2 failed)", citationStatusPayload.message());
+        assertEquals("Citations could not be loaded", citationStatusPayload.details());
+        assertEquals(STATUS_CODE_CITATION_PARTIAL_FAILURE, citationStatusPayload.code());
+        assertEquals(Boolean.FALSE, citationStatusPayload.retryable());
+        assertEquals(STATUS_STAGE_CITATION, citationStatusPayload.stage());
+    }
+
+    @Test
+    void citationPartialFailureStatusFluxEmitsNothingWhenAllCitationsConvert() {
+        SseSupport sseSupport = new SseSupport(objectMapper);
+
+        StepVerifier.create(sseSupport.citationPartialFailureStatusFlux(0)).verifyComplete();
     }
 }

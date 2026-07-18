@@ -2,6 +2,9 @@ package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_CITATION_PARTIAL_FAILURE;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_CITATION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.WebMvcConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
@@ -29,6 +34,7 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
@@ -68,6 +74,9 @@ class GuidedSseCitationEventTest {
     @Autowired
     GuidedLearningController guidedLearningController;
 
+    @Autowired
+    ObjectMapper objectMapper;
+
     @MockitoBean
     GuidedLearningService guidedLearningService;
 
@@ -98,8 +107,9 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
-        given(guidedLearningService.citationsForContextDocuments(eq(List.of(lessonContextDocument))))
-                .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
+        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+                .willReturn(new RetrievalService.CitationOutcome(
+                        List.of(new Citation("https://example.com", "Example", "", "")), 0));
 
         var asyncResult = mockMvc.perform(post("/api/guided/stream")
                         .with(csrf())
@@ -120,6 +130,56 @@ class GuidedSseCitationEventTest {
         assertTrue(
                 aggregated.contains("https://example.com"),
                 "Citation payload should include the citation URL. Response was:\n" + aggregated);
+    }
+
+    @Test
+    void guidedStreamSurfacesPartialCitationConversionWithTheCanonicalStatus() throws JsonProcessingException {
+        Document lessonContextDocument = Document.builder()
+                .id("official-guided-context")
+                .text("Official lesson context")
+                .metadata("sourceKind", "official")
+                .build();
+        given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
+        given(openAIStreamingService.isAvailable()).willReturn(true);
+        given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
+        given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .willReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+        given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
+                .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
+        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+                .willReturn(new RetrievalService.CitationOutcome(
+                        List.of(new Citation("https://example.com", "Example", "", "")), 1));
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                guidedLearningController.stream(
+                                new GuidedStreamRequest("guided:test", "intro", "Hello"), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "guided stream events");
+
+        int citationPartialFailureStatusIndex = -1;
+        int citationEventIndex = -1;
+        for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
+            ServerSentEvent<String> streamEvent = streamEvents.get(eventIndex);
+            if (EVENT_CITATION.equals(streamEvent.event())) {
+                citationEventIndex = eventIndex;
+                continue;
+            }
+            if (!EVENT_STATUS.equals(streamEvent.event())) {
+                continue;
+            }
+            SseSupport.SseEventPayload statusPayload = objectMapper.readValue(
+                    Objects.requireNonNull(streamEvent.data(), "guided status data"), SseSupport.SseEventPayload.class);
+            if (STATUS_CODE_CITATION_PARTIAL_FAILURE.equals(statusPayload.code())) {
+                citationPartialFailureStatusIndex = eventIndex;
+                assertEquals(Boolean.FALSE, statusPayload.retryable());
+                assertEquals(STATUS_STAGE_CITATION, statusPayload.stage());
+            }
+        }
+
+        assertTrue(citationPartialFailureStatusIndex >= 0, "guided stream should surface partial citation failure");
+        assertTrue(citationEventIndex > citationPartialFailureStatusIndex, "warning should precede citations");
     }
 
     @Test

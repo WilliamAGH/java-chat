@@ -200,7 +200,7 @@ public class GuidedLesson {
         if (sourceTokens.isEmpty()) {
             throw new IllegalStateException("Guided lesson " + tokenName + " cannot be empty");
         }
-        Set<String> retainedDocSets = new HashSet<>();
+        Set<String> retainedTokens = new HashSet<>();
         for (String sourceToken : sourceTokens) {
             if (sourceToken.isBlank()) {
                 throw new IllegalStateException("Guided lesson " + tokenName + " cannot contain blank tokens");
@@ -208,7 +208,7 @@ public class GuidedLesson {
             if (!sourceToken.equals(sourceToken.trim())) {
                 throw new IllegalStateException("Guided lesson " + tokenName + " tokens must be trimmed");
             }
-            if (!retainedDocSets.add(sourceToken)) {
+            if (!retainedTokens.add(sourceToken)) {
                 throw new IllegalStateException("Guided lesson " + tokenName + " cannot contain duplicate tokens");
             }
         }

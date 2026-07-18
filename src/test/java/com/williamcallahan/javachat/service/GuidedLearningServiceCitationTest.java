@@ -28,10 +28,14 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 
 /** Verifies every guided retrieval flow is grounded in its lesson-owned official source scope. */
+@JsonTest
 class GuidedLearningServiceCitationTest {
     private static final String LESSON_SLUG = "strings";
+    private static final String UNKNOWN_LESSON_SLUG = "unknown-guided-lesson";
     private static final String TEST_JDK_VERSION = "25";
     private static final String USER_QUESTION = "How does substring work?";
     private static final String OFFICIAL_SOURCE_TEXT = "String.substring returns a new string.";
@@ -39,6 +43,9 @@ class GuidedLearningServiceCitationTest {
     private static final String KOTLIN_LESSON_SLUG = "kotlin-on-the-jvm";
     private static final String CURATED_LESSON_RESOURCE_DIRECTORY = "guided/lessons/";
     private static final String CURATED_LESSON_FILE_SUFFIX = ".md";
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @Test
     void guidedRetrievalFlowsUseTheLessonOfficialDocSetConstraint() {
@@ -77,7 +84,9 @@ class GuidedLearningServiceCitationTest {
         assertEquals(List.of(officialSourceDocument), promptOutcome.lessonContextDocuments());
         assertEquals(
                 List.of(officialCitation),
-                guidedLearningService.citationsForContextDocuments(promptOutcome.lessonContextDocuments()));
+                guidedLearningService
+                        .citationOutcomeForContextDocuments(promptOutcome.lessonContextDocuments())
+                        .citations());
 
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
@@ -103,7 +112,7 @@ class GuidedLearningServiceCitationTest {
 
     @Test
     void guidedLoopsPromptEmbedsTheCanonicalJava25CompactSourceLesson() throws IOException {
-        GuidedTOCProvider tocProvider = new GuidedTOCProvider(new ObjectMapper());
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
                 .thenReturn(List.of());
@@ -131,7 +140,7 @@ class GuidedLearningServiceCitationTest {
 
     @Test
     void guidedKotlinPromptFollowsCanonicalContentWithoutJavaCompactSyntaxGuidance() throws IOException {
-        GuidedTOCProvider tocProvider = new GuidedTOCProvider(new ObjectMapper());
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
                 .thenReturn(List.of());
@@ -162,7 +171,7 @@ class GuidedLearningServiceCitationTest {
         GuidedLearningService guidedLearningService = guidedLearningService(
                 tocProvider, retrievalService, enrichmentService, chatService, systemPromptConfig());
 
-        for (String invalidLessonSlug : List.of(LESSON_SLUG, "")) {
+        for (String invalidLessonSlug : List.of(UNKNOWN_LESSON_SLUG, "")) {
             assertThrows(
                     NoSuchElementException.class, () -> guidedLearningService.citationsForLesson(invalidLessonSlug));
             assertThrows(
@@ -176,6 +185,29 @@ class GuidedLearningServiceCitationTest {
         verifyNoInteractions(retrievalService, enrichmentService, chatService);
     }
 
+    @Test
+    void preservesCitationConversionFailuresForGuidedStreamingCallers() {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        Document officialSourceDocument = Document.builder()
+                .id("official-source")
+                .text(OFFICIAL_SOURCE_TEXT)
+                .build();
+        RetrievalService.CitationOutcome expectedCitationOutcome = new RetrievalService.CitationOutcome(List.of(), 1);
+        when(retrievalService.toCitations(List.of(officialSourceDocument))).thenReturn(expectedCitationOutcome);
+
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                mock(GuidedTOCProvider.class),
+                retrievalService,
+                mock(EnrichmentService.class),
+                mock(ChatService.class),
+                systemPromptConfig());
+
+        RetrievalService.CitationOutcome actualCitationOutcome =
+                guidedLearningService.citationOutcomeForContextDocuments(List.of(officialSourceDocument));
+
+        assertEquals(expectedCitationOutcome, actualCitationOutcome);
+    }
+
     private static GuidedLearningService guidedLearningService(
             GuidedTOCProvider tocProvider,
             RetrievalService retrievalService,
@@ -186,8 +218,8 @@ class GuidedLearningServiceCitationTest {
                 tocProvider, retrievalService, enrichmentService, chatService, systemPromptConfig, TEST_JDK_VERSION);
     }
 
-    private static GuidedLesson guidedLesson() {
-        return new GuidedTOCProvider(new ObjectMapper()).findBySlug(LESSON_SLUG).orElseThrow();
+    private GuidedLesson guidedLesson() {
+        return new GuidedTOCProvider(objectMapper).findBySlug(LESSON_SLUG).orElseThrow();
     }
 
     private static Document officialSourceDocument(GuidedLesson guidedLesson) {

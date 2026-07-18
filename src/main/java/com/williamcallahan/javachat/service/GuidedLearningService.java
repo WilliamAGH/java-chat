@@ -118,7 +118,7 @@ public class GuidedLearningService {
         String query = buildLessonQuery(lesson);
         RetrievalConstraint retrievalConstraint = retrievalConstraintFor(lesson);
         List<Document> citationDocuments = retrievalService.retrieveForCitationDiscovery(query, retrievalConstraint);
-        return citationsForContextDocuments(citationDocuments);
+        return citationOutcomeForContextDocuments(citationDocuments).citations();
     }
 
     /**
@@ -167,23 +167,16 @@ public class GuidedLearningService {
     }
 
     /**
-     * Builds UI-ready citations from the exact context documents used to ground a guided response.
+     * Builds the citation outcome from the exact context documents used to ground a guided response.
+     *
+     * <p>The outcome preserves conversion state for the SSE boundary while {@link RetrievalService}
+     * remains the sole owner of conversion and empty-outcome semantics.</p>
      *
      * @param lessonContextDocuments retrieved official documents used to ground the response
-     * @return citations converted from the same lesson-scoped documents
+     * @return citations and any conversion failures from the same lesson-scoped documents
      */
-    public List<Citation> citationsForContextDocuments(List<Document> lessonContextDocuments) {
-        if (lessonContextDocuments == null || lessonContextDocuments.isEmpty()) {
-            return List.of();
-        }
-        RetrievalService.CitationOutcome citationOutcome = retrievalService.toCitations(lessonContextDocuments);
-        if (citationOutcome.failedConversionCount() > 0) {
-            logger.warn(
-                    "Guided citation conversion had {} failure(s) out of {} documents",
-                    citationOutcome.failedConversionCount(),
-                    lessonContextDocuments.size());
-        }
-        return citationOutcome.citations();
+    public RetrievalService.CitationOutcome citationOutcomeForContextDocuments(List<Document> lessonContextDocuments) {
+        return retrievalService.toCitations(lessonContextDocuments);
     }
 
     /**

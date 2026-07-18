@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.config;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -14,6 +16,8 @@ class AppPropertiesValidationTest {
     private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 256;
     private static final long TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 120L;
+    private static final long MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 1L;
+    private static final long MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 86_400L;
     private static final String TEST_OPENAI_EMBEDDING_BASE_URL = "https://api.openai.com";
     private static final String TEST_REMOTE_EMBEDDING_MODEL = "provider/test-embedding-model";
     private static final int TEST_REMOTE_EMBEDDING_DIMENSIONS = 8;
@@ -52,10 +56,46 @@ class AppPropertiesValidationTest {
 
     @Test
     void rejectsNonPositiveConfiguredProviderBackoff() {
-        AppProperties appProperties = validAppProperties();
-        appProperties.getLlm().setConfiguredProviderBackoffSeconds(0);
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(0);
 
-        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
+
+        assertEquals(
+                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: 0",
+                configurationFailure.getMessage());
+    }
+
+    @Test
+    void acceptsMinimumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+
+        assertEquals(
+                Duration.ofSeconds(MIN_CONFIGURED_PROVIDER_BACKOFF_SECONDS), llmProperties.configuredProviderBackoff());
+    }
+
+    @Test
+    void acceptsMaximumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
+
+        assertEquals(
+                Duration.ofSeconds(MAX_CONFIGURED_PROVIDER_BACKOFF_SECONDS), llmProperties.configuredProviderBackoff());
+    }
+
+    @Test
+    void rejectsLongMaximumConfiguredProviderBackoff() {
+        AppProperties.Llm llmProperties = new AppProperties.Llm();
+        llmProperties.setConfiguredProviderBackoffSeconds(Long.MAX_VALUE);
+
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, llmProperties::configuredProviderBackoff);
+
+        assertEquals(
+                "app.llm.configured-provider-backoff-seconds must be in range [1, 86400], got: " + Long.MAX_VALUE,
+                configurationFailure.getMessage());
     }
 
     @Test

@@ -1,8 +1,11 @@
 package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -29,6 +35,7 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
@@ -38,12 +45,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /** Verifies guided stream boundaries keep failure diagnostics internal without duplicating terminal alerts. */
+@JsonTest
 class GuidedLearningControllerStreamingFailureTest {
     private static final String SESSION_ID = "guided-session";
     private static final String LESSON_SLUG = "sealed-classes";
@@ -52,7 +62,9 @@ class GuidedLearningControllerStreamingFailureTest {
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(GuidedLearningController.class);
     private ExpectedLogEvents controllerLogEvents;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     private GuidedLearningService guidedLearningService;
     private ChatMemoryService chatMemoryService;
@@ -89,7 +101,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
@@ -124,7 +137,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
@@ -171,6 +185,42 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
+    void unavailableProviderEmitsPreparationStatusBeforeTheFatalConfigurationError() throws JsonProcessingException {
+        when(streamingService.isAvailable()).thenReturn(false);
+        MockHttpServletResponse streamingResponse = new MockHttpServletResponse();
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                guidedController.stream(new GuidedStreamRequest(SESSION_ID, LESSON_SLUG, USER_QUERY), streamingResponse)
+                        .collectList()
+                        .block(),
+                "guided stream events");
+
+        assertEquals(2, streamEvents.size());
+        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
+        SseSupport.SseEventPayload preparationStatus = objectMapper.readValue(
+                Objects.requireNonNull(streamEvents.getFirst().data(), "preparation status data"),
+                SseSupport.SseEventPayload.class);
+        assertEquals(STATUS_CODE_STREAM_PREPARING, preparationStatus.code());
+        assertEquals(STATUS_STAGE_RETRIEVAL, preparationStatus.stage());
+
+        ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
+        assertEquals(EVENT_ERROR, terminalErrorEvent.event());
+        SseSupport.SseEventPayload terminalError = objectMapper.readValue(
+                Objects.requireNonNull(terminalErrorEvent.data(), "terminal error data"),
+                SseSupport.SseEventPayload.class);
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_MESSAGE, terminalError.message());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_DETAILS, terminalError.details());
+        assertEquals(STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR, terminalError.code());
+        assertEquals(Boolean.FALSE, terminalError.retryable());
+        assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
+        assertEquals("no", streamingResponse.getHeader("X-Accel-Buffering"));
+        assertEquals("no-cache, no-transform", streamingResponse.getHeader("Cache-Control"));
+        verify(chatMemoryService, never()).getHistory(SESSION_ID);
+        verify(guidedLearningService, never())
+                .buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString());
+    }
+
+    @Test
     void guidedChatKeepsNonTerminalExceptionTypeInStructuredLogOnly() throws JsonProcessingException {
         IllegalStateException upstreamFailure = new IllegalStateException(UPSTREAM_SECRET_MESSAGE);
         when(streamingService.isAvailable()).thenReturn(true);
@@ -178,7 +228,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI)));

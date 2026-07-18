@@ -402,7 +402,7 @@ class OpenAIStreamingServiceTest {
     }
 
     @Test
-    void headerlessRateLimitCompletionPreservesOriginalFailureAndActivatesConfiguredCooldown() {
+    void headerlessRateLimitCompletionSurfacesDecisionFailureWithoutFixedCooldown() {
         RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService,
@@ -419,17 +419,21 @@ class OpenAIStreamingServiceTest {
         ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
 
         StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectErrorSatisfies(failure -> assertSame(headerlessRateLimitFailure, failure))
+                .expectErrorSatisfies(failure -> {
+                    RateLimitDecisionException decisionFailure =
+                            assertInstanceOf(RateLimitDecisionException.class, failure);
+                    assertEquals("OpenAI rate-limit headers are missing", decisionFailure.getMessage());
+                })
                 .verify();
         StepVerifier.create(streamingService.complete("test", 0.7))
-                .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
+                .expectError(RateLimitDecisionException.class)
                 .verify();
 
-        verify(responseService, times(1)).create(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(responseService, times(2)).create(any(ResponseCreateParams.class), any(RequestOptions.class));
     }
 
     @Test
-    void unusableRateLimitHeaderStreamingPreservesOriginalFailureAndActivatesConfiguredCooldown() {
+    void unusableRateLimitHeaderStreamingSurfacesDecisionFailureWithoutFixedCooldown() {
         RateLimitService rateLimitService = configuredGithubModelsRateLimitService();
         OpenAIStreamingService streamingService = new OpenAIStreamingService(
                 rateLimitService,
@@ -453,16 +457,23 @@ class OpenAIStreamingServiceTest {
                 .expectErrorSatisfies(failure -> {
                     OpenAiStreamingFailureException terminalFailure =
                             assertInstanceOf(OpenAiStreamingFailureException.class, failure);
-                    assertSame(unusableRateLimitFailure, terminalFailure.upstreamFailure());
+                    RateLimitDecisionException decisionFailure =
+                            assertInstanceOf(RateLimitDecisionException.class, terminalFailure.upstreamFailure());
+                    assertEquals("OpenAI rate-limit headers are invalid", decisionFailure.getMessage());
+                    assertTrue(List.of(decisionFailure.getSuppressed()).contains(unusableRateLimitFailure));
                 })
                 .verify();
         StepVerifier.create(streamingService
                         .streamResponse(StructuredPrompt.fromRawPrompt("test", 1), 0.7)
                         .flatMapMany(StreamingResult::textChunks))
-                .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
+                .expectErrorSatisfies(failure -> {
+                    OpenAiStreamingFailureException terminalFailure =
+                            assertInstanceOf(OpenAiStreamingFailureException.class, failure);
+                    assertInstanceOf(RateLimitDecisionException.class, terminalFailure.upstreamFailure());
+                })
                 .verify();
 
-        verify(responseService, times(1)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
+        verify(responseService, times(2)).createStreaming(any(ResponseCreateParams.class), any(RequestOptions.class));
     }
 
     @Test

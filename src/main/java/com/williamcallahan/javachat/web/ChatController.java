@@ -120,15 +120,14 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
         return Flux.concat(sseSupport.responsePreparationStatus(), Flux.defer(() -> {
-                    List<Message> history = chatMemory.getHistory(sessionId);
-                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
-
-                    // Avoid performing retrieval when the configured provider cannot admit a request.
+                    // Avoid reading session state or performing retrieval when the configured provider cannot stream.
                     if (!openAIStreamingService.isAvailable()) {
                         PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-                        return sseSupport.sseError(
-                                "Streaming service unavailable", "OpenAI streaming service is not ready");
+                        return sseSupport.configuredProviderConfigurationError();
                     }
+
+                    List<Message> history = chatMemory.getHistory(sessionId);
+                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
                     // Build structured prompt for intelligent truncation
                     // Pass model hint to optimize RAG for token-constrained models
@@ -146,10 +145,6 @@ public class ChatController extends BaseController {
                     RetrievalService.CitationOutcome citationOutcome =
                             retrievalService.toCitations(promptOutcome.documents());
                     final List<Citation> finalCitations = citationOutcome.citations();
-                    final String finalCitationWarning = citationOutcome.failedConversionCount() > 0
-                            ? "Some citations could not be loaded (" + citationOutcome.failedConversionCount()
-                                    + " failed)"
-                            : null;
 
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
@@ -174,8 +169,8 @@ public class ChatController extends BaseController {
                                 // Combine retrieval notices with citation warning if present
                                 Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                                         .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
-                                statusEvents = statusEvents.concatWith(
-                                        sseSupport.citationWarningStatusFlux(finalCitationWarning));
+                                statusEvents = statusEvents.concatWith(sseSupport.citationPartialFailureStatusFlux(
+                                        citationOutcome.failedConversionCount()));
 
                                 // Wrap chunks in JSON to preserve whitespace
                                 Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
