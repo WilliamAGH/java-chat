@@ -188,13 +188,31 @@ export function buildFullUrl(baseUrl: string | undefined | null, anchor?: string
   return safeUrl;
 }
 
+/**
+ * Builds a canonical citation identity with a case-insensitive base URL and exact fragment.
+ *
+ * Delegates URL construction to buildFullUrl so link rendering and deduplication share the
+ * same safety rules, while retaining fragment case because Java API anchors are case-sensitive.
+ */
+export function citationUrlIdentity(baseUrl: string | undefined | null, anchor?: string): string {
+  const fullCitationUrl = buildFullUrl(baseUrl, anchor);
+  const fragmentStart = fullCitationUrl.indexOf(ANCHOR_SEPARATOR);
+
+  if (fragmentStart === -1) {
+    return fullCitationUrl.toLowerCase();
+  }
+
+  return `${fullCitationUrl.slice(0, fragmentStart).toLowerCase()}${fullCitationUrl.slice(fragmentStart)}`;
+}
+
 /** Constraint for objects with a URL property (used in deduplication). */
 interface HasUrl {
   url?: string | null;
+  anchor?: string;
 }
 
 /**
- * Deduplicates an array of objects by URL (case-insensitive).
+ * Deduplicates citations by a case-insensitive base URL and case-sensitive fragment.
  * Filters out objects with missing or invalid URL properties.
  *
  * @param citations - Array of objects with url property (null/undefined treated as empty)
@@ -206,12 +224,12 @@ export function deduplicateCitations<T extends HasUrl>(
   if (!citations || citations.length === 0) {
     return [];
   }
-  const seen = new Set<string>();
+  const seenCitationIdentities = new Set<string>();
   return citations.filter((citation) => {
     if (!citation || typeof citation.url !== "string") return false;
-    const key = citation.url.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const citationIdentity = citationUrlIdentity(citation.url, citation.anchor);
+    if (seenCitationIdentities.has(citationIdentity)) return false;
+    seenCitationIdentities.add(citationIdentity);
     return true;
   });
 }

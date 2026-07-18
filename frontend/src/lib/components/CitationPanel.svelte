@@ -4,7 +4,8 @@
     getCitationType,
     getDisplaySource,
     buildFullUrl,
-    deduplicateCitations
+    deduplicateCitations,
+    citationUrlIdentity
   } from '../utils/url'
 
   interface Props {
@@ -52,14 +53,6 @@
   /** Deduplicated citations for display, with defensive validation. */
   let uniqueCitations = $derived(deduplicateCitations(citations))
 
-  /**
-   * Builds the full citation URL including anchor fragment.
-   * Delegates to shared utility for sanitization.
-   */
-  function buildCitationUrl(citation: Citation): string {
-    return buildFullUrl(citation.url, citation.anchor)
-  }
-
   function toggleExpand() {
     isExpanded = !isExpanded
   }
@@ -86,12 +79,12 @@
 
     {#if isExpanded}
       <ul id={citationListId} class="citation-list" role="list" bind:this={citationListElement}>
-        {#each uniqueCitations as citation (citation.url)}
+        {#each uniqueCitations as citation (citationUrlIdentity(citation.url, citation.anchor))}
           {@const citationType = getCitationType(citation.url)}
           {@const displaySource = getDisplaySource(citation.url)}
           <li class="citation-item" data-type={citationType}>
             <a
-              href={buildCitationUrl(citation)}
+              href={buildFullUrl(citation.url, citation.anchor)}
               target="_blank"
               rel="noopener noreferrer"
               class="citation-link"

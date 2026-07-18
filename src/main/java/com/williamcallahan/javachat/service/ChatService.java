@@ -77,11 +77,14 @@ public class ChatService {
     }
 
     /**
-     * Resolves citations for a query using the retrieval pipeline.
+     * Resolves citations through official sparse documentation discovery.
      */
     public List<Citation> citationsFor(String userQuery) {
-        List<Document> documents = retrievalService.retrieve(userQuery);
-        return retrievalService.toCitations(documents).citations();
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(DocsSourceRegistry.officialDocumentationSourceIdentities());
+        return retrievalService
+                .discoverCitations(userQuery, officialDocumentationConstraint)
+                .citations();
     }
 
     /**

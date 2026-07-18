@@ -3,6 +3,7 @@ import {
   sanitizeUrl,
   buildFullUrl,
   deduplicateCitations,
+  citationUrlIdentity,
   FALLBACK_SOURCE_LABEL,
   getCitationType,
   getDisplaySource,
@@ -96,6 +97,12 @@ describe("buildFullUrl", () => {
     expect(buildFullUrl("https://example.com", "section")).toBe("https://example.com#section");
   });
 
+  it("preserves an encoded Java API anchor", () => {
+    expect(buildFullUrl("https://example.com/String.html", "%3Cinit%3E()")).toBe(
+      "https://example.com/String.html#%3Cinit%3E()",
+    );
+  });
+
   it("handles anchor - appends with hash separator", () => {
     // Note: buildFullUrl always prepends # to anchor, so #section becomes ##section
     // Callers should strip # from anchors before passing
@@ -121,7 +128,10 @@ describe("deduplicateCitations", () => {
     ];
     const deduplicatedCitations = deduplicateCitations(citations);
     expect(deduplicatedCitations).toHaveLength(2);
-    expect(deduplicatedCitations.map((c) => c.url)).toEqual(["https://a.com", "https://b.com"]);
+    expect(deduplicatedCitations.map((citation) => citation.url)).toEqual([
+      "https://a.com",
+      "https://b.com",
+    ]);
   });
 
   it("keeps first occurrence when deduplicating", () => {
@@ -131,6 +141,64 @@ describe("deduplicateCitations", () => {
     ];
     const deduplicatedCitations = deduplicateCitations(citations);
     expect(deduplicatedCitations[0].title).toBe("First");
+  });
+
+  it("preserves case-sensitive and encoded anchors while collapsing matching identities", () => {
+    const citations = [
+      {
+        url: "HTTPS://DOCS.example.com/String.html",
+        anchor: "Foo()",
+        title: "String Foo method",
+      },
+      {
+        url: "https://docs.example.com/string.html",
+        anchor: "foo()",
+        title: "String foo method",
+      },
+      {
+        url: "https://docs.example.com/STRING.html",
+        anchor: "Foo()",
+        title: "Duplicate String Foo method",
+      },
+      {
+        url: "https://docs.example.com/string.html",
+        anchor: "%3Cinit%3E()",
+        title: "String constructor",
+      },
+      {
+        url: "https://docs.example.com/STRING.html",
+        anchor: "%3Cinit%3E()",
+        title: "Duplicate constructor citation",
+      },
+    ];
+
+    const deduplicatedCitations = deduplicateCitations(citations);
+
+    expect(deduplicatedCitations.map((citation) => citation.anchor)).toEqual([
+      "Foo()",
+      "foo()",
+      "%3Cinit%3E()",
+    ]);
+    expect(deduplicatedCitations.map((citation) => citation.title)).toEqual([
+      "String Foo method",
+      "String foo method",
+      "String constructor",
+    ]);
+  });
+
+  it("normalizes only the base URL in citation identities", () => {
+    const uppercaseAnchorIdentity = citationUrlIdentity(
+      "HTTPS://DOCS.example.com/String.html",
+      "Foo()",
+    );
+    const lowercaseAnchorIdentity = citationUrlIdentity(
+      "https://docs.example.com/string.html",
+      "foo()",
+    );
+
+    expect(uppercaseAnchorIdentity).toBe("https://docs.example.com/string.html#Foo()");
+    expect(lowercaseAnchorIdentity).toBe("https://docs.example.com/string.html#foo()");
+    expect(uppercaseAnchorIdentity).not.toBe(lowercaseAnchorIdentity);
   });
 });
 

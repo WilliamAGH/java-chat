@@ -115,28 +115,35 @@ public class RetrievalService {
     }
 
     /**
-     * Retrieves official documents for static citation discovery using hybrid RRF ranking only.
+     * Discovers static citations from one sparse official-documentation query.
      *
-     * <p>Lesson citation panels need a deterministic source list before a learner asks a question.
-     * This operation intentionally uses the Qdrant hybrid ranking already produced by the single
-     * retrieval path and does not make a second LLM reranking request. Chat-answer retrieval
-     * continues to use {@link #retrieve(String)} and its configured reranker.</p>
+     * <p>Candidate documents are converted and deduplicated by their final citation URL and anchor
+     * before the configured citation limit is applied. Chat-answer context retrieval continues to
+     * use {@link #retrieve(String)} and its configured hybrid and reranking pipeline.</p>
      *
      * @param query citation-discovery query
      * @param retrievalConstraint exact server-side constraint for the citation sources
-     * @return hybrid-ranked documents limited to the configured citation count
+     * @return limited citations plus every candidate conversion failure
      */
-    public List<Document> retrieveForCitationDiscovery(String query, RetrievalConstraint retrievalConstraint) {
+    public CitationOutcome discoverCitations(String query, RetrievalConstraint retrievalConstraint) {
         Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
         if (query == null || query.isBlank()) {
-            return List.of();
+            return new CitationOutcome(List.of(), 0);
         }
-        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, versionFilter);
-        int citationDocumentLimit = appProperties.getRag().getSearchCitations();
-        return candidateRetrieval.documents().stream()
-                .limit(citationDocumentLimit)
+        int citationLimit = appProperties.getRag().getSearchCitations();
+        if (citationLimit <= 0) {
+            return new CitationOutcome(List.of(), 0);
+        }
+        int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+        HybridSearchService.SearchOutcome citationSearchOutcome =
+                hybridSearchService.searchDocumentationCitationsOutcome(
+                        boostedQuery, citationCandidateLimit, retrievalConstraint);
+        CitationOutcome candidateCitationOutcome = toCitations(citationSearchOutcome.documents());
+        List<Citation> limitedCitations = candidateCitationOutcome.citations().stream()
+                .limit(citationLimit)
                 .toList();
+        return new CitationOutcome(limitedCitations, candidateCitationOutcome.failedConversionCount());
     }
 
     /**
@@ -368,12 +375,17 @@ public class RetrievalService {
                 String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
                 String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
                 String documentType = stringMetadataValue(sourceDocMetadata, METADATA_DOC_TYPE);
-                String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
-                String citationIdentity = citationIdentityFor(rawUrl, url);
+                String refinedCitationUrl =
+                        refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
+                String citationIdentity = citationIdentityFor(rawUrl, refinedCitationUrl);
                 if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
                 }
-                citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDocument.getText())));
+                citations.add(new Citation(
+                        fragmentlessCitationSourceUrl(refinedCitationUrl),
+                        title,
+                        citationAnchor(refinedCitationUrl),
+                        trimmedCitationSnippet(sourceDocument.getText())));
             } catch (RuntimeException citationConversionFailure) {
                 failedConversionCount++;
                 log.warn(
@@ -396,6 +408,11 @@ public class RetrievalService {
     private static String fragmentlessCitationSourceUrl(String citationUrl) {
         int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
         return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);
+    }
+
+    private static String citationAnchor(String citationUrl) {
+        int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
+        return fragmentDelimiterIndex < 0 ? "" : citationUrl.substring(fragmentDelimiterIndex + 1);
     }
 
     /**
