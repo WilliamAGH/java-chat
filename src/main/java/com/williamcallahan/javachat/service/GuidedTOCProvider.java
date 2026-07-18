@@ -10,7 +10,6 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Stream;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -19,8 +18,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class GuidedTOCProvider {
-    private static final String OFFICIAL_SOURCE_KIND = "official";
-
     private final ObjectMapper objectMapper;
     private volatile List<GuidedLesson> cachedLessons = List.of();
     private volatile boolean tocLoaded = false;
@@ -117,22 +114,14 @@ public class GuidedTOCProvider {
     }
 
     private static String resolveOfficialDocSet(String lessonSlug, String sourceReference) {
-        List<String> matchingCanonicalSourceIdentities = canonicalOfficialSourceIdentities()
-                .filter(canonicalSourceIdentity -> canonicalSourceIdentity.equals(sourceReference))
-                .toList();
+        List<String> matchingCanonicalSourceIdentities =
+                DocsSourceRegistry.officialDocumentationSourceIdentities().stream()
+                        .filter(canonicalSourceIdentity -> canonicalSourceIdentity.equals(sourceReference))
+                        .toList();
         if (matchingCanonicalSourceIdentities.size() != 1) {
             throw new IllegalStateException(
                     "Guided TOC lesson references unknown official source: " + lessonSlug + " -> " + sourceReference);
         }
         return matchingCanonicalSourceIdentities.getFirst();
-    }
-
-    private static Stream<String> canonicalOfficialSourceIdentities() {
-        return Stream.concat(
-                DocsSourceRegistry.documentationSources().stream()
-                        .filter(documentationSource -> OFFICIAL_SOURCE_KIND.equals(documentationSource.sourceKind()))
-                        .map(DocsSourceRegistry.DocumentationSource::docSet),
-                DocsSourceRegistry.javaApiDocumentationSources().stream()
-                        .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath));
     }
 }

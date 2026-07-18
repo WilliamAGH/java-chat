@@ -1041,6 +1041,9 @@
             border-right: none;
             border-bottom: none;
             overflow-y: auto;
+            /* Uses the larger mobile FAB footprint so compact breakpoints retain clearance. */
+            --lesson-content-panel-mobile-reading-inset: var(--space-20);
+            padding-bottom: var(--lesson-content-panel-mobile-reading-inset);
         }
     }
 
@@ -1059,6 +1062,7 @@
 
         .lesson-content-panel {
             padding: var(--space-4);
+            padding-bottom: var(--lesson-content-panel-mobile-reading-inset);
         }
     }
 

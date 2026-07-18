@@ -21,6 +21,39 @@ const LIVE_PDF_CITATION: Citation[] = [
   },
 ];
 
+const SHARED_PAGE_CITATIONS: Citation[] = [
+  {
+    url: "HTTPS://DOCS.example.com/String.html",
+    anchor: "Foo()",
+    title: "String Foo method",
+    snippet: "Returns the Foo member.",
+  },
+  {
+    url: "https://docs.example.com/string.html",
+    anchor: "foo()",
+    title: "String foo method",
+    snippet: "Returns the foo member.",
+  },
+  {
+    url: "https://docs.example.com/STRING.html",
+    anchor: "Foo()",
+    title: "Duplicate String Foo method",
+    snippet: "Duplicates the Foo method citation.",
+  },
+  {
+    url: "https://docs.example.com/string.html",
+    anchor: "%3Cinit%3E()",
+    title: "String constructor",
+    snippet: "Creates a new string.",
+  },
+  {
+    url: "https://docs.example.com/STRING.html",
+    anchor: "%3Cinit%3E()",
+    title: "Duplicate constructor citation",
+    snippet: "Duplicates the constructor citation.",
+  },
+];
+
 describe("CitationPanel", () => {
   // The prototype polyfill lives in src/test/setup.ts; spying here captures calls
   // from the panel revealing the expanded list inside its scroll container.
@@ -85,5 +118,29 @@ describe("CitationPanel", () => {
     });
     expect(citationLink).not.toHaveAccessibleName(/%20/);
     expect(citationLink).toHaveAttribute("href", "/pdfs/Think Java - 2nd Edition Book.pdf#page=42");
+  });
+
+  it("renders case-sensitive anchors separately while collapsing matching citation identities", async () => {
+    const { getByRole, queryByText } = render(CitationPanel, {
+      props: { citations: SHARED_PAGE_CITATIONS },
+    });
+
+    await fireEvent.click(getByRole("button", { name: /3 sources/i }));
+    await tick();
+
+    expect(getByRole("link", { name: /String Foo method/ })).toHaveAttribute(
+      "href",
+      "HTTPS://DOCS.example.com/String.html#Foo()",
+    );
+    expect(getByRole("link", { name: /String foo method/ })).toHaveAttribute(
+      "href",
+      "https://docs.example.com/string.html#foo()",
+    );
+    expect(getByRole("link", { name: /String constructor/ })).toHaveAttribute(
+      "href",
+      "https://docs.example.com/string.html#%3Cinit%3E()",
+    );
+    expect(queryByText("Duplicate String Foo method")).toBeNull();
+    expect(queryByText("Duplicate constructor citation")).toBeNull();
   });
 });

@@ -7,6 +7,7 @@
   import { refreshCsrfToken } from './lib/services/csrf'
   import {
     applicationViewForPath,
+    canonicalRecoveryPathForPath,
     canonicalPathForApplicationView,
     synchronizeDocumentMetadata,
     type ApplicationView,
@@ -15,6 +16,7 @@
   let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
 
   $effect(() => {
+    recoverUnimplementedLessonRoute()
     if (applicationViewForPath(globalThis.location.pathname) !== currentView) {
       const selectedViewPath = canonicalPathForApplicationView(currentView)
       globalThis.history.pushState({}, '', selectedViewPath)
@@ -27,8 +29,16 @@
   })
 
   function synchronizeViewWithBrowserHistory(): void {
+    recoverUnimplementedLessonRoute()
     currentView = applicationViewForPath(globalThis.location.pathname)
     synchronizeDocumentMetadata()
+  }
+
+  function recoverUnimplementedLessonRoute(): void {
+    const canonicalRecoveryPath = canonicalRecoveryPathForPath(globalThis.location.pathname)
+    if (canonicalRecoveryPath) {
+      globalThis.history.replaceState({}, '', canonicalRecoveryPath)
+    }
   }
 </script>
 

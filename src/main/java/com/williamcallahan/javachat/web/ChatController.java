@@ -140,8 +140,8 @@ public class ChatController extends BaseController {
                     AtomicInteger chunkCount = new AtomicInteger(0);
                     PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
-                    // Emit citations inline at stream end - compute before streaming starts
-                    // Citation conversion failures are surfaced to UI via status event
+                    // Cite the exact official documents supplied to the model so source attribution
+                    // cannot drift from the answer context. Conversion failures remain observable.
                     RetrievalService.CitationOutcome citationOutcome =
                             retrievalService.toCitations(promptOutcome.documents());
                     final List<Citation> finalCitations = citationOutcome.citations();
@@ -166,7 +166,7 @@ public class ChatController extends BaseController {
                                 // Heartbeats terminate when data stream completes (success or error)
                                 Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
 
-                                // Combine retrieval notices with citation warning if present
+                                // Surface retrieval and citation-conversion notices before response content.
                                 Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
                                         .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
                                 statusEvents = statusEvents.concatWith(sseSupport.citationPartialFailureStatusFlux(

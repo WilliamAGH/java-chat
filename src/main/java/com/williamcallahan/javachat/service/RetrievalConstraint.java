@@ -65,6 +65,27 @@ public record RetrievalConstraint(
     }
 
     /**
+     * Returns this constraint combined with an exact document-version requirement.
+     *
+     * @param requiredDocumentVersion document version token extracted from the query
+     * @return constraint retaining every existing field plus the required version
+     * @throws IllegalArgumentException when an existing version conflicts with the required version
+     */
+    public RetrievalConstraint withDocVersion(String requiredDocumentVersion) {
+        String sanitizedRequiredDocumentVersion = sanitize(requiredDocumentVersion);
+        if (sanitizedRequiredDocumentVersion.isBlank()) {
+            return this;
+        }
+        if (!docVersion.isBlank() && !docVersion.equals(sanitizedRequiredDocumentVersion)) {
+            throw new IllegalArgumentException("Conflicting document version constraints");
+        }
+        if (docVersion.equals(sanitizedRequiredDocumentVersion)) {
+            return this;
+        }
+        return new RetrievalConstraint(sanitizedRequiredDocumentVersion, sourceKind, docType, sourceName, docSet);
+    }
+
+    /**
      * Returns true when at least one server-side filter can be applied.
      *
      * @return true when the constraint has one or more non-empty fields

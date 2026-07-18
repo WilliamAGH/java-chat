@@ -117,8 +117,9 @@ public class GuidedLearningService {
         GuidedLesson lesson = requireListedLesson(slug);
         String query = buildLessonQuery(lesson);
         RetrievalConstraint retrievalConstraint = retrievalConstraintFor(lesson);
-        List<Document> citationDocuments = retrievalService.retrieveForCitationDiscovery(query, retrievalConstraint);
-        return citationOutcomeForContextDocuments(citationDocuments).citations();
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations(query, retrievalConstraint);
+        return citationOutcome.citationsOrThrow();
     }
 
     /**

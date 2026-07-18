@@ -35,4 +35,23 @@ class RetrievalConstraintTest {
                 UnsupportedOperationException.class,
                 () -> retrievalConstraint.docSet().add("dev-java"));
     }
+
+    @Test
+    void combinesDocumentVersionWithEveryExistingOfficialSourceField() {
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java17-complete"));
+
+        RetrievalConstraint combinedConstraint = officialDocumentationConstraint.withDocVersion("17");
+
+        assertEquals("17", combinedConstraint.docVersion());
+        assertEquals("official", combinedConstraint.sourceKind());
+        assertEquals(officialDocumentationConstraint.docSet(), combinedConstraint.docSet());
+    }
+
+    @Test
+    void rejectsConflictingDocumentVersions() {
+        RetrievalConstraint java17Constraint = RetrievalConstraint.forDocVersion("17");
+
+        assertThrows(IllegalArgumentException.class, () -> java17Constraint.withDocVersion("25"));
+    }
 }

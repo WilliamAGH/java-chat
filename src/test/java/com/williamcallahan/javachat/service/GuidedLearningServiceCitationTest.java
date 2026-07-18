@@ -57,9 +57,9 @@ class GuidedLearningServiceCitationTest {
         RetrievalService retrievalService = mock(RetrievalService.class);
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
                 .thenReturn(List.of(officialSourceDocument));
-        when(retrievalService.retrieveForCitationDiscovery(anyString(), any(RetrievalConstraint.class)))
-                .thenReturn(List.of(officialSourceDocument));
         Citation officialCitation = new Citation(officialSourceUrl(guidedLesson), "Strings", "", "substring");
+        when(retrievalService.discoverCitations(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(retrievalService.toCitations(List.of(officialSourceDocument)))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
 
@@ -92,7 +92,7 @@ class GuidedLearningServiceCitationTest {
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService, org.mockito.Mockito.times(2))
                 .retrieve(anyString(), retrievalConstraintCaptor.capture());
-        verify(retrievalService).retrieveForCitationDiscovery(anyString(), retrievalConstraintCaptor.capture());
+        verify(retrievalService).discoverCitations(anyString(), retrievalConstraintCaptor.capture());
         for (RetrievalConstraint guidedConstraint : retrievalConstraintCaptor.getAllValues()) {
             assertEquals("official", guidedConstraint.sourceKind());
             assertEquals(guidedLesson.getDocSet(), guidedConstraint.docSet());
@@ -206,6 +206,31 @@ class GuidedLearningServiceCitationTest {
                 guidedLearningService.citationOutcomeForContextDocuments(List.of(officialSourceDocument));
 
         assertEquals(expectedCitationOutcome, actualCitationOutcome);
+    }
+
+    @Test
+    void lessonCitationsRejectPartialCitationConversionOutcomes() {
+        GuidedLesson guidedLesson = guidedLesson();
+        GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
+        when(tocProvider.findBySlug(LESSON_SLUG)).thenReturn(Optional.of(guidedLesson));
+
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.discoverCitations(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(new RetrievalService.CitationOutcome(
+                        List.of(new Citation(officialSourceUrl(guidedLesson), "Strings", "", OFFICIAL_SOURCE_TEXT)),
+                        1));
+
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider,
+                retrievalService,
+                mock(EnrichmentService.class),
+                mock(ChatService.class),
+                systemPromptConfig());
+
+        CitationConversionFailureException conversionFailure = assertThrows(
+                CitationConversionFailureException.class, () -> guidedLearningService.citationsForLesson(LESSON_SLUG));
+
+        assertEquals(1, conversionFailure.failedConversionCount());
     }
 
     private static GuidedLearningService guidedLearningService(

@@ -115,28 +115,37 @@ public class RetrievalService {
     }
 
     /**
-     * Retrieves official documents for static citation discovery using hybrid RRF ranking only.
+     * Discovers static citations from one sparse official-documentation query.
      *
-     * <p>Lesson citation panels need a deterministic source list before a learner asks a question.
-     * This operation intentionally uses the Qdrant hybrid ranking already produced by the single
-     * retrieval path and does not make a second LLM reranking request. Chat-answer retrieval
-     * continues to use {@link #retrieve(String)} and its configured reranker.</p>
+     * <p>Candidate documents are converted and deduplicated by their final citation URL and anchor
+     * before the configured citation limit is applied. Chat-answer context retrieval continues to
+     * use {@link #retrieve(String)} and its configured hybrid and reranking pipeline.</p>
      *
      * @param query citation-discovery query
      * @param retrievalConstraint exact server-side constraint for the citation sources
-     * @return hybrid-ranked documents limited to the configured citation count
+     * @return limited citations plus every candidate conversion failure
      */
-    public List<Document> retrieveForCitationDiscovery(String query, RetrievalConstraint retrievalConstraint) {
+    public CitationOutcome discoverCitations(String query, RetrievalConstraint retrievalConstraint) {
         Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
         if (query == null || query.isBlank()) {
-            return List.of();
+            return new CitationOutcome(List.of(), 0);
         }
+        int citationLimit = appProperties.getRag().getSearchCitations();
+        if (citationLimit <= 0) {
+            return new CitationOutcome(List.of(), 0);
+        }
+        int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, versionFilter);
-        int citationDocumentLimit = appProperties.getRag().getSearchCitations();
-        return candidateRetrieval.documents().stream()
-                .limit(citationDocumentLimit)
+        RetrievalConstraint combinedRetrievalConstraint = combineWithVersionFilter(retrievalConstraint, versionFilter);
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+        HybridSearchService.SearchOutcome citationSearchOutcome =
+                hybridSearchService.searchDocumentationCitationsOutcome(
+                        boostedQuery, citationCandidateLimit, combinedRetrievalConstraint);
+        CitationOutcome candidateCitationOutcome = toCitations(citationSearchOutcome.documents());
+        List<Citation> limitedCitations = candidateCitationOutcome.citations().stream()
+                .limit(citationLimit)
                 .toList();
+        return new CitationOutcome(limitedCitations, candidateCitationOutcome.failedConversionCount());
     }
 
     /**
@@ -154,8 +163,8 @@ public class RetrievalService {
     /**
      * Retrieves documents and notices within the caller-owned metadata constraint.
      *
-     * <p>The same constraint instance is passed to hybrid search so feature-specific source scopes
-     * cannot drift into an unconstrained retrieval path.</p>
+     * <p>Feature-specific source scopes are retained while any query-derived Java version is added
+     * to the same server-side Qdrant filter.</p>
      *
      * @param query retrieval query
      * @param retrievalConstraint exact server-side constraint for the retrieval
@@ -167,7 +176,15 @@ public class RetrievalService {
             return new RetrievalOutcome(List.of(), List.of());
         }
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        return retrieveOutcome(query, retrievalConstraint, versionFilter);
+        RetrievalConstraint combinedRetrievalConstraint = combineWithVersionFilter(retrievalConstraint, versionFilter);
+        return retrieveOutcome(query, combinedRetrievalConstraint, versionFilter);
+    }
+
+    private static RetrievalConstraint combineWithVersionFilter(
+            RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
+        return versionFilter
+                .map(filterPatterns -> retrievalConstraint.withDocVersion(filterPatterns.versionNumber()))
+                .orElse(retrievalConstraint);
     }
 
     private RetrievalOutcome retrieveOutcome(
@@ -208,24 +225,43 @@ public class RetrievalService {
     /**
      * Retrieve documents with custom limits for token-constrained models.
      */
-    public RetrievalOutcome retrieveWithLimitOutcome(String query, int maxDocs, int maxTokensPerDoc) {
-        RetrievalOutcome outcome = retrieveOutcome(query);
+    public RetrievalOutcome retrieveWithLimitOutcome(String query, int maxDocuments, int maxTokensPerDocument) {
+        return limitRetrievalOutcome(retrieveOutcome(query), maxDocuments, maxTokensPerDocument);
+    }
+
+    /**
+     * Retrieves constrained documents while capping document count and per-document token budget.
+     *
+     * @param query retrieval query
+     * @param maxDocuments maximum number of documents to retain
+     * @param maxTokensPerDocument maximum estimated tokens retained per document
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @return constrained, truncated retrieval outcome
+     */
+    public RetrievalOutcome retrieveWithLimitOutcome(
+            String query, int maxDocuments, int maxTokensPerDocument, RetrievalConstraint retrievalConstraint) {
+        return limitRetrievalOutcome(retrieveOutcome(query, retrievalConstraint), maxDocuments, maxTokensPerDocument);
+    }
+
+    private RetrievalOutcome limitRetrievalOutcome(
+            RetrievalOutcome outcome, int maxDocuments, int maxTokensPerDocument) {
         List<Document> documents = outcome.documents();
         if (documents.isEmpty()) {
             return outcome;
         }
-        List<Document> truncatedDocs = documents.stream()
-                .limit(Math.max(1, maxDocs))
-                .map(document -> truncateDocumentToTokenLimit(document, maxTokensPerDoc))
+        List<Document> truncatedDocuments = documents.stream()
+                .limit(Math.max(1, maxDocuments))
+                .map(document -> truncateDocumentToTokenLimit(document, maxTokensPerDocument))
                 .toList();
-        return new RetrievalOutcome(truncatedDocs, outcome.notices());
+        return new RetrievalOutcome(truncatedDocuments, outcome.notices());
     }
 
     /**
      * Retrieves documents while capping document count and per-document token budget.
      */
-    public List<Document> retrieveWithLimit(String query, int maxDocs, int maxTokensPerDoc) {
-        return retrieveWithLimitOutcome(query, maxDocs, maxTokensPerDoc).documents();
+    public List<Document> retrieveWithLimit(String query, int maxDocuments, int maxTokensPerDocument) {
+        return retrieveWithLimitOutcome(query, maxDocuments, maxTokensPerDocument)
+                .documents();
     }
 
     private List<Document> applyVersionFilterIfPresent(
@@ -329,9 +365,9 @@ public class RetrievalService {
     /**
      * Outcome of converting documents into citations, surfacing any partial conversion failures.
      *
-     * <p>Callers must inspect {@code failedConversionCount} to detect partial failures rather than
-     * silently receiving an incomplete citation list. A zero count means all documents converted
-     * successfully.</p>
+     * <p>Callers must inspect {@code failedConversionCount} or call {@link #citationsOrThrow()} to
+     * avoid silently receiving an incomplete citation list. A zero count means all documents
+     * converted successfully.</p>
      *
      * @param citations successfully converted citations
      * @param failedConversionCount number of documents that failed citation conversion
@@ -342,6 +378,23 @@ public class RetrievalService {
             if (failedConversionCount < 0) {
                 throw new IllegalArgumentException("failedConversionCount cannot be negative");
             }
+        }
+
+        /**
+         * Returns fully converted citations or rejects the incomplete conversion outcome.
+         *
+         * <p>Static citation responses cannot represent a source list truthfully when any source
+         * document failed conversion, so callers must surface the typed failure instead of returning
+         * only the successfully converted subset.</p>
+         *
+         * @return immutable citations when every source document converted successfully
+         * @throws CitationConversionFailureException when one or more source documents failed conversion
+         */
+        public List<Citation> citationsOrThrow() {
+            if (failedConversionCount > 0) {
+                throw new CitationConversionFailureException(failedConversionCount);
+            }
+            return citations;
         }
     }
 
@@ -368,12 +421,17 @@ public class RetrievalService {
                 String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
                 String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
                 String documentType = stringMetadataValue(sourceDocMetadata, METADATA_DOC_TYPE);
-                String url = refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
-                String citationIdentity = citationIdentityFor(rawUrl, url);
+                String refinedCitationUrl =
+                        refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
+                String citationIdentity = citationIdentityFor(rawUrl, refinedCitationUrl);
                 if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
                 }
-                citations.add(new Citation(url, title, "", trimmedCitationSnippet(sourceDocument.getText())));
+                citations.add(new Citation(
+                        fragmentlessCitationSourceUrl(refinedCitationUrl),
+                        title,
+                        citationAnchor(refinedCitationUrl),
+                        trimmedCitationSnippet(sourceDocument.getText())));
             } catch (RuntimeException citationConversionFailure) {
                 failedConversionCount++;
                 log.warn(
@@ -396,6 +454,11 @@ public class RetrievalService {
     private static String fragmentlessCitationSourceUrl(String citationUrl) {
         int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
         return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);
+    }
+
+    private static String citationAnchor(String citationUrl) {
+        int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
+        return fragmentDelimiterIndex < 0 ? "" : citationUrl.substring(fragmentDelimiterIndex + 1);
     }
 
     /**

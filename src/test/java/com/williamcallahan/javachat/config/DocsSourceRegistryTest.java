@@ -1,11 +1,15 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -25,6 +29,39 @@ class DocsSourceRegistryTest {
         List<DocumentationSource> documentationSources = DocsSourceRegistry.documentationSources();
 
         assertThrows(UnsupportedOperationException.class, documentationSources::removeFirst);
+    }
+
+    @Test
+    void projectsImmutableOfficialSourceIdentitiesFromBothCanonicalManifests() {
+        List<String> expectedSourceIdentities = Stream.concat(
+                        DocsSourceRegistry.documentationSources().stream().map(DocumentationSource::docSet),
+                        DocsSourceRegistry.javaApiDocumentationSources().stream()
+                                .map(JavaApiDocumentationSource::relativeMirrorPath))
+                .toList();
+
+        List<String> officialSourceIdentities = DocsSourceRegistry.officialDocumentationSourceIdentities();
+
+        assertEquals(expectedSourceIdentities, officialSourceIdentities);
+        assertThrows(UnsupportedOperationException.class, officialSourceIdentities::removeFirst);
+    }
+
+    @Test
+    void excludesSyntheticNonOfficialSourcesWithoutRestatingCanonicalSourceIdentities() {
+        DocumentationSource canonicalOfficialSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        JavaApiDocumentationSource canonicalJavaApiSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        DocumentationSource syntheticNonOfficialSource = mock(DocumentationSource.class);
+        when(syntheticNonOfficialSource.sourceKind()).thenReturn("community");
+        when(syntheticNonOfficialSource.docSet()).thenReturn("synthetic-community-docs");
+
+        List<String> projectedSourceIdentities = DocsSourceRegistry.projectOfficialDocumentationSourceIdentities(
+                List.of(canonicalOfficialSource, syntheticNonOfficialSource), List.of(canonicalJavaApiSource));
+
+        assertEquals(
+                List.of(canonicalOfficialSource.docSet(), canonicalJavaApiSource.relativeMirrorPath()),
+                projectedSourceIdentities);
+        assertFalse(projectedSourceIdentities.contains(syntheticNonOfficialSource.docSet()));
     }
 
     @Test

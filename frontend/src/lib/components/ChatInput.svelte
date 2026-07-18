@@ -16,47 +16,86 @@
   let { onSend, disabled = false, placeholder = DEFAULT_PLACEHOLDER }: Props = $props()
 
   let inputValue = $state('')
-  let inputEl: HTMLTextAreaElement | null = $state(null)
+  let messageInput: HTMLTextAreaElement | null = $state(null)
+  let chatInputForm: HTMLFormElement | null = $state(null)
+  let previouslyDisabled = false
+  let submissionAwaitsDisabledTransition = false
+  let submissionOwnsDisabledTransition = false
 
-  function handleSubmit() {
-    if (!inputValue.trim() || disabled) return
-    onSend(inputValue.trim())
+  $effect(() => {
+    const hasDisabledStateTransition = disabled !== previouslyDisabled
+
+    if (submissionAwaitsDisabledTransition && hasDisabledStateTransition && disabled) {
+      submissionOwnsDisabledTransition = true
+    }
+
+    if (submissionOwnsDisabledTransition && hasDisabledStateTransition && !disabled) {
+      if (canRestoreMessageInputFocus()) {
+        messageInput?.focus()
+      }
+      submissionAwaitsDisabledTransition = false
+      submissionOwnsDisabledTransition = false
+    }
+
+    previouslyDisabled = disabled
+  })
+
+  function canRestoreMessageInputFocus(): boolean {
+    const focusedElement = document.activeElement
+    return (
+      focusedElement === null ||
+      focusedElement === document.body ||
+      chatInputForm?.contains(focusedElement) === true
+    )
+  }
+
+  function submitMessage(): void {
+    const submittedMessage = inputValue.trim()
+    if (!submittedMessage || disabled) return
+
+    submissionAwaitsDisabledTransition = true
+    onSend(submittedMessage)
     inputValue = ''
-    // Reset height after clearing
-    if (inputEl) {
-      inputEl.style.height = 'auto'
+    if (messageInput) {
+      messageInput.style.height = 'auto'
     }
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+  function handleFormSubmit(submitEvent: SubmitEvent): void {
+    submitEvent.preventDefault()
+    submitMessage()
+  }
+
+  function handleKeyDown(keyboardEvent: KeyboardEvent): void {
+    if (keyboardEvent.isComposing) return
+
+    if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey) {
+      keyboardEvent.preventDefault()
+      submitMessage()
     }
   }
 
   function autoResize() {
-    if (!inputEl) return
-    inputEl.style.height = 'auto'
-    inputEl.style.height = `${Math.min(inputEl.scrollHeight, 200)}px`
+    if (!messageInput) return
+    messageInput.style.height = 'auto'
+    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 200)}px`
   }
 
-  // Global keyboard shortcut
   onMount(() => {
-    function handleGlobalKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        inputEl?.focus()
-        inputEl?.select()
+    function handleGlobalKeyDown(keyboardEvent: KeyboardEvent) {
+      if ((keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key === 'k') {
+        keyboardEvent.preventDefault()
+        messageInput?.focus()
+        messageInput?.select()
       }
-      if (e.key === 'Escape' && document.activeElement === inputEl) {
+      if (keyboardEvent.key === 'Escape' && document.activeElement === messageInput) {
         inputValue = ''
-        if (inputEl) inputEl.style.height = 'auto'
+        if (messageInput) messageInput.style.height = 'auto'
       }
     }
 
     document.addEventListener('keydown', handleGlobalKeyDown)
-    inputEl?.focus()
+    messageInput?.focus()
 
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown)
@@ -66,9 +105,9 @@
 
 <div class="input-area">
   <div class="input-container">
-    <div class="input-wrapper">
+    <form bind:this={chatInputForm} class="input-wrapper" onsubmit={handleFormSubmit}>
       <textarea
-        bind:this={inputEl}
+        bind:this={messageInput}
         bind:value={inputValue}
         oninput={autoResize}
         onkeydown={handleKeyDown}
@@ -80,9 +119,8 @@
       ></textarea>
 
       <button
-        type="button"
+        type="submit"
         class="send-btn"
-        onclick={handleSubmit}
         disabled={disabled || !inputValue.trim()}
         aria-label="Send message"
       >
@@ -96,7 +134,7 @@
           </svg>
         {/if}
       </button>
-    </div>
+    </form>
 
     <p class="input-hint">
       <span class="hint-text">Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for new line</span>

@@ -57,27 +57,36 @@ const APPLICATION_ROUTE_BY_PATH = {
   [ROOT_APPLICATION_PATH]: {
     view: "chat",
     isCanonicalViewPath: true,
+    recoversDescendantPathsToCanonicalView: false,
     pageMetadata: DEFAULT_PAGE_METADATA,
   },
   [CHAT_APPLICATION_PATH]: {
     view: "chat",
     isCanonicalViewPath: false,
+    recoversDescendantPathsToCanonicalView: false,
     pageMetadata: CHAT_PAGE_METADATA,
   },
   [GUIDED_APPLICATION_PATH]: {
     view: "learn",
     isCanonicalViewPath: false,
+    recoversDescendantPathsToCanonicalView: true,
     pageMetadata: GUIDED_PAGE_METADATA,
   },
   [LEARN_APPLICATION_PATH]: {
     view: "learn",
     isCanonicalViewPath: true,
+    recoversDescendantPathsToCanonicalView: true,
     pageMetadata: GUIDED_PAGE_METADATA,
   },
 } as const;
 
 type ApplicationPath = keyof typeof APPLICATION_ROUTE_BY_PATH;
 type ApplicationRoute = (typeof APPLICATION_ROUTE_BY_PATH)[ApplicationPath];
+
+type ApplicationRouteResolution = {
+  readonly applicationRoute: ApplicationRoute;
+  readonly canonicalRecoveryPath: string | null;
+};
 
 function normalizeApplicationPath(pathname: string): string {
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
@@ -87,11 +96,36 @@ function isApplicationPath(pathname: string): pathname is ApplicationPath {
   return Object.hasOwn(APPLICATION_ROUTE_BY_PATH, pathname);
 }
 
-function applicationRouteForPath(pathname: string): ApplicationRoute {
+function applicationRouteResolutionForPath(pathname: string): ApplicationRouteResolution {
   const normalizedPathname = normalizeApplicationPath(pathname);
-  return isApplicationPath(normalizedPathname)
-    ? APPLICATION_ROUTE_BY_PATH[normalizedPathname]
-    : APPLICATION_ROUTE_BY_PATH[ROOT_APPLICATION_PATH];
+  if (isApplicationPath(normalizedPathname)) {
+    return {
+      applicationRoute: APPLICATION_ROUTE_BY_PATH[normalizedPathname],
+      canonicalRecoveryPath: null,
+    };
+  }
+
+  const nestedLessonRoute = Object.entries(APPLICATION_ROUTE_BY_PATH).find(
+    ([applicationPath, applicationRoute]) =>
+      applicationRoute.recoversDescendantPathsToCanonicalView &&
+      normalizedPathname.startsWith(`${applicationPath}/`),
+  );
+  if (nestedLessonRoute) {
+    const [, applicationRoute] = nestedLessonRoute;
+    return {
+      applicationRoute,
+      canonicalRecoveryPath: canonicalPathForApplicationView(applicationRoute.view),
+    };
+  }
+
+  return {
+    applicationRoute: APPLICATION_ROUTE_BY_PATH[ROOT_APPLICATION_PATH],
+    canonicalRecoveryPath: null,
+  };
+}
+
+function applicationRouteForPath(pathname: string): ApplicationRoute {
+  return applicationRouteResolutionForPath(pathname).applicationRoute;
 }
 
 function updateNamedMetadata(metadataName: string, metadataText: string): void {
@@ -149,6 +183,11 @@ function updateStructuredData(canonicalUrl: string, pageDescription: string): vo
 /** Resolves the SPA view that corresponds to a browser pathname. */
 export function applicationViewForPath(pathname: string): ApplicationView {
   return applicationRouteForPath(pathname).view;
+}
+
+/** Resolves the canonical repair path for an unimplemented nested lesson route. */
+export function canonicalRecoveryPathForPath(pathname: string): string | null {
+  return applicationRouteResolutionForPath(pathname).canonicalRecoveryPath;
 }
 
 /** Resolves the canonical public path for a selected SPA view. */

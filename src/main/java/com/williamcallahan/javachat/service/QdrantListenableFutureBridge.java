@@ -4,6 +4,7 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -31,10 +32,20 @@ final class QdrantListenableFutureBridge {
      *
      * @param qdrantQueryFuture asynchronous Qdrant query future
      * @param <T> successful completion type
-     * @return completable future that mirrors success or failure from the source future
+     * @return completable future that mirrors completion and propagates caller cancellation to the source future
      */
     static <T> CompletableFuture<T> toCompletableFuture(ListenableFuture<T> qdrantQueryFuture) {
-        CompletableFuture<T> completableFuture = new CompletableFuture<>();
+        Objects.requireNonNull(qdrantQueryFuture, "qdrantQueryFuture");
+        CompletableFuture<T> completableFuture = new CompletableFuture<>() {
+            @Override
+            public boolean cancel(boolean mayInterruptIfRunning) {
+                boolean cancellationAccepted = super.cancel(mayInterruptIfRunning);
+                if (cancellationAccepted) {
+                    qdrantQueryFuture.cancel(mayInterruptIfRunning);
+                }
+                return cancellationAccepted;
+            }
+        };
         Futures.addCallback(
                 qdrantQueryFuture,
                 new FutureCallback<>() {

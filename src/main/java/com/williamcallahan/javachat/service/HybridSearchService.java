@@ -32,12 +32,13 @@ import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
 /**
- * Executes hybrid (dense + sparse) search across all Qdrant collections using RRF fusion.
+ * Executes hybrid search across all Qdrant collections and sparse-only official citation search.
  *
  * <p>For each collection, a Qdrant Query API request is issued with two prefetch stages
  * (dense nearest-neighbor and sparse BM25-style lexical search) fused via reciprocal rank
  * fusion (RRF). Queries are fanned out to all configured collections in parallel and results
- * are deduplicated by point UUID before returning top-K.</p>
+ * are deduplicated by point UUID before returning top-K. Citation discovery sends one direct sparse
+ * query only to the canonical documentation collection.</p>
  *
  * <p>Verified API contract (Step 0): this adapter uses direct {@code io.qdrant:client} 1.16.2
  * primitives rather than Spring AI VectorStore abstractions. Hybrid behavior depends on
@@ -50,6 +51,7 @@ public class HybridSearchService {
     private static final Logger log = LoggerFactory.getLogger(HybridSearchService.class);
 
     private static final int MAX_FAILURE_DETAIL_LENGTH = 240;
+    private static final long MINIMUM_QDRANT_QUERY_DURATION_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
 
     private final QdrantClient qdrantClient;
     private final QueryEncodingServices queryEncoding;
@@ -140,21 +142,74 @@ public class HybridSearchService {
 
         Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection =
                 LinkedHashMap.newLinkedHashMap(collectionNames.size());
-        for (String collection : collectionNames) {
+        long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
+        for (String collectionName : collectionNames) {
             QueryPoints queryRequest = Objects.requireNonNull(
-                    buildHybridQueryRequest(collection, encodedQuery, queryConfig, topK), "QueryPoints");
-            CompletableFuture<List<ScoredPoint>> future =
-                    QdrantListenableFutureBridge.toCompletableFuture(qdrantClient.queryAsync(queryRequest));
-            futuresByCollection.put(collection, future);
+                    buildHybridQueryRequest(collectionName, encodedQuery, queryConfig, topK), "QueryPoints");
+            CompletableFuture<List<ScoredPoint>> collectionQueryFuture =
+                    dispatchQueryBeforeDeadline(queryRequest, queryDeadlineNanos);
+            futuresByCollection.put(collectionName, collectionQueryFuture);
         }
 
+        CollectionQueryDispatch queryDispatch =
+                new CollectionQueryDispatch(futuresByCollection, queryConfig.queryTimeout(), queryDeadlineNanos);
+        return collectSearchOutcome(queryDispatch, topK, queryConfig, CollectionFailurePolicy.CONFIGURED);
+    }
+
+    /**
+     * Searches the canonical documentation collection for citation candidates using sparse lexical retrieval only.
+     *
+     * <p>This operation does not create a dense embedding, issue prefetch queries, perform RRF fusion,
+     * or include dynamically discovered GitHub collections.</p>
+     *
+     * @param query citation-discovery query text
+     * @param topK maximum number of citation candidates to return
+     * @param retrievalConstraint official documentation metadata constraint
+     * @return sparse search outcome containing documents and optional non-fatal notices
+     */
+    public SearchOutcome searchDocumentationCitationsOutcome(
+            String query, int topK, RetrievalConstraint retrievalConstraint) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
+        if (query.isBlank() || topK <= 0) {
+            return new SearchOutcome(List.of(), List.of());
+        }
+
+        LexicalSparseVectorEncoder.SparseVector sparseVector =
+                queryEncoding.sparseVectorEncoder().encode(query);
+        if (sparseVector.indices().isEmpty()) {
+            return new SearchOutcome(List.of(), List.of());
+        }
+
+        Optional<Filter> retrievalFilter = queryEncoding.constraintBuilder().buildFilter(retrievalConstraint);
+        EncodedCitationQuery encodedCitationQuery = new EncodedCitationQuery(sparseVector, retrievalFilter);
+        HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
+        String documentationCollectionName =
+                appProperties.getQdrant().getCollections().getDocs();
+        long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
+        QueryPoints queryRequest = buildDocumentationCitationQueryRequest(
+                documentationCollectionName, encodedCitationQuery, queryConfig, topK);
+        CompletableFuture<List<ScoredPoint>> documentationQueryFuture =
+                dispatchQueryBeforeDeadline(queryRequest, queryDeadlineNanos);
+        Map<String, CompletableFuture<List<ScoredPoint>>> documentationQueryByCollection =
+                Map.of(documentationCollectionName, documentationQueryFuture);
+        CollectionQueryDispatch queryDispatch = new CollectionQueryDispatch(
+                documentationQueryByCollection, queryConfig.queryTimeout(), queryDeadlineNanos);
+        return collectSearchOutcome(queryDispatch, topK, queryConfig, CollectionFailurePolicy.STRICT);
+    }
+
+    private SearchOutcome collectSearchOutcome(
+            CollectionQueryDispatch queryDispatch,
+            int topK,
+            HybridQueryConfig queryConfig,
+            CollectionFailurePolicy collectionFailurePolicy) {
         Map<String, ScoredPointMatch> scoredPointsByUuid = new LinkedHashMap<>();
         List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures = new ArrayList<>();
-        collectFanOutResults(futuresByCollection, queryConfig.queryTimeout(), scoredPointsByUuid, collectionFailures);
+        collectFanOutResults(queryDispatch, scoredPointsByUuid, collectionFailures);
 
-        if (!collectionFailures.isEmpty() && queryConfig.failOnPartialSearchError()) {
+        if (!collectionFailures.isEmpty() && collectionFailurePolicy.failsSearch(queryConfig)) {
             throw new HybridSearchPartialFailureException(
-                    "Hybrid retrieval failed for " + collectionFailures.size() + " collection(s)", collectionFailures);
+                    "Qdrant retrieval failed for " + collectionFailures.size() + " collection(s)", collectionFailures);
         }
 
         List<Document> rankedDocuments = scoredPointsByUuid.values().stream()
@@ -164,11 +219,30 @@ public class HybridSearchService {
                         scoredPointMatch.point(),
                         scoredPointMatch.id(),
                         scoredPointMatch.score(),
-                        scoredPointMatch.collection()))
+                        scoredPointMatch.collectionName()))
                 .toList();
         List<HybridSearchNotice> retrievalNotices =
                 collectionFailures.stream().map(HybridSearchService::toNotice).toList();
         return new SearchOutcome(rankedDocuments, retrievalNotices);
+    }
+
+    private static long queryDeadlineNanos(Duration queryTimeout) {
+        return System.nanoTime() + queryTimeout.toNanos();
+    }
+
+    private CompletableFuture<List<ScoredPoint>> dispatchQueryBeforeDeadline(
+            QueryPoints queryRequest, long queryDeadlineNanos) {
+        long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
+        if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
+            return new CompletableFuture<>();
+        }
+        Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
+        try {
+            return QdrantListenableFutureBridge.toCompletableFuture(
+                    qdrantClient.queryAsync(queryRequest, remainingQueryDuration));
+        } catch (RuntimeException queryDispatchFailure) {
+            return CompletableFuture.failedFuture(queryDispatchFailure);
+        }
     }
 
     /**
@@ -178,7 +252,7 @@ public class HybridSearchService {
      * @param sparseVectorName Qdrant named vector key for sparse tokens
      * @param prefetchLimit per-collection prefetch candidate count
      * @param rrfK reciprocal rank fusion k parameter
-     * @param queryTimeout fan-out timeout per collection
+     * @param queryTimeout shared timeout budget for the complete collection fan-out
      * @param failOnPartialSearchError whether partial collection failures are fatal
      */
     record HybridQueryConfig(
@@ -250,11 +324,41 @@ public class HybridSearchService {
         }
     }
 
+    /** Groups sparse encoding and its exact metadata filter for citation discovery. */
+    private record EncodedCitationQuery(
+            LexicalSparseVectorEncoder.SparseVector sparseVector, Optional<Filter> retrievalFilter) {
+        EncodedCitationQuery {
+            Objects.requireNonNull(sparseVector, "sparseVector");
+            Objects.requireNonNull(retrievalFilter, "retrievalFilter");
+        }
+    }
+
+    /** Keeps every collection wait on the timeout deadline established before fan-out dispatch. */
+    private record CollectionQueryDispatch(
+            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection,
+            Duration queryTimeout,
+            long queryDeadlineNanos) {
+        CollectionQueryDispatch {
+            Objects.requireNonNull(futuresByCollection, "futuresByCollection");
+            Objects.requireNonNull(queryTimeout, "queryTimeout");
+        }
+    }
+
+    /** Selects whether collection query failures follow configuration or always fail retrieval. */
+    private enum CollectionFailurePolicy {
+        CONFIGURED,
+        STRICT;
+
+        private boolean failsSearch(HybridQueryConfig queryConfig) {
+            return this == STRICT || queryConfig.failOnPartialSearchError();
+        }
+    }
+
     private QueryPoints buildHybridQueryRequest(
-            String collection, EncodedQuery encodedQuery, HybridQueryConfig queryConfig, int limit) {
+            String collectionName, EncodedQuery encodedQuery, HybridQueryConfig queryConfig, int limit) {
 
         QueryPoints.Builder builder = QueryPoints.newBuilder()
-                .setCollectionName(collection)
+                .setCollectionName(collectionName)
                 .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
                 .setLimit(limit);
         encodedQuery.retrievalFilter().ifPresent(builder::setFilter);
@@ -282,50 +386,79 @@ public class HybridSearchService {
         return builder.build();
     }
 
+    private QueryPoints buildDocumentationCitationQueryRequest(
+            String documentationCollectionName,
+            EncodedCitationQuery encodedCitationQuery,
+            HybridQueryConfig queryConfig,
+            int citationCandidateLimit) {
+        QueryPoints.Builder queryBuilder = QueryPoints.newBuilder()
+                .setCollectionName(documentationCollectionName)
+                .setQuery(nearest(
+                        Objects.requireNonNull(
+                                encodedCitationQuery.sparseVector().termFrequencies()),
+                        Objects.requireNonNull(
+                                encodedCitationQuery.sparseVector().integerIndices())))
+                .setUsing(queryConfig.sparseVectorName())
+                .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
+                .setLimit(citationCandidateLimit);
+        encodedCitationQuery.retrievalFilter().ifPresent(queryBuilder::setFilter);
+        return queryBuilder.build();
+    }
+
     private void collectFanOutResults(
-            Map<String, CompletableFuture<List<ScoredPoint>>> futuresByCollection,
-            Duration timeout,
+            CollectionQueryDispatch queryDispatch,
             Map<String, ScoredPointMatch> scoredPointsByUuid,
             List<HybridSearchPartialFailureException.CollectionSearchFailure> collectionFailures) {
 
-        for (Map.Entry<String, CompletableFuture<List<ScoredPoint>>> futureByCollectionEntry :
-                futuresByCollection.entrySet()) {
-            String collection = futureByCollectionEntry.getKey();
-            CompletableFuture<List<ScoredPoint>> future = futureByCollectionEntry.getValue();
+        for (Map.Entry<String, CompletableFuture<List<ScoredPoint>>> collectionQueryEntry :
+                queryDispatch.futuresByCollection().entrySet()) {
+            String collectionName = collectionQueryEntry.getKey();
+            CompletableFuture<List<ScoredPoint>> collectionQueryFuture = collectionQueryEntry.getValue();
             try {
-                List<ScoredPoint> points = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-                mergePoints(points, collection, scoredPointsByUuid);
+                long remainingWaitNanos = Math.max(0L, queryDispatch.queryDeadlineNanos() - System.nanoTime());
+                List<ScoredPoint> scoredPoints = collectionQueryFuture.get(remainingWaitNanos, TimeUnit.NANOSECONDS);
+                mergePoints(scoredPoints, collectionName, scoredPointsByUuid);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-                future.cancel(true);
-                log.warn("[QDRANT] Search interrupted for collection={}", collection);
-                collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
-                        collection, "Interrupted", "Hybrid query was interrupted"));
+                cancelPendingQueries(queryDispatch);
+                log.warn("[QDRANT] Search interrupted for collection={}", collectionName);
+                HybridSearchPartialFailureException.CollectionSearchFailure interruptionFailure =
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                collectionName, "Interrupted", "Qdrant query was interrupted");
+                throw new HybridSearchPartialFailureException(
+                        "Qdrant retrieval was interrupted", List.of(interruptionFailure));
             } catch (ExecutionException executionException) {
                 Throwable cause = executionException.getCause();
                 String exceptionType = cause == null
                         ? executionException.getClass().getSimpleName()
                         : cause.getClass().getSimpleName();
                 String failureMessage = cause == null ? executionException.getMessage() : cause.getMessage();
-                log.warn("[QDRANT] Search failed for collection={} (exceptionType={})", collection, exceptionType);
+                log.warn("[QDRANT] Search failed for collection={} (exceptionType={})", collectionName, exceptionType);
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
-                        collection, exceptionType, sanitizeFailureDetails(failureMessage)));
+                        collectionName, exceptionType, sanitizeFailureDetails(failureMessage)));
             } catch (TimeoutException _) {
-                future.cancel(true);
-                log.warn("[QDRANT] Search timed out for collection={}", collection);
+                collectionQueryFuture.cancel(true);
+                log.warn("[QDRANT] Search timed out for collection={}", collectionName);
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
-                        collection, "Timeout", "Hybrid query exceeded timeout " + timeout.toMillis() + "ms"));
+                        collectionName,
+                        "Timeout",
+                        "Qdrant query exceeded timeout "
+                                + queryDispatch.queryTimeout().toMillis() + "ms"));
             }
         }
     }
 
+    private static void cancelPendingQueries(CollectionQueryDispatch queryDispatch) {
+        queryDispatch.futuresByCollection().values().forEach(queryFuture -> queryFuture.cancel(true));
+    }
+
     private static void mergePoints(
-            List<ScoredPoint> points, String collection, Map<String, ScoredPointMatch> scoredPointsByUuid) {
+            List<ScoredPoint> points, String collectionName, Map<String, ScoredPointMatch> scoredPointsByUuid) {
         for (ScoredPoint point : points) {
             String pointId = extractPointId(point);
             ScoredPointMatch existing = scoredPointsByUuid.get(pointId);
             if (existing == null || point.getScore() > existing.score()) {
-                scoredPointsByUuid.put(pointId, new ScoredPointMatch(pointId, point.getScore(), point, collection));
+                scoredPointsByUuid.put(pointId, new ScoredPointMatch(pointId, point.getScore(), point, collectionName));
             }
         }
     }
@@ -371,5 +504,5 @@ public class HybridSearchService {
         return flattenedFailure.substring(0, MAX_FAILURE_DETAIL_LENGTH) + "...";
     }
 
-    private record ScoredPointMatch(String id, double score, ScoredPoint point, String collection) {}
+    private record ScoredPointMatch(String id, double score, ScoredPoint point, String collectionName) {}
 }

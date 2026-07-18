@@ -53,6 +53,39 @@ async function openLessonAndSendMessage(
   await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
 }
 
+async function openMobileGuidedChat(learnView: Awaited<ReturnType<typeof renderLearnView>>) {
+  await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+  const mobileChatTrigger = learnView.getByRole("button", {
+    name: "Ask questions about this lesson",
+  });
+  await fireEvent.click(mobileChatTrigger);
+
+  const mobileChatDrawer = await learnView.findByRole("dialog", {
+    name: "Lesson chat",
+  });
+  const mobileMessageInput = mobileChatDrawer.querySelector("textarea[aria-label='Message input']");
+  if (!(mobileMessageInput instanceof HTMLTextAreaElement)) {
+    throw new Error("Expected mobile message input element to be a textarea");
+  }
+  const mobileSendButton = mobileChatDrawer.querySelector("button[aria-label='Send message']");
+  if (!(mobileSendButton instanceof HTMLButtonElement)) {
+    throw new Error("Expected mobile send button element to be a button");
+  }
+
+  return { mobileChatTrigger, mobileMessageInput, mobileSendButton };
+}
+
+async function submitMobileGuidedMessage(
+  mobileMessageInput: HTMLTextAreaElement,
+  mobileSendButton: HTMLButtonElement,
+): Promise<void> {
+  await fireEvent.input(mobileMessageInput, {
+    target: { value: "Explain records" },
+  });
+  await fireEvent.click(mobileSendButton);
+  await vi.waitFor(() => expect(mobileMessageInput).toBeDisabled());
+}
+
 function configureLessonCatalog(...guidedLessons: GuidedLesson[]): void {
   fetchTocMock.mockResolvedValue(guidedLessons);
 }
@@ -159,6 +192,86 @@ describe("LearnView guided chat streaming stability", () => {
     await fireEvent.click(closeChatButton);
     await tick();
 
+    expect(mobileChatTrigger).toHaveFocus();
+  });
+
+  it("restores mobile drawer input focus after a submitted stream completes with focus in the form", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected guided stream completion callback to be set");
+    };
+    streamGuidedChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const learnView = await renderLearnView();
+    const { mobileMessageInput, mobileSendButton } = await openMobileGuidedChat(learnView);
+    mobileMessageInput.focus();
+
+    await submitMobileGuidedMessage(mobileMessageInput, mobileSendButton);
+    expect(mobileMessageInput).toHaveFocus();
+
+    completeStream();
+
+    await vi.waitFor(() => {
+      expect(mobileMessageInput).toBeEnabled();
+      expect(mobileMessageInput).toHaveFocus();
+    });
+  });
+
+  it("restores mobile drawer input focus after a submitted stream completes with focus on the document body", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected guided stream completion callback to be set");
+    };
+    streamGuidedChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const learnView = await renderLearnView();
+    const { mobileMessageInput, mobileSendButton } = await openMobileGuidedChat(learnView);
+    await submitMobileGuidedMessage(mobileMessageInput, mobileSendButton);
+
+    const transientFocusControl = document.createElement("button");
+    learnView.container.append(transientFocusControl);
+    transientFocusControl.focus();
+    transientFocusControl.remove();
+    expect(document.activeElement).toBe(document.body);
+
+    completeStream();
+
+    await vi.waitFor(() => {
+      expect(mobileMessageInput).toBeEnabled();
+      expect(mobileMessageInput).toHaveFocus();
+    });
+  });
+
+  it("preserves mobile trigger focus after a submitted stream completes", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected guided stream completion callback to be set");
+    };
+    streamGuidedChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const learnView = await renderLearnView();
+    const { mobileChatTrigger, mobileMessageInput, mobileSendButton } =
+      await openMobileGuidedChat(learnView);
+    await submitMobileGuidedMessage(mobileMessageInput, mobileSendButton);
+
+    mobileChatTrigger.focus();
+    expect(mobileChatTrigger).toHaveFocus();
+
+    completeStream();
+
+    await vi.waitFor(() => expect(mobileMessageInput).toBeEnabled());
     expect(mobileChatTrigger).toHaveFocus();
   });
 

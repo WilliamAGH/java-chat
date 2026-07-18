@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -45,12 +46,14 @@ import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.core.io.ClassPathResource;
@@ -232,6 +235,57 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
         verify(chatMemoryService, never()).getHistory(SESSION_ID);
         verifyNoInteractions(chatService, retrievalService);
+    }
+
+    @Test
+    void chatStreamCitesTheExactDocumentsUsedForPromptContextWithoutSecondDiscovery() throws JsonProcessingException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                createSseSupport(),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        Document officialPromptDocument = mock(Document.class);
+        Citation officialCitation = new Citation(
+                "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html",
+                "List",
+                "of()",
+                "Creates an unmodifiable list.");
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(chatService.buildStructuredPromptWithContextOutcome(
+                        anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
+                .thenReturn(new ChatService.StructuredPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(officialPromptDocument)));
+        when(retrievalService.toCitations(List.of(officialPromptDocument)))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "chat stream events");
+
+        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
+        ServerSentEvent<String> citationEvent = streamEvents.stream()
+                .filter(streamEvent -> EVENT_CITATION.equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        List<Citation> streamedCitations = Arrays.asList(objectMapper.readValue(
+                Objects.requireNonNull(citationEvent.data(), "citation event data"), Citation[].class));
+
+        assertEquals(1, streamedCitations.size());
+        assertEquals(officialCitation.getUrl(), streamedCitations.getFirst().getUrl());
+        verify(retrievalService).toCitations(List.of(officialPromptDocument));
+        verify(chatService, never()).citationsFor(anyString());
     }
 
     @Test

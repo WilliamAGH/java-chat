@@ -24,7 +24,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +32,6 @@ import org.springframework.boot.test.autoconfigure.json.JsonTest;
 /** Verifies guided source references remain manifest-owned and project into the public lesson contract. */
 @JsonTest
 class GuidedTOCProviderTest {
-    private static final String SOURCE_KIND_OFFICIAL = "official";
     private static final String CANONICAL_SOURCE_REFERENCE_TEST_SLUG = "strings";
     private static final String CALLER_MUTATED_LESSON_TITLE = "Caller-mutated lesson title";
     private static final String UNKNOWN_SOURCE_REFERENCE_TEST_SLUG = "unknown-source-reference";
@@ -50,13 +48,7 @@ class GuidedTOCProviderTest {
                 .findBySlug(CANONICAL_SOURCE_REFERENCE_TEST_SLUG)
                 .orElseThrow();
 
-        List<String> expectedDocSets = Stream.concat(
-                        DocsSourceRegistry.documentationSources().stream()
-                                .filter(documentationSource ->
-                                        SOURCE_KIND_OFFICIAL.equals(documentationSource.sourceKind()))
-                                .map(DocsSourceRegistry.DocumentationSource::docSet),
-                        DocsSourceRegistry.javaApiDocumentationSources().stream()
-                                .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath))
+        List<String> expectedDocSets = DocsSourceRegistry.officialDocumentationSourceIdentities().stream()
                 .filter(listedLesson.sourceReferences()::contains)
                 .toList();
 

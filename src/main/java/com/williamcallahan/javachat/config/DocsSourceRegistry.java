@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +45,7 @@ public final class DocsSourceRegistry {
     private static final String SPRING_AI_API_2_BASE_KEY = "SPRING_AI_API_2_BASE";
 
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
+    private static final String OFFICIAL_DOCUMENTATION_SOURCE_KIND = "official";
 
     private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
@@ -85,6 +87,8 @@ public final class DocsSourceRegistry {
     private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES =
             JavaApiDocumentationManifest.load();
     private static final List<DocumentationSource> DOCUMENTATION_SOURCES = DocumentationSourceManifest.load();
+    private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
+            projectOfficialDocumentationSourceIdentities(DOCUMENTATION_SOURCES, JAVA_API_DOCUMENTATION_SOURCES);
 
     public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
     public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
@@ -268,6 +272,33 @@ public final class DocsSourceRegistry {
      */
     public static List<DocumentationSource> documentationSources() {
         return List.copyOf(DOCUMENTATION_SOURCES);
+    }
+
+    /**
+     * Returns retrieval identities for every official documentation source in the canonical manifests.
+     *
+     * <p>Non-Java documentation is identified by its canonical {@code docSet}; Java API documentation
+     * is identified by its canonical relative mirror path because that is the ingestion-owned
+     * {@code docSet} projection.</p>
+     *
+     * @return immutable source identities in non-Java then Java API manifest order
+     */
+    public static List<String> officialDocumentationSourceIdentities() {
+        return List.copyOf(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+    }
+
+    static List<String> projectOfficialDocumentationSourceIdentities(
+            List<DocumentationSource> documentationSources,
+            List<JavaApiDocumentationSource> javaApiDocumentationSources) {
+        Objects.requireNonNull(documentationSources, "documentationSources");
+        Objects.requireNonNull(javaApiDocumentationSources, "javaApiDocumentationSources");
+        return Stream.concat(
+                        documentationSources.stream()
+                                .filter(documentationSource ->
+                                        OFFICIAL_DOCUMENTATION_SOURCE_KIND.equals(documentationSource.sourceKind()))
+                                .map(DocumentationSource::docSet),
+                        javaApiDocumentationSources.stream().map(JavaApiDocumentationSource::relativeMirrorPath))
+                .toList();
     }
 
     /**

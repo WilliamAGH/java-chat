@@ -77,11 +77,12 @@ public class ChatService {
     }
 
     /**
-     * Resolves citations for a query using the retrieval pipeline.
+     * Resolves citations through official sparse documentation discovery.
      */
     public List<Citation> citationsFor(String userQuery) {
-        List<Document> documents = retrievalService.retrieve(userQuery);
-        return retrievalService.toCitations(documents).citations();
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.discoverCitations(userQuery, officialDocumentationConstraint());
+        return citationOutcome.citationsOrThrow();
     }
 
     /**
@@ -134,17 +135,19 @@ public class ChatService {
 
         // Use reduced RAG for token-constrained models (GPT-5.x family)
         RetrievalService.RetrievalOutcome retrievalOutcome;
+        RetrievalConstraint retrievalConstraint = officialDocumentationConstraint();
         if (ModelConfiguration.isTokenConstrained(modelHint)) {
             retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
                     latestUserMessage,
                     ModelConfiguration.RAG_LIMIT_CONSTRAINED,
-                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
+                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
+                    retrievalConstraint);
             logger.debug(
                     "Using reduced RAG: {} documents with max {} tokens each",
                     retrievalOutcome.documents().size(),
                     ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {
-            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage);
+            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage, retrievalConstraint);
         }
 
         List<Document> contextDocs = retrievalOutcome.documents();
@@ -173,6 +176,10 @@ public class ChatService {
                 new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
 
         return new StructuredPromptOutcome(structuredPrompt, retrievalOutcome.notices(), retrievalOutcome.documents());
+    }
+
+    private static RetrievalConstraint officialDocumentationConstraint() {
+        return RetrievalConstraint.forOfficialDocSets(DocsSourceRegistry.officialDocumentationSourceIdentities());
     }
 
     /**
