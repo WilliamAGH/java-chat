@@ -12,6 +12,7 @@ import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.OpenAiProviderRoutingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Lazy;
 
 /**
@@ -71,6 +72,15 @@ class RequiredCredentialValidationTest {
 
         assertNotNull(lazyConfiguration);
         assertFalse(lazyConfiguration.value());
+    }
+
+    @Test
+    void validationIsLimitedToWebApplications() {
+        ConditionalOnWebApplication webApplicationCondition =
+                RequiredCredentialValidation.class.getAnnotation(ConditionalOnWebApplication.class);
+
+        assertNotNull(webApplicationCondition);
+        assertTrue(webApplicationCondition.type() == ConditionalOnWebApplication.Type.ANY);
     }
 
     private RequiredCredentialValidation createValidation(
