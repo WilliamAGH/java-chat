@@ -21,6 +21,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.SettableFuture;
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.QdrantGitHubCollectionDiscovery;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.QdrantClient;
@@ -48,8 +49,14 @@ class HybridSearchServiceTest {
             "[QDRANT] Search failed for collection=java-chat-books (exceptionType=RuntimeException)";
     private static final String CITATION_COLLECTION_FAILURE_WARNING =
             "[QDRANT] Search failed for collection=java-docs (exceptionType=RuntimeException)";
-    private static final String HYBRID_QUERY = "Java 25 streams";
+    private static final DocsSourceRegistry.JavaApiDocumentationSource REPRESENTED_JAVA_API_SOURCE =
+            DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+    private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
+            DocsSourceRegistry.officialDocumentationSourceIdentities();
+    private static final String HYBRID_QUERY = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " streams";
     private static final String CITATION_QUERY = "Java records";
+    private static final String VERSIONED_SELECTOR_CITATION_QUERY =
+            "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
     private static final Duration DISPATCH_BUDGET_TEST_TIMEOUT = Duration.ofMillis(500);
     private static final long FIRST_DISPATCH_DELAY_MILLIS = 50;
     private static final Duration SHARED_QUERY_TIMEOUT = Duration.ofMillis(150);
@@ -92,7 +99,8 @@ class HybridSearchServiceTest {
                 .queryAsync(notNull(), notNull());
 
         HybridSearchService hybridSearchService = buildSearchService();
-        RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersion("25");
+        RetrievalConstraint retrievalConstraint =
+                RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease());
 
         hybridSearchService.searchOutcome(HYBRID_QUERY, 5, retrievalConstraint);
 
@@ -133,7 +141,7 @@ class HybridSearchServiceTest {
 
         HybridSearchService hybridSearchService = buildSearchServiceWithGitHubDiscovery(gitHubCollectionDiscovery);
         RetrievalConstraint officialDocumentationConstraint =
-                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java25-complete"));
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
 
         HybridSearchService.SearchOutcome citationSearchOutcome =
                 hybridSearchService.searchDocumentationCitationsOutcome(
@@ -161,7 +169,7 @@ class HybridSearchServiceTest {
         assertTrue(officialFilter.contains("sourceKind"));
         assertTrue(officialFilter.contains("official"));
         assertTrue(officialFilter.contains("docSet"));
-        assertTrue(officialFilter.contains("dev-java"));
+        assertTrue(officialFilter.contains(REPRESENTED_JAVA_API_SOURCE.relativeMirrorPath()));
         assertEquals(1, citationSearchOutcome.documents().size());
         assertEquals(
                 appProperties.getQdrant().getCollections().getDocs(),
@@ -169,6 +177,33 @@ class HybridSearchServiceTest {
         verifyNoInteractions(embeddingClient);
         verify(gitHubCollectionDiscovery, never()).getDiscoveredCollections();
         verify(qdrantClient, never()).queryAsync(any(QueryPoints.class));
+    }
+
+    @Test
+    void citationSearchExpandsSelectorsWithoutDroppingItsExactVersionFilter() {
+        when(sparseEncoder.encode(VERSIONED_SELECTOR_CITATION_QUERY + " List"))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
+        List<QueryPoints> capturedQueries = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedQueries.add(invocation.getArgument(0));
+                    return Futures.immediateFuture(List.of());
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService hybridSearchService = buildSearchService();
+        hybridSearchService.searchDocumentationCitationsOutcome(
+                VERSIONED_SELECTOR_CITATION_QUERY,
+                3,
+                RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+
+        assertEquals(1, capturedQueries.size());
+        assertTrue(capturedQueries.getFirst().hasFilter());
+        String versionFilter = capturedQueries.getFirst().getFilter().toString();
+        assertTrue(versionFilter.contains("docVersion"));
+        assertTrue(versionFilter.contains(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+        verify(sparseEncoder).encode(VERSIONED_SELECTOR_CITATION_QUERY + " List");
+        verifyNoInteractions(embeddingClient);
     }
 
     @Test
@@ -181,7 +216,7 @@ class HybridSearchServiceTest {
                 .queryAsync(notNull(), notNull());
         HybridSearchService hybridSearchService = buildSearchService();
         RetrievalConstraint officialDocumentationConstraint =
-                RetrievalConstraint.forOfficialDocSets(List.of("dev-java"));
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
 
         HybridSearchPartialFailureException citationSearchFailure;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {

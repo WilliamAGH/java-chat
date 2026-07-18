@@ -35,11 +35,39 @@ class IngestionProvenanceDeriverTest {
     }
 
     @Test
+    void projectsTheCanonicalJavaApiDocumentTypeForJavaApiMirrors() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
+        DocsSourceRegistry.JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path javaApiDocument = documentationRoot
+                .resolve(javaApiDocumentationSource.relativeMirrorPath())
+                .resolve("index.html");
+
+        IngestionProvenance provenance = provenanceDeriver.derive(
+                documentationRoot, javaApiDocument, javaApiDocumentationSource.remoteBaseUrl());
+
+        assertEquals(DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE, provenance.docType());
+    }
+
+    @Test
     void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
-        IngestionProvenance embeddedSeparatorProvenance =
-                new IngestionProvenance("alpha\u001fbeta", "gamma", "oracle", "official", "21", "api-docs");
-        IngestionProvenance shiftedSeparatorProvenance =
-                new IngestionProvenance("beta", "gamma", "oracle", "official", "21", "api-docs");
+        String representedJavaRelease =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().javaRelease();
+        IngestionProvenance embeddedSeparatorProvenance = new IngestionProvenance(
+                "alpha\u001fbeta",
+                "gamma",
+                "oracle",
+                "official",
+                representedJavaRelease,
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
+        IngestionProvenance shiftedSeparatorProvenance = new IngestionProvenance(
+                "beta",
+                "gamma",
+                "oracle",
+                "official",
+                representedJavaRelease,
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
 
         String embeddedSeparatorFingerprintInput = embeddedSeparatorProvenance.fingerprintInput("fingerprint");
         String shiftedSeparatorFingerprintInput = shiftedSeparatorProvenance.fingerprintInput("fingerprint\u001falpha");

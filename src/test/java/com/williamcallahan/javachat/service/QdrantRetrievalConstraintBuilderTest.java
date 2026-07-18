@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import io.qdrant.client.grpc.Common.Condition;
 import io.qdrant.client.grpc.Common.Filter;
 import java.util.List;
@@ -27,9 +28,15 @@ class QdrantRetrievalConstraintBuilderTest {
 
     @Test
     void buildsMustConditionsForConstrainedInput() {
-        List<String> allowedDocSet = List.of("dev-java", "java/java25-complete");
-        RetrievalConstraint retrievalConstraint =
-                new RetrievalConstraint("25", "official", "api-docs", "", allowedDocSet);
+        DocsSourceRegistry.JavaApiDocumentationSource representedJavaApiSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        List<String> allowedDocSet = DocsSourceRegistry.officialDocumentationSourceIdentities();
+        RetrievalConstraint retrievalConstraint = new RetrievalConstraint(
+                representedJavaApiSource.javaRelease(),
+                "official",
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE,
+                "",
+                allowedDocSet);
         Optional<Filter> optionalFilter = builder.buildFilter(retrievalConstraint);
 
         assertTrue(optionalFilter.isPresent());

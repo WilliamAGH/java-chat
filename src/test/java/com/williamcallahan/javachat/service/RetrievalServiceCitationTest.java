@@ -96,7 +96,7 @@ class RetrievalServiceCitationTest {
                 .text("return equals(this.SomeField, r.OTHER_FIELD);")
                 .metadata("url", recordJavadocUrl)
                 .metadata("package", "java.lang")
-                .metadata("docType", "api-docs")
+                .metadata("docType", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .build();
 
         RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(recordDocument));
@@ -198,7 +198,7 @@ class RetrievalServiceCitationTest {
 
         Document validDocument =
                 Document.builder().id("valid-doc").text("Valid snippet").build();
-        validDocument.getMetadata().put("url", "https://docs.oracle.com/javase/8/docs/api/java/lang/String.html");
+        validDocument.getMetadata().put("url", javaLangStringJavadocUrl());
         validDocument.getMetadata().put("title", "String");
 
         RetrievalService.CitationOutcome citationOutcome;
@@ -249,7 +249,7 @@ class RetrievalServiceCitationTest {
                 .text(sourceText)
                 .metadata("url", javaLangStringJavadocUrl())
                 .metadata("package", "java.lang")
-                .metadata("docType", "api-docs")
+                .metadata("docType", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .build();
     }
 

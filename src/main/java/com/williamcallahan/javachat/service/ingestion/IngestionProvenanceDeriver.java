@@ -138,7 +138,7 @@ public class IngestionProvenanceDeriver {
             return "book";
         }
         if (normalized.startsWith("java/")) {
-            return "api-docs";
+            return DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
         }
         if (normalized.startsWith("oracle/javase")) {
             return "release-notes";
@@ -149,7 +149,7 @@ public class IngestionProvenanceDeriver {
         if (url != null) {
             String lower = AsciiTextNormalizer.toLowerAscii(url);
             if (lower.contains("docs.oracle.com/en/java/javase/")) {
-                return "api-docs";
+                return DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
             }
             if (lower.contains("/pdfs/")) {
                 return "pdf";
@@ -203,7 +203,7 @@ public class IngestionProvenanceDeriver {
      * @param sourceName logical source identifier
      * @param sourceKind source category ("official", "vendor", "unknown")
      * @param docVersion version token when available
-     * @param docType doc type token ("api-docs", "release-notes", "blog", "pdf", etc.)
+     * @param docType doc type token (Java API, release-notes, blog, PDF, etc.)
      */
     public record IngestionProvenance(
             String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {

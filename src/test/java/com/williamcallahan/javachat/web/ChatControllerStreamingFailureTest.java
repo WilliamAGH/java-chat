@@ -49,6 +49,14 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +67,7 @@ import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
+import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -71,6 +80,7 @@ class ChatControllerStreamingFailureTest {
     private static final String SESSION_ID = "session\nid";
     private static final String USER_QUERY = "explain sealed classes";
     private static final String UPSTREAM_SECRET_MESSAGE = "OPENAI_API_KEY=secret-body";
+    private static final int ASYNC_ASSERTION_TIMEOUT_SECONDS = 2;
 
     private final Logger pipelineLogger = (Logger) LoggerFactory.getLogger("PIPELINE");
     private final Logger reactorHooksLogger = (Logger) LoggerFactory.getLogger(ReactorHooksConfig.class);
@@ -197,6 +207,147 @@ class ChatControllerStreamingFailureTest {
                 .verify();
 
         verifyNoInteractions(chatMemoryService, chatService, streamingService, retrievalService);
+    }
+
+    @Test
+    void streamSubscriptionReturnsAfterPreparationStatusWhileRetrievalIsBlocked()
+            throws JsonProcessingException, InterruptedException, ExecutionException, TimeoutException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                createSseSupport(),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        CountDownLatch retrievalStarted = new CountDownLatch(1);
+        CountDownLatch releaseRetrieval = new CountDownLatch(1);
+        CountDownLatch preparationStatusObserved = new CountDownLatch(1);
+        AtomicReference<ServerSentEvent<String>> firstStreamEvent = new AtomicReference<>();
+        AtomicReference<Throwable> streamFailure = new AtomicReference<>();
+        AtomicReference<Disposable> activeSubscription = new AtomicReference<>();
+
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
+            retrievalStarted.countDown();
+            assertTrue(
+                    releaseRetrieval.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "test should release blocked retrieval");
+            return List.of();
+        });
+        when(chatService.buildStructuredPromptWithContextOutcome(
+                        anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
+                .thenReturn(new ChatService.StructuredPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
+        when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.never());
+
+        ExecutorService subscriptionExecutor = Executors.newSingleThreadExecutor();
+        Future<?> subscriptionRegistration = subscriptionExecutor.submit(() -> activeSubscription.set(
+                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                        .subscribe(
+                                streamEvent -> {
+                                    if (firstStreamEvent.compareAndSet(null, streamEvent)) {
+                                        preparationStatusObserved.countDown();
+                                    }
+                                },
+                                streamFailure::set)));
+
+        try {
+            assertTrue(
+                    preparationStatusObserved.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "preparation status should be observable before retrieval completes");
+            assertTrue(
+                    retrievalStarted.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "retrieval should start after the preparation status");
+            subscriptionRegistration.get(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            ServerSentEvent<String> preparationEvent =
+                    Objects.requireNonNull(firstStreamEvent.get(), "first stream event");
+            assertEquals(EVENT_STATUS, preparationEvent.event());
+            SseSupport.SseEventPayload preparationStatus = objectMapper.readValue(
+                    Objects.requireNonNull(preparationEvent.data(), "preparation status event data"),
+                    SseSupport.SseEventPayload.class);
+            assertEquals(STATUS_CODE_STREAM_PREPARING, preparationStatus.code());
+            assertEquals(STATUS_STAGE_RETRIEVAL, preparationStatus.stage());
+            assertEquals(1L, releaseRetrieval.getCount(), "subscription should return while retrieval remains blocked");
+            assertNull(streamFailure.get());
+        } finally {
+            releaseRetrieval.countDown();
+            Disposable streamSubscription = activeSubscription.get();
+            if (streamSubscription != null) {
+                streamSubscription.dispose();
+            }
+            subscriptionRegistration.cancel(true);
+            subscriptionExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void disposingStreamInterruptsBlockedPreparationAndPreventsDownstreamWork() throws InterruptedException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                createSseSupport(),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        CountDownLatch retrievalStarted = new CountDownLatch(1);
+        CountDownLatch releaseRetrieval = new CountDownLatch(1);
+        CountDownLatch retrievalInterrupted = new CountDownLatch(1);
+        CountDownLatch retrievalFinished = new CountDownLatch(1);
+        AtomicReference<Throwable> streamFailure = new AtomicReference<>();
+
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
+            retrievalStarted.countDown();
+            try {
+                releaseRetrieval.await();
+                return List.of();
+            } catch (InterruptedException interruptedFailure) {
+                retrievalInterrupted.countDown();
+                throw interruptedFailure;
+            } finally {
+                retrievalFinished.countDown();
+            }
+        });
+
+        Disposable streamSubscription = chatController.stream(
+                        new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                .subscribe(
+                        preparationEvent -> assertEquals(EVENT_STATUS, preparationEvent.event()), streamFailure::set);
+
+        try {
+            assertTrue(
+                    retrievalStarted.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "retrieval should be blocked before cancellation");
+
+            streamSubscription.dispose();
+
+            assertTrue(
+                    retrievalInterrupted.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "disposing the stream should interrupt blocked retrieval");
+            assertTrue(
+                    retrievalFinished.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "blocked retrieval should terminate after cancellation");
+            assertNull(streamFailure.get());
+            verifyNoInteractions(chatService, retrievalService);
+            verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+            verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
+        } finally {
+            releaseRetrieval.countDown();
+            streamSubscription.dispose();
+        }
     }
 
     @Test

@@ -33,12 +33,12 @@ public class RetrievalService {
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
     private static final double TRUNCATION_BREAK_THRESHOLD = 0.8;
 
-    private static final String METADATA_URL = "url";
+    private static final String METADATA_URL = QdrantPayloadFieldSchema.URL_FIELD;
     private static final String METADATA_TITLE = "title";
     private static final String METADATA_PACKAGE = "package";
     private static final String METADATA_HASH = "hash";
-    private static final String METADATA_DOC_TYPE = "docType";
-    private static final String DOCUMENT_TYPE_API_DOCS = "api-docs";
+    private static final String METADATA_DOC_TYPE = QdrantPayloadFieldSchema.DOC_TYPE_FIELD;
+    private static final String DOCUMENT_TYPE_API_DOCS = DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
 
@@ -137,11 +137,12 @@ public class RetrievalService {
         int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
         Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
         RetrievalConstraint combinedRetrievalConstraint = combineWithVersionFilter(retrievalConstraint, versionFilter);
-        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
         HybridSearchService.SearchOutcome citationSearchOutcome =
                 hybridSearchService.searchDocumentationCitationsOutcome(
-                        boostedQuery, citationCandidateLimit, combinedRetrievalConstraint);
-        CitationOutcome candidateCitationOutcome = toCitations(citationSearchOutcome.documents());
+                        query, citationCandidateLimit, combinedRetrievalConstraint);
+        List<Document> orderedCitationCandidates =
+                CitationCandidateRanker.orderForCitationQuery(query, citationSearchOutcome.documents());
+        CitationOutcome candidateCitationOutcome = toCitations(orderedCitationCandidates);
         List<Citation> limitedCitations = candidateCitationOutcome.citations().stream()
                 .limit(citationLimit)
                 .toList();
