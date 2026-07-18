@@ -20,7 +20,6 @@ import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -339,10 +338,8 @@ public class OpenAIStreamingService {
             RateLimitService.ApiProvider provider, Throwable upstreamFailure) {
         try {
             providerRoutingService.recordProviderFailure(provider, upstreamFailure);
-        } catch (RuntimeException providerFailureRecordingException) {
-            if (!Objects.equals(providerFailureRecordingException, upstreamFailure)) {
-                upstreamFailure.addSuppressed(providerFailureRecordingException);
-            }
+        } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+            upstreamFailure.addSuppressed(rateLimitDecisionFailure);
         }
     }
 
