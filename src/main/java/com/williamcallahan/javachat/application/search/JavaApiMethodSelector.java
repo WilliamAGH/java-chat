@@ -94,25 +94,19 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
     /**
      * Determines whether a Javadoc URL path identifies this selector's declaring type.
      *
-     * <p>Unqualified selectors match the type filename in any package. Qualified selectors require
-     * the exact package path immediately before that filename, preventing same-named JDK types in
-     * different packages from receiving the same citation priority.</p>
+     * <p>Qualified selectors use their query package and ignore candidate metadata. Unqualified
+     * selectors require a canonical Java package supplied by the candidate metadata, which keeps
+     * package-relative API pages from being mistaken for canonical type pages.</p>
      *
      * @param javadocPath decoded Javadoc URL path
-     * @return true when the path names this selector's declaring type
+     * @param candidatePackageName candidate package metadata, or {@code null} when absent
+     * @return true when the path names this selector's declaring type in its expected package
      */
-    public boolean matchesJavadocPath(String javadocPath) {
+    public boolean matchesJavadocPath(String javadocPath, String candidatePackageName) {
         Objects.requireNonNull(javadocPath, "javadocPath");
-        int filenameStartIndex = javadocPath.lastIndexOf('/') + 1;
-        String candidateFilename = javadocPath.substring(filenameStartIndex);
-        if (!typePageFileName().equals(candidateFilename)) {
-            return false;
-        }
-        if (packageName.isBlank()) {
-            return true;
-        }
-        String qualifiedPagePathSuffix = "/" + packageName.replace('.', '/') + "/" + typePageFileName();
-        return javadocPath.endsWith(qualifiedPagePathSuffix);
+        return expectedPackageName(candidatePackageName)
+                .map(expectedPackageName -> matchesPackageTypePath(javadocPath, expectedPackageName))
+                .orElse(false);
     }
 
     /**
@@ -122,6 +116,47 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      */
     public String sparseQueryTerms() {
         return typePageName;
+    }
+
+    private Optional<String> expectedPackageName(String candidatePackageName) {
+        if (!packageName.isBlank()) {
+            return Optional.of(packageName);
+        }
+        return isCanonicalJavaPackageName(candidatePackageName) ? Optional.of(candidatePackageName) : Optional.empty();
+    }
+
+    private boolean matchesPackageTypePath(String javadocPath, String expectedPackageName) {
+        String expectedPagePath = "/" + expectedPackageName.replace('.', '/') + "/" + typePageFileName();
+        return javadocPath.endsWith(expectedPagePath);
+    }
+
+    private static boolean isCanonicalJavaPackageName(String candidatePackageName) {
+        if (candidatePackageName == null
+                || candidatePackageName.isBlank()
+                || !candidatePackageName.equals(candidatePackageName.trim())) {
+            return false;
+        }
+
+        boolean segmentStart = true;
+        for (int characterIndex = 0; characterIndex < candidatePackageName.length(); characterIndex++) {
+            char packageCharacter = candidatePackageName.charAt(characterIndex);
+            if (packageCharacter == '.') {
+                if (segmentStart) {
+                    return false;
+                }
+                segmentStart = true;
+                continue;
+            }
+            if (segmentStart) {
+                if (!Character.isJavaIdentifierStart(packageCharacter)) {
+                    return false;
+                }
+                segmentStart = false;
+            } else if (!Character.isJavaIdentifierPart(packageCharacter)) {
+                return false;
+            }
+        }
+        return !segmentStart;
     }
 
     private static ParsedQualifiedName parseQualifiedName(String query, int startIndex) {

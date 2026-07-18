@@ -86,7 +86,9 @@ final class CitationCandidateRanker {
         if (documentPath == null || documentPath.isBlank()) {
             return false;
         }
-        return selector.matchesJavadocPath(documentPath);
+        Object rawCandidatePackageName = citationCandidate.getMetadata().get(QdrantPayloadFieldSchema.PACKAGE_FIELD);
+        String candidatePackageName = rawCandidatePackageName instanceof String packageName ? packageName : null;
+        return selector.matchesJavadocPath(documentPath, candidatePackageName);
     }
 
     private static boolean hasMethodDeclarationEvidence(JavaApiMethodSelector selector, Document citationCandidate) {
