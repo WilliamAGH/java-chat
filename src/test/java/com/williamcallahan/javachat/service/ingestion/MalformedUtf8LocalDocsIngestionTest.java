@@ -77,7 +77,7 @@ class MalformedUtf8LocalDocsIngestionTest {
                 new IngestionStorageServices(
                         hybridVectorService,
                         chunkProcessingService,
-                        mock(ContentHasher.class),
+                        new ContentHasher(),
                         localStoreService,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),

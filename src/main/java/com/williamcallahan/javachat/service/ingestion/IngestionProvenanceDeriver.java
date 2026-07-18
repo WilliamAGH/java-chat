@@ -205,6 +205,8 @@ public class IngestionProvenanceDeriver {
      */
     public record IngestionProvenance(
             String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {
+        private static final String FINGERPRINT_FIELD_SEPARATOR = "\u001f";
+
         public IngestionProvenance {
             docSet = sanitize(docSet);
             docPath = sanitize(docPath);
@@ -212,6 +214,25 @@ public class IngestionProvenanceDeriver {
             sourceKind = sanitize(sourceKind);
             docVersion = sanitize(docVersion);
             docType = sanitize(docType);
+        }
+
+        /**
+         * Projects the canonical provenance inventory into deterministic fingerprint material.
+         *
+         * @param fileContentFingerprint fingerprint of the source bytes
+         * @return content and provenance fields in canonical record order
+         */
+        public String fingerprintInput(String fileContentFingerprint) {
+            Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
+            return String.join(
+                    FINGERPRINT_FIELD_SEPARATOR,
+                    fileContentFingerprint,
+                    docSet,
+                    docPath,
+                    sourceName,
+                    sourceKind,
+                    docVersion,
+                    docType);
         }
     }
 }

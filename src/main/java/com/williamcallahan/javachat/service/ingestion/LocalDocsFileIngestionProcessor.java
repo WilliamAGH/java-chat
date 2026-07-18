@@ -35,7 +35,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    private static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-javadoc-extraction-v1";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v2";
 
     private final FileContentServices content;
     private final IngestionStorageServices storage;
@@ -103,6 +103,8 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         IngestionProvenance provenance = provenanceDeriver.derive(root, file, url);
+        String provenanceAwareContentFingerprint =
+                provenanceAwareContentFingerprint(fileContentFingerprint, provenance);
         var router = storage.router();
         var localStore = storage.localStore();
         QdrantCollectionKind collectionKind =
@@ -124,7 +126,7 @@ public class LocalDocsFileIngestionProcessor {
         boolean unchangedByFingerprint = priorIngestionRecord
                 .map(ingestionRecord -> ingestionRecord.fileSizeBytes() == fileSizeBytes
                         && ingestionRecord.lastModifiedMillis() == lastModifiedMillis
-                        && fileContentFingerprint.equals(ingestionRecord.contentFingerprint())
+                        && provenanceAwareContentFingerprint.equals(ingestionRecord.contentFingerprint())
                         && LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION.equals(ingestionRecord.extractionSemanticsVersion()))
                 .orElse(false);
 
@@ -199,9 +201,9 @@ public class LocalDocsFileIngestionProcessor {
                 try {
                     var quarantine = content.quarantine();
                     quarantine.quarantine(file);
-                    INDEXING_LOG.warn("[INDEXING] Content guard rejected file and moved it to quarantine");
+                    INDEXING_LOG.warn("[INDEXING] Content guard rejected file and copied it to quarantine");
                     return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                            file.toString(), "content-guard", "quarantined: " + guardDecision.rejectionReason()));
+                            file.toString(), "content-guard", "quarantine copy: " + guardDecision.rejectionReason()));
                 } catch (IOException quarantineException) {
                     log.warn(
                             "Failed to quarantine invalid content (exception type: {})",
@@ -240,7 +242,7 @@ public class LocalDocsFileIngestionProcessor {
                     url,
                     fileSizeBytes,
                     lastModifiedMillis,
-                    fileContentFingerprint,
+                    provenanceAwareContentFingerprint,
                     documents,
                     chunkingOutcome.allChunkHashes(),
                     fileStartMillis);
@@ -263,7 +265,7 @@ public class LocalDocsFileIngestionProcessor {
                                 url,
                                 fileSizeBytes,
                                 lastModifiedMillis,
-                                fileContentFingerprint,
+                                provenanceAwareContentFingerprint,
                                 forcedDocuments,
                                 forcedChunkingOutcome.allChunkHashes(),
                                 fileStartMillis);
@@ -283,7 +285,11 @@ public class LocalDocsFileIngestionProcessor {
             }
             INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
             markFileIngested(
-                    url, fileSizeBytes, lastModifiedMillis, fileContentFingerprint, chunkingOutcome.allChunkHashes());
+                    url,
+                    fileSizeBytes,
+                    lastModifiedMillis,
+                    provenanceAwareContentFingerprint,
+                    chunkingOutcome.allChunkHashes());
             return LocalDocsFileOutcome.skippedFile();
         }
         if (chunkingOutcome.generatedNoChunks()) {
@@ -434,5 +440,11 @@ public class LocalDocsFileIngestionProcessor {
     private String mapLocalPathToUrl(final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
         return DocsSourceRegistry.resolveLocalPath(absolutePath).orElse(FILE_URL_PREFIX + absolutePath);
+    }
+
+    private String provenanceAwareContentFingerprint(String fileContentFingerprint, IngestionProvenance provenance) {
+        Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
+        Objects.requireNonNull(provenance, "provenance");
+        return storage.hasher().sha256(provenance.fingerprintInput(fileContentFingerprint));
     }
 }

@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service.ingestion;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
@@ -150,6 +153,62 @@ class LocalDocsFileIngestionProcessorTest {
         assertFalse(updatedMarkerCaptor.getValue().extractionSemanticsVersion().isBlank());
     }
 
+    @Test
+    void shouldReprocessMarkerWhoseFingerprintOmitsCanonicalProvenance(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path documentationFile =
+                localDocsRoot.resolve(documentationSource.relativeMirrorPath()).resolve("index.html");
+        Files.createDirectories(Objects.requireNonNull(documentationFile.getParent(), "documentationFile parent"));
+        Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        String expectedDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
+        String contentOnlyFingerprint = "documentation-fingerprint";
+        LocalStoreService.FileIngestionRecord contentOnlyMarker = new LocalStoreService.FileIngestionRecord(
+                Files.size(documentationFile),
+                Files.getLastModifiedTime(documentationFile).toMillis(),
+                contentOnlyFingerprint,
+                LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                List.of("old-documentation-hash"));
+
+        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
+        LocalStoreService localStoreService = mock(LocalStoreService.class);
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        Document indexedDocument = new Document("documentation-point", "Documentation body", new HashMap<>());
+        ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
+                new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("current-documentation-hash"), 1, 0);
+
+        when(localStoreService.computeFileContentFingerprint(documentationFile)).thenReturn(contentOnlyFingerprint);
+        when(localStoreService.readFileIngestionRecord(expectedDocumentationUrl))
+                .thenReturn(Optional.of(contentOnlyMarker));
+        when(hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(chunkProcessingService.processAndStoreChunksForce(
+                        anyString(), eq(expectedDocumentationUrl), anyString(), anyString()))
+                .thenReturn(forcedChunkingOutcome);
+
+        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
+                chunkProcessingService, localStoreService, hybridVectorService, ingestedFilePruneService);
+
+        LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
+
+        assertTrue(processingOutcome.processed());
+        verify(ingestedFilePruneService)
+                .pruneCollectionFileStrict("documentation", expectedDocumentationUrl, contentOnlyMarker);
+        verify(chunkProcessingService)
+                .processAndStoreChunksForce(anyString(), eq(expectedDocumentationUrl), anyString(), anyString());
+        ArgumentCaptor<LocalStoreService.FileIngestionRecord> updatedMarkerCaptor =
+                ArgumentCaptor.forClass(LocalStoreService.FileIngestionRecord.class);
+        verify(localStoreService).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        assertNotEquals(contentOnlyFingerprint, updatedMarkerCaptor.getValue().contentFingerprint());
+        assertEquals(
+                contentOnlyMarker.extractionSemanticsVersion(),
+                updatedMarkerCaptor.getValue().extractionSemanticsVersion());
+    }
+
     private static LocalDocsFileIngestionProcessor createIngestionProcessor(
             ChunkProcessingService chunkProcessingService,
             LocalStoreService localStoreService,
@@ -166,7 +225,7 @@ class LocalDocsFileIngestionProcessorTest {
                 new IngestionStorageServices(
                         hybridVectorService,
                         chunkProcessingService,
-                        mock(ContentHasher.class),
+                        new ContentHasher(),
                         localStoreService,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),
