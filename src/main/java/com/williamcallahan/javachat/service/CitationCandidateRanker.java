@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.service.ingestion.JavaPackageExtractor;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -86,7 +87,8 @@ final class CitationCandidateRanker {
         if (documentPath == null || documentPath.isBlank()) {
             return false;
         }
-        return selector.matchesJavadocPath(documentPath);
+        String candidatePackageName = JavaPackageExtractor.extractJavaApiPackage(sourceUrl);
+        return selector.matchesJavadocPath(documentPath, candidatePackageName);
     }
 
     private static boolean hasMethodDeclarationEvidence(JavaApiMethodSelector selector, Document citationCandidate) {

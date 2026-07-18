@@ -127,13 +127,11 @@ class RetrievalServiceTest {
         String citationQuery = "What does List.of return?";
         String listPageUrl = javaApiPageUrl("java.util", "List.html");
         List<Document> qdrantCandidates = List.of(
+                apiDocumentationCitationCandidate("object", "A utility of() method", "java.lang", "Object.html"),
+                apiDocumentationCitationCandidate("string", "A utility of() method", "java.lang", "String.html"),
+                apiDocumentationCitationCandidate("integer", "A utility of() method", "java.lang", "Integer.html"),
                 apiDocumentationCitationCandidate(
-                        "object", "A utility of() method", javaApiPageUrl("java.lang", "Object.html")),
-                apiDocumentationCitationCandidate(
-                        "string", "A utility of() method", javaApiPageUrl("java.lang", "String.html")),
-                apiDocumentationCitationCandidate(
-                        "integer", "A utility of() method", javaApiPageUrl("java.lang", "Integer.html")),
-                apiDocumentationCitationCandidate("list", "static <E> List<E> of(E element)", listPageUrl));
+                        "list", "static <E> List<E> of(E element)", "java.util", "List.html"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
                         eq(citationQuery), eq(4), same(officialDocumentationConstraint)))
                 .thenReturn(new HybridSearchService.SearchOutcome(qdrantCandidates, List.of()));
@@ -222,12 +220,13 @@ class RetrievalServiceTest {
     }
 
     private static Document apiDocumentationCitationCandidate(
-            String documentId, String documentText, String sourceUrl) {
+            String documentId, String documentText, String packageName, String pageFilename) {
         return Document.builder()
                 .id(documentId)
                 .text(documentText)
-                .metadata(QdrantPayloadFieldSchema.URL_FIELD, sourceUrl)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiPageUrl(packageName, pageFilename))
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, packageName)
                 .build();
     }
 

@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.application.search;
 
+import com.williamcallahan.javachat.domain.javaapi.JavaPackageName;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -94,25 +95,20 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
     /**
      * Determines whether a Javadoc URL path identifies this selector's declaring type.
      *
-     * <p>Unqualified selectors match the type filename in any package. Qualified selectors require
-     * the exact package path immediately before that filename, preventing same-named JDK types in
-     * different packages from receiving the same citation priority.</p>
+     * <p>Qualified selectors use their query package and ignore the candidate package. Unqualified
+     * selectors require a canonical Java package derived from the candidate source URL, which
+     * keeps package-relative API pages from being mistaken for canonical type pages.</p>
      *
      * @param javadocPath decoded Javadoc URL path
-     * @return true when the path names this selector's declaring type
+     * @param candidatePackageName package derived from the candidate source URL, or {@code null}
+     *     when absent
+     * @return true when the path names this selector's declaring type in its expected package
      */
-    public boolean matchesJavadocPath(String javadocPath) {
+    public boolean matchesJavadocPath(String javadocPath, String candidatePackageName) {
         Objects.requireNonNull(javadocPath, "javadocPath");
-        int filenameStartIndex = javadocPath.lastIndexOf('/') + 1;
-        String candidateFilename = javadocPath.substring(filenameStartIndex);
-        if (!typePageFileName().equals(candidateFilename)) {
-            return false;
-        }
-        if (packageName.isBlank()) {
-            return true;
-        }
-        String qualifiedPagePathSuffix = "/" + packageName.replace('.', '/') + "/" + typePageFileName();
-        return javadocPath.endsWith(qualifiedPagePathSuffix);
+        return expectedPackageName(candidatePackageName)
+                .map(expectedPackageName -> matchesPackageTypePath(javadocPath, expectedPackageName))
+                .orElse(false);
     }
 
     /**
@@ -122,6 +118,18 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      */
     public String sparseQueryTerms() {
         return typePageName;
+    }
+
+    private Optional<JavaPackageName> expectedPackageName(String candidatePackageName) {
+        if (!packageName.isBlank()) {
+            return JavaPackageName.from(packageName);
+        }
+        return JavaPackageName.from(candidatePackageName);
+    }
+
+    private boolean matchesPackageTypePath(String javadocPath, JavaPackageName expectedPackageName) {
+        String expectedPagePath = "/" + expectedPackageName.javadocPath() + "/" + typePageFileName();
+        return javadocPath.endsWith(expectedPagePath);
     }
 
     private static ParsedQualifiedName parseQualifiedName(String query, int startIndex) {

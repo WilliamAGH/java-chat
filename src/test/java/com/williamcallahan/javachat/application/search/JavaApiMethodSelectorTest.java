@@ -57,7 +57,7 @@ class JavaApiMethodSelectorTest {
         assertEquals("of", selector.methodName());
         assertEquals("List.html", selector.typePageFileName());
         assertEquals("List", selector.sparseQueryTerms());
-        assertTrue(selector.matchesJavadocPath("/java.base/java/util/List.html"));
+        assertTrue(selector.matchesJavadocPath("/java.base/java/util/List.html", null));
     }
 
     @Test
@@ -76,6 +76,25 @@ class JavaApiMethodSelectorTest {
     void requiresCaseSensitiveJavadocTypePageNames() {
         JavaApiMethodSelector selector = new JavaApiMethodSelector("java.util", "List", "of");
 
-        assertFalse(selector.matchesJavadocPath("/java.base/java/util/list.html"));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/util/list.html", null));
+    }
+
+    @Test
+    void requiresCanonicalCandidatePackageForUnqualifiedSelectors() {
+        JavaApiMethodSelector selector = new JavaApiMethodSelector("", "List", "of");
+
+        assertTrue(selector.matchesJavadocPath("/java.base/java/util/List.html", "java.util"));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/util/class-use/List.html", "java.util.class-use"));
+        assertFalse(selector.matchesJavadocPath("/List.html", ""));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/util/List.html", null));
+    }
+
+    @Test
+    void matchesQualifiedSelectorsByPathRegardlessOfCandidateMetadata() {
+        JavaApiMethodSelector selector = new JavaApiMethodSelector("java.util", "Date", "toString");
+
+        assertTrue(selector.matchesJavadocPath("/java.base/java/util/Date.html", null));
+        assertTrue(selector.matchesJavadocPath("/java.base/java/util/Date.html", "java.sql"));
+        assertFalse(selector.matchesJavadocPath("/java.sql/java/sql/Date.html", "java.util"));
     }
 }

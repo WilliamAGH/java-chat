@@ -24,7 +24,7 @@ public final class JavadocLinkResolver {
      *
      * @param url         Javadoc page URL ending with .html
      * @param text        Extracted chunk text from the same page
-     * @param packageName Package name of the type (from metadata), can be empty
+     * @param packageName Java package derived from the canonical Javadoc source URL, can be empty
      * @return URL with a fragment to the member if a confident match is found; original URL otherwise
      */
     public static String refineMemberAnchorUrl(String url, String text, String packageName) {
