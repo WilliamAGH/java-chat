@@ -279,6 +279,12 @@ LOG_FILE="$TEST_WORK_ROOT/documentation-fetch.log"
 wget() {
     printf '%s\n' "$@" > "$generic_mirror_wget_arguments_file"
     printf '<html><body>Fetched</body></html>\n' > "$generic_mirror_target_directory/index.html"
+    mkdir -p "$generic_mirror_target_directory/nested"
+    printf '<html><body>Nested</body></html>\n' > "$generic_mirror_target_directory/nested/guide.htm"
+    printf 'User-agent: *\n' > "$generic_mirror_target_directory/robots.txt"
+    printf 'User-agent: *\n' > "$generic_mirror_target_directory/nested/robots.txt"
+    printf 'body {}\n' > "$generic_mirror_target_directory/site.css"
+    printf 'wget state\n' > "$generic_mirror_target_directory/.wget-state"
     return 0
 }
 if ! (cd "$generic_mirror_target_directory" \
@@ -300,6 +306,14 @@ if grep -Eq '^--accept=' "$generic_mirror_wget_arguments_file"; then
 fi
 if ! grep -Eq '^--reject=.*png' "$generic_mirror_wget_arguments_file"; then
     fail_documentation_fetch_projection_test "generic mirrors must reject binary asset extensions"
+fi
+if [ ! -f "$generic_mirror_target_directory/index.html" ] \
+    || [ ! -f "$generic_mirror_target_directory/nested/guide.htm" ]; then
+    fail_documentation_fetch_projection_test "generic mirror cleanup removed governed HTML files"
+fi
+if find "$generic_mirror_target_directory" -type f ! \( -name '*.html' -o -name '*.htm' \) \
+    -print -quit | grep -q .; then
+    fail_documentation_fetch_projection_test "generic mirror cleanup retained non-HTML fetch artifacts"
 fi
 
 assert_seed_network_policy() {
