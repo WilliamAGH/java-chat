@@ -5,13 +5,34 @@
   import LearnView from './lib/components/LearnView.svelte'
   import ToastContainer from './lib/components/ToastContainer.svelte'
   import { refreshCsrfToken } from './lib/services/csrf'
+  import {
+    applicationViewForPath,
+    canonicalPathForApplicationView,
+    synchronizeDocumentMetadata,
+    type ApplicationView,
+  } from './lib/services/pageMetadata'
 
-  let currentView = $state<'chat' | 'learn'>('chat')
+  let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
+
+  $effect(() => {
+    if (applicationViewForPath(globalThis.location.pathname) !== currentView) {
+      const selectedViewPath = canonicalPathForApplicationView(currentView)
+      globalThis.history.pushState({}, '', selectedViewPath)
+    }
+    synchronizeDocumentMetadata()
+  })
 
   onMount(() => {
     void refreshCsrfToken()
   })
+
+  function synchronizeViewWithBrowserHistory(): void {
+    currentView = applicationViewForPath(globalThis.location.pathname)
+    synchronizeDocumentMetadata()
+  }
 </script>
+
+<svelte:window onpopstate={synchronizeViewWithBrowserHistory} />
 
 <div class="app-shell">
   <Header bind:currentView />
