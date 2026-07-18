@@ -43,6 +43,28 @@ describe("ChatView streaming stability", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not submit while an IME composition is active", async () => {
+    const renderedChatView = await renderChatView();
+    const messageInput = renderedChatView.getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+
+    await fireEvent.input(messageInput, { target: { value: "record" } });
+    const composingEnterEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: "Enter",
+    });
+    await fireEvent(messageInput, composingEnterEvent);
+
+    expect(composingEnterEvent.defaultPrevented).toBe(false);
+    expect(streamChatMock).not.toHaveBeenCalled();
+    expect(renderedChatView.container.querySelector(".message.user")).toBeNull();
+    expect(messageInput).toHaveValue("record");
+  });
+
   it("keeps the assistant message DOM node stable when the stream completes", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected stream completion callback to be set");

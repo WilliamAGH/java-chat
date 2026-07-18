@@ -43,6 +43,27 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void versionedConstrainedRetrievalCombinesOfficialScopeAndQueryVersionForHybridSearch() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java17-complete"));
+        RetrievalConstraint expectedCombinedConstraint = officialDocumentationConstraint.withDocVersion("17");
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedCombinedConstraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+
+        retrievalService.retrieveOutcome("Java 17 List.of", officialDocumentationConstraint);
+
+        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), eq(expectedCombinedConstraint));
+        assertEquals("17", expectedCombinedConstraint.docVersion());
+        assertEquals("official", expectedCombinedConstraint.sourceKind());
+        assertEquals(officialDocumentationConstraint.docSet(), expectedCombinedConstraint.docSet());
+    }
+
+    @Test
     void citationDiscoveryLimitsAfterFinalUrlAndAnchorDeduplication() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
@@ -82,6 +103,26 @@ class RetrievalServiceTest {
         assertEquals(0, citationOutcome.failedConversionCount());
         verify(hybridSearchService).searchDocumentationCitationsOutcome(anyString(), eq(4), same(guidedConstraint));
         verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+    }
+
+    @Test
+    void versionedCitationDiscoveryCombinesOfficialScopeAndQueryVersionBeforeDispatch() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java17-complete"));
+        RetrievalConstraint expectedCombinedConstraint = officialDocumentationConstraint.withDocVersion("17");
+        when(hybridSearchService.searchDocumentationCitationsOutcome(
+                        anyString(), anyInt(), eq(expectedCombinedConstraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
+
+        retrievalService.discoverCitations("Java 17 List.of", officialDocumentationConstraint);
+
+        verify(hybridSearchService)
+                .searchDocumentationCitationsOutcome(anyString(), anyInt(), eq(expectedCombinedConstraint));
         verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
     }
 

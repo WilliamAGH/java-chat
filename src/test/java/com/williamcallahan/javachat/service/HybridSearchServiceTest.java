@@ -231,6 +231,45 @@ class HybridSearchServiceTest {
                     .allMatch(logEvent -> logEvent.getFormattedMessage().contains("Search timed out for collection=")));
         }
         assertEquals(4, timedOutSearchOutcome.notices().size());
+        assertTrue(timedOutSearchOutcome.notices().stream()
+                .allMatch(retrievalNotice -> retrievalNotice.details().contains("Qdrant query exceeded timeout")));
+        assertEquals(4, stalledQdrantQueryFutures.size());
+        assertTrue(stalledQdrantQueryFutures.stream().allMatch(SettableFuture::isCancelled));
+    }
+
+    @Test
+    void interruptionCancelsEveryPendingQueryAndFailsRetrievalEvenWhenPartialFailuresAreNonFatal() {
+        appProperties.getQdrant().setFailOnPartialSearchError(false);
+        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(sparseEncoder.encode(HYBRID_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
+        List<SettableFuture<List<ScoredPoint>>> stalledQdrantQueryFutures = new ArrayList<>();
+        doAnswer(invocation -> {
+                    SettableFuture<List<ScoredPoint>> stalledQdrantQueryFuture = SettableFuture.create();
+                    stalledQdrantQueryFutures.add(stalledQdrantQueryFuture);
+                    return stalledQdrantQueryFuture;
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService hybridSearchService = buildSearchService();
+        HybridSearchPartialFailureException interruptionFailure;
+        boolean interruptStatusPreserved;
+        Thread.currentThread().interrupt();
+        try {
+            interruptionFailure = assertThrows(
+                    HybridSearchPartialFailureException.class,
+                    () -> hybridSearchService.searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none()));
+        } finally {
+            interruptStatusPreserved = Thread.interrupted();
+        }
+
+        assertTrue(interruptStatusPreserved);
+        assertEquals("Qdrant retrieval was interrupted", interruptionFailure.getMessage());
+        assertEquals(1, interruptionFailure.collectionFailures().size());
+        assertEquals(
+                "Qdrant query was interrupted",
+                interruptionFailure.collectionFailures().getFirst().failureDetails());
         assertEquals(4, stalledQdrantQueryFutures.size());
         assertTrue(stalledQdrantQueryFutures.stream().allMatch(SettableFuture::isCancelled));
     }

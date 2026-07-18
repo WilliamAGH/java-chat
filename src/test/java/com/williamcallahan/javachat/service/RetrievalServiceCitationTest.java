@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -228,6 +229,10 @@ class RetrievalServiceCitationTest {
         assertEquals(1, citationOutcome.failedConversionCount());
         assertEquals("String", citationOutcome.citations().getFirst().getTitle());
         assertTrue(citationOutcome.citations().getFirst().getUrl().contains("docs.oracle.com"));
+
+        CitationConversionFailureException conversionFailure =
+                assertThrows(CitationConversionFailureException.class, citationOutcome::citationsOrThrow);
+        assertEquals(1, conversionFailure.failedConversionCount());
     }
 
     private static RetrievalService citationService() {

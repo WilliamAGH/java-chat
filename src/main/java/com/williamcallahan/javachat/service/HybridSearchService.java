@@ -420,10 +420,13 @@ public class HybridSearchService {
                 mergePoints(scoredPoints, collectionName, scoredPointsByUuid);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-                collectionQueryFuture.cancel(true);
+                cancelPendingQueries(queryDispatch);
                 log.warn("[QDRANT] Search interrupted for collection={}", collectionName);
-                collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
-                        collectionName, "Interrupted", "Hybrid query was interrupted"));
+                HybridSearchPartialFailureException.CollectionSearchFailure interruptionFailure =
+                        new HybridSearchPartialFailureException.CollectionSearchFailure(
+                                collectionName, "Interrupted", "Qdrant query was interrupted");
+                throw new HybridSearchPartialFailureException(
+                        "Qdrant retrieval was interrupted", List.of(interruptionFailure));
             } catch (ExecutionException executionException) {
                 Throwable cause = executionException.getCause();
                 String exceptionType = cause == null
@@ -439,10 +442,14 @@ public class HybridSearchService {
                 collectionFailures.add(new HybridSearchPartialFailureException.CollectionSearchFailure(
                         collectionName,
                         "Timeout",
-                        "Hybrid query exceeded timeout "
+                        "Qdrant query exceeded timeout "
                                 + queryDispatch.queryTimeout().toMillis() + "ms"));
             }
         }
+    }
+
+    private static void cancelPendingQueries(CollectionQueryDispatch queryDispatch) {
+        queryDispatch.futuresByCollection().values().forEach(queryFuture -> queryFuture.cancel(true));
     }
 
     private static void mergePoints(

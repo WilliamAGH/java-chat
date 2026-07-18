@@ -160,11 +160,7 @@ describe("LearnView async request ownership", () => {
     const learnView = await renderSelectedLesson();
     const lessonContentPanel =
       learnView.container.querySelector<HTMLElement>(".lesson-content-panel");
-    if (!lessonContentPanel) {
-      throw new Error("Expected a scrollable lesson content panel");
-    }
-
-    expect(lessonContentPanel).toHaveClass("lesson-content-panel");
+    expect(lessonContentPanel).toBeInTheDocument();
 
     expect(learnViewSource).toContain(
       "--lesson-content-panel-mobile-reading-inset: var(--space-20)",

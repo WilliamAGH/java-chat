@@ -66,7 +66,9 @@
     submitMessage()
   }
 
-  function handleKeyDown(keyboardEvent: KeyboardEvent) {
+  function handleKeyDown(keyboardEvent: KeyboardEvent): void {
+    if (keyboardEvent.isComposing) return
+
     if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey) {
       keyboardEvent.preventDefault()
       submitMessage()

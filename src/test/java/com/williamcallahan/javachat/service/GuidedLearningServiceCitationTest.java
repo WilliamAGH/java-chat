@@ -208,6 +208,31 @@ class GuidedLearningServiceCitationTest {
         assertEquals(expectedCitationOutcome, actualCitationOutcome);
     }
 
+    @Test
+    void lessonCitationsRejectPartialCitationConversionOutcomes() {
+        GuidedLesson guidedLesson = guidedLesson();
+        GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
+        when(tocProvider.findBySlug(LESSON_SLUG)).thenReturn(Optional.of(guidedLesson));
+
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.discoverCitations(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(new RetrievalService.CitationOutcome(
+                        List.of(new Citation(officialSourceUrl(guidedLesson), "Strings", "", OFFICIAL_SOURCE_TEXT)),
+                        1));
+
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider,
+                retrievalService,
+                mock(EnrichmentService.class),
+                mock(ChatService.class),
+                systemPromptConfig());
+
+        CitationConversionFailureException conversionFailure = assertThrows(
+                CitationConversionFailureException.class, () -> guidedLearningService.citationsForLesson(LESSON_SLUG));
+
+        assertEquals(1, conversionFailure.failedConversionCount());
+    }
+
     private static GuidedLearningService guidedLearningService(
             GuidedTOCProvider tocProvider,
             RetrievalService retrievalService,
