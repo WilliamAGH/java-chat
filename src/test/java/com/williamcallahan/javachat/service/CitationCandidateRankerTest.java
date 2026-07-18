@@ -34,13 +34,19 @@ class CitationCandidateRankerTest {
     }
 
     @Test
-    void prioritizesCanonicalTypePagesOverClassUseAndRootPageCandidates() {
-        Document classUseCandidate = javaApiJavadocCandidate(
-                "class-use", "static <E> List<E> of(E element)", javadocPage("java.util.class-use", "List.html"));
+    void derivesCanonicalPackageFromSourceUrlsInsteadOfLegacyPackageMetadata() {
+        Document classUseCandidate = javaApiJavadocCandidateWithPackageMetadata(
+                "class-use",
+                "static <E> List<E> of(E element)",
+                javadocPage("java.util.class-use", "List.html"),
+                "java.util");
         Document rootPageCandidate =
-                javaApiRootJavadocCandidate("root-page", "static <E> List<E> of(E element)", "List.html");
-        Document canonicalListCandidate = javaApiJavadocCandidate(
-                "canonical-list", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
+                javaApiRootJavadocCandidate("root-page", "static <E> List<E> of(E element)", "List.html", "java.util");
+        Document canonicalListCandidate = javaApiJavadocCandidateWithPackageMetadata(
+                "canonical-list",
+                "static <E> List<E> of(E element)",
+                javaUtilJavadocPage("List.html"),
+                "java.base.java.util");
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "What does Java List.of() return?",
@@ -198,7 +204,8 @@ class CitationCandidateRankerTest {
                 .build();
     }
 
-    private static Document javaApiRootJavadocCandidate(String documentId, String documentText, String filename) {
+    private static Document javaApiRootJavadocCandidate(
+            String documentId, String documentText, String filename, String candidatePackageName) {
         DocsSourceRegistry.JavaApiDocumentationSource representedJavaApiSource =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst();
         return Document.builder()
@@ -206,7 +213,7 @@ class CitationCandidateRankerTest {
                 .text(documentText)
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, representedJavaApiSource.remoteBaseUrl() + filename)
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
-                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "")
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, candidatePackageName)
                 .build();
     }
 

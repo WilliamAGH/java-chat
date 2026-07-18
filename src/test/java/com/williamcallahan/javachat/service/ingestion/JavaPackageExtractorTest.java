@@ -25,7 +25,23 @@ class JavaPackageExtractorTest {
                 + "?redirect=/api/#append-java.lang.String-";
 
         assertTrue(JavaPackageExtractor.isJavaApiUrl(javadocUrl));
-        assertEquals("java.lang", JavaPackageExtractor.extractPackage(javadocUrl, ""));
+        assertEquals("java.lang", JavaPackageExtractor.extractJavaApiPackage(javadocUrl));
+        assertEquals("java.lang", JavaPackageExtractor.extractPackage(javadocUrl, "Package java.fake"));
+    }
+
+    @Test
+    void derivesOnlyValidPackagesEncodedByCanonicalJavaApiPaths() {
+        String javaApiBaseUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl();
+
+        assertEquals(
+                "java.util",
+                JavaPackageExtractor.extractJavaApiPackage(javaApiBaseUrl + "java.base/java/util/List.html"));
+        assertEquals(
+                "",
+                JavaPackageExtractor.extractJavaApiPackage(javaApiBaseUrl + "java.base/java/util/class-use/List.html"));
+        assertEquals("", JavaPackageExtractor.extractJavaApiPackage(javaApiBaseUrl + "List.html"));
+        assertEquals("", JavaPackageExtractor.extractJavaApiPackage(SPRING_BOOT_API_URL));
     }
 
     @Test
@@ -43,5 +59,14 @@ class JavaPackageExtractorTest {
         String springBootReferenceUrl = "https://docs.spring.io/spring-boot/reference/?redirect=/api/#/api/";
 
         assertFalse(JavaPackageExtractor.isJavaApiUrl(springBootReferenceUrl));
+    }
+
+    @Test
+    void validatesBodyTextPackageFallbackThroughTheCanonicalPackageOwner() {
+        String referenceUrl = "https://example.test/java/reference";
+
+        assertEquals("java.util", JavaPackageExtractor.extractPackage(referenceUrl, "Package java.util,"));
+        assertEquals("", JavaPackageExtractor.extractPackage(referenceUrl, "Package java.util.class-use"));
+        assertEquals("", JavaPackageExtractor.extractPackage(referenceUrl, "Package java.class"));
     }
 }

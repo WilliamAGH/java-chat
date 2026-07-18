@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
+import com.williamcallahan.javachat.service.ingestion.JavaPackageExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
@@ -415,10 +416,8 @@ public class RetrievalService {
                 Map<String, ?> sourceDocMetadata = sourceDocument.getMetadata();
                 String rawUrl = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.URL_FIELD);
                 String title = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.TITLE_FIELD);
-                String packageName = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.PACKAGE_FIELD);
                 String documentType = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.DOC_TYPE_FIELD);
-                String refinedCitationUrl =
-                        refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
+                String refinedCitationUrl = refineCitationUrl(rawUrl, sourceDocument.getText(), documentType);
                 String citationIdentity = citationIdentityFor(rawUrl, refinedCitationUrl);
                 if (!citationIdentity.isBlank() && !retainedCitationIdentities.add(citationIdentity)) {
                     continue;
@@ -478,10 +477,11 @@ public class RetrievalService {
      * Refines a raw document URL and gates Javadoc member anchors to {@code api-docs} metadata.
      *
      */
-    private String refineCitationUrl(String rawUrl, String documentText, String packageName, String documentType) {
+    private String refineCitationUrl(String rawUrl, String documentText, String documentType) {
         String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);
         String citationUrl = normalizedUrl;
         if (DOCUMENT_TYPE_API_DOCS.equals(documentType)) {
+            String packageName = JavaPackageExtractor.extractJavaApiPackage(normalizedUrl);
             String nestedTypeRefinedUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineNestedTypeUrl(
                     citationUrl, documentText);
             citationUrl = com.williamcallahan.javachat.util.JavadocLinkResolver.refineMemberAnchorUrl(

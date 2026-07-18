@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
+import com.williamcallahan.javachat.domain.javaapi.JavaPackageName;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -35,6 +36,25 @@ public final class JavaPackageExtractor {
     }
 
     /**
+     * Derives the Java package encoded by a manifest-governed Java API source URL.
+     *
+     * <p>URL consumers use this projection instead of persisted package metadata so package
+     * identity follows the canonical source path across ingestion generations.</p>
+     *
+     * @param url source URL
+     * @return package encoded by the canonical Java API path, or an empty string when the URL is
+     *     not a canonical Java API source or its path does not identify a package
+     */
+    public static String extractJavaApiPackage(String url) {
+        Objects.requireNonNull(url, "url");
+        return findJavaApiSourceUrl(url)
+                .map(JavaPackageExtractor::extractPackageFromJavaApiPath)
+                .flatMap(JavaPackageName::from)
+                .map(JavaPackageName::qualifiedName)
+                .orElse("");
+    }
+
+    /**
      * Attempts to derive a package name from the URL and extracted page text.
      *
      * @param url source URL
@@ -45,9 +65,7 @@ public final class JavaPackageExtractor {
         Objects.requireNonNull(url, "url");
         Objects.requireNonNull(bodyText, "bodyText");
 
-        String pathDerivedPackageName = findJavaApiSourceUrl(url)
-                .map(JavaPackageExtractor::extractPackageFromJavaApiPath)
-                .orElse("");
+        String pathDerivedPackageName = extractJavaApiPackage(url);
         if (!pathDerivedPackageName.isBlank()) {
             return pathDerivedPackageName;
         }
@@ -58,7 +76,10 @@ public final class JavaPackageExtractor {
             String snippet = bodyText.substring(packageIndex, end);
             for (String token : snippet.split("\\s+")) {
                 if (AsciiTextNormalizer.toLowerAscii(token).startsWith("java.")) {
-                    return token.replaceAll("[,.;]$", "");
+                    String candidatePackageName = token.replaceAll("[,.;]$", "");
+                    return JavaPackageName.from(candidatePackageName)
+                            .map(JavaPackageName::qualifiedName)
+                            .orElse("");
                 }
             }
         }

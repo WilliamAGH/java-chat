@@ -65,6 +65,25 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
+    void derivesMemberAnchorPackageFromCanonicalUrlInsteadOfLegacyMetadata() {
+        String mapJavadocUrl = javaUtilMapJavadocUrl();
+        Document legacyMapDocument = Document.builder()
+                .id("legacy-map-package")
+                .text("copyOf(Map.Entry entry)")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, mapJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.base.java.util")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .build();
+
+        Citation citation = citationService()
+                .toCitations(List.of(legacyMapDocument))
+                .citations()
+                .getFirst();
+
+        assertEquals("copyOf(java.util.Map.Entry)", citation.getAnchor());
+    }
+
+    @Test
     void serializedCitationSplitsAtTheFirstFragmentDelimiterWithoutDecodingTheAnchor() {
         String citationPageUrl = "https://example.test/reference/arrays";
         String encodedCitationAnchor = "method%28java.lang.String%5B%5D%29#details%20section";
@@ -256,6 +275,11 @@ class RetrievalServiceCitationTest {
     private static String javaLangStringJavadocUrl() {
         return DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
                 + "java.base/java/lang/String.html";
+    }
+
+    private static String javaUtilMapJavadocUrl() {
+        return DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                + "java.base/java/util/Map.html";
     }
 
     /** Simulates malformed metadata values whose string conversion fails at runtime. */
