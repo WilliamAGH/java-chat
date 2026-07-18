@@ -18,10 +18,8 @@ import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,9 +66,6 @@ class GuidedLearningControllerCuratedContentTest {
 
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
-
-    @MockitoBean
-    RetrievalService retrievalService;
 
     @BeforeEach
     void startCapturingControllerLogs() {
@@ -144,6 +139,9 @@ class GuidedLearningControllerCuratedContentTest {
     }
 
     private static GuidedLesson listedLesson(String lessonSlug) {
-        return new GuidedLesson(lessonSlug, "Listed Lesson", "", List.of());
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(lessonSlug);
+        listedLesson.setTitle("Listed Lesson");
+        return listedLesson;
     }
 }

@@ -108,8 +108,8 @@ export async function fetchLessonContent(slug: string): Promise<LessonContentRes
 }
 
 /**
- * Fetch Think Java-only citations for a guided lesson slug.
- * Used by LearnView to render lesson sources with proper PDF page anchors.
+ * Fetch citations from the lesson's canonical official documentation scope.
+ * Used by LearnView to render the same sources that ground guided chat responses.
  */
 export async function fetchGuidedLessonCitations(
   slug: string,

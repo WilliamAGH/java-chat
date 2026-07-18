@@ -29,7 +29,6 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
@@ -64,18 +63,17 @@ class GuidedLearningControllerStreamingFailureTest {
     void setUpController() {
         controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
         guidedLearningService = mock(GuidedLearningService.class);
-        RetrievalService retrievalService = mock(RetrievalService.class);
         chatMemoryService = mock(ChatMemoryService.class);
         streamingService = mock(OpenAIStreamingService.class);
         guidedController = new GuidedLearningController(
                 guidedLearningService,
-                retrievalService,
                 chatMemoryService,
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
                 new SseSupport(objectMapper),
                 new AppProperties());
+        when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
     }
 
     @AfterEach
@@ -91,7 +89,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
@@ -126,7 +124,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
@@ -156,8 +154,10 @@ class GuidedLearningControllerStreamingFailureTest {
     @Test
     void guidedLessonContentDoesNotEmitDuplicateErrorForTerminalStreamingFailure() {
         ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
-        when(guidedLearningService.getLesson(LESSON_SLUG))
-                .thenReturn(Optional.of(new GuidedLesson(LESSON_SLUG, "Sealed Classes", "", List.of())));
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(LESSON_SLUG);
+        listedLesson.setTitle("Sealed Classes");
+        when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson));
         when(guidedLearningService.streamLessonContent(LESSON_SLUG)).thenReturn(Flux.error(terminalFailure));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
@@ -178,7 +178,7 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
+        when(guidedLearningService.citationsForContextDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(
                         new StreamingResult(Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI)));
@@ -211,6 +211,13 @@ class GuidedLearningControllerStreamingFailureTest {
 
     private static ReportedTerminalStreamingFailure terminalFailure() {
         return new ReportedTerminalStreamingFailure(new IllegalStateException("upstream failure"));
+    }
+
+    private static GuidedLesson listedLesson() {
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(LESSON_SLUG);
+        listedLesson.setTitle("Sealed Classes");
+        return listedLesson;
     }
 
     private long controllerErrorCount() {

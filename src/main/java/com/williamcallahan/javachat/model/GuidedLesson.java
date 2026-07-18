@@ -1,35 +1,26 @@
 package com.williamcallahan.javachat.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Guided lesson metadata used for structured learning flows.
+ * Guided lesson metadata and canonical official-source scope used for structured learning flows.
  */
 public class GuidedLesson {
     private String slug;
     private String title;
     private String summary;
     private List<String> keywords = List.of();
+    private String technology = "";
+    private List<String> sourceReferences = List.of();
+    private List<String> docSet = List.of();
 
     /**
      * Creates an empty guided lesson container.
      */
     public GuidedLesson() {}
-
-    /**
-     * Creates a guided lesson with the supplied metadata.
-     *
-     * @param slug lesson slug identifier
-     * @param title lesson title
-     * @param summary lesson summary
-     * @param keywords lesson keyword list
-     */
-    public GuidedLesson(String slug, String title, String summary, List<String> keywords) {
-        this.slug = slug;
-        this.title = title;
-        this.summary = summary;
-        this.keywords = keywords == null ? List.of() : List.copyOf(keywords);
-    }
 
     /**
      * Returns the lesson slug identifier.
@@ -101,5 +92,108 @@ public class GuidedLesson {
      */
     public void setKeywords(List<String> keywords) {
         this.keywords = keywords == null ? List.of() : List.copyOf(keywords);
+    }
+
+    /**
+     * Returns the technology whose official documentation grounds the lesson.
+     *
+     * @return technology name
+     */
+    public String getTechnology() {
+        return technology;
+    }
+
+    /**
+     * Sets the technology whose official documentation grounds the lesson.
+     *
+     * @param technology technology name
+     */
+    public void setTechnology(String technology) {
+        this.technology = technology == null ? "" : technology;
+    }
+
+    /**
+     * Returns the manifest identities associated with this lesson before source-scope projection.
+     *
+     * <p>This intentionally is not a JavaBean getter: source references configure the packaged
+     * TOC and never form part of the public lesson API.</p>
+     *
+     * @return canonical manifest identities in lesson order
+     */
+    public List<String> sourceReferences() {
+        return List.copyOf(sourceReferences);
+    }
+
+    /**
+     * Sets canonical manifest identities read from the packaged TOC.
+     *
+     * @param sourceReferences exact source identities owned by the manifests
+     */
+    @JsonProperty(value = "sourceReferences", access = JsonProperty.Access.WRITE_ONLY)
+    public void setSourceReferences(List<String> sourceReferences) {
+        this.sourceReferences = sourceReferences == null ? List.of() : List.copyOf(sourceReferences);
+    }
+
+    /**
+     * Returns the canonical documentation-set tokens allowed to ground the lesson.
+     *
+     * <p>The singular property name preserves parity with the canonical Qdrant payload key
+     * {@code docSet}; the list represents an any-of constraint over that key.</p>
+     *
+     * @return allowed documentation-set tokens
+     */
+    public List<String> getDocSet() {
+        return List.copyOf(docSet);
+    }
+
+    /**
+     * Applies the documentation-set projection resolved from canonical source identities.
+     *
+     * @param resolvedDocSets canonical documentation-set tokens allowed to ground the lesson
+     */
+    public void applyResolvedDocSet(List<String> resolvedDocSets) {
+        this.docSet = resolvedDocSets == null ? List.of() : List.copyOf(resolvedDocSets);
+    }
+
+    /**
+     * Enforces the manifest-reference metadata required before source-scope projection.
+     *
+     * @throws IllegalStateException when source references are absent or malformed
+     */
+    public void requireValidSourceReferences() {
+        requireValidTokens(sourceReferences, "sourceReferences");
+    }
+
+    /**
+     * Enforces the source-scope metadata required before a lesson participates in retrieval.
+     *
+     * @throws IllegalStateException when technology or documentation-set metadata is absent or malformed
+     */
+    public void requireValidSourceScope() {
+        if (technology.isBlank()) {
+            throw new IllegalStateException("Guided lesson technology cannot be blank");
+        }
+        if (!technology.equals(technology.trim())) {
+            throw new IllegalStateException("Guided lesson technology must be trimmed");
+        }
+        requireValidTokens(docSet, "docSet");
+    }
+
+    private static void requireValidTokens(List<String> sourceTokens, String tokenName) {
+        if (sourceTokens.isEmpty()) {
+            throw new IllegalStateException("Guided lesson " + tokenName + " cannot be empty");
+        }
+        Set<String> retainedDocSets = new HashSet<>();
+        for (String sourceToken : sourceTokens) {
+            if (sourceToken.isBlank()) {
+                throw new IllegalStateException("Guided lesson " + tokenName + " cannot contain blank tokens");
+            }
+            if (!sourceToken.equals(sourceToken.trim())) {
+                throw new IllegalStateException("Guided lesson " + tokenName + " tokens must be trimmed");
+            }
+            if (!retainedDocSets.add(sourceToken)) {
+                throw new IllegalStateException("Guided lesson " + tokenName + " cannot contain duplicate tokens");
+            }
+        }
     }
 }

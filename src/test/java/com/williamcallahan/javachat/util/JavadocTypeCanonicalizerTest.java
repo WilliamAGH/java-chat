@@ -30,4 +30,38 @@ class JavadocTypeCanonicalizerTest {
 
         assertEquals(classPageUrl, refinedUrl);
     }
+
+    @Test
+    void refineMemberAnchorUrlDoesNotTreatInvocationArgumentsAsDeclarationTypes() {
+        String classPageUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/lang/Record.html";
+        String surroundingDocText = "return equals(this.SomeField, r.OTHER_FIELD);";
+
+        String refinedUrl =
+                JavadocMemberAnchorResolver.refineMemberAnchorUrl(classPageUrl, surroundingDocText, "java.lang");
+
+        assertEquals(classPageUrl, refinedUrl);
+    }
+
+    @Test
+    void canonicalizeTypePreservesQualifiedJavadocDeclarationTypes() {
+        Optional<String> canonicalType =
+                JavadocTypeCanonicalizer.canonicalizeType("java.lang.Object", "java.lang", "Record");
+
+        assertEquals(Optional.of("java.lang.Object"), canonicalType);
+    }
+
+    @Test
+    void refineMemberAnchorUrlPreservesQualifiedDeclarationParameterTypes() {
+        String classPageUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/lang/Record.html";
+        String surroundingDocText = "public boolean equals(java.lang.Object comparisonTarget)";
+
+        String refinedUrl =
+                JavadocMemberAnchorResolver.refineMemberAnchorUrl(classPageUrl, surroundingDocText, "java.lang");
+
+        assertEquals(classPageUrl + "#equals(java.lang.Object)", refinedUrl);
+    }
 }

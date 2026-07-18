@@ -9,7 +9,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -28,6 +31,81 @@ import org.springframework.ai.document.Document;
 class RetrievalServiceTest {
 
     private static final Logger RETRIEVAL_SERVICE_LOGGER = (Logger) LoggerFactory.getLogger(RetrievalService.class);
+
+    @Test
+    void constrainedRetrievalPassesTheCallerConstraintInstanceToHybridSearch() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint guidedConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java25-complete"));
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+
+        retrievalService.retrieveOutcome("Java strings", guidedConstraint);
+
+        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint));
+    }
+
+    @Test
+    void citationDiscoveryUsesConfiguredCitationLimitWithoutInvokingTheLlmReranker() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        AppProperties appProperties = new AppProperties();
+        appProperties.getRag().setSearchReturnK(3);
+        appProperties.getRag().setSearchCitations(1);
+        RetrievalService retrievalService =
+                new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint guidedConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java25-complete"));
+        Document firstHybridDocument = Document.builder()
+                .id("first-hybrid-document")
+                .text("String API documentation")
+                .metadata("hash", "first-hash")
+                .build();
+        Document secondHybridDocument = Document.builder()
+                .id("second-hybrid-document")
+                .text("String tutorial")
+                .metadata("hash", "second-hash")
+                .build();
+        Document thirdHybridDocument = Document.builder()
+                .id("third-hybrid-document")
+                .text("String examples")
+                .metadata("hash", "third-hash")
+                .build();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(
+                        List.of(firstHybridDocument, secondHybridDocument, thirdHybridDocument), List.of()));
+
+        List<Document> citationDocuments =
+                retrievalService.retrieveForCitationDiscovery("Java strings", guidedConstraint);
+
+        assertEquals(List.of(firstHybridDocument), citationDocuments);
+        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint));
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+    }
+
+    @Test
+    void citationDiscoveryPropagatesHybridFailuresWithoutRerankerFallback() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint guidedConstraint =
+                RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java25-complete"));
+        HybridSearchPartialFailureException.CollectionSearchFailure collectionFailure =
+                new HybridSearchPartialFailureException.CollectionSearchFailure("java-docs", "Timeout", "5s");
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+                .thenThrow(new HybridSearchPartialFailureException("collection failure", List.of(collectionFailure)));
+
+        assertThrows(
+                HybridSearchPartialFailureException.class,
+                () -> retrievalService.retrieveForCitationDiscovery("Java strings", guidedConstraint));
+
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+    }
 
     @Test
     void propagatesHybridSearchNotices() {
@@ -151,6 +229,73 @@ class RetrievalServiceTest {
 
         assertEquals(
                 List.of(stringJavadocUrl + "#substring(int,int)", stringJavadocUrl + "#charAt(int)"),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsDoesNotGenerateRecordAnchorFromUppercaseInvocationArguments() {
+        String recordJavadocUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/lang/Record.html";
+        Document recordDocument = Document.builder()
+                .id("record-equals-invocation")
+                .text("return equals(this.SomeField, r.OTHER_FIELD);")
+                .metadata("url", recordJavadocUrl)
+                .metadata("package", "java.lang")
+                .metadata("docType", "api-docs")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(recordDocument));
+
+        assertEquals(
+                List.of(recordJavadocUrl),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsDoesNotRefineMemberAnchorsOutsideApiDocs() {
+        String stringJavadocUrl = javaLangStringJavadocUrl();
+        Document tutorialDocument = Document.builder()
+                .id("tutorial-substring-chunk")
+                .text("substring(int,int)")
+                .metadata("url", stringJavadocUrl)
+                .metadata("package", "java.lang")
+                .metadata("docType", "tutorial")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(tutorialDocument));
+
+        assertEquals(
+                List.of(stringJavadocUrl),
+                citationOutcome.citations().stream()
+                        .map(citation -> citation.getUrl())
+                        .toList());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void toCitationsDoesNotRefineNestedTypeUrlsOutsideApiDocs() {
+        String mapJavadocUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/util/Map.html";
+        Document tutorialDocument = Document.builder()
+                .id("tutorial-map-entry-chunk")
+                .text("Map.Entry")
+                .metadata("url", mapJavadocUrl)
+                .metadata("package", "java.util")
+                .metadata("docType", "tutorial")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(tutorialDocument));
+
+        assertEquals(
+                List.of(mapJavadocUrl),
                 citationOutcome.citations().stream()
                         .map(citation -> citation.getUrl())
                         .toList());
@@ -291,7 +436,8 @@ class RetrievalServiceTest {
             var conversionFailureWarning = expectedLogEvents.events().getFirst();
             assertEquals(Level.WARN, conversionFailureWarning.getLevel());
             assertEquals(
-                    "Citation conversion failed (exceptionType=IllegalStateException, docUrl=[unprintable:BrokenUrlValue], docTitle=Broken citation)",
+                    "Citation conversion failed (exceptionType=IllegalStateException,"
+                            + " docUrl=[unprintable:BrokenUrlValue], docTitle=Broken citation)",
                     conversionFailureWarning.getFormattedMessage());
             assertNotNull(conversionFailureWarning.getThrowableProxy());
             assertEquals(
@@ -326,6 +472,7 @@ class RetrievalServiceTest {
                 .text(sourceText)
                 .metadata("url", javaLangStringJavadocUrl())
                 .metadata("package", "java.lang")
+                .metadata("docType", "api-docs")
                 .build();
     }
 

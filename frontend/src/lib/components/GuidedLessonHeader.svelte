@@ -27,7 +27,7 @@
       </svg>
       <span>{ALL_LESSONS_LABEL}</span>
     </button>
-    <h2 class="lesson-title">{lessonTitle}</h2>
+    <h1 class="lesson-title">{lessonTitle}</h1>
   </div>
 </div>
 

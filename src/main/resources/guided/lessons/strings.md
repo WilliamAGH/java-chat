@@ -1,6 +1,10 @@
-A `String` represents text. Names, messages, file labels, and source code text all use strings. In Java, a string literal uses double quotes, while a single `char` uses single quotes.
+## Work with text using `String`
 
-## Work with text
+A `String` represents text. Names, messages, file labels, and source code text use strings. A string literal uses double quotes, while a single `char` uses single quotes.
+
+## Join, measure, and slice text
+
+Save this program as `StringBasics.java`, then run `java StringBasics.java`.
 
 ```java
 void main() {
@@ -8,46 +12,61 @@ void main() {
     String topic = "recursion";
 
     IO.println("Course length: " + courseName.length());
-    IO.println("First topic character: " + topic.charAt(0));
-    IO.println("First three topic characters: " + topic.substring(0, 3));
+    IO.println("First topic code unit: " + topic.charAt(0));
+    IO.println("First three topic code units: " + topic.substring(0, 3));
 
     String lessonLabel = courseName + ": " + topic;
     IO.println(lessonLabel);
-
-    if (topic.equals("recursion")) {
-        IO.println("This topic uses a method that calls itself.");
-    }
-
-    String revisedCourseName = courseName.replace("Foundations", "Practice");
-    IO.println(courseName);
-    IO.println(revisedCourseName);
 }
 ```
 
-`+` joins strings together. `length()` returns the string length used by its index-based operations. `charAt(0)` retrieves the `char` at index `0`, and `substring(0, 3)` begins at index `0` but stops before index `3`.
+Expected output:
 
-## Strings do not change in place
+```text
+Course length: 16
+First topic code unit: r
+First three topic code units: rec
+Java Foundations: recursion
+```
 
-Strings are immutable. A string-changing method such as `replace` returns a new string; it does not alter the original one. In the example, `courseName` remains `"Java Foundations"`, while `revisedCourseName` holds the new text.
+`+` joins strings. `length()` counts `char` values, which are UTF-16 code units. `charAt(0)` returns the `char` at index `0`, and `substring(0, 3)` includes index `0` but stops before index `3`. For these ASCII examples, those code units match the visible characters; Java's exact indexing unit remains a UTF-16 code unit.
 
-That behavior makes it safer to pass strings around: code that receives a string cannot silently edit the characters inside it. It also means you must store a returned string if you want to use the changed text.
+## Store the text returned by a string operation
 
-## Compare text with `equals`
-
-Use `equals` to compare the characters in two strings:
+Save this program as `StringChanges.java`, then run `java StringChanges.java`.
 
 ```java
 void main() {
-    String topic = "recursion";
+    String courseName = "Java Foundations";
+    String revisedCourseName = courseName.replace("Foundations", "Practice");
     String expectedTopic = "recursion";
-    boolean topicsMatch = topic.equals(expectedTopic);
+    String actualTopic = "recursion";
+    boolean topicsMatch = actualTopic.equals(expectedTopic);
 
+    IO.println("Original: " + courseName);
+    IO.println("Revised: " + revisedCourseName);
     IO.println("Topics match: " + topicsMatch);
 }
 ```
 
-Do not use `==` for string contents. `==` checks whether two references point to the same `String` object, which is a different question from whether their text matches.
+Expected output:
 
-## Practice
+```text
+Original: Java Foundations
+Revised: Java Practice
+Topics match: true
+```
 
-Change `topic` to a longer word. Predict the output of `charAt`, `substring`, and `length()` before you run the program. Then create a new string with `toUpperCase()` and print both the original and returned strings to see immutability again.
+Strings are immutable. `replace` returns a new string; it does not alter `courseName`. Store the returned string when you want to use the changed text.
+
+Use `equals` to compare string contents. Do not use `==` for that question: `==` checks whether two references point to the same `String` object, not whether their characters match.
+
+## Avoid indexing mistakes
+
+For a string with `length()` of `9`, valid indexes run from `0` through `8`. Calling `charAt(9)` or using a substring endpoint outside the valid range fails with an index error. Before writing an index, state whether the endpoint is included or excluded.
+
+## Check your understanding
+
+- Change `topic` to a longer word. Predict `charAt`, `substring`, and `length()` before running the program.
+- Call `toUpperCase()` and print both the original string and the returned string to demonstrate immutability.
+- Explain why `actualTopic.equals(expectedTopic)` asks the right question while `actualTopic == expectedTopic` does not.

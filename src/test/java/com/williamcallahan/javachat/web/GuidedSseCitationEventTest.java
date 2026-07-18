@@ -9,10 +9,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,17 +29,20 @@ import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import reactor.core.publisher.Flux;
@@ -62,6 +65,9 @@ class GuidedSseCitationEventTest {
     @Autowired
     MockMvc mockMvc;
 
+    @Autowired
+    GuidedLearningController guidedLearningController;
+
     @MockitoBean
     GuidedLearningService guidedLearningService;
 
@@ -77,19 +83,22 @@ class GuidedSseCitationEventTest {
     @MockitoBean
     OpenAIStreamingService openAIStreamingService;
 
-    @MockitoBean
-    RetrievalService retrievalService;
-
     @Test
     void guidedStreamEmitsCitationEvent() throws Exception {
+        Document lessonContextDocument = Document.builder()
+                .id("official-guided-context")
+                .text("Official lesson context")
+                .metadata("sourceKind", "official")
+                .build();
+        given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        given(guidedLearningService.citationsForBookDocuments(anyList()))
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
+        given(guidedLearningService.citationsForContextDocuments(eq(List.of(lessonContextDocument))))
                 .willReturn(List.of(new Citation("https://example.com", "Example", "", "")));
 
         var asyncResult = mockMvc.perform(post("/api/guided/stream")
@@ -114,23 +123,19 @@ class GuidedSseCitationEventTest {
     }
 
     @Test
-    void guidedContentStreamEmitsSseErrorWhenCuratedLessonStreamingFails() throws Exception {
-        given(guidedLearningService.getLesson("intro"))
-                .willReturn(Optional.of(new GuidedLesson("intro", "Introduction", "", List.of())));
+    void guidedContentStreamEmitsSseErrorWhenCuratedLessonStreamingFails() {
+        given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(guidedLearningService.streamLessonContent(anyString()))
                 .willReturn(Flux.error(new IllegalStateException("Reranking request failed")));
 
-        String aggregated;
+        List<ServerSentEvent<String>> streamEvents;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(GUIDED_LEARNING_CONTROLLER_LOGGER)) {
-            var asyncResult = mockMvc.perform(get("/api/guided/content/stream").param("slug", "intro"))
-                    .andExpect(request().asyncStarted())
-                    .andReturn();
-
-            aggregated = mockMvc.perform(asyncDispatch(asyncResult))
-                    .andExpect(status().isOk())
-                    .andReturn()
-                    .getResponse()
-                    .getContentAsString();
+            streamEvents = Objects.requireNonNull(
+                    guidedLearningController
+                            .streamLesson("intro", new MockHttpServletResponse())
+                            .collectList()
+                            .block(),
+                    "guided lesson content stream events");
 
             assertEquals(1, expectedLogEvents.events().size());
             var streamFailureEvent = expectedLogEvents.events().getFirst();
@@ -139,11 +144,22 @@ class GuidedSseCitationEventTest {
             assertNull(streamFailureEvent.getThrowableProxy());
         }
 
+        ServerSentEvent<String> errorSseEvent = streamEvents.stream()
+                .filter(streamEvent -> EVENT_ERROR.equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorSseEvent.data(), "guided lesson stream error payload");
         assertTrue(
-                aggregated.contains("event:" + EVENT_ERROR) || aggregated.contains("event: " + EVENT_ERROR),
-                "SSE stream should include an error event. Response was:\n" + aggregated);
+                EVENT_ERROR.equals(errorSseEvent.event()), "SSE stream should include a lesson-content error event.");
         assertTrue(
-                aggregated.contains("Lesson content stream failed"),
-                "Error payload should identify lesson content stream failure. Response was:\n" + aggregated);
+                serializedError.contains("Lesson content stream failed"),
+                "Error payload should identify lesson content stream failure. Payload was:\n" + serializedError);
+    }
+
+    private static GuidedLesson listedLesson(String lessonSlug) {
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(lessonSlug);
+        listedLesson.setTitle("Introduction");
+        return listedLesson;
     }
 }

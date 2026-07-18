@@ -38,7 +38,6 @@ public class AppProperties {
     private static final String CLICKY_KEY = "app.clicky";
     private static final String EMBEDDINGS_KEY = "app.embeddings";
     private static final String LLM_KEY = "app.llm";
-    private static final String GUIDED_LEARNING_KEY = "app.guided-learning";
 
     /**
      * Default base URL for SEO endpoints when no explicit public base URL is configured.
@@ -57,7 +56,6 @@ public class AppProperties {
     private CorsConfig cors = new CorsConfig();
     private Embeddings embeddings = new Embeddings();
     private Llm llm = new Llm();
-    private GuidedLearning guidedLearning = new GuidedLearning();
     private Clicky clicky = new Clicky();
     private String publicBaseUrl = DEFAULT_PUBLIC_BASE_URL;
 
@@ -82,7 +80,6 @@ public class AppProperties {
         requireConfiguredSection(cors, CORS_KEY).validateConfiguration();
         requireConfiguredSection(embeddings, EMBEDDINGS_KEY).validateConfiguration();
         requireConfiguredSection(llm, LLM_KEY).validateConfiguration();
-        requireConfiguredSection(guidedLearning, GUIDED_LEARNING_KEY).validateConfiguration();
         requireConfiguredSection(clicky, CLICKY_KEY).validateConfiguration();
         this.publicBaseUrl = validatePublicBaseUrl(publicBaseUrl);
     }
@@ -111,14 +108,6 @@ public class AppProperties {
 
     public void setClicky(Clicky clicky) {
         this.clicky = requireConfiguredSection(clicky, CLICKY_KEY);
-    }
-
-    public GuidedLearning getGuidedLearning() {
-        return guidedLearning;
-    }
-
-    public void setGuidedLearning(GuidedLearning guidedLearning) {
-        this.guidedLearning = requireConfiguredSection(guidedLearning, GUIDED_LEARNING_KEY);
     }
 
     private static String validatePublicBaseUrl(final String configuredPublicBaseUrl) {
@@ -701,29 +690,6 @@ public class AppProperties {
             if (configuredProviderBackoffSeconds <= 0) {
                 throw new IllegalArgumentException("app.llm.configured-provider-backoff-seconds must be positive, got: "
                         + configuredProviderBackoffSeconds);
-            }
-            return this;
-        }
-    }
-
-    /** Guided learning configuration for Think Java book integration. */
-    public static class GuidedLearning {
-        /** Classpath resource path to the Think Java 2nd Edition PDF used for guided lessons. */
-        private static final String DEFAULT_THINK_JAVA_PDF_CLASSPATH = "/pdfs/Think Java - 2nd Edition Book.pdf";
-
-        private String thinkJavaPdfPath = DEFAULT_THINK_JAVA_PDF_CLASSPATH;
-
-        public String getThinkJavaPdfPath() {
-            return thinkJavaPdfPath;
-        }
-
-        public void setThinkJavaPdfPath(String thinkJavaPdfPath) {
-            this.thinkJavaPdfPath = thinkJavaPdfPath;
-        }
-
-        GuidedLearning validateConfiguration() {
-            if (thinkJavaPdfPath == null || thinkJavaPdfPath.isBlank()) {
-                throw new IllegalArgumentException("app.guided-learning.think-java-pdf-path cannot be null or blank");
             }
             return this;
         }

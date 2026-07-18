@@ -25,13 +25,20 @@ async function loadHighlightJs(): Promise<typeof import("highlight.js/lib/core")
     return hljsInstance;
   }
 
-  const [hljs, java, xml, json, bash] = await Promise.all([
-    import("highlight.js/lib/core"),
-    import("highlight.js/lib/languages/java"),
-    import("highlight.js/lib/languages/xml"),
-    import("highlight.js/lib/languages/json"),
-    import("highlight.js/lib/languages/bash"),
-  ]);
+  const [hljs, java, xml, json, bash, plaintext, properties, kotlin, scala, groovy, clojure] =
+    await Promise.all([
+      import("highlight.js/lib/core"),
+      import("highlight.js/lib/languages/java"),
+      import("highlight.js/lib/languages/xml"),
+      import("highlight.js/lib/languages/json"),
+      import("highlight.js/lib/languages/bash"),
+      import("highlight.js/lib/languages/plaintext"),
+      import("highlight.js/lib/languages/properties"),
+      import("highlight.js/lib/languages/kotlin"),
+      import("highlight.js/lib/languages/scala"),
+      import("highlight.js/lib/languages/groovy"),
+      import("highlight.js/lib/languages/clojure"),
+    ]);
 
   hljsInstance = hljs.default;
 
@@ -41,6 +48,22 @@ async function loadHighlightJs(): Promise<typeof import("highlight.js/lib/core")
     if (!hljsInstance.getLanguage("xml")) hljsInstance.registerLanguage("xml", xml.default);
     if (!hljsInstance.getLanguage("json")) hljsInstance.registerLanguage("json", json.default);
     if (!hljsInstance.getLanguage("bash")) hljsInstance.registerLanguage("bash", bash.default);
+    if (!hljsInstance.getLanguage("plaintext")) {
+      hljsInstance.registerLanguage("plaintext", plaintext.default);
+    }
+    if (!hljsInstance.getLanguage("properties")) {
+      hljsInstance.registerLanguage("properties", properties.default);
+    }
+    if (!hljsInstance.getLanguage("kotlin")) {
+      hljsInstance.registerLanguage("kotlin", kotlin.default);
+    }
+    if (!hljsInstance.getLanguage("scala")) hljsInstance.registerLanguage("scala", scala.default);
+    if (!hljsInstance.getLanguage("groovy")) {
+      hljsInstance.registerLanguage("groovy", groovy.default);
+    }
+    if (!hljsInstance.getLanguage("clojure")) {
+      hljsInstance.registerLanguage("clojure", clojure.default);
+    }
     languagesRegistered = true;
   }
 

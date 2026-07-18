@@ -9,10 +9,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.model.GuidedLesson;
-import com.williamcallahan.javachat.support.PdfCitationEnhancer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -97,9 +95,18 @@ class GuidedLessonCuratedContentTest {
     }
 
     @Test
+    void everyTocLessonDeclaresTechnologyAndCanonicalOfficialDocSetScope() {
+        for (GuidedLesson guidedLesson : curatedTocProvider().getTOC()) {
+            assertFalse(guidedLesson.getTechnology().isBlank());
+            assertFalse(guidedLesson.getDocSet().isEmpty());
+        }
+    }
+
+    @Test
     void rejectsListedLessonWithoutPackagedCuratedMarkdown() {
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
-        GuidedLesson listedLesson = new GuidedLesson(MISSING_CURATED_LESSON_SLUG, "Missing", "", List.of());
+        GuidedLesson listedLesson = new GuidedLesson();
+        listedLesson.setSlug(MISSING_CURATED_LESSON_SLUG);
         when(tocProvider.findBySlug(MISSING_CURATED_LESSON_SLUG)).thenReturn(Optional.of(listedLesson));
 
         GuidedLearningService.CuratedLessonResourceMissingException missingResourceFailure = assertThrows(
@@ -122,8 +129,6 @@ class GuidedLessonCuratedContentTest {
                 mock(EnrichmentService.class),
                 mock(ChatService.class),
                 mock(SystemPromptConfig.class),
-                mock(PdfCitationEnhancer.class),
-                new AppProperties(),
                 TEST_JDK_VERSION);
     }
 

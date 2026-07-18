@@ -64,6 +64,8 @@ export const GuidedLessonSchema = z.object({
   title: z.string(),
   summary: z.string(),
   keywords: z.array(z.string()),
+  technology: z.string(),
+  docSet: z.array(z.string()),
 });
 
 /** Array of lessons for TOC endpoint. */

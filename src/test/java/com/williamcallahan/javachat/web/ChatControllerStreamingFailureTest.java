@@ -1,9 +1,13 @@
 package com.williamcallahan.javachat.web;
 
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_TEXT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,6 +19,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
@@ -49,6 +54,7 @@ import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Operators;
+import reactor.test.StepVerifier;
 
 /** Verifies the chat request boundary does not duplicate the service-owned terminal stream alert. */
 class ChatControllerStreamingFailureTest {
@@ -142,6 +148,42 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_STREAM, providerCooldownEvent.stage());
         assertFalse(serializedError.contains(ConfiguredProviderTemporarilyUnavailableException.class.getSimpleName()));
         assertFalse(serializedError.contains(RateLimitService.ApiProvider.GITHUB_MODELS.getName()));
+    }
+
+    @Test
+    void streamEmitsPreparationStatusBeforeDeferredRetrievalAndProviderWork() {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                new SseSupport(new ObjectMapper()),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+
+        StepVerifier.create(
+                        chatController.stream(
+                                new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse()),
+                        1)
+                .assertNext(streamEvent -> {
+                    assertEquals(EVENT_STATUS, streamEvent.event());
+                    assertDoesNotThrow(() -> {
+                        SseSupport.SseEventPayload preparationStatus = new ObjectMapper()
+                                .readValue(
+                                        Objects.requireNonNull(streamEvent.data(), "preparation status event data"),
+                                        SseSupport.SseEventPayload.class);
+                        assertEquals(STATUS_CODE_STREAM_PREPARING, preparationStatus.code());
+                        assertEquals(STATUS_STAGE_RETRIEVAL, preparationStatus.stage());
+                    });
+                })
+                .thenCancel()
+                .verify();
+
+        verifyNoInteractions(chatMemoryService, chatService, streamingService, retrievalService);
     }
 
     @Test

@@ -11,7 +11,6 @@ import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavail
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.StructuredLogValue;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletResponse;
@@ -58,7 +57,6 @@ public class GuidedLearningController extends BaseController {
     private static final Duration LESSON_CONTENT_TIMEOUT = Duration.ofSeconds(25);
 
     private final GuidedLearningService guidedService;
-    private final RetrievalService retrievalService;
     private final ChatMemoryService chatMemory;
     private final OpenAIStreamingService openAIStreamingService;
     private final MarkdownService markdownService;
@@ -70,7 +68,6 @@ public class GuidedLearningController extends BaseController {
      */
     public GuidedLearningController(
             GuidedLearningService guidedService,
-            RetrievalService retrievalService,
             ChatMemoryService chatMemory,
             OpenAIStreamingService openAIStreamingService,
             ExceptionResponseBuilder exceptionBuilder,
@@ -79,7 +76,6 @@ public class GuidedLearningController extends BaseController {
             AppProperties appProperties) {
         super(exceptionBuilder);
         this.guidedService = guidedService;
-        this.retrievalService = retrievalService;
         this.chatMemory = chatMemory;
         this.openAIStreamingService = openAIStreamingService;
         this.markdownService = markdownService;
@@ -105,7 +101,7 @@ public class GuidedLearningController extends BaseController {
      * @throws ResponseStatusException when the slug is not listed in the guided table of contents.
      */
     @GetMapping("/lesson")
-    public GuidedLesson lesson(@RequestParam("slug") String slug) {
+    public GuidedLesson lesson(@RequestParam(name = "slug", required = false) String slug) {
         return requireListedLesson(slug);
     }
 
@@ -116,8 +112,9 @@ public class GuidedLearningController extends BaseController {
      * @return A {@link List} of {@link Citation} objects.
      */
     @GetMapping("/citations")
-    public List<Citation> citations(@RequestParam("slug") String slug) {
-        return guidedService.citationsForLesson(slug);
+    public List<Citation> citations(@RequestParam(name = "slug", required = false) String slug) {
+        GuidedLesson listedLesson = requireListedLesson(slug);
+        return guidedService.citationsForLesson(listedLesson.getSlug());
     }
 
     /**
@@ -127,8 +124,9 @@ public class GuidedLearningController extends BaseController {
      * @return An {@link Enrichment} object containing the lesson's enrichment data.
      */
     @GetMapping("/enrich")
-    public Enrichment enrich(@RequestParam("slug") String slug) {
-        return guidedService.enrichmentForLesson(slug).sanitized();
+    public Enrichment enrich(@RequestParam(name = "slug", required = false) String slug) {
+        GuidedLesson listedLesson = requireListedLesson(slug);
+        return guidedService.enrichmentForLesson(listedLesson.getSlug()).sanitized();
     }
 
     /**
@@ -140,7 +138,8 @@ public class GuidedLearningController extends BaseController {
      * @return A {@link Flux} of SSE text events carrying lesson markdown chunks.
      */
     @GetMapping(value = "/content/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> streamLesson(@RequestParam("slug") String slug, HttpServletResponse response) {
+    public Flux<ServerSentEvent<String>> streamLesson(
+            @RequestParam(name = "slug", required = false) String slug, HttpServletResponse response) {
         Flux<String> lessonContentStream = curatedLessonContentStream(slug);
         sseSupport.configureStreamingHeaders(response);
         return Flux.defer(() -> {
@@ -174,7 +173,7 @@ public class GuidedLearningController extends BaseController {
      * @return A response containing the authoritative curated markdown content.
      */
     @GetMapping(value = "/content", produces = MediaType.APPLICATION_JSON_VALUE)
-    public LessonContentResponse content(@RequestParam("slug") String slug) {
+    public LessonContentResponse content(@RequestParam(name = "slug", required = false) String slug) {
         return new LessonContentResponse(readCuratedLessonContent(slug), false);
     }
 
@@ -186,7 +185,7 @@ public class GuidedLearningController extends BaseController {
      * @return A string containing the rendered HTML.
      */
     @GetMapping(value = "/content/html", produces = MediaType.TEXT_HTML_VALUE)
-    public String contentHtml(@RequestParam("slug") String slug) {
+    public String contentHtml(@RequestParam(name = "slug", required = false) String slug) {
         String lessonMarkdownContent = readCuratedLessonContent(slug);
         return markdownService.processStructured(lessonMarkdownContent).html();
     }
@@ -250,20 +249,21 @@ public class GuidedLearningController extends BaseController {
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> stream(
             @Valid @RequestBody GuidedStreamRequest request, HttpServletResponse response) {
-        sseSupport.configureStreamingHeaders(response);
-
         String sessionId = request.resolvedSessionId();
+        GuidedLesson listedLesson = requireListedLesson(request.slug());
         String userQuery =
                 request.userQuery().orElseThrow(() -> new IllegalArgumentException("User query is required"));
-        String lessonSlug =
-                request.lessonSlug().orElseThrow(() -> new IllegalArgumentException("Lesson slug is required"));
+        String canonicalLessonSlug = listedLesson.getSlug();
 
         if (!openAIStreamingService.isAvailable()) {
             log.warn("OpenAI streaming service unavailable for guided session");
             return sseSupport.sseError("Service temporarily unavailable", "The streaming service is not ready");
         }
 
-        return streamGuidedResponse(sessionId, userQuery, lessonSlug);
+        sseSupport.configureStreamingHeaders(response);
+        return Flux.concat(
+                sseSupport.responsePreparationStatus(),
+                streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug));
     }
 
     /**
@@ -275,32 +275,15 @@ public class GuidedLearningController extends BaseController {
      * @return SSE stream of response chunks with heartbeats
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(String sessionId, String userQuery, String lessonSlug) {
-        List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
         return Flux.defer(() -> {
+                    List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
                     StringBuilder fullResponse = new StringBuilder();
 
                     GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                             guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-                    // Compute citations before streaming starts - page-anchor failures surfaced to UI via status event
-                    List<Citation> computedCitations;
-                    String citationWarning;
-                    try {
-                        computedCitations =
-                                guidedService.citationsForBookDocuments(promptOutcome.bookContextDocuments());
-                        citationWarning = null;
-                    } catch (RuntimeException citationEnhancementFailure) {
-                        log.warn(
-                                "PDF page-anchor enhancement failed; returning base citations (exceptionType={})",
-                                citationEnhancementFailure.getClass().getSimpleName());
-                        computedCitations = retrievalService
-                                .toCitations(promptOutcome.bookContextDocuments())
-                                .citations();
-                        citationWarning =
-                                "PDF page-anchor enhancement failed; using base citations without page anchors";
-                    }
-                    final List<Citation> finalCitations = computedCitations;
-                    final String finalCitationWarning = citationWarning;
+                    List<Citation> finalCitations =
+                            guidedService.citationsForContextDocuments(promptOutcome.lessonContextDocuments());
 
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
@@ -320,15 +303,9 @@ public class GuidedLearningController extends BaseController {
                                 Flux<ServerSentEvent<String>> citationEvent =
                                         Flux.just(sseSupport.citationEvent(finalCitations));
 
-                                Flux<ServerSentEvent<String>> statusEvents =
-                                        sseSupport.citationWarningStatusFlux(finalCitationWarning);
-
-                                // Start selected-provider and status events before the ref-counted data stream.
+                                // Start the selected-provider event before the ref-counted data stream.
                                 return Flux.concat(
-                                        Flux.just(providerEvent),
-                                        statusEvents,
-                                        Flux.merge(dataEvents, heartbeats),
-                                        citationEvent);
+                                        Flux.just(providerEvent), Flux.merge(dataEvents, heartbeats), citationEvent);
                             })
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })

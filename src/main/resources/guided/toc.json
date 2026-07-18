@@ -3,55 +3,272 @@
     "slug": "introduction-to-java",
     "title": "Introduction to Java",
     "summary": "What programs are, how they run, and the structure of a simple Java program.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["program", "source code", "compile", "run", "Hello, World"]
   },
   {
     "slug": "variables-and-types",
     "title": "Variables and Types",
     "summary": "Primitive types, declarations, assignment, and naming conventions.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["int", "double", "boolean", "declaration", "assignment"]
   },
   {
     "slug": "conditionals",
     "title": "Conditionals",
     "summary": "if/else, comparison operators, and boolean logic.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["if", "else", "comparison", "boolean", "logic"]
   },
   {
     "slug": "loops",
     "title": "Loops",
     "summary": "while and for loops, loop variables, and termination conditions.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["while", "for", "iteration", "loop variable"]
   },
   {
     "slug": "methods",
     "title": "Methods",
     "summary": "Defining methods, parameters, return values, and scope.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["method", "parameter", "return", "scope", "call"]
   },
   {
     "slug": "classes-and-objects",
     "title": "Classes and Objects",
     "summary": "Defining classes, fields, constructors, and object interaction.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["class", "object", "constructor", "field", "this"]
   },
   {
     "slug": "arrays",
     "title": "Arrays",
     "summary": "Declaring arrays, indexing, iteration, and common patterns.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["array", "index", "length", "iteration"]
   },
   {
     "slug": "strings",
     "title": "Strings",
     "summary": "String operations, immutability, and common methods.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["String", "substring", "charAt", "equals", "immutability"]
   },
   {
     "slug": "recursion",
     "title": "Recursion",
     "summary": "Recursive definitions, base cases, and stack behavior.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
     "keywords": ["recursion", "base case", "stack", "factorial"]
+  },
+  {
+    "slug": "packages-and-imports",
+    "title": "Packages and Imports",
+    "summary": "Organizing types, resolving names, and controlling package-level access.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["package", "import", "classpath", "access", "namespace"]
+  },
+  {
+    "slug": "exceptions",
+    "title": "Exceptions and Resource Safety",
+    "summary": "Representing failures, choosing exception types, and closing resources deterministically.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["exception", "throws", "try", "catch", "AutoCloseable"]
+  },
+  {
+    "slug": "collections",
+    "title": "Collections",
+    "summary": "Choosing and using lists, sets, and maps through their interface contracts.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["List", "Set", "Map", "Collection", "iteration"]
+  },
+  {
+    "slug": "generics",
+    "title": "Generics",
+    "summary": "Expressing reusable type relationships with parameters, bounds, and wildcards.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["generic", "type parameter", "wildcard", "variance", "erasure"]
+  },
+  {
+    "slug": "interfaces-and-inheritance",
+    "title": "Interfaces and Inheritance",
+    "summary": "Sharing contracts and behavior while preserving clear subtype responsibilities.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["interface", "extends", "implements", "override", "polymorphism"]
+  },
+  {
+    "slug": "records",
+    "title": "Records",
+    "summary": "Modeling transparent data carriers with validated state and value semantics.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["record", "component", "constructor", "equals", "immutability"]
+  },
+  {
+    "slug": "enums-and-sealed-types",
+    "title": "Enums and Sealed Types",
+    "summary": "Modeling closed choices and controlled type hierarchies.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["enum", "sealed", "permits", "exhaustive", "switch"]
+  },
+  {
+    "slug": "lambdas-and-streams",
+    "title": "Lambdas and Streams",
+    "summary": "Passing behavior and building lazy, readable collection pipelines.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["lambda", "Stream", "map", "filter", "collect"]
+  },
+  {
+    "slug": "modern-java-pattern-matching",
+    "title": "Modern Java Pattern Matching",
+    "summary": "Using type, record, and switch patterns to express safe structural decisions.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["pattern", "instanceof", "record pattern", "switch", "guard"]
+  },
+  {
+    "slug": "file-io",
+    "title": "File I/O",
+    "summary": "Reading and writing files with explicit paths, encodings, and cleanup behavior.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["Path", "Files", "UTF-8", "I/O", "resource"]
+  },
+  {
+    "slug": "concurrency-and-virtual-threads",
+    "title": "Concurrency and Virtual Threads",
+    "summary": "Coordinating independent tasks while protecting shared state and preserving cancellation.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["virtual thread", "ExecutorService", "concurrency", "synchronization", "cancellation"]
+  },
+  {
+    "slug": "modules",
+    "title": "The Java Module System",
+    "summary": "Declaring named modules, dependencies, exports, and strong boundaries.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["module-info", "requires", "exports", "module path", "encapsulation"]
+  },
+  {
+    "slug": "garbage-collection-and-memory",
+    "title": "Garbage Collection and Memory",
+    "summary": "Understanding reachability, heap lifetime, resource cleanup, and retention problems.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["garbage collection", "heap", "reachability", "memory leak", "resource"]
+  },
+  {
+    "slug": "testing-with-junit",
+    "title": "Testing with JUnit",
+    "summary": "Writing focused behavior tests, failure assertions, and maintainable fixtures.",
+    "technology": "Java",
+    "sourceReferences": ["dev-java", "java/java25-complete"],
+    "keywords": ["JUnit", "test", "assertion", "fixture", "parameterized test"]
+  },
+  {
+    "slug": "kotlin-on-the-jvm",
+    "title": "Kotlin on the JVM",
+    "summary": "Learning Kotlin's null safety, concise data modeling, Java interop, and build contract.",
+    "technology": "Kotlin",
+    "sourceReferences": ["kotlin"],
+    "keywords": ["Kotlin", "null safety", "data class", "interop", "Gradle"]
+  },
+  {
+    "slug": "scala-on-the-jvm",
+    "title": "Scala on the JVM",
+    "summary": "Exploring Scala 3's type system, functional style, Java interop, and compatibility choices.",
+    "technology": "Scala",
+    "sourceReferences": ["scala"],
+    "keywords": ["Scala", "case class", "enum", "functional programming", "interop"]
+  },
+  {
+    "slug": "groovy-on-the-jvm",
+    "title": "Groovy on the JVM",
+    "summary": "Using Groovy scripts, dynamic and static typing, collections, and Java integration.",
+    "technology": "Groovy",
+    "sourceReferences": ["groovy"],
+    "keywords": ["Groovy", "script", "dynamic typing", "CompileStatic", "interop"]
+  },
+  {
+    "slug": "clojure-on-the-jvm",
+    "title": "Clojure on the JVM",
+    "summary": "Working with immutable data, functions, sequences, namespaces, and Java interop.",
+    "technology": "Clojure",
+    "sourceReferences": ["clojure"],
+    "keywords": ["Clojure", "immutable", "sequence", "namespace", "interop"]
+  },
+  {
+    "slug": "choosing-a-jvm-language",
+    "title": "Choosing a JVM Language",
+    "summary": "Comparing Java, Kotlin, Scala, Groovy, and Clojure across team and runtime constraints.",
+    "technology": "JVM Ecosystem",
+    "sourceReferences": ["dev-java", "kotlin", "scala", "groovy", "clojure"],
+    "keywords": ["JVM language", "tradeoff", "toolchain", "interop", "ecosystem"]
+  },
+  {
+    "slug": "spring-boot-fundamentals",
+    "title": "Spring Boot Fundamentals",
+    "summary": "Understanding auto-configuration, starters, application structure, and runtime configuration.",
+    "technology": "Spring Boot",
+    "sourceReferences": ["spring-boot"],
+    "keywords": ["Spring Boot", "auto-configuration", "starter", "application", "configuration"]
+  },
+  {
+    "slug": "dependency-injection-and-configuration",
+    "title": "Dependency Injection and Configuration",
+    "summary": "Composing Spring components with constructor injection and typed configuration properties.",
+    "technology": "Spring Boot",
+    "sourceReferences": ["spring-boot"],
+    "keywords": ["dependency injection", "constructor", "bean", "ConfigurationProperties", "validation"]
+  },
+  {
+    "slug": "building-rest-apis-with-spring-boot",
+    "title": "Building REST APIs with Spring Boot",
+    "summary": "Designing validated HTTP endpoints with explicit contracts and error behavior.",
+    "technology": "Spring Boot",
+    "sourceReferences": ["spring-boot"],
+    "keywords": ["REST", "controller", "HTTP", "validation", "ProblemDetail"]
+  },
+  {
+    "slug": "data-access-and-testing-in-spring-boot",
+    "title": "Data Access and Testing in Spring Boot",
+    "summary": "Keeping transaction boundaries clear and choosing focused, realistic test slices.",
+    "technology": "Spring Boot",
+    "sourceReferences": ["spring-boot"],
+    "keywords": ["data access", "transaction", "repository", "test slice", "Testcontainers"]
+  },
+  {
+    "slug": "quarkus-fundamentals",
+    "title": "Quarkus Fundamentals",
+    "summary": "Building Quarkus applications with CDI, configuration, REST, and native-aware design.",
+    "technology": "Quarkus",
+    "sourceReferences": ["quarkus"],
+    "keywords": ["Quarkus", "CDI", "REST", "configuration", "native image"]
+  },
+  {
+    "slug": "spring-boot-vs-quarkus",
+    "title": "Spring Boot vs. Quarkus",
+    "summary": "Comparing framework models, ecosystems, startup behavior, native builds, and migration cost.",
+    "technology": "Spring Boot and Quarkus",
+    "sourceReferences": ["spring-boot", "quarkus"],
+    "keywords": ["Spring Boot", "Quarkus", "comparison", "native", "ecosystem"]
   }
 ]
-

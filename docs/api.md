@@ -44,6 +44,11 @@ whether it is a progress/warning notice or a terminal failure.
 Stream-provider `error` events populate `code`, `retryable`, and `stage`; a citation warning
 emits the same metadata on a `status` event. Treat `null` metadata as absent.
 
+The first event for `POST /api/chat/stream` and `POST /api/guided/stream` is a `status` event with
+`code: "stream.preparing"` and `stage: "retrieval"`. It confirms that the stream was admitted
+before history and retrieval work begin; a later dependency failure still emits a terminal `error`
+event.
+
 Chat uses exactly one provider selected by `LLM_PRIMARY_PROVIDER` (`github_models` or `openai`).
 The request never falls back to the other provider: an unavailable, rate-limited, or failed configured
 provider terminates the stream with an `error` event.

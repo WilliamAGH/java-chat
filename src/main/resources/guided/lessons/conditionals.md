@@ -1,6 +1,10 @@
-Programs often need to choose between actions. A conditional evaluates a `boolean` expression and runs code only for the matching path. This is how a program can react to a score, a user choice, or the state of a calculation.
+## Make a decision with a conditional
 
-## Choose a path with `if`, `else if`, and `else`
+A conditional evaluates a `boolean` expression and runs code only for the matching path. This lets a program react to a score, a choice, or the state of a calculation.
+
+## Choose one path with `if`, `else if`, and `else`
+
+Save this program as `PracticeEligibility.java`, then run `java PracticeEligibility.java`.
 
 ```java
 void main() {
@@ -21,11 +25,42 @@ void main() {
 }
 ```
 
-Java evaluates the conditions from top to bottom. In one `if`/`else if`/`else` chain, it runs the first branch whose condition is `true` and skips the rest of that chain. The final `else` handles every remaining case.
+Expected output:
 
-## Write boolean expressions
+```text
+You passed the practice set.
+You are ready for the next lesson.
+```
 
-Comparison operators produce `boolean` answers:
+Java evaluates an `if`/`else if`/`else` chain from top to bottom. It runs the first branch whose condition is `true` and skips the rest of that chain. The final `else` handles every remaining case.
+
+## Decide boundary behavior before writing conditions
+
+Save this program as `StudySessionAdvice.java`, then run `java StudySessionAdvice.java`.
+
+```java
+void main() {
+    double studyHours = 2.0;
+
+    if (studyHours < 1.0) {
+        IO.println("Schedule more practice time.");
+    } else if (studyHours <= 2.0) {
+        IO.println("Record what you learned.");
+    } else {
+        IO.println("Take a short break before continuing.");
+    }
+}
+```
+
+Expected output:
+
+```text
+Record what you learned.
+```
+
+At exactly `2.0`, the first condition is false and the second condition is true. Writing that boundary down first prevents gaps and accidental overlap.
+
+## Write boolean expressions precisely
 
 - `==` means equal to, and `!=` means not equal to.
 - `<`, `<=`, `>`, and `>=` compare ordered primitive values such as numbers.
@@ -33,14 +68,16 @@ Comparison operators produce `boolean` answers:
 - `||` means at least one condition must be true.
 - `!` reverses a boolean answer.
 
-The expression `practiceScore >= 70 && reflectionSubmitted` is true only when both requirements are met. Parentheses can make a long condition easier to read, especially when `&&` and `||` appear together.
+The expression `practiceScore >= 70 && reflectionSubmitted` is true only when both requirements are met. Parentheses make longer conditions easier to read, especially when `&&` and `||` appear together.
 
-## Make each branch clear
+## Avoid common conditional mistakes
 
-Keep the condition focused on one question, and put curly braces around every branch even if it currently has one statement. Braces make future edits safer: adding another statement cannot accidentally place it outside the intended branch.
+Use `=` only to assign a value and `==` to compare primitive values. Put the more specific condition before a broader condition that would also match it; otherwise, the later branch can never run. Keep braces around every branch, even when it currently contains one statement, so a later edit cannot silently change which statements belong to the branch.
 
-Use `=` only to assign a value. Use `==` to compare primitive values. Strings need a different comparison method, `equals`, because `==` asks whether two references point to the same object rather than whether their text is the same; the Strings lesson explores that distinction.
+Strings use `equals` to compare their text. `==` asks whether two references point to the same object; the Strings lesson explores the distinction.
 
-## Practice
+## Check your understanding
 
-Write a condition that prints a different message for a study session shorter than one hour, from one through two hours, and longer than two hours. Decide the boundary behavior first, then write the conditions so that every possible duration follows exactly one path.
+- Change `practiceScore` to `90`, `70`, and `69`, then predict which message each value prints.
+- Write a conditional for sessions shorter than one hour, from one through two hours, and longer than two hours. State which branch handles exactly one and exactly two hours.
+- Explain why one `if`/`else if`/`else` chain does not run two of its branches.

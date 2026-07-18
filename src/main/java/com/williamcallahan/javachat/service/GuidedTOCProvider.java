@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
@@ -10,6 +11,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -18,37 +20,40 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class GuidedTOCProvider {
-    private final ObjectMapper mapper;
-    private volatile List<GuidedLesson> cache = Collections.emptyList();
+    private static final String OFFICIAL_SOURCE_KIND = "official";
+
+    private final ObjectMapper objectMapper;
+    private volatile List<GuidedLesson> cachedLessons = Collections.emptyList();
     private volatile boolean tocLoaded = false;
 
     /**
      * Creates a TOC provider backed by a safely copied ObjectMapper instance.
      *
-     * @param mapper configured ObjectMapper
+     * @param objectMapper configured ObjectMapper
      */
-    public GuidedTOCProvider(ObjectMapper mapper) {
-        this.mapper = Objects.requireNonNull(mapper, "mapper").copy();
+    public GuidedTOCProvider(ObjectMapper objectMapper) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     }
 
     /**
      * Returns the lesson table of contents, loading it lazily from the classpath on first access.
      */
     public synchronized List<GuidedLesson> getTOC() {
-        if (tocLoaded) return cache;
+        if (tocLoaded) return cachedLessons;
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
-                List<GuidedLesson> loadedLessons = mapper.readerFor(new TypeReference<List<GuidedLesson>>() {})
+                List<GuidedLesson> loadedLessons = objectMapper
+                        .readerFor(new TypeReference<List<GuidedLesson>>() {})
                         .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                         .readValue(tocStream);
-                cache = List.copyOf(loadedLessons);
+                cachedLessons = projectOfficialSourceScopes(loadedLessons);
             }
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
         }
         tocLoaded = true;
-        return cache;
+        return cachedLessons;
     }
 
     /**
@@ -63,5 +68,58 @@ public class GuidedTOCProvider {
                     return lessonSlug != null && normalizedSlug.equals(AsciiTextNormalizer.toLowerAscii(lessonSlug));
                 })
                 .findFirst();
+    }
+
+    /**
+     * Resolves each lesson's canonical source references into its retrieval-facing docSet projection.
+     *
+     * <p>The source manifests own source identities and documentation metadata. The TOC only relates
+     * a lesson to those identities, while the public lesson shape receives the exact docSet values
+     * projected from the manifests.</p>
+     *
+     * @param guidedLessons deserialized lesson metadata
+     * @return immutable lessons with manifest-projected source scopes
+     */
+    static List<GuidedLesson> projectOfficialSourceScopes(List<GuidedLesson> guidedLessons) {
+        if (guidedLessons == null) {
+            throw new IllegalStateException("Guided TOC must contain a lesson array");
+        }
+        for (GuidedLesson guidedLesson : guidedLessons) {
+            if (guidedLesson == null) {
+                throw new IllegalStateException("Guided TOC cannot contain null lessons");
+            }
+            try {
+                guidedLesson.requireValidSourceReferences();
+                List<String> resolvedDocSets = guidedLesson.sourceReferences().stream()
+                        .map(sourceReference -> resolveOfficialDocSet(guidedLesson.getSlug(), sourceReference))
+                        .toList();
+                guidedLesson.applyResolvedDocSet(resolvedDocSets);
+                guidedLesson.requireValidSourceScope();
+            } catch (IllegalStateException invalidSourceScope) {
+                throw new IllegalStateException(
+                        "Guided TOC lesson has invalid source scope: " + guidedLesson.getSlug(), invalidSourceScope);
+            }
+        }
+        return List.copyOf(guidedLessons);
+    }
+
+    private static String resolveOfficialDocSet(String lessonSlug, String sourceReference) {
+        List<String> matchingCanonicalSourceIdentities = canonicalOfficialSourceIdentities()
+                .filter(canonicalSourceIdentity -> canonicalSourceIdentity.equals(sourceReference))
+                .toList();
+        if (matchingCanonicalSourceIdentities.size() != 1) {
+            throw new IllegalStateException(
+                    "Guided TOC lesson references unknown official source: " + lessonSlug + " -> " + sourceReference);
+        }
+        return matchingCanonicalSourceIdentities.getFirst();
+    }
+
+    private static Stream<String> canonicalOfficialSourceIdentities() {
+        return Stream.concat(
+                DocsSourceRegistry.documentationSources().stream()
+                        .filter(documentationSource -> OFFICIAL_SOURCE_KIND.equals(documentationSource.sourceKind()))
+                        .map(DocsSourceRegistry.DocumentationSource::docSet),
+                DocsSourceRegistry.javaApiDocumentationSources().stream()
+                        .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath));
     }
 }

@@ -31,6 +31,9 @@ import reactor.core.publisher.Flux;
 public class SseSupport {
     private static final Logger log = LoggerFactory.getLogger(SseSupport.class);
 
+    private static final String RESPONSE_PREPARATION_MESSAGE = "Preparing your response";
+    private static final String RESPONSE_PREPARATION_DETAILS = "Finding relevant Java documentation.";
+
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
@@ -160,6 +163,23 @@ public class SseSupport {
         String json = jsonSerialize(payload);
         return Flux.just(
                 ServerSentEvent.<String>builder().event(EVENT_STATUS).data(json).build());
+    }
+
+    /**
+     * Emits the first stream event before potentially slow retrieval work begins.
+     *
+     * <p>This progress event makes request admission observable while controllers continue their
+     * single retrieval and provider path. Subsequent dependency failures remain terminal error
+     * events; this status never masks them.</p>
+     *
+     * @return one response-preparation status event
+     */
+    public Flux<ServerSentEvent<String>> responsePreparationStatus() {
+        return sseStatus(SseEventPayload.builder(RESPONSE_PREPARATION_MESSAGE)
+                .details(RESPONSE_PREPARATION_DETAILS)
+                .code(STATUS_CODE_STREAM_PREPARING)
+                .stage(STATUS_STAGE_RETRIEVAL)
+                .build());
     }
 
     /**
