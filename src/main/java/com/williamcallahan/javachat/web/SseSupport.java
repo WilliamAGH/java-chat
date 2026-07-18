@@ -5,7 +5,6 @@ import static com.williamcallahan.javachat.web.SseConstants.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
-import com.williamcallahan.javachat.service.StreamingNotice;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,13 +35,20 @@ public class SseSupport {
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
 
-    private static final Counter DROPPED_COALESCED_CHUNK_COUNTER =
-            Metrics.counter("javachat.sse.backpressure.dropped_chunks");
+    /** Stable client-facing message for configured-provider admission cooldowns. */
+    static final String CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE =
+            "The AI provider is temporarily unavailable. Please try again shortly.";
+
+    /** Safe retry guidance for configured-provider admission cooldowns. */
+    static final String CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS = "Your request can be retried after a short wait.";
+
+    private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
+            Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
     private static final Counter DROPPED_HEARTBEAT_COUNTER =
             Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
 
     private final ObjectWriter jsonWriter;
-    private final AtomicLong droppedCoalescedChunkCount = new AtomicLong();
+    private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
     /**
@@ -70,7 +76,7 @@ public class SseSupport {
      * Filters empty chunks and applies the standard streaming configuration.
      *
      * @param source the raw content flux from the streaming service
-     * @param chunkConsumer consumer called for each non-empty chunk (typically for accumulation)
+     * @param chunkConsumer consumer called for coalesced chunks after bounded data buffering
      * @return a shared flux configured for SSE streaming
      */
     public Flux<String> prepareDataStream(Flux<String> source, Consumer<String> chunkConsumer) {
@@ -78,13 +84,12 @@ public class SseSupport {
                 .bufferTimeout(STREAM_CHUNK_COALESCE_MAX_ITEMS, Duration.ofMillis(STREAM_CHUNK_COALESCE_WINDOW_MS))
                 .filter(chunkBatch -> !chunkBatch.isEmpty())
                 .map(chunkBatch -> String.join("", chunkBatch))
-                .doOnNext(chunk -> chunkConsumer.accept(chunk))
-                // Keep buffering bounded and drop oldest coalesced chunks under sustained
-                // downstream pressure to avoid unbounded memory growth.
+                // Keep buffering bounded and fail the stream rather than persist or display a truncated answer.
                 .onBackpressureBuffer(
                         STREAM_BACKPRESSURE_BUFFER_CAPACITY,
-                        this::recordDroppedCoalescedChunk,
-                        BufferOverflowStrategy.DROP_OLDEST)
+                        this::recordCoalescedChunkOverflow,
+                        BufferOverflowStrategy.ERROR)
+                .doOnNext(chunk -> chunkConsumer.accept(chunk))
                 // Two subscribers consume this stream in controllers:
                 // 1) text event emission, 2) heartbeat termination signal.
                 // refCount(2) preserves their rendezvous and disconnects upstream when both cancel.
@@ -173,16 +178,16 @@ public class SseSupport {
                         .build());
     }
 
-    private void recordDroppedCoalescedChunk(String droppedChunk) {
-        DROPPED_COALESCED_CHUNK_COUNTER.increment();
-        long totalDroppedChunks = droppedCoalescedChunkCount.incrementAndGet();
-        if (totalDroppedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
+    private void recordCoalescedChunkOverflow(String overflowedChunk) {
+        COALESCED_CHUNK_OVERFLOW_COUNTER.increment();
+        long totalOverflowedChunks = coalescedChunkOverflowCount.incrementAndGet();
+        if (totalOverflowedChunks % STREAM_BACKPRESSURE_DROP_LOG_INTERVAL == 0) {
             log.warn(
-                    "Dropped {} coalesced SSE chunks due to downstream backpressure "
-                            + "(bufferCapacity={}, droppedChunkLength={})",
-                    totalDroppedChunks,
+                    "SSE stream buffer overflowed {} times due to downstream backpressure "
+                            + "(bufferCapacity={}, overflowedChunkLength={})",
+                    totalOverflowedChunks,
                     STREAM_BACKPRESSURE_BUFFER_CAPACITY,
-                    droppedChunk.length());
+                    overflowedChunk.length());
         }
     }
 
@@ -243,8 +248,7 @@ public class SseSupport {
     }
 
     /**
-     * Creates a provider event indicating which LLM provider is handling the request.
-     * Surfaces provider transparency to end-users per the no-silent-fallback policy.
+     * Creates a provider event identifying the LLM provider selected for the request.
      *
      * @param providerName the name of the LLM provider (e.g., "OpenAI", "GitHub Models")
      * @return ServerSentEvent with provider metadata payload
@@ -254,36 +258,6 @@ public class SseSupport {
                 .event(EVENT_PROVIDER)
                 .data(jsonSerialize(new ProviderPayload(providerName)))
                 .build();
-    }
-
-    /**
-     * Projects runtime streaming notices into their SSE protocol events.
-     *
-     * <p>Provider-fallback notices emit the fallback provider before their status event. One
-     * subscription to the replayed notice flux owns both projections, while {@code concatMap}
-     * keeps each notice's protocol events ordered and non-interleaved.</p>
-     *
-     * @param notices flux of streaming notices from the provider
-     * @return flux of ordered ServerSentEvents with provider and status payloads
-     */
-    public Flux<ServerSentEvent<String>> streamingNoticeEvents(Flux<StreamingNotice> notices) {
-        return notices.concatMap(this::streamingNoticeEventSequence);
-    }
-
-    private Flux<ServerSentEvent<String>> streamingNoticeEventSequence(StreamingNotice streamingNotice) {
-        ServerSentEvent<String> noticeStatusEvent = statusEvent(SseEventPayload.builder(streamingNotice.summary())
-                .details(streamingNotice.diagnosticContext())
-                .code(streamingNotice.code())
-                .retryable(streamingNotice.retryable())
-                .provider(streamingNotice.provider())
-                .stage(streamingNotice.stage())
-                .attempt(streamingNotice.attempt())
-                .maxAttempts(streamingNotice.maxAttempts())
-                .build());
-        if (STATUS_CODE_STREAM_PROVIDER_FALLBACK.equals(streamingNotice.code())) {
-            return Flux.just(providerEvent(streamingNotice.provider()), noticeStatusEvent);
-        }
-        return Flux.just(noticeStatusEvent);
     }
 
     /**
@@ -324,23 +298,27 @@ public class SseSupport {
                 .build());
     }
 
+    /**
+     * Creates the stable retryable error used when the configured provider is in an admission cooldown.
+     *
+     * <p>Both chat streaming routes delegate here so provider internals never become part of either
+     * public SSE contract.</p>
+     *
+     * @return a retryable terminal SSE error event
+     */
+    public Flux<ServerSentEvent<String>> configuredProviderUnavailableError() {
+        return streamErrorEvent(CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, true);
+    }
+
     /** Preserves text-chunk whitespace through JSON serialization. */
     public record TextChunk(String text) {}
 
     /**
      * Payload record for status and error SSE events.
      * Event-type distinction is handled by the SSE event type string, not by the payload record.
-     * Use {@link #builder(String)} to construct — avoids 8-param positional calls with null padding.
+     * Use {@link #builder(String)} to construct — avoids positional calls with null padding.
      */
-    public record SseEventPayload(
-            String message,
-            String details,
-            String code,
-            Boolean retryable,
-            String provider,
-            String stage,
-            Integer attempt,
-            Integer maxAttempts) {
+    public record SseEventPayload(String message, String details, String code, Boolean retryable, String stage) {
 
         /** Creates a builder with the required message field. */
         public static Builder builder(String message) {
@@ -353,10 +331,7 @@ public class SseSupport {
             private String details;
             private String code;
             private Boolean retryable;
-            private String provider;
             private String stage;
-            private Integer attempt;
-            private Integer maxAttempts;
 
             private Builder(String message) {
                 this.message = message;
@@ -396,17 +371,6 @@ public class SseSupport {
             }
 
             /**
-             * Sets the provider identifier that emitted the event.
-             *
-             * @param provider provider identifier for event attribution
-             * @return this builder instance
-             */
-            public Builder provider(String provider) {
-                this.provider = provider;
-                return this;
-            }
-
-            /**
              * Sets the pipeline stage associated with this status or error event.
              *
              * @param stage pipeline stage identifier
@@ -417,31 +381,9 @@ public class SseSupport {
                 return this;
             }
 
-            /**
-             * Sets the current retry attempt number for this event.
-             *
-             * @param attempt current attempt index (1-based)
-             * @return this builder instance
-             */
-            public Builder attempt(Integer attempt) {
-                this.attempt = attempt;
-                return this;
-            }
-
-            /**
-             * Sets the maximum allowed retry attempts for this event sequence.
-             *
-             * @param maxAttempts configured retry-attempt ceiling
-             * @return this builder instance
-             */
-            public Builder maxAttempts(Integer maxAttempts) {
-                this.maxAttempts = maxAttempts;
-                return this;
-            }
-
             /** Builds the immutable payload record. */
             public SseEventPayload build() {
-                return new SseEventPayload(message, details, code, retryable, provider, stage, attempt, maxAttempts);
+                return new SseEventPayload(message, details, code, retryable, stage);
             }
         }
     }

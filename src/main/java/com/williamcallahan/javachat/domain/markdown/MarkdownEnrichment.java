@@ -1,42 +1,30 @@
 package com.williamcallahan.javachat.domain.markdown;
 
+import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
+
 /**
- * Base interface for structured enrichment elements.
- * This replaces regex-based enrichment processing with type-safe objects.
+ * Represents one manifest-backed enrichment found in Markdown.
  *
- * Note: Named MarkdownEnrichment to avoid conflict with existing model.Enrichment class.
+ * <p>A generic record keeps the supported kind inventory in the canonical manifest. Adding a
+ * manifest row therefore does not require another Java subtype, enum branch, or token method.</p>
  */
-public sealed interface MarkdownEnrichment permits Hint, Warning, Background, Example, Reminder {
+public record MarkdownEnrichment(String type, String content, int position) {
 
-    /**
-     * Gets the enrichment type identifier.
-     * @return type string
-     */
-    String type();
+    /** Enforces the shared enrichment text and source-position invariants. */
+    public MarkdownEnrichment {
+        if (!UnicodeVisibleContent.hasVisibleContent(type)) {
+            throw new IllegalArgumentException("Enrichment type cannot be null or blank");
+        }
+        if (isBlankEnrichmentText(content)) {
+            throw new IllegalArgumentException("Enrichment content cannot be null or blank");
+        }
+        if (position < 0) {
+            throw new IllegalArgumentException("Enrichment position must be non-negative");
+        }
+    }
 
-    /**
-     * Gets the enrichment content.
-     * @return content string
-     */
-    String content();
-
-    /**
-     * Gets the enrichment priority for rendering order.
-     * @return priority level
-     */
-    EnrichmentPriority priority();
-
-    /**
-     * Gets the position in the document where this enrichment was found.
-     * @return document position
-     */
-    int position();
-
-    /**
-     * Checks if this enrichment has non-empty content.
-     * @return true if content is not empty
-     */
-    default boolean hasContent() {
-        return content() != null && !content().trim().isEmpty();
+    /** Reports whether enrichment text would render without a visible character. */
+    public static boolean isBlankEnrichmentText(String enrichmentText) {
+        return !UnicodeVisibleContent.hasVisibleContent(enrichmentText);
     }
 }

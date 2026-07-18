@@ -9,6 +9,7 @@ import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
+import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
@@ -112,7 +113,7 @@ public class ChatController extends BaseController {
         long requestToken = REQUEST_SEQUENCE.incrementAndGet();
 
         String sessionId = request.resolvedSessionId();
-        String userQuery = request.userQuery();
+        String latest = request.latest();
 
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
@@ -126,7 +127,7 @@ public class ChatController extends BaseController {
                     // Pass model hint to optimize RAG for token-constrained models
                     ChatService.StructuredPromptOutcome promptOutcome =
                             chatService.buildStructuredPromptWithContextOutcome(
-                                    history, userQuery, ModelConfiguration.DEFAULT_MODEL);
+                                    history, latest, ModelConfiguration.DEFAULT_MODEL);
 
                     // Use OpenAI streaming only (legacy fallback removed)
                     if (openAIStreamingService.isAvailable()) {
@@ -171,25 +172,21 @@ public class ChatController extends BaseController {
                                     statusEvents = statusEvents.concatWith(
                                             sseSupport.citationWarningStatusFlux(finalCitationWarning));
 
-                                    Flux<ServerSentEvent<String>> runtimeStreamingEvents =
-                                            sseSupport.streamingNoticeEvents(streamingResult.notices());
-
                                     // Wrap chunks in JSON to preserve whitespace
                                     Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
                                     Flux<ServerSentEvent<String>> citationEvent =
                                             Flux.just(sseSupport.citationEvent(finalCitations));
 
-                                    // Start replayable fallback protocol events before the ref-counted data stream
-                                    // so the provider and status notice arrive before fallback text.
+                                    // Start selected-provider and status events before the ref-counted data stream.
                                     return Flux.concat(
                                             Flux.just(providerEvent),
                                             statusEvents,
-                                            Flux.merge(runtimeStreamingEvents, dataEvents, heartbeats),
+                                            Flux.merge(dataEvents, heartbeats),
                                             citationEvent);
                                 })
                                 .doOnComplete(() -> {
-                                    chatMemory.addExchange(sessionId, userQuery, fullResponse.toString());
+                                    chatMemory.addExchange(sessionId, latest, fullResponse.toString());
                                     PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
                                 });
                     }
@@ -205,6 +202,9 @@ public class ChatController extends BaseController {
                     Throwable upstreamError = terminalFailureContext
                             .map(ReportedStreamingFailure::upstreamFailure)
                             .orElse(error);
+                    if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
+                        return sseSupport.configuredProviderUnavailableError();
+                    }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
                     String diagnostics = upstreamError instanceof Exception exception
                             ? describeException(exception)

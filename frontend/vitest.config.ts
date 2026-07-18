@@ -9,6 +9,11 @@ export default defineConfig({
   resolve: {
     conditions: ["module", "browser", "development"],
   },
+  server: {
+    fs: {
+      allow: [".."],
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

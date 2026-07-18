@@ -1,7 +1,9 @@
 package com.williamcallahan.javachat.config;
 
+import com.williamcallahan.javachat.service.OpenAiProviderRoutingService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import jakarta.annotation.PostConstruct;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +16,6 @@ import org.springframework.context.annotation.Configuration;
 public class ApiKeyLoggingConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger(ApiKeyLoggingConfig.class);
     private static final String DEV_PROFILE = "dev";
-    private static final String GITHUB_MODELS_HOST = "models.github.ai";
     private static final String LOG_HEADER = "=== API Key Configuration Status ===";
     private static final String LOG_FOOTER = "===================================";
     private static final String LOG_GITHUB_NOT_CONFIGURED = "GITHUB_TOKEN: Not configured";
@@ -26,17 +27,17 @@ public class ApiKeyLoggingConfig {
     private static final String LOG_QDRANT_NOT_CONFIGURED = "QDRANT_API_KEY: Not configured";
     private static final String LOG_QDRANT_CONFIGURED = "QDRANT_API_KEY: Configured";
     private static final String LOG_QDRANT_CONFIGURED_MASKED = "QDRANT_API_KEY: Configured (masked)";
-    private static final String LOG_CHAT_GITHUB = "Chat API: Using GitHub Models";
-    private static final String LOG_CHAT_OPENAI = "Chat API: Using OpenAI API";
-    private static final String LOG_CHAT_GITHUB_FALLBACK = "Chat API: Using GitHub Models (fallback)";
-    private static final String LOG_CHAT_OPENAI_FALLBACK = "Chat API: Using OpenAI API (fallback)";
-    private static final String LOG_CHAT_MISSING =
-            "Chat API: No API key configured - chat functionality will not work!";
+    private static final String LOG_CHAT_GITHUB = "Chat API: Selected provider is GitHub Models";
+    private static final String LOG_CHAT_GITHUB_CREDENTIAL_MISSING =
+            "Chat API: Selected GitHub Models provider requires GITHUB_TOKEN";
+    private static final String LOG_CHAT_OPENAI = "Chat API: Selected provider is OpenAI API";
+    private static final String LOG_CHAT_OPENAI_CREDENTIAL_MISSING =
+            "Chat API: Selected OpenAI provider requires OPENAI_API_KEY";
     private static final String GITHUB_TOKEN_PROPERTY = "${GITHUB_TOKEN:}";
     private static final String OPENAI_API_KEY_PROPERTY = "${OPENAI_API_KEY:}";
     private static final String QDRANT_API_KEY_PROPERTY = "${QDRANT_API_KEY:}";
     private static final String ACTIVE_PROFILE_PROPERTY = "${spring.profiles.active:dev}";
-    private static final String BASE_URL_PROPERTY = "${spring.ai.openai.base-url:}";
+    private final OpenAiProviderRoutingService providerRoutingService;
 
     @Value(GITHUB_TOKEN_PROPERTY)
     private String githubToken;
@@ -50,8 +51,14 @@ public class ApiKeyLoggingConfig {
     @Value(ACTIVE_PROFILE_PROPERTY)
     private String activeProfile;
 
-    @Value(BASE_URL_PROPERTY)
-    private String baseUrl;
+    /**
+     * Creates startup diagnostics bound to the canonical chat-provider selection.
+     *
+     * @param providerRoutingService validated chat-provider configuration
+     */
+    public ApiKeyLoggingConfig(OpenAiProviderRoutingService providerRoutingService) {
+        this.providerRoutingService = Objects.requireNonNull(providerRoutingService, "providerRoutingService");
+    }
 
     /**
      * Logs API key configuration at startup to aid diagnostics.
@@ -60,7 +67,6 @@ public class ApiKeyLoggingConfig {
     public void logApiKeyStatus() {
         String normalizedProfile = AsciiTextNormalizer.toLowerAscii(activeProfile == null ? "" : activeProfile.trim());
         final boolean devProfile = DEV_PROFILE.equals(normalizedProfile);
-        final boolean githubModelsEnabled = baseUrl != null && baseUrl.contains(GITHUB_MODELS_HOST);
 
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_HEADER);
@@ -89,35 +95,42 @@ public class ApiKeyLoggingConfig {
             }
         }
 
-        logChatApiSelection(githubModelsEnabled);
+        logChatApiSelection();
 
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_FOOTER);
         }
     }
 
-    private void logChatApiSelection(final boolean githubModelsEnabled) {
-        final boolean githubTokenPresent = isNonBlank(githubToken);
-        final boolean openAiTokenPresent = isNonBlank(openaiApiKey);
+    private void logChatApiSelection() {
+        switch (providerRoutingService.configuredProvider()) {
+            case GITHUB_MODELS -> logGitHubModelsChatSelection();
+            case OPENAI -> logOpenAiChatSelection();
+            case LOCAL -> throw new IllegalStateException("Chat API configuration does not support the local provider");
+        }
+    }
 
-        if (githubModelsEnabled && githubTokenPresent) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(LOG_CHAT_GITHUB);
+    private void logGitHubModelsChatSelection() {
+        if (!isNonBlank(githubToken)) {
+            if (LOGGER.isWarnEnabled()) {
+                LOGGER.warn(LOG_CHAT_GITHUB_CREDENTIAL_MISSING);
             }
-        } else if (!githubModelsEnabled && openAiTokenPresent) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(LOG_CHAT_OPENAI);
+            return;
+        }
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info(LOG_CHAT_GITHUB);
+        }
+    }
+
+    private void logOpenAiChatSelection() {
+        if (!isNonBlank(openaiApiKey)) {
+            if (LOGGER.isWarnEnabled()) {
+                LOGGER.warn(LOG_CHAT_OPENAI_CREDENTIAL_MISSING);
             }
-        } else if (githubTokenPresent) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(LOG_CHAT_GITHUB_FALLBACK);
-            }
-        } else if (openAiTokenPresent) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(LOG_CHAT_OPENAI_FALLBACK);
-            }
-        } else if (LOGGER.isWarnEnabled()) {
-            LOGGER.warn(LOG_CHAT_MISSING);
+            return;
+        }
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info(LOG_CHAT_OPENAI);
         }
     }
 

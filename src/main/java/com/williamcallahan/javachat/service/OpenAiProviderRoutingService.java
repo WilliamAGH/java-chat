@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import com.openai.client.OpenAIClient;
-import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
@@ -9,33 +8,34 @@ import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.SseException;
 import com.openai.errors.UnauthorizedException;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import reactor.core.Exceptions;
 
 /**
- * Chooses provider order and fallback eligibility for OpenAI-compatible calls.
+ * Selects the configured provider and classifies its failures for OpenAI-compatible calls.
  *
  * <p>This service owns provider availability checks, transient failure classification,
- * and primary-provider backoff timing so routing behavior is consistent across
- * streaming and completion code paths.</p>
+ * and configured-provider backoff timing so routing behavior is consistent across
+ * streaming and completion code paths. It validates the configured provider during
+ * application startup so an explicit invalid selection cannot change routing behavior.</p>
  */
 @Service
-public class OpenAiProviderRoutingService {
+@Lazy(false)
+public final class OpenAiProviderRoutingService {
     private static final Logger log = LoggerFactory.getLogger(OpenAiProviderRoutingService.class);
 
     private static final String PROVIDER_SETTING_OPENAI = "openai";
     private static final String PROVIDER_SETTING_GITHUB_MODELS = "github_models";
-    private static final String PROVIDER_SETTING_GITHUB_MODELS_ALT = "github-models";
-    private static final String PROVIDER_SETTING_GITHUB = "github";
 
     /**
      * Identifies the whole-call timeout message emitted by OkHttp 4.12 {@code RealCall.timeoutExit}.
@@ -51,128 +51,102 @@ public class OpenAiProviderRoutingService {
     private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
 
     private final RateLimitService rateLimitService;
-    private final long primaryBackoffSeconds;
-    private final String primaryProviderSetting;
+    private final long configuredProviderBackoffSeconds;
+    private final RateLimitService.ApiProvider configuredProvider;
 
-    /** Epoch millis until which the primary provider is temporarily disabled after failure. */
-    private volatile long primaryBackoffUntilEpochMs;
+    /** Epoch millis until which the configured provider is temporarily disabled after failure. */
+    private volatile long configuredProviderBackoffUntilEpochMs;
 
     /**
-     * Creates provider routing state using configured provider priority and backoff values.
+     * Creates provider routing state using the configured provider and backoff values.
      *
      * @param rateLimitService provider rate-limit state tracker
-     * @param primaryBackoffSeconds backoff duration after primary provider transient failure
-     * @param primaryProviderSetting configured provider priority name
+     * @param appProperties typed source of configured-provider backoff policy
+     * @param configuredProviderSetting configured provider name
+     * @throws IllegalArgumentException when the configured provider is unsupported
      */
     public OpenAiProviderRoutingService(
             RateLimitService rateLimitService,
-            @Value("${LLM_PRIMARY_BACKOFF_SECONDS:600}") long primaryBackoffSeconds,
-            @Value("${LLM_PRIMARY_PROVIDER:github_models}") String primaryProviderSetting) {
+            AppProperties appProperties,
+            @Value("${LLM_PRIMARY_PROVIDER:github_models}") String configuredProviderSetting) {
         this.rateLimitService = rateLimitService;
-        this.primaryBackoffSeconds = primaryBackoffSeconds;
-        this.primaryProviderSetting = primaryProviderSetting;
-        this.primaryBackoffUntilEpochMs = 0L;
+        this.configuredProviderBackoffSeconds = appProperties.getLlm().getConfiguredProviderBackoffSeconds();
+        this.configuredProvider = resolveConfiguredProvider(configuredProviderSetting);
+        this.configuredProviderBackoffUntilEpochMs = 0L;
     }
 
     /**
-     * Resolves providers in deterministic order and filters unavailable candidates.
+     * Returns the sole provider selected for chat requests and startup diagnostics.
      *
-     * @param primaryClient GitHub Models client when configured
-     * @param secondaryClient OpenAI client when configured
-     * @return ordered provider candidates that are currently callable
+     * @return configured chat provider
      */
-    public List<OpenAiProviderCandidate> selectAvailableProviderCandidates(
-            OpenAIClient primaryClient, OpenAIClient secondaryClient) {
-        List<OpenAiProviderCandidate> orderedCandidates = orderedProviderCandidates(primaryClient, secondaryClient);
-        List<OpenAiProviderCandidate> availableCandidates = new ArrayList<>(orderedCandidates.size());
-        boolean hasAlternateProvider = orderedCandidates.size() > 1;
-        for (OpenAiProviderCandidate providerCandidate : orderedCandidates) {
-            if (isProviderCandidateAvailable(providerCandidate, hasAlternateProvider)) {
-                availableCandidates.add(providerCandidate);
-            }
-        }
-        return List.copyOf(availableCandidates);
+    public RateLimitService.ApiProvider configuredProvider() {
+        return configuredProvider;
     }
 
     /**
-     * Records provider failures and applies primary-provider backoff when eligible.
+     * Returns whether the configured provider has a client available for dispatch.
+     *
+     * @param githubModelsClient GitHub Models client when configured
+     * @param openAiClient OpenAI client when configured
+     * @return true when the client matching the configured provider is present
+     */
+    public boolean hasConfiguredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
+        return configuredProviderClient(githubModelsClient, openAiClient) != null;
+    }
+
+    /**
+     * Atomically admits one request to the configured provider immediately before SDK dispatch.
+     *
+     * <p>The synchronized cooldown check and rate-limit reservation form the single admission
+     * boundary for both streaming and completion requests.</p>
+     *
+     * @param githubModelsClient GitHub Models client when configured
+     * @param openAiClient OpenAI client when configured
+     * @return the admitted configured-provider candidate, or empty when its client is missing
+     * @throws ConfiguredProviderTemporarilyUnavailableException when cooldown or rate limiting denies admission
+     */
+    public synchronized Optional<OpenAiProviderCandidate> admitConfiguredProviderRequest(
+            OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
+        OpenAIClient configuredClient = configuredProviderClient(githubModelsClient, openAiClient);
+        if (configuredClient == null) {
+            log.warn("Configured provider client is unavailable (providerId={})", configuredProvider.ordinal());
+            return Optional.empty();
+        }
+        OpenAiProviderCandidate providerCandidate = new OpenAiProviderCandidate(configuredClient, configuredProvider);
+        requireConfiguredProviderAdmission();
+        return Optional.of(providerCandidate);
+    }
+
+    /**
+     * Records provider failures and applies configured-provider backoff when eligible.
      *
      * @param provider provider that failed
      * @param throwable failure raised by SDK or transport
      */
-    public void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
+    public synchronized void recordProviderFailure(RateLimitService.ApiProvider provider, Throwable throwable) {
+        if (provider == configuredProvider && shouldBackoffConfiguredProvider(throwable)) {
+            markConfiguredProviderBackoff();
+        }
+
         if (throwable instanceof OpenAIServiceException serviceException
                 && serviceException.statusCode() == HTTP_TOO_MANY_REQUESTS) {
+            recordProviderRateLimitWhenTimingIsUsable(provider, serviceException);
+        }
+    }
+
+    private void recordProviderRateLimitWhenTimingIsUsable(
+            RateLimitService.ApiProvider provider, OpenAIServiceException serviceException) {
+        try {
             rateLimitService.recordRateLimitFromOpenAiServiceException(provider, serviceException);
+        } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+            log.atWarn()
+                    .setMessage("Provider rate-limit timing could not be recorded; configured cooldown remains active")
+                    .addKeyValue("providerId", provider.ordinal())
+                    .addKeyValue(
+                            "exceptionType", rateLimitDecisionFailure.getClass().getSimpleName())
+                    .log();
         }
-
-        if (provider == configuredPrimaryProvider() && shouldBackoffPrimary(throwable)) {
-            markPrimaryBackoff();
-        }
-    }
-
-    /**
-     * Determines whether a completion failure should trigger provider fallback.
-     *
-     * @param throwable completion failure
-     * @return true when retrying another provider is likely to succeed
-     */
-    public boolean isCompletionFallbackEligible(Throwable throwable) {
-        if (shouldBackoffPrimary(throwable)) {
-            return true;
-        }
-        if (throwable instanceof NotFoundException) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            return serviceException.statusCode() == HTTP_REQUEST_TIMEOUT;
-        }
-        String exceptionMessage = throwable.getMessage();
-        if (exceptionMessage == null) {
-            return false;
-        }
-        String normalizedMessage = AsciiTextNormalizer.toLowerAscii(exceptionMessage);
-        return normalizedMessage.contains("timeout")
-                || normalizedMessage.contains("temporarily unavailable")
-                || normalizedMessage.contains("connection reset")
-                || normalizedMessage.contains("connection closed");
-    }
-
-    /**
-     * Determines whether a streaming failure should trigger provider fallback.
-     *
-     * @param throwable streaming failure
-     * @return true when retrying another provider before first token is likely to succeed
-     */
-    public boolean isStreamingFallbackEligible(Throwable throwable) {
-        if (shouldBackoffPrimary(throwable)) {
-            return true;
-        }
-        if (throwable instanceof NotFoundException) {
-            return true;
-        }
-        if (throwable instanceof SseException || Exceptions.isOverflow(throwable)) {
-            return true;
-        }
-        if (throwable instanceof OpenAIServiceException serviceException) {
-            int statusCode = serviceException.statusCode();
-            return statusCode == HTTP_REQUEST_TIMEOUT
-                    || statusCode == HTTP_CONFLICT
-                    || statusCode == HTTP_TOO_MANY_REQUESTS
-                    || statusCode >= HTTP_INTERNAL_SERVER_ERROR;
-        }
-        String exceptionMessage = throwable.getMessage();
-        if (exceptionMessage == null) {
-            return false;
-        }
-        String normalizedMessage = AsciiTextNormalizer.toLowerAscii(exceptionMessage);
-        return normalizedMessage.contains("invalid stream")
-                || normalizedMessage.contains("malformed")
-                || normalizedMessage.contains("unexpected end of json input")
-                || normalizedMessage.contains("timeout")
-                || normalizedMessage.contains("temporarily unavailable")
-                || normalizedMessage.contains("connection reset")
-                || normalizedMessage.contains("connection closed");
     }
 
     /**
@@ -184,6 +158,9 @@ public class OpenAiProviderRoutingService {
     public boolean isRecoverableStreamingFailure(Throwable throwable) {
         if (throwable == null || isCallerCancellation(throwable)) {
             return false;
+        }
+        if (throwable instanceof ConfiguredProviderTemporarilyUnavailableException) {
+            return true;
         }
         if (throwable instanceof UnauthorizedException
                 || throwable instanceof PermissionDeniedException
@@ -216,84 +193,50 @@ public class OpenAiProviderRoutingService {
                 || normalizedMessage.contains("connection closed");
     }
 
-    boolean shouldBackoffPrimary(Throwable throwable) {
+    boolean shouldBackoffConfiguredProvider(Throwable throwable) {
         if (isCallerCancellation(throwable)) {
             return false;
         }
-        return isRateLimit(throwable)
-                || throwable instanceof OpenAIIoException
-                || throwable instanceof UnauthorizedException
-                || throwable instanceof PermissionDeniedException
-                || throwable instanceof InternalServerException
-                || throwable instanceof NotFoundException
-                || isServerError(throwable);
+        return isRateLimit(throwable) || throwable instanceof OpenAIIoException || isServerError(throwable);
     }
 
-    private List<OpenAiProviderCandidate> orderedProviderCandidates(
-            OpenAIClient primaryClient, OpenAIClient secondaryClient) {
-        RateLimitService.ApiProvider configuredPrimary = configuredPrimaryProvider();
-        RateLimitService.ApiProvider configuredSecondary =
-                configuredPrimary == RateLimitService.ApiProvider.GITHUB_MODELS
-                        ? RateLimitService.ApiProvider.OPENAI
-                        : RateLimitService.ApiProvider.GITHUB_MODELS;
-
-        List<OpenAiProviderCandidate> candidates = new ArrayList<>(2);
-        addProviderCandidate(candidates, configuredPrimary, primaryClient, secondaryClient);
-        addProviderCandidate(candidates, configuredSecondary, primaryClient, secondaryClient);
-        return List.copyOf(candidates);
-    }
-
-    private void addProviderCandidate(
-            List<OpenAiProviderCandidate> candidates,
-            RateLimitService.ApiProvider provider,
-            OpenAIClient primaryClient,
-            OpenAIClient secondaryClient) {
-        OpenAIClient providerClient = providerClient(provider, primaryClient, secondaryClient);
-        if (providerClient == null) {
-            return;
-        }
-        candidates.add(new OpenAiProviderCandidate(providerClient, provider));
-    }
-
-    private OpenAIClient providerClient(
-            RateLimitService.ApiProvider provider, OpenAIClient primaryClient, OpenAIClient secondaryClient) {
-        return switch (provider) {
-            case GITHUB_MODELS -> primaryClient;
-            case OPENAI -> secondaryClient;
+    private OpenAIClient configuredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {
+        return switch (configuredProvider) {
+            case GITHUB_MODELS -> githubModelsClient;
+            case OPENAI -> openAiClient;
             case LOCAL -> null;
         };
     }
 
-    private boolean isProviderCandidateAvailable(
-            OpenAiProviderCandidate providerCandidate, boolean hasAlternateProvider) {
-        RateLimitService.ApiProvider provider = providerCandidate.provider();
-        if (provider == configuredPrimaryProvider() && isPrimaryInBackoff() && hasAlternateProvider) {
-            log.warn("Primary provider unavailable (backoff active, providerId={})", provider.ordinal());
-            return false;
+    private void requireConfiguredProviderAdmission() {
+        if (isConfiguredProviderInBackoff()) {
+            log.warn("Configured provider unavailable (backoff active, providerId={})", configuredProvider.ordinal());
+            throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
         }
-        if (rateLimitService.isProviderAvailable(provider)) {
-            return true;
+        if (rateLimitService.tryReserveRequest(configuredProvider)) {
+            return;
         }
-        log.warn("Provider unavailable (rate limited, providerId={})", provider.ordinal());
-        return false;
+        log.warn("Configured provider admission denied (providerId={})", configuredProvider.ordinal());
+        throw new ConfiguredProviderTemporarilyUnavailableException(configuredProvider);
     }
 
-    private RateLimitService.ApiProvider configuredPrimaryProvider() {
-        String normalizedSetting = primaryProviderSetting == null
-                ? PROVIDER_SETTING_GITHUB_MODELS
-                : AsciiTextNormalizer.toLowerAscii(primaryProviderSetting.trim());
+    private static RateLimitService.ApiProvider resolveConfiguredProvider(String configuredProviderSetting) {
+        String normalizedSetting = configuredProviderSetting == null
+                ? ""
+                : AsciiTextNormalizer.toLowerAscii(configuredProviderSetting.trim());
         return switch (normalizedSetting) {
             case PROVIDER_SETTING_OPENAI -> RateLimitService.ApiProvider.OPENAI;
-            case PROVIDER_SETTING_GITHUB_MODELS, PROVIDER_SETTING_GITHUB_MODELS_ALT, PROVIDER_SETTING_GITHUB ->
-                RateLimitService.ApiProvider.GITHUB_MODELS;
-            default -> {
-                log.warn(
-                        "Unknown LLM_PRIMARY_PROVIDER value '{}', defaulting to '{}'",
-                        primaryProviderSetting,
-                        PROVIDER_SETTING_GITHUB_MODELS);
-                yield RateLimitService.ApiProvider.GITHUB_MODELS;
-            }
+            case PROVIDER_SETTING_GITHUB_MODELS -> RateLimitService.ApiProvider.GITHUB_MODELS;
+            default -> throw invalidConfiguredProviderSetting(configuredProviderSetting);
         };
+    }
+
+    private static IllegalArgumentException invalidConfiguredProviderSetting(String configuredProviderSetting) {
+        String settingDescription = configuredProviderSetting == null || configuredProviderSetting.isBlank()
+                ? "a blank value"
+                : "'" + configuredProviderSetting + "'";
+        return new IllegalArgumentException(
+                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received " + settingDescription + ".");
     }
 
     private boolean isRateLimit(Throwable throwable) {
@@ -334,15 +277,15 @@ public class OpenAiProviderRoutingService {
                 && OK_HTTP_CALL_TIMEOUT_MESSAGE.equals(interruptedIoException.getMessage());
     }
 
-    private boolean isPrimaryInBackoff() {
-        return System.currentTimeMillis() < primaryBackoffUntilEpochMs;
+    private boolean isConfiguredProviderInBackoff() {
+        return System.currentTimeMillis() < configuredProviderBackoffUntilEpochMs;
     }
 
-    private void markPrimaryBackoff() {
-        long backoffEndsAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(Math.max(1, primaryBackoffSeconds));
-        this.primaryBackoffUntilEpochMs = backoffEndsAt;
+    private void markConfiguredProviderBackoff() {
+        long backoffEndsAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(configuredProviderBackoffSeconds);
+        this.configuredProviderBackoffUntilEpochMs = backoffEndsAt;
         long backoffSecondsRemaining =
                 Math.max(1, TimeUnit.MILLISECONDS.toSeconds(backoffEndsAt - System.currentTimeMillis()));
-        log.warn("Primary provider temporarily disabled for {}s due to failure", backoffSecondsRemaining);
+        log.warn("Configured provider temporarily disabled for {}s due to failure", backoffSecondsRemaining);
     }
 }

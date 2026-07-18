@@ -26,8 +26,9 @@ The scrape phase mirrors upstream documentation into `data/docs/` using `wget`.
 ### Java API source catalog
 
 Complete Java API mirror records are defined in
-`src/main/resources/java-api-documentation-sources.manifest`; source URLs outside complete Java API mirrors are defined in
-`src/main/resources/docs-sources.properties`.
+`src/main/resources/java-api-documentation-sources.manifest`. Official non-Java source records are
+defined in `src/main/resources/documentation-sources.manifest`; `src/main/resources/docs-sources.properties`
+remains only for legacy citation and fetch settings outside either manifest.
 
 The manifest is the single semantic owner of each complete Java API release, remote URL, mirror path,
 display name, and fetch policy. Add, change, or remove a complete Java API source by editing one manifest
@@ -35,6 +36,12 @@ row only. Do not add `JAVA*_API_BASE` properties or environment overrides, and d
 manifest's rows or field values in properties, Java constants, shell arrays, tests, or docs.
 Run `./scripts/fetch_all_docs.sh --list-java-api-sources` to inspect the exact rows consumed by the fetch
 script; the CLI catalog and citation registry project the same rows and parity is enforced by tests.
+
+The non-Java manifest is the single semantic owner of each official source's fetch URL, citation base URL,
+mirror path, display name, and ingestion provenance. Add, change, or remove an official non-Java source by
+editing one manifest row only. Do not duplicate its field values in Java constants, shell arrays, tests, or
+documentation. Run `./scripts/fetch_all_docs.sh --list-documentation-sources` to inspect the exact rows
+consumed by the fetch script; the CLI catalog, citation registry, and provenance deriver project those rows.
 
 ### Make targets
 
@@ -47,15 +54,16 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 ### Script flags
 
 ```bash
-./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--list-java-api-sources]
+./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]
 ```
 
 | Flag | Effect |
 |---|---|
-| `--include-quick` | Also fetch small landing-page mirrors (Spring Boot/Framework/AI quick sets) |
+| `--include-quick` | Also fetch small landing-page mirrors (Spring Framework/AI quick sets) |
 | `--no-clean` | Do not quarantine incomplete mirrors before refetching |
 | `--force` | Refresh all sources even if they look complete |
 | `--list-java-api-sources` | Print configured Java API source projections without fetching |
+| `--list-documentation-sources` | Print configured official non-Java source projections without fetching |
 | `--help` | Show usage |
 
 ### What "incremental" means for scraping
@@ -63,7 +71,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 - `wget --mirror --timestamping` skips files that haven't changed on the server.
 - Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
 - Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
-- Oracle Javadoc uses a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
+- Manifest-governed Java API sources (those with a `javaRelease` field) use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
 
 ---
 
@@ -88,7 +96,7 @@ make process-github-repo  # GitHub repo ingestion (REPO_PATH / REPO_URL / SYNC_E
 
 | Flag | Effect |
 |---|---|
-| `--doc-sets=...` | Comma-separated doc set IDs or paths to process (see [doc set filtering](#doc-set-filtering)) |
+| `--doc-sets=...` | Comma-separated doc set paths (or IDs for non-Java sets) to process (see [doc set filtering](#doc-set-filtering)) |
 | `--help` | Show usage |
 
 ## GitHub repository ingestion
@@ -118,22 +126,23 @@ GitHub ingestion runs in headless CLI mode (`spring.main.web-application-type=no
 
 ### Doc set filtering
 
-Limit ingestion to specific doc sets by ID or path:
+Limit ingestion to specific doc sets by path. Non-Java sets also accept short IDs (hyphenated paths); Java API sets require the exact canonical path from the listing command:
 
 ```bash
-# Complete Java API paths: copy relativeMirrorPath from the listing command
+# Copy relativeMirrorPath from either canonical listing command
 ./scripts/fetch_all_docs.sh --list-java-api-sources
+./scripts/fetch_all_docs.sh --list-documentation-sources
 DOCS_SETS=relative/path/from/listing make process-doc-sets
 
-# Non-Java example
-./scripts/process_all_to_qdrant.sh --doc-sets=spring-boot-complete
+# Legacy non-Java example
+./scripts/process_all_to_qdrant.sh --doc-sets=spring-framework-complete
 ```
 
-Complete Java API doc set paths are projected from the manifest. Common non-Java doc sets are:
+Complete Java API and official non-Java doc set paths are projected from their manifests. Common legacy
+non-Java doc sets are:
 
 | ID | Content |
 |---|---|
-| `spring-boot-complete` | Spring Boot reference + API docs |
 | `spring-framework-complete` | Spring Framework reference + Javadoc |
 | `spring-ai-complete` | Spring AI reference + API (stable + 2.0) |
 | `books` | PDF books |
@@ -141,8 +150,12 @@ Complete Java API doc set paths are projected from the manifest. Common non-Java
 ### What "incremental" means for ingestion
 
 - Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
-- Unchanged files are skipped on re-runs — only new or modified content is embedded.
-- File-level fingerprints (`data/index/file_*.marker`) include size, mtime, and content SHA-256 to detect source changes, triggering re-chunking and pruning stale vectors from Qdrant.
+- A file is skipped only when its file-level marker has the same size, mtime, content SHA-256, and
+  extractor-semantics version as the current ingestion contract.
+- File-level markers (`data/index/file_*.marker`) include those values plus the ingested chunk hashes.
+  A source-content change or extractor-semantics change triggers strict stale-vector and parsed-chunk
+  pruning before re-chunking and upserting to Qdrant. Markers created before the semantics field existed
+  are reindexed once.
 
 ---
 
@@ -174,7 +187,7 @@ Each collection has two named vector spaces:
 
 ### Collection auto-creation
 
-On startup (non-test profile), `QdrantIndexInitializer` ensures all four collections exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). Dimension mismatches cause startup failure.
+On startup (non-test profile), `QdrantIndexInitializer` ensures all four collections exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). Reachable schema or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup.
 
 ### Environment variables
 
@@ -239,7 +252,7 @@ To run the CLI directly:
 app_jar=$(ls -1 build/libs/*.jar | grep -v -- "-plain.jar" | head -1)
 
 # With doc set filtering
-DOCS_SETS=spring-boot-complete java -Dspring.profiles.active=cli -jar "$app_jar"
+DOCS_SETS=spring-framework-complete java -Dspring.profiles.active=cli -jar "$app_jar"
 ```
 
 The docs root defaults to `data/docs` unless `DOCS_DIR` is set.

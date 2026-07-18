@@ -12,12 +12,15 @@ source "$SCRIPT_DIR/lib/shell_bootstrap.sh"
 source "$SCRIPT_DIR/lib/env_loader.sh"
 # shellcheck source=lib/documentation_sources.sh
 source "$SCRIPT_DIR/lib/documentation_sources.sh"
+# shellcheck source=lib/documentation_fetch_sources.sh
+source "$SCRIPT_DIR/lib/documentation_fetch_sources.sh"
 # shellcheck source=lib/documentation_fetch_metadata.sh
 source "$SCRIPT_DIR/lib/documentation_fetch_metadata.sh"
 
 # Centralized source definitions
 RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
 JAVA_API_SOURCES_MANIFEST="$SCRIPT_DIR/../src/main/resources/java-api-documentation-sources.manifest"
+DOCUMENTATION_SOURCES_MANIFEST="$SCRIPT_DIR/../src/main/resources/documentation-sources.manifest"
 DOCS_ROOT="$SCRIPT_DIR/../data/docs"
 LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
 
@@ -26,6 +29,7 @@ INCLUDE_QUICK="${INCLUDE_QUICK:-false}"
 CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
+LIST_DOCUMENTATION_SOURCES="false"
 DOCUMENTATION_FETCH_PARTIAL_STATUS=2
 
 parse_fetch_arguments() {
@@ -44,12 +48,16 @@ parse_fetch_arguments() {
             --list-java-api-sources)
                 LIST_JAVA_API_SOURCES="true"
                 ;;
+            --list-documentation-sources)
+                LIST_DOCUMENTATION_SOURCES="true"
+                ;;
             --help|-h)
-                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources]"
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]"
                 echo "  --include-quick : Also refresh small 'quick' doc mirrors"
                 echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
                 echo "  --force         : Refresh even when mirrors look complete"
                 echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
+                echo "  --list-documentation-sources : Print canonical non-Java source projections without fetching"
                 exit 0
                 ;;
             *)
@@ -355,75 +363,6 @@ fetch_docs() {
     fi
 }
 
-# Projects one eight-field documentation source row into the fetch boundary.
-fetch_documentation_source() {
-    local documentation_source_projection="$1"
-    local fetch_projection_delimiters="${documentation_source_projection//[^|]/}"
-    if [ "${#fetch_projection_delimiters}" -ne 7 ]; then
-        log "${RED}✗ Documentation source projection must contain exactly eight fields${NC}"
-        return 1
-    fi
-
-    local java_release
-    local documentation_source_url
-    local relative_mirror_path
-    local documentation_source_name
-    local cut_directories
-    local minimum_html_files
-    local reject_regex
-    local partial_mirror_allowed
-    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed <<< "$documentation_source_projection"
-
-    if [ -z "$documentation_source_url" ] || [ -z "$relative_mirror_path" ] || [ -z "$documentation_source_name" ]; then
-        log "${RED}✗ Documentation source projection has a blank required field${NC}"
-        return 1
-    fi
-    if has_boundary_whitespace "$documentation_source_url" \
-        || has_boundary_whitespace "$relative_mirror_path" \
-        || has_boundary_whitespace "$documentation_source_name" \
-        || has_boundary_whitespace "$reject_regex" \
-        || has_manifest_control_character "$documentation_source_url" \
-        || has_manifest_control_character "$relative_mirror_path" \
-        || has_manifest_control_character "$documentation_source_name" \
-        || has_manifest_control_character "$reject_regex"; then
-        log "${RED}✗ Documentation source projection has invalid text fields${NC}"
-        return 1
-    fi
-    if [ -n "$java_release" ] \
-        && { ! is_canonical_manifest_integer "$java_release" || [ "$java_release" = "0" ]; }; then
-        log "${RED}✗ Documentation source Java release must be blank or a positive canonical integer${NC}"
-        return 1
-    fi
-    if ! is_normalized_relative_mirror_path "$relative_mirror_path"; then
-        log "${RED}✗ Documentation source mirror path must be normalized and relative${NC}"
-        return 1
-    fi
-    if [ -n "$java_release" ] && ! is_absolute_https_remote_base_url "$documentation_source_url"; then
-        log "${RED}✗ Java API documentation source URL must be an absolute HTTPS base URL${NC}"
-        return 1
-    fi
-    if ! is_canonical_manifest_integer "$cut_directories"; then
-        log "${RED}✗ Documentation source cut-directories value must be a canonical integer${NC}"
-        return 1
-    fi
-    if ! is_canonical_manifest_integer "$minimum_html_files" || [ "$minimum_html_files" = "0" ]; then
-        log "${RED}✗ Documentation source minimum HTML files must be a positive canonical integer${NC}"
-        return 1
-    fi
-
-    if [ "$partial_mirror_allowed" != "true" ] && [ "$partial_mirror_allowed" != "false" ]; then
-        log "${RED}✗ Documentation source partial-mirror policy must be true or false${NC}"
-        return 1
-    fi
-
-    echo ""
-    log "Processing: $documentation_source_name"
-    log "URL: $documentation_source_url"
-    log "Target: $DOCS_ROOT/$relative_mirror_path"
-
-    fetch_docs "$java_release" "$documentation_source_url" "$relative_mirror_path" "$documentation_source_name" "$cut_directories" "$minimum_html_files" "$reject_regex" "$partial_mirror_allowed"
-}
-
 run_documentation_fetch() {
 set -euo pipefail
 if [ -f "$RES_PROPS" ]; then
@@ -431,47 +370,28 @@ if [ -f "$RES_PROPS" ]; then
 fi
 parse_fetch_arguments "$@"
 
-# Documentation sources configuration
-# Format: JAVA_RELEASE|URL|RELATIVE_MIRROR_PATH|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
-# JAVA_RELEASE is blank for non-Java documentation sources.
-DOC_SOURCES=(
-    # Spring Boot (current)
-    "|${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|spring-boot-complete|Spring Boot Reference (current)|1|50||false"
-    "|${SPRING_BOOT_API_BASE:-https://docs.spring.io/spring-boot/api/}|spring-boot-complete|Spring Boot API (current)|1|7000||false"
-
-    # Spring AI
-    # Stable reference (1.1.x) - avoid pulling versioned reference subtrees (including 2.0) and SNAPSHOT content.
-    "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai-reference|Spring AI Reference (stable)|1|80|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
-    # 2.0 reference (milestone) - avoid SNAPSHOT content.
-    "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-reference-2|Spring AI Reference (2.0)|1|80|/spring-ai/reference/[^/]*SNAPSHOT|false"
-    # API docs (stable + 2.x). Keep these separate to avoid quarantine/validation conflicts.
-    "|${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}|spring-ai-api-stable|Spring AI API (stable)|1|200||false"
-    "|${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}|spring-ai-api-2|Spring AI API (2.x)|1|200||false"
-
-    # Spring Framework (current) - avoid pulling older reference versions under /reference/6.x, etc.
-    "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework-complete|Spring Framework Reference (current)|1|3000|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
-    "|${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}|spring-framework-complete|Spring Framework Javadoc (current)|1|7000||false"
-
-    "|${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}|oracle/javase|Java 25 Release Notes Issues|3|1||false"
-    "|${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}|ibm/articles|IBM Java 25 Overview|1|1||false"
-    "|${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}|jetbrains/idea/2025/09|JetBrains Java 25 Blog|3|1||false"
-)
-
 load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-append_java_api_fetch_sources
+load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
 
 if [ "$LIST_JAVA_API_SOURCES" = "true" ]; then
     printf '%s\n' "${JAVA_API_SOURCE_PROJECTIONS[@]}"
     exit 0
 fi
+if [ "$LIST_DOCUMENTATION_SOURCES" = "true" ]; then
+    printf '%s\n' "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"
+    exit 0
+fi
+
+# Format: JAVA_RELEASE|URL|RELATIVE_MIRROR_PATH|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
+# Java API rows are projected from their dedicated manifest; generic official sources are projected
+# from documentation-sources.manifest; older specialized sources remain isolated in their legacy catalog.
+DOC_SOURCES=()
+append_legacy_documentation_fetch_sources
+append_manifest_documentation_fetch_sources
+append_java_api_fetch_sources
 
 if [ "$INCLUDE_QUICK" = "true" ]; then
-    DOC_SOURCES+=(
-        "|${SPRING_BOOT_REFERENCE_BASE:-https://docs.spring.io/spring-boot/reference/}|spring-boot|Spring Boot Quick (reference landing)|1|1||false"
-        "|${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}|spring-framework|Spring Framework Quick (reference landing)|1|1|/spring-framework/reference/[0-9]__OR__/spring-framework/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}|spring-ai|Spring AI Quick (reference landing)|1|1|/spring-ai/reference/[0-9]__OR__/spring-ai/reference/[^/]*SNAPSHOT|false"
-        "|${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}|spring-ai-2|Spring AI Quick (2.0 landing)|1|1|/spring-ai/reference/[^/]*SNAPSHOT|false"
-    )
+    append_quick_documentation_fetch_sources
 fi
 
 echo "=============================================="

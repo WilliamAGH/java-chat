@@ -1,6 +1,6 @@
 # Configuration
 
-Java Chat is configured primarily via environment variables. Scripts load `.env` when present, but `.env` is optional when values are exported in the invoking shell.
+Java Chat reads credentials from environment variables. Scripts load `.env` when present, but `.env` is optional when values are exported in the invoking shell. Non-secret provider endpoints, models, and defaults are owned by the application property files.
 
 For defaults, see `src/main/resources/application.properties`.
 
@@ -16,7 +16,7 @@ Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) and supports:
 - **GitHub Models** via `GITHUB_TOKEN`
 - **OpenAI** via `OPENAI_API_KEY`
 
-Provider order is controlled by `LLM_PRIMARY_PROVIDER` (default `github_models`). When both keys are present, eligible failures can fail over to the configured secondary provider before the first streamed token; failures that are not eligible for failover are surfaced to the client.
+`LLM_PRIMARY_PROVIDER` selects the only provider used for chat: `github_models` (the default when unset) or `openai`. An explicitly blank or unsupported value fails application startup. Credential, rate-limit, and upstream failures are surfaced; Java Chat never dispatches a request to another provider.
 
 Common variables:
 
@@ -25,9 +25,10 @@ Common variables:
 - `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
 - `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (application fallback default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
-- `OPENAI_REASONING_EFFORT` (optional, GPT‑5 family)
+- `OPENAI_MODEL` (default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call while provider gateways own first-output and inter-output deadlines)
+
+Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. Invalid values fail startup. Supported reasoning-effort subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 
 ### Researchly shared gateway
 
@@ -40,7 +41,7 @@ OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
 OPENAI_MODEL=gemma-4-26b-a4b
 ```
 
-`gemma-4-26b-a4b` is the gateway's regular Gemma alias and may fail over across the providers configured for it. Gateway-side routing is separate from Java Chat's `LLM_PRIMARY_PROVIDER` ordering. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their existing explicit provider selection and use `OPENAI_EMBEDDING_BASE_URL` or `REMOTE_EMBEDDING_SERVER_URL` rather than the chat gateway URL.
+`gemma-4-26b-a4b` is the gateway's regular Gemma alias. Java Chat sends the request only to its configured `openai` provider; any routing inside the gateway is outside Java Chat. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their explicit provider selection through the `app.embeddings.open-ai-base-url` or `app.remote-embedding.server-url` application properties rather than the chat gateway URL.
 
 ### Provider notes
 
@@ -51,7 +52,7 @@ OPENAI_MODEL=gemma-4-26b-a4b
 
 ### Rate limiting
 
-- If you hit `429` errors on GitHub Models, either wait and retry or set `OPENAI_API_KEY` as an additional provider.
+- If GitHub Models returns `429`, wait until the configured provider is available. To use OpenAI instead, explicitly set `LLM_PRIMARY_PROVIDER=openai`, provide `OPENAI_API_KEY`, and restart the application.
 
 ## Embeddings
 
@@ -64,8 +65,8 @@ and ingestion/retrieval stops so invalid vectors are never cached.
 Selection order:
 
 1) Local embedding server when `APP_LOCAL_EMBEDDING_ENABLED=true`
-2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_SERVER_URL` and `REMOTE_EMBEDDING_API_KEY` are set
-3) OpenAI embeddings when `OPENAI_API_KEY` is set
+2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_API_KEY` is set; its endpoint and model come from `application.properties`
+3) OpenAI embeddings when `OPENAI_API_KEY` and `app.embeddings.open-ai-model` are set
 
 `GITHUB_TOKEN` / GitHub Models is never used for embeddings. GitHub Models does not expose an embeddings API in this project.
 
@@ -82,9 +83,12 @@ Common variables:
 - `APP_LOCAL_EMBEDDING_MODEL` (default `text-embedding-qwen3-embedding-8b`)
 - `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `4096`)
 - `APP_LOCAL_EMBEDDING_BATCH_SIZE` (default `32`)
-- `REMOTE_EMBEDDING_SERVER_URL`, `REMOTE_EMBEDDING_API_KEY`, `REMOTE_EMBEDDING_MODEL_NAME`, `REMOTE_EMBEDDING_DIMENSIONS` (optional)
-  - `REMOTE_EMBEDDING_SERVER_URL` has no in-repo default and must be set via environment or `.env`.
-  - `REMOTE_EMBEDDING_SERVER_URL` accepts either `.../v1` or `.../v1/embeddings`; both normalize correctly.
+- `REMOTE_EMBEDDING_API_KEY` (optional credential loaded from the environment or `.env`)
+- `app.remote-embedding.server-url`, `app.remote-embedding.model`, and `app.remote-embedding.dimensions` in `application.properties`
+  - `app.remote-embedding.server-url` accepts either `.../v1` or `.../v1/embeddings`; both normalize correctly.
+  - The remote credential activates this provider. A configured non-secret endpoint without that credential does not override an explicitly configured OpenAI embedding provider.
+- `app.embeddings.open-ai-base-url` and `app.embeddings.open-ai-model` in `application.properties`
+  - `app.embeddings.open-ai-model` must be set before selecting OpenAI embeddings with `OPENAI_API_KEY`.
 
 Environment precedence is universal across Make targets and ingestion scripts:
 1) CLI arguments (script flags / Make variables passed inline)
@@ -168,4 +172,4 @@ Common variables (see `app.rag.*` defaults in `application.properties`):
 - `RAG_TOP_K`
 - `RAG_RETURN_K`
 - `RAG_CITATIONS_K`
-- `RAG_RERANKER_TIMEOUT` (default `12s`) — timeout budget for LLM reranking calls
+- `RAG_RERANKER_TIMEOUT` (default `30s`) — timeout budget for LLM reranking calls

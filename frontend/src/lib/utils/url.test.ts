@@ -3,9 +3,58 @@ import {
   sanitizeUrl,
   buildFullUrl,
   deduplicateCitations,
+  FALLBACK_SOURCE_LABEL,
   getCitationType,
   getDisplaySource,
 } from "./url";
+
+const PDF_CITATION_URL_CASES = [
+  {
+    scenario: "a query string",
+    citationUrl: "https://example.com/Reference.pdf?edition=second",
+    expectedSourceLabel: "Reference",
+  },
+  {
+    scenario: "a page fragment",
+    citationUrl: "https://example.com/Reference.pdf#page=7",
+    expectedSourceLabel: "Reference",
+  },
+  {
+    scenario: "both a query string and page fragment",
+    citationUrl: "https://example.com/Reference.pdf?edition=second#page=7",
+    expectedSourceLabel: "Reference",
+  },
+  {
+    scenario: "an uppercase extension",
+    citationUrl: "https://example.com/REFERENCE.PDF?edition=second#page=7",
+    expectedSourceLabel: "REFERENCE",
+  },
+  {
+    scenario: "a percent-encoded filename",
+    citationUrl: "https://example.com/Think%20Java.pdf#page=1",
+    expectedSourceLabel: "Think Java",
+  },
+  {
+    scenario: "the live citation's literal-space filename and page fragment",
+    citationUrl: "/pdfs/Think Java - 2nd Edition Book.pdf#page=42",
+    expectedSourceLabel: "Think Java 2nd Edition Book",
+  },
+  {
+    scenario: "a file URL",
+    citationUrl: "file:///guides/Reference.pdf",
+    expectedSourceLabel: "Reference",
+  },
+  {
+    scenario: "a local URL path",
+    citationUrl: "/guides/Reference.pdf",
+    expectedSourceLabel: "Reference",
+  },
+  {
+    scenario: "a relative URL path",
+    citationUrl: "guides/Reference.pdf",
+    expectedSourceLabel: "Reference",
+  },
+] as const;
 
 describe("sanitizeUrl", () => {
   it("returns fallback for empty/null/undefined input", () => {
@@ -107,14 +156,30 @@ describe("getCitationType", () => {
   });
 });
 
+describe("PDF citation URL metadata", () => {
+  for (const pdfCitationExpectation of PDF_CITATION_URL_CASES) {
+    it(`uses the PDF icon and filename for ${pdfCitationExpectation.scenario}`, () => {
+      expect(getCitationType(pdfCitationExpectation.citationUrl)).toBe("pdf");
+      expect(getDisplaySource(pdfCitationExpectation.citationUrl)).toBe(
+        pdfCitationExpectation.expectedSourceLabel,
+      );
+    });
+  }
+});
+
 describe("getDisplaySource", () => {
   it("extracts hostname from URL", () => {
     expect(getDisplaySource("https://docs.oracle.com/javase/8/")).toBe("docs.oracle.com");
+    expect(getDisplaySource("HTTPS://EXAMPLE.COM/guide")).toBe("example.com");
   });
 
   it("returns fallback label for invalid URLs", () => {
     expect(getDisplaySource("not-a-url")).toBe("Source");
     expect(getDisplaySource("")).toBe("Source");
     expect(getDisplaySource(null)).toBe("Source");
+  });
+
+  it("returns the fallback label for malformed percent-encoded PDF filenames", () => {
+    expect(getDisplaySource("https://example.com/Think%ZZJava.pdf")).toBe(FALLBACK_SOURCE_LABEL);
   });
 });

@@ -18,7 +18,7 @@ Built with Spring Boot + WebFlux, Svelte, and Qdrant.
 
 ### Prerequisites
 
-This project uses **Gradle Toolchains** with **Temurin JDK 25** and **mise** (or **asdf**) for reproducible builds.
+This project uses **Gradle Toolchains** with **BellSoft Liberica JDK 25** and **mise** (or **asdf**) for reproducible builds.
 
 #### Option 1: Using mise (recommended)
 
@@ -35,13 +35,13 @@ asdf plugin add java https://github.com/halcyon/asdf-java.git
 asdf install
 ```
 
-**What happens**: Gradle Toolchains will auto-download Temurin JDK 25 on first build if not present locally. The `mise`/`asdf` setup ensures your shell and IDE (IntelliJ) use the correct Java version.
+**What happens**: Gradle Toolchains will auto-download BellSoft Liberica JDK 25 on first build if not present locally. The `mise`/`asdf` setup ensures your shell and IDE (IntelliJ) use the correct Java version.
 
 ### Running
 
 ```bash
 cp .env.example .env
-# edit .env and set GITHUB_TOKEN or OPENAI_API_KEY
+# edit .env: select LLM_PRIMARY_PROVIDER and set its matching credential
 make compose-up   # optional local Qdrant
 make dev
 ```

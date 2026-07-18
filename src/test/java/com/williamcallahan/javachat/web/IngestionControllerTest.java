@@ -2,6 +2,8 @@ package com.williamcallahan.javachat.web;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -12,9 +14,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.service.DocsIngestionService;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -30,6 +36,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @WithMockUser
 class IngestionControllerTest {
     private static final String DOWNSTREAM_SECRET = "downstream-response-body-secret";
+    private static final Logger INGESTION_CONTROLLER_LOGGER =
+            (Logger) LoggerFactory.getLogger(IngestionController.class);
 
     @Autowired
     MockMvc mockMvc;
@@ -59,9 +67,21 @@ class IngestionControllerTest {
                 .when(docsIngestionService)
                 .crawlAndIngest(anyInt());
 
-        mockMvc.perform(post("/api/ingest").with(csrf()))
-                .andExpect(status().isInternalServerError())
-                .andExpect(content().string(not(containsString(DOWNSTREAM_SECRET))));
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(INGESTION_CONTROLLER_LOGGER)) {
+            mockMvc.perform(post("/api/ingest").with(csrf()))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(content().string(not(containsString(DOWNSTREAM_SECRET))));
+
+            assertEquals(2, expectedLogEvents.events().size());
+            var ingestionFailureEvent = expectedLogEvents.events().stream()
+                    .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(
+                    "Unexpected error during ingestion (exception type: IllegalStateException)",
+                    ingestionFailureEvent.getFormattedMessage());
+            assertNull(ingestionFailureEvent.getThrowableProxy());
+        }
     }
 
     @Test

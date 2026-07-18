@@ -18,18 +18,20 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.ChatMemoryService;
+import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.GuidedLearningService;
 import com.williamcallahan.javachat.service.MarkdownService;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,7 +52,7 @@ class GuidedLearningControllerStreamingFailureTest {
     private static final String UPSTREAM_SECRET_MESSAGE = "OPENAI_API_KEY=secret-body";
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(GuidedLearningController.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+    private ExpectedLogEvents controllerLogEvents;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private GuidedLearningService guidedLearningService;
@@ -60,8 +62,7 @@ class GuidedLearningControllerStreamingFailureTest {
 
     @BeforeEach
     void setUpController() {
-        logAppender.start();
-        controllerLogger.addAppender(logAppender);
+        controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
         guidedLearningService = mock(GuidedLearningService.class);
         RetrievalService retrievalService = mock(RetrievalService.class);
         chatMemoryService = mock(ChatMemoryService.class);
@@ -79,9 +80,7 @@ class GuidedLearningControllerStreamingFailureTest {
 
     @AfterEach
     void stopCapturingControllerLogs() {
-        controllerLogger.detachAppender(logAppender);
-        logAppender.stop();
-        logAppender.list.clear();
+        controllerLogEvents.close();
     }
 
     @Test
@@ -94,8 +93,8 @@ class GuidedLearningControllerStreamingFailureTest {
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(
-                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(
@@ -117,9 +116,48 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
+    void configuredProviderCooldownUsesTheSharedRetryableClientError() throws JsonProcessingException {
+        ConfiguredProviderTemporarilyUnavailableException configuredProviderFailure =
+                new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.GITHUB_MODELS);
+        ReportedTerminalStreamingFailure terminalFailure =
+                new ReportedTerminalStreamingFailure(configuredProviderFailure);
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
+                .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of()));
+        when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                guidedController.stream(
+                                new GuidedStreamRequest(SESSION_ID, LESSON_SLUG, USER_QUERY),
+                                new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "guided stream events");
+
+        String serializedStreamError = serializedErrorEvent(streamEvents);
+        SseSupport.SseEventPayload streamError =
+                objectMapper.readValue(serializedStreamError, SseSupport.SseEventPayload.class);
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, streamError.message());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, streamError.details());
+        assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, streamError.code());
+        assertEquals(Boolean.TRUE, streamError.retryable());
+        assertEquals(STATUS_STAGE_STREAM, streamError.stage());
+        assertFalse(serializedStreamError.contains(
+                ConfiguredProviderTemporarilyUnavailableException.class.getSimpleName()));
+        assertFalse(serializedStreamError.contains(RateLimitService.ApiProvider.GITHUB_MODELS.getName()));
+        assertEquals(0, controllerErrorCount());
+    }
+
+    @Test
     void guidedLessonContentDoesNotEmitDuplicateErrorForTerminalStreamingFailure() {
         ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
-        when(guidedLearningService.getCachedLessonMarkdown(LESSON_SLUG)).thenReturn(Optional.empty());
+        when(guidedLearningService.getLesson(LESSON_SLUG))
+                .thenReturn(Optional.of(new GuidedLesson(LESSON_SLUG, "Sealed Classes", "", List.of())));
         when(guidedLearningService.streamLessonContent(LESSON_SLUG)).thenReturn(Flux.error(terminalFailure));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
@@ -142,8 +180,8 @@ class GuidedLearningControllerStreamingFailureTest {
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
         when(guidedLearningService.citationsForBookDocuments(anyList())).thenReturn(List.of());
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(
-                        Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, Flux.empty())));
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI)));
         when(streamingService.isRecoverableStreamingFailure(upstreamFailure)).thenReturn(false);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(
@@ -160,7 +198,7 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(Boolean.FALSE, streamError.retryable());
         assertFalse(serializedStreamError.contains(IllegalStateException.class.getSimpleName()));
         assertFalse(serializedStreamError.contains(UPSTREAM_SECRET_MESSAGE));
-        ILoggingEvent controllerAlert = logAppender.list.stream()
+        ILoggingEvent controllerAlert = controllerLogEvents.events().stream()
                 .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
                 .findFirst()
                 .orElseThrow();
@@ -176,7 +214,7 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     private long controllerErrorCount() {
-        return logAppender.list.stream()
+        return controllerLogEvents.events().stream()
                 .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
                 .count();
     }

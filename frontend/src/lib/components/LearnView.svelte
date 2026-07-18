@@ -59,9 +59,12 @@
     // Streaming state from composable (immediate status clear for LearnView)
     const streaming = createStreamingState();
 
-    // Cleanup scroll anchor on unmount
+    // Cleanup active streams, timers, and scroll state on unmount
     $effect(() => {
         return () => {
+            cancelInFlightGuidedChatStream();
+            cancelInFlightLessonContentStream();
+            streaming.cleanup();
             scrollAnchor.cleanup();
         };
     });
@@ -168,6 +171,7 @@
     async function selectLesson(lesson: GuidedLesson): Promise<void> {
         const targetSlug = lesson.slug;
         cancelInFlightLessonContentStream();
+        scrollAnchor.reset();
         const activeLessonContentStreamVersion = lessonContentStreamVersion;
         lessonContentAbortController = new AbortController();
         const lessonContentAbortSignal = lessonContentAbortController.signal;
@@ -227,40 +231,40 @@
                 return;
             if (lessonContentAbortSignal.aborted) return;
 
-            // Fetch citations for the lesson topic (Think Java-only, with explicit error tracking)
-            fetchGuidedLessonCitations(lesson.slug)
-                .then((result) => {
-                    // Guard against stale citation response
-                    if (selectedLesson?.slug !== targetSlug) return;
+            // Keep the request owner alive until the citation phase finishes.
+            const citationResult = await fetchGuidedLessonCitations(lesson.slug, {
+                signal: lessonContentAbortSignal,
+            });
 
-                    // Preserve scroll position before updating citations
-                    const scrollTop = lessonContentPanelEl?.scrollTop ?? 0;
+            if (selectedLesson?.slug !== targetSlug) return;
+            if (
+                lessonContentStreamVersion !== activeLessonContentStreamVersion
+            )
+                return;
+            if (lessonContentAbortSignal.aborted) return;
 
-                    if (result.success) {
-                        lessonCitations = deduplicateCitations(
-                            result.citations,
-                        );
-                    } else {
-                        lessonCitationsError = result.error;
-                    }
-                    lessonCitationsLoaded = true;
+            // Preserve scroll position before updating citations
+            const scrollTop = lessonContentPanelEl?.scrollTop ?? 0;
 
-                    // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
-                    requestAnimationFrame(() => {
-                        if (lessonContentPanelEl && scrollTop > 0) {
-                            lessonContentPanelEl.scrollTop = scrollTop;
-                        }
-                    });
-                })
-                .catch((error) => {
-                    // Guard against stale citation error
-                    if (selectedLesson?.slug !== targetSlug) return;
-                    lessonCitationsError =
-                        error instanceof Error
-                            ? error.message
-                            : "Failed to load lesson sources";
-                    lessonCitationsLoaded = true;
-                });
+            if (citationResult.success) {
+                lessonCitations = deduplicateCitations(citationResult.citations);
+            } else {
+                lessonCitationsError = citationResult.error;
+            }
+            lessonCitationsLoaded = true;
+
+            // Restore scroll position after DOM update (content added at bottom shouldn't shift view)
+            requestAnimationFrame(() => {
+                if (selectedLesson?.slug !== targetSlug) return;
+                if (
+                    lessonContentStreamVersion !== activeLessonContentStreamVersion
+                )
+                    return;
+                if (lessonContentAbortSignal.aborted) return;
+                if (lessonContentPanelEl && scrollTop > 0) {
+                    lessonContentPanelEl.scrollTop = scrollTop;
+                }
+            });
         } catch (error) {
             if (selectedLesson?.slug !== targetSlug) return;
             if (
@@ -307,6 +311,7 @@
 
     function clearChat(): void {
         cancelInFlightGuidedChatStream();
+        scrollAnchor.reset();
         if (selectedLesson) {
             const lessonSlug = selectedLesson.slug;
             const lessonSessionId = sessionIdsByLesson.get(lessonSlug);
@@ -416,6 +421,10 @@
         // Scroll once when user sends - no auto-scroll during streaming
         await scrollAnchor.scrollOnce();
 
+        if (selectedLesson?.slug !== streamLessonSlug) return;
+        if (guidedChatStreamVersion !== activeStreamVersion) return;
+        if (abortSignal.aborted) return;
+
         streaming.startStream();
         const assistantMessageId = createChatMessageId(
             "guided",
@@ -456,6 +465,13 @@
                             return;
                         if (abortSignal.aborted) return;
                         streaming.updateStatus(status);
+                    },
+                    onProvider: (providerEvent) => {
+                        if (selectedLesson?.slug !== streamLessonSlug) return;
+                        if (guidedChatStreamVersion !== activeStreamVersion)
+                            return;
+                        if (abortSignal.aborted) return;
+                        streaming.updateProvider(providerEvent);
                     },
                     onCitations: (citations) => {
                         // Guard: ignore citations if user navigated away

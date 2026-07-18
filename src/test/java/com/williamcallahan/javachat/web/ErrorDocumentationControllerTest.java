@@ -11,7 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import jakarta.servlet.RequestDispatcher;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,23 +42,16 @@ class ErrorDocumentationControllerTest {
     ErrorDocumentationController errorDocumentationController;
 
     private final Logger controllerLogger = (Logger) LoggerFactory.getLogger(ErrorDocumentationController.class);
-    private final ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
-    private boolean controllerLoggerAdditive;
+    private ExpectedLogEvents controllerLogEvents;
 
     @BeforeEach
     void captureControllerLogs() {
-        controllerLoggerAdditive = controllerLogger.isAdditive();
-        controllerLogger.setAdditive(false);
-        logAppender.start();
-        controllerLogger.addAppender(logAppender);
+        controllerLogEvents = ExpectedLogEvents.capture(controllerLogger);
     }
 
     @AfterEach
     void stopCapturingControllerLogs() {
-        controllerLogger.detachAppender(logAppender);
-        controllerLogger.setAdditive(controllerLoggerAdditive);
-        logAppender.stop();
-        logAppender.list.clear();
+        controllerLogEvents.close();
     }
 
     @Test
@@ -115,8 +108,8 @@ class ErrorDocumentationControllerTest {
     }
 
     private ILoggingEvent onlyControllerLog() {
-        assertEquals(1, logAppender.list.size());
-        return logAppender.list.getFirst();
+        assertEquals(1, controllerLogEvents.events().size());
+        return controllerLogEvents.events().getFirst();
     }
 
     /** Forces classpath resource reads to fail after discovery succeeds. */

@@ -15,7 +15,6 @@ final class DocsLocalPathMapper {
     private static final String PATH_SEPARATOR_TEXT = "/";
 
     private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
-    private static final String SPRING_BOOT_MARKER = "spring-boot";
 
     private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
             "docs/current/api/current/javadoc-api/";
@@ -24,11 +23,6 @@ final class DocsLocalPathMapper {
     private static final String SPRING_FRAMEWORK_LEGACY_DOCS_JAVADOC_JAVA_PREFIX = "docs/current/javadoc-api/java/";
     private static final String SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX = "javadoc-api/java/";
     private static final String SPRING_FRAMEWORK_JAVADOC_PREFIX = "javadoc-api/";
-
-    private static final String SPRING_BOOT_LEGACY_DOCS_API_PREFIX = "docs/current/api/";
-    private static final String SPRING_BOOT_LEGACY_DOCS_REFERENCE_PREFIX = "docs/current/reference/";
-    private static final String SPRING_BOOT_API_PREFIX = "api/";
-    private static final String SPRING_BOOT_REFERENCE_PREFIX = "reference/";
 
     private static final String DOCS_API_SUFFIX = "/docs/api";
     private static final String DOCS_API_PREFIX = "docs/api/";
@@ -61,9 +55,6 @@ final class DocsLocalPathMapper {
         if (localPrefix.contains(SPRING_FRAMEWORK_MARKER)) {
             adjustedPath = normalizeSpringFrameworkRelativePath(adjustedPath);
         }
-        if (localPrefix.contains(SPRING_BOOT_MARKER)) {
-            adjustedPath = normalizeSpringBootRelativePath(adjustedPath);
-        }
         return adjustedPath;
     }
 
@@ -84,20 +75,6 @@ final class DocsLocalPathMapper {
         } else if (adjustedPath.startsWith(SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX)) {
             adjustedPath = SPRING_FRAMEWORK_JAVADOC_PREFIX
                     + adjustedPath.substring(SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX.length());
-        }
-        return adjustedPath;
-    }
-
-    private static String normalizeSpringBootRelativePath(final String relativePath) {
-        String adjustedPath = relativePath;
-        // Normalize legacy local mirror layouts into the current Spring docs URL structure.
-        // Current upstream API docs are served under: /spring-boot/api/
-        if (adjustedPath.startsWith(SPRING_BOOT_LEGACY_DOCS_API_PREFIX)) {
-            adjustedPath = SPRING_BOOT_API_PREFIX + adjustedPath.substring(SPRING_BOOT_LEGACY_DOCS_API_PREFIX.length());
-        }
-        if (adjustedPath.startsWith(SPRING_BOOT_LEGACY_DOCS_REFERENCE_PREFIX)) {
-            adjustedPath = SPRING_BOOT_REFERENCE_PREFIX
-                    + adjustedPath.substring(SPRING_BOOT_LEGACY_DOCS_REFERENCE_PREFIX.length());
         }
         return adjustedPath;
     }

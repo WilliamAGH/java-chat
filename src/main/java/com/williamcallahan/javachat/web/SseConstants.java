@@ -26,9 +26,6 @@ public final class SseConstants {
     /** SSE event type for provider metadata (which LLM provider is responding). */
     public static final String EVENT_PROVIDER = "provider";
 
-    /** Stable status code emitted when backend switches providers before first streamed token. */
-    public static final String STATUS_CODE_STREAM_PROVIDER_FALLBACK = "stream.provider.fallback";
-
     /** Stable status/error code emitted for recoverable stream-provider failures. */
     public static final String STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR = "stream.provider.retryable-error";
 

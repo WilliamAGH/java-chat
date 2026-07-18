@@ -95,24 +95,13 @@ public class RateLimitService {
         ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
         String providerName = providerName(requiredProvider);
 
-        if (!isProviderConfigured(requiredProvider)) {
-            log.debug("[{}] Not configured; treating as unavailable", providerName);
-            return false;
-        }
-
-        if (!rateLimitState.isAvailable(providerName)) {
-            log.debug("[{}] Rate limited (persistent state)", providerName);
+        if (!isConfiguredAndPersistentlyAvailable(requiredProvider)) {
             return false;
         }
 
         ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
-        if (!state.isAvailable()) {
-            log.debug("[{}] In circuit breaker state", providerName);
-            return false;
-        }
-
-        if (state.requestsToday() >= requiredProvider.dailyLimit) {
-            log.warn("[{}] Reached daily limit", providerName);
+        if (!state.isAvailable(requiredProvider.dailyLimit)) {
+            log.debug("[{}] Circuit or daily request limit prevents admission", providerName);
             return false;
         }
 
@@ -120,7 +109,30 @@ public class RateLimitService {
     }
 
     /**
-     * Records a successful provider request in both in-memory and persistent state.
+     * Atomically reserves one provider request immediately before SDK dispatch.
+     *
+     * <p>Every granted reservation consumes the daily limit even when the dispatched request
+     * subsequently fails, preventing retries from evading the protective cap.</p>
+     */
+    public boolean tryReserveRequest(ApiProvider provider) {
+        ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
+        String providerName = providerName(requiredProvider);
+
+        if (!isConfiguredAndPersistentlyAvailable(requiredProvider)) {
+            return false;
+        }
+
+        ProviderCircuitState state = getOrCreateEndpointState(requiredProvider);
+        if (!state.tryReserveRequest(requiredProvider.dailyLimit)) {
+            log.warn("[{}] Circuit or daily request limit denied admission", providerName);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Records a successful reserved provider request in in-memory and persistent state.
      */
     public void recordSuccess(ApiProvider provider) {
         ApiProvider requiredProvider = Objects.requireNonNull(provider, "provider");
@@ -175,6 +187,19 @@ public class RateLimitService {
     public void reset() {
         endpointStates.clear();
         log.info("Rate limit manager reset (in-memory state only)");
+    }
+
+    private boolean isConfiguredAndPersistentlyAvailable(ApiProvider provider) {
+        String providerName = providerName(provider);
+        if (!isProviderConfigured(provider)) {
+            log.debug("[{}] Not configured; treating as unavailable", providerName);
+            return false;
+        }
+        if (!rateLimitState.isAvailable(providerName)) {
+            log.debug("[{}] Rate limited (persistent state)", providerName);
+            return false;
+        }
+        return true;
     }
 
     private boolean isProviderConfigured(ApiProvider provider) {

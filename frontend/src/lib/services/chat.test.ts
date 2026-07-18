@@ -107,4 +107,18 @@ describe("streamChat", () => {
     );
     expect(onError).toHaveBeenCalledWith({ message: "Unexpected provider failure" });
   });
+
+  it("forwards the selected provider event", async () => {
+    const selectedProvider = { provider: "OpenAI" };
+    streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
+      callbacks.onProvider?.(selectedProvider);
+    });
+    const onChunk = vi.fn();
+    const onProvider = vi.fn();
+
+    await streamChat("session-4", "Explain sealed classes", onChunk, { onProvider });
+
+    expect(onProvider).toHaveBeenCalledOnce();
+    expect(onProvider).toHaveBeenCalledWith(selectedProvider);
+  });
 });

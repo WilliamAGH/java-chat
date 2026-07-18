@@ -14,10 +14,39 @@ Request body:
 
 SSE event types (see `SseConstants`):
 
-- `status` → `{"message":"...","details":"..."}`
+- `status` → shared status/error payload, used for progress and non-terminal warnings
+- `provider` → `{"provider":"GitHub Models"}` (the one configured provider selected for this request)
 - `text` → `{"text":"..."}`
 - `citation` → JSON array of citations
-- `error` → `{"message":"...","details":"..."}`
+- `error` → shared status/error payload for a terminal stream failure
+
+`status` and `error` both serialize the following payload shape. The event type determines
+whether it is a progress/warning notice or a terminal failure.
+
+```json
+{
+  "message": "Citations could not be loaded",
+  "details": "Citations could not be loaded",
+  "code": "citation.partial-failure",
+  "retryable": false,
+  "stage": "citation"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `message` | Human-readable summary. |
+| `details` | Additional diagnostic detail; it can be `null`. |
+| `code` | Stable machine-readable status/error code. It can be `null` when no classification applies. Clients must branch on this field rather than the message text. |
+| `retryable` | Whether a client may retry the operation. It can be `null` for ordinary progress notices. |
+| `stage` | Pipeline stage associated with the notice or failure, such as `citation` or `stream`. It can be `null` for ordinary progress notices. |
+
+Stream-provider `error` events populate `code`, `retryable`, and `stage`; a citation warning
+emits the same metadata on a `status` event. Treat `null` metadata as absent.
+
+Chat uses exactly one provider selected by `LLM_PRIMARY_PROVIDER` (`github_models` or `openai`).
+The request never falls back to the other provider: an unavailable, rate-limited, or failed configured
+provider terminates the stream with an `error` event.
 
 Example:
 

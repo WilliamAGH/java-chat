@@ -15,6 +15,7 @@ const URL_SCHEME_HTTPS = "https://";
 const LOCAL_PATH_PREFIX = "/";
 const ANCHOR_SEPARATOR = "#";
 const PDF_EXTENSION = ".pdf";
+const URL_PATHNAME_BASE = "https://citation.invalid";
 
 /** Fallback value for invalid or dangerous URLs. */
 export const FALLBACK_LINK_TARGET = "#";
@@ -35,7 +36,8 @@ const REPO_PATTERNS = ["github.com", "gitlab.com", "bitbucket.org"] as const;
  * Checks if URL starts with http:// or https://.
  */
 export function isHttpUrl(url: string): boolean {
-  return url.startsWith(URL_SCHEME_HTTP) || url.startsWith(URL_SCHEME_HTTPS);
+  const lowerUrl = url.toLowerCase();
+  return lowerUrl.startsWith(URL_SCHEME_HTTP) || lowerUrl.startsWith(URL_SCHEME_HTTPS);
 }
 
 /**
@@ -43,6 +45,17 @@ export function isHttpUrl(url: string): boolean {
  */
 export function matchesAnyPattern(url: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => url.includes(pattern));
+}
+
+/**
+ * Extracts a parsed pathname so both citation metadata decisions ignore queries and fragments.
+ */
+function safeCitationPathname(url: string): string | undefined {
+  try {
+    return new URL(url, URL_PATHNAME_BASE).pathname;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -95,8 +108,9 @@ export function sanitizeUrl(url: string | undefined | null): string {
 export function getCitationType(url: string | undefined | null): CitationType {
   if (!url) return "unknown";
   const lowerUrl = url.toLowerCase();
+  const citationPathname = safeCitationPathname(url);
 
-  if (lowerUrl.endsWith(PDF_EXTENSION)) return "pdf";
+  if (citationPathname?.toLowerCase().endsWith(PDF_EXTENSION)) return "pdf";
   if (isHttpUrl(lowerUrl)) {
     if (matchesAnyPattern(lowerUrl, API_DOC_PATTERNS)) return "api-doc";
     if (matchesAnyPattern(lowerUrl, REPO_PATTERNS)) return "repo";
@@ -115,13 +129,19 @@ export function getCitationType(url: string | undefined | null): CitationType {
 export function getDisplaySource(url: string | undefined | null): string {
   if (!url) return FALLBACK_SOURCE_LABEL;
 
-  const lowerUrl = url.toLowerCase();
+  const citationPathname = safeCitationPathname(url);
 
   // PDF filenames - extract and clean the filename
-  if (lowerUrl.endsWith(PDF_EXTENSION)) {
-    const segments = url.split(LOCAL_PATH_PREFIX);
+  if (citationPathname?.toLowerCase().endsWith(PDF_EXTENSION)) {
+    const segments = citationPathname.split(LOCAL_PATH_PREFIX);
     const filename = segments[segments.length - 1];
-    const cleanName = filename
+    let decodedFilename: string;
+    try {
+      decodedFilename = decodeURIComponent(filename);
+    } catch {
+      return FALLBACK_SOURCE_LABEL;
+    }
+    const cleanName = decodedFilename
       .replace(/\.pdf$/i, "")
       .replace(/[-_]/g, " ")
       .replace(/\s+/g, " ")

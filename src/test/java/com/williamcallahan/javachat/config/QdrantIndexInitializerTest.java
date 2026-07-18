@@ -12,10 +12,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -39,22 +38,16 @@ class QdrantIndexInitializerTest {
     private static final String QDRANT_FALLBACK_BASE_URL = "http://qdrant.test:7444";
 
     private final Logger initializerLogger = (Logger) LoggerFactory.getLogger(QdrantIndexInitializer.class);
-    private final ListAppender<ILoggingEvent> initializerEvents = new ListAppender<>();
-    private boolean initializerLoggerAdditive;
+    private ExpectedLogEvents initializerLogEvents;
 
     @BeforeEach
     void captureInitializerEvents() {
-        initializerLoggerAdditive = initializerLogger.isAdditive();
-        initializerLogger.setAdditive(false);
-        initializerEvents.start();
-        initializerLogger.addAppender(initializerEvents);
+        initializerLogEvents = ExpectedLogEvents.capture(initializerLogger);
     }
 
     @AfterEach
     void stopCapturingInitializerEvents() {
-        initializerLogger.detachAppender(initializerEvents);
-        initializerLogger.setAdditive(initializerLoggerAdditive);
-        initializerEvents.stop();
+        initializerLogEvents.close();
     }
 
     @Test
@@ -336,7 +329,7 @@ class QdrantIndexInitializerTest {
     }
 
     private long eventCount(Level level, String messageFragment) {
-        return initializerEvents.list.stream()
+        return initializerLogEvents.events().stream()
                 .filter(loggingEvent -> loggingEvent.getLevel().equals(level))
                 .filter(loggingEvent -> loggingEvent.getFormattedMessage().contains(messageFragment))
                 .count();

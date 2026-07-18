@@ -32,17 +32,29 @@ public class QdrantClientConfig {
     /** Idle timeout before keepalive pings start. */
     private static final long IDLE_TIMEOUT_MINUTES = 5;
 
-    @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
-    private String host;
+    private final String host;
+    private final int port;
+    private final boolean useTls;
+    private final String apiKey;
 
-    @Value("${spring.ai.vectorstore.qdrant.port:6334}")
-    private int port;
-
-    @Value("${spring.ai.vectorstore.qdrant.use-tls:false}")
-    private boolean useTls;
-
-    @Value("${spring.ai.vectorstore.qdrant.api-key:}")
-    private String apiKey;
+    /**
+     * Creates Qdrant connection settings from non-secret properties and the direct credential environment variable.
+     *
+     * @param host Qdrant host
+     * @param port Qdrant gRPC port
+     * @param useTls whether to use TLS for gRPC
+     * @param apiKey Qdrant API credential from {@code QDRANT_API_KEY}
+     */
+    public QdrantClientConfig(
+            @Value("${spring.ai.vectorstore.qdrant.host:localhost}") String host,
+            @Value("${spring.ai.vectorstore.qdrant.port:6334}") int port,
+            @Value("${spring.ai.vectorstore.qdrant.use-tls:false}") boolean useTls,
+            @Value("${QDRANT_API_KEY:}") String apiKey) {
+        this.host = Objects.requireNonNull(host, "host");
+        this.port = port;
+        this.useTls = useTls;
+        this.apiKey = Objects.requireNonNull(apiKey, "apiKey");
+    }
 
     /**
      * Creates a QdrantClient with gRPC keepalive configured for cloud deployments.
@@ -77,8 +89,8 @@ public class QdrantClientConfig {
         ManagedChannel channel = Objects.requireNonNull(channelBuilder.build(), "ManagedChannel");
         QdrantGrpcClient.Builder grpcClientBuilder = QdrantGrpcClient.newBuilder(channel, true);
 
-        if (apiKey != null && !apiKey.isBlank()) {
-            grpcClientBuilder.withApiKey(Objects.requireNonNull(apiKey, "apiKey"));
+        if (!apiKey.isBlank()) {
+            grpcClientBuilder.withApiKey(apiKey);
         }
 
         return new QdrantClient(Objects.requireNonNull(grpcClientBuilder.build(), "QdrantGrpcClient"));

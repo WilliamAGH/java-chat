@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { applyJavaLanguageDetection } from "./javaLanguageDetection";
 import { parseMarkdown, escapeHtml } from "./markdown";
 
@@ -31,10 +31,67 @@ describe("parseMarkdown", () => {
   });
 
   it("preserves enrichment data attributes", () => {
-    // Enrichment markers are parsed by the extension
     const markdown = "{{hint: This is a hint}}";
     const renderedHtml = parseMarkdown(markdown);
+
     expect(renderedHtml).toContain('data-enrichment-type="hint"');
+    expect(renderedHtml).toContain("Helpful Hints");
+  });
+
+  it("does not render cards for Unicode-whitespace-only enrichment text", () => {
+    const unicodeBlankEnrichmentTexts = [
+      "\u3000",
+      "\u2003",
+      "\u00a0",
+      "\ufeff",
+      "\u200b",
+      "\u2060",
+      " \t\u00a0\u2003\u200b\u2060\u3000\n",
+    ];
+
+    for (const isStreaming of [false, true]) {
+      for (const blankEnrichmentText of unicodeBlankEnrichmentTexts) {
+        const renderedHtml = parseMarkdown(`{{hint:${blankEnrichmentText}}}`, isStreaming);
+
+        expect(renderedHtml).not.toContain("inline-enrichment");
+        expect(renderedHtml).not.toContain("Helpful Hints");
+      }
+    }
+  });
+
+  it("keeps multiline inline-code close candidates literal in complete and streaming enrichments", () => {
+    const enrichmentMarkdown = [
+      "{{warning: Keep `literal }}",
+      "inside inline code` before the real closer.",
+      "}}",
+    ].join("\n");
+
+    for (const isStreaming of [false, true]) {
+      const renderedHtml = parseMarkdown(enrichmentMarkdown, isStreaming);
+
+      expect(renderedHtml).toContain('data-enrichment-type="warning"');
+      expect(renderedHtml).toContain("literal }}");
+      expect(renderedHtml).toContain("before the real closer.");
+      expect(renderedHtml).not.toContain("{{warning:");
+    }
+  });
+
+  it("keeps fence-looking backtick runs inside multiline inline code in complete and streaming enrichments", () => {
+    const enrichmentMarkdown = [
+      "{{example: Keep ``",
+      "```",
+      "not a code fence",
+      "`` then close the enrichment.}}",
+    ].join("\n");
+
+    for (const isStreaming of [false, true]) {
+      const renderedHtml = parseMarkdown(enrichmentMarkdown, isStreaming);
+
+      expect(renderedHtml).toContain('data-enrichment-type="example"');
+      expect(renderedHtml).toContain("not a code fence");
+      expect(renderedHtml).toContain("then close the enrichment.");
+      expect(renderedHtml).not.toContain("{{example:");
+    }
   });
 
   it("preserves trailing content brace when enrichment closes with }}}", () => {
@@ -102,12 +159,13 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain("Use the literal { character.");
   });
 
-  it("recovers a valid nested marker from an unbalanced outer marker", () => {
+  it("uses the first complete close marker for nested enrichment source", () => {
     const markdown = "{{hint: Start with the invariant. {{warning: Never ignore exceptions.}}";
     const renderedHtml = parseMarkdown(markdown);
 
     expect(renderedHtml).toContain("Start with the invariant.");
-    expect(renderedHtml).toContain('data-enrichment-type="warning"');
+    expect(renderedHtml).toContain('data-enrichment-type="hint"');
+    expect(renderedHtml).not.toContain('data-enrichment-type="warning"');
     expect(renderedHtml).not.toContain("{{");
   });
 
@@ -117,6 +175,87 @@ describe("parseMarkdown", () => {
 
     expect(renderedHtml).toContain("{{warning: literal");
     expect(renderedHtml).toContain("if (ready) { run(); }");
+  });
+
+  it("recognizes CommonMark fences with zero through three leading spaces", () => {
+    for (let indentationSpaces = 0; indentationSpaces <= 3; indentationSpaces++) {
+      const indentation = " ".repeat(indentationSpaces);
+      const markdown = [
+        `${indentation}\`\`\`java`,
+        `${indentation}String literal = "{{warning: not a card}}";`,
+        `${indentation}\`\`\``,
+      ].join("\n");
+
+      const renderedHtml = parseMarkdown(markdown);
+
+      expect(renderedHtml).toContain("<pre>");
+      expect(renderedHtml).toContain("{{warning: not a card}}");
+      expect(renderedHtml).not.toContain("inline-enrichment warning");
+    }
+  });
+
+  it("keeps four-space fence text in an indented code block", () => {
+    const markdown = [
+      "    ```java",
+      '    String literal = "{{warning: not a card}}";',
+      "    ```",
+    ].join("\n");
+
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain("<pre>");
+    expect(renderedHtml).toContain("```java");
+    expect(renderedHtml).toContain("{{warning: not a card}}");
+    expect(renderedHtml).not.toContain("inline-enrichment warning");
+  });
+
+  it("ignores close candidates inside zero-to-three-space enrichment fences", () => {
+    for (let indentationSpaces = 0; indentationSpaces <= 3; indentationSpaces++) {
+      const indentation = " ".repeat(indentationSpaces);
+      const markdown = [
+        "{{example:",
+        `${indentation}\`\`\`java`,
+        `${indentation}String literal = "}}";`,
+        `${indentation}\`\`\``,
+        "After the fenced example.",
+        "}}",
+      ].join("\n");
+
+      const renderedHtml = parseMarkdown(markdown);
+
+      expect(renderedHtml).toContain('data-enrichment-type="example"');
+      expect(renderedHtml).toContain("After the fenced example.");
+      expect(renderedHtml).toContain('String literal = "}}";');
+    }
+  });
+
+  it("ignores close candidates inside four-space indented enrichment code", () => {
+    const markdown = ["{{example:", "    }}", "After the indented code.", "}}"].join("\n");
+
+    const renderedHtml = parseMarkdown(markdown);
+
+    expect(renderedHtml).toContain('data-enrichment-type="example"');
+    expect(renderedHtml).toContain("After the indented code.");
+  });
+
+  it("logs only metadata when enrichment markdown is repaired in development", () => {
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const markdown = "{{example:Before```java\nint answer = 42;\n```After}}";
+
+    parseMarkdown(markdown);
+
+    expect(warningSpy).toHaveBeenCalledWith(
+      "[markdown] Repaired enrichment markdown structure",
+      expect.objectContaining({
+        kind: "example",
+        contentLength: expect.any(Number),
+        rawLength: expect.any(Number),
+      }),
+    );
+    const warningMetadata = warningSpy.mock.calls[0]?.[1];
+    expect(warningMetadata).not.toHaveProperty("content");
+    expect(warningMetadata).not.toHaveProperty("raw");
+    warningSpy.mockRestore();
   });
 
   it("normalizes attached fenced code blocks with trailing prose", () => {

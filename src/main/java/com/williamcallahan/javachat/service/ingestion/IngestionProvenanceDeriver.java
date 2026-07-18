@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.service.ingestion;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -27,23 +29,51 @@ public class IngestionProvenanceDeriver {
         Objects.requireNonNull(file, "file");
 
         Path baseDocsDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
-        String docSet = "";
-        if (root.startsWith(baseDocsDir)) {
-            docSet = baseDocsDir.relativize(root).toString();
-        }
+        Path absoluteRoot = root.toAbsolutePath().normalize();
+        Path absoluteFile = file.toAbsolutePath().normalize();
+        String relativeMirrorPath = absoluteRoot.startsWith(baseDocsDir)
+                ? baseDocsDir.relativize(absoluteRoot).toString().replace('\\', '/')
+                : "";
+        String docPath = absoluteFile.startsWith(absoluteRoot)
+                ? absoluteRoot.relativize(absoluteFile).toString()
+                : "";
+        String relativeDocumentPath = absoluteFile.startsWith(baseDocsDir)
+                ? baseDocsDir.relativize(absoluteFile).toString().replace('\\', '/')
+                : "";
 
-        String docPath = "";
-        if (file.startsWith(root)) {
-            docPath = root.relativize(file).toString();
-        }
+        return DocsSourceRegistry.documentationSourceForRelativeDocumentPath(relativeDocumentPath)
+                .map(documentationSource -> manifestProvenance(
+                        documentationSource, documentPathWithinSource(relativeDocumentPath, documentationSource)))
+                .orElseGet(() -> legacyProvenance(relativeMirrorPath, docPath, url));
+    }
 
-        String sourceName = deriveSourceName(docSet, url);
+    private static String documentPathWithinSource(
+            String relativeDocumentPath, DocumentationSource documentationSource) {
+        String relativeMirrorPath = documentationSource.relativeMirrorPath();
+        if (relativeDocumentPath.equals(relativeMirrorPath)) {
+            return "";
+        }
+        return relativeDocumentPath.substring(relativeMirrorPath.length() + 1);
+    }
+
+    private static IngestionProvenance manifestProvenance(DocumentationSource documentationSource, String docPath) {
+        return new IngestionProvenance(
+                documentationSource.docSet(),
+                docPath,
+                documentationSource.docSet(),
+                documentationSource.sourceKind(),
+                documentationSource.docVersion(),
+                documentationSource.docType());
+    }
+
+    private static IngestionProvenance legacyProvenance(String relativeMirrorPath, String docPath, String url) {
+        String sourceName = deriveSourceName(relativeMirrorPath, url);
         String sourceKind = deriveSourceKind(sourceName);
-        String docType = deriveDocType(docSet, url);
-        String docVersion = deriveDocVersion(docSet, url);
+        String docType = deriveDocType(relativeMirrorPath, url);
+        String docVersion = deriveDocVersion(relativeMirrorPath, url);
 
         return new IngestionProvenance(
-                sanitize(docSet),
+                sanitize(relativeMirrorPath),
                 sanitize(docPath),
                 sanitize(sourceName),
                 sanitize(sourceKind),
@@ -139,27 +169,27 @@ public class IngestionProvenanceDeriver {
         return "";
     }
 
-    private static String firstNumberToken(String input) {
-        if (input == null || input.isBlank()) {
+    private static String firstNumberToken(String candidateText) {
+        if (candidateText == null || candidateText.isBlank()) {
             return "";
         }
-        StringBuilder digits = new StringBuilder();
-        for (int i = 0; i < input.length(); i++) {
-            char ch = input.charAt(i);
+        StringBuilder digitSequence = new StringBuilder();
+        for (int i = 0; i < candidateText.length(); i++) {
+            char ch = candidateText.charAt(i);
             if (ch >= '0' && ch <= '9') {
-                digits.append(ch);
-            } else if (!digits.isEmpty()) {
+                digitSequence.append(ch);
+            } else if (!digitSequence.isEmpty()) {
                 break;
             }
         }
-        return digits.toString();
+        return digitSequence.toString();
     }
 
-    private static String sanitize(String value) {
-        if (value == null) {
+    private static String sanitize(String provenanceToken) {
+        if (provenanceToken == null) {
             return "";
         }
-        String trimmed = value.trim();
+        String trimmed = provenanceToken.trim();
         return trimmed.isBlank() ? "" : trimmed;
     }
 

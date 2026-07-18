@@ -2,8 +2,6 @@ package com.williamcallahan.javachat.config;
 
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,26 +20,10 @@ public class AiConfig {
     private static final long RESPONSE_TIMEOUT_MINUTES = 2;
     private static final int CONNECT_TIMEOUT_MILLIS = 30_000;
 
-    // ChatModel is auto-configured by Spring AI starter using spring.ai.openai.* properties.
-    // CRITICAL: GitHub Models endpoint is https://models.github.ai/inference
-    // DO NOT USE: models.inference.ai.azure.com (this is a hallucinated URL)
-
     /**
      * Creates the AI configuration.
      */
     public AiConfig() {}
-
-    /**
-     * Builds the chat client for Spring AI.
-     *
-     * @param builder chat client builder
-     * @return chat client instance
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public ChatClient chatClient(final ChatClient.Builder builder) {
-        return builder.build();
-    }
 
     /**
      * Configures the shared WebClient builder for AI calls.

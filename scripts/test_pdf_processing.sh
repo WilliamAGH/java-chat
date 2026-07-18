@@ -43,12 +43,12 @@ export DOCS_DIR="$PROJECT_ROOT/data/docs/books"
 # Build the application using Gradle task
 echo -e "${YELLOW}Building application...${NC}"
 cd "$PROJECT_ROOT"
-./gradlew buildForScripts --quiet
+./scripts/with_build_state_lock.sh ./gradlew buildForScripts --quiet
 
 echo -e "${GREEN}Application built successfully${NC}"
 
 # Run the document processor using Gradle task
 echo -e "${YELLOW}Processing PDF document...${NC}"
-./gradlew runDocumentProcessor --quiet
+./scripts/with_build_state_lock.sh ./gradlew runDocumentProcessor --quiet
 
 echo -e "${GREEN}PDF processing complete${NC}"

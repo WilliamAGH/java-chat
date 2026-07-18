@@ -9,17 +9,15 @@ import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.support.PdfCitationEnhancer;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serial;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -56,6 +54,13 @@ public class GuidedLearningService {
     /** Classpath directory containing curated lesson markdown files. */
     private static final String CURATED_LESSONS_RESOURCE_DIR = "guided/lessons/";
 
+    /** Message prefix used when a TOC lesson has no packaged curated markdown. */
+    private static final String CURATED_LESSON_RESOURCE_MISSING_MESSAGE =
+            "Curated lesson resource is missing for TOC lesson: ";
+
+    /** Message used when callers request a lesson outside the curated table of contents. */
+    private static final String UNKNOWN_GUIDED_LESSON_MESSAGE = "Unknown guided lesson slug";
+
     /**
      * Base guidance for Think Java-grounded responses with learning aid markers.
      *
@@ -67,7 +72,7 @@ public class GuidedLearningService {
                     + "Use ONLY content grounded in this book for factual claims. "
                     + "If the book does not cover a topic, say so plainly and ask before stepping outside the book. "
                     + "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately. "
-                    + "Embed learning aids using {{hint:...}}, {{reminder:...}}, {{background:...}}, {{example:...}}, {{warning:...}}. "
+                    + "Embed learning aids using these canonical markers:%n%s%n"
                     + "Prefer short, correct explanations with clear code examples when appropriate. If unsure, state the limitation.%n%n"
                     + "## Current Lesson Context%n"
                     + "%s%n%n"
@@ -282,91 +287,38 @@ public class GuidedLearningService {
     }
 
     /**
-     * Stream well-structured lesson content for the given slug.
-     * Produces markdown with headings, paragraphs, lists, and an example code block.
+     * Streams the authoritative classpath markdown for a listed guided lesson.
+     *
+     * @param slug requested lesson slug
+     * @return one markdown emission from the packaged curated lesson
+     * @throws NoSuchElementException when the slug is absent from the guided table of contents
+     * @throws CuratedLessonResourceMissingException when a listed lesson has no packaged markdown resource
      */
     public Flux<String> streamLessonContent(String slug) {
-        return Flux.defer(() -> {
-            // Curated lessons override AI generation for slugs where the model produces unreliable formatting.
-            Optional<String> curatedMarkdown = loadCuratedLessonMarkdown(slug);
-            if (curatedMarkdown.isPresent()) {
-                return Flux.just(curatedMarkdown.get());
-            }
-
-            Optional<GuidedLesson> lessonOptional = tocProvider.findBySlug(slug);
-            String title = lessonOptional.map(GuidedLesson::getTitle).orElse(slug);
-            String query = lessonOptional.map(this::buildLessonQuery).orElse(slug);
-
-            // Retrieve Think Java-only context
-            List<Document> retrievedDocuments = retrievalService.retrieve(query);
-            List<Document> bookDocuments = filterToBook(retrievedDocuments);
-
-            // Guidance: produce a clean, layered markdown lesson body
-            String guidance = String.join(
-                    " ",
-                    "Create a concise, beautifully formatted Java lesson using markdown only.",
-                    "Do NOT include any heading at the top; the UI provides the title.",
-                    "Then 1-2 short paragraphs that define and motivate the topic.",
-                    "Add a bullet list of 3-5 key points or rules.",
-                    "Include one short Java example in a fenced ```java code block with comments.",
-                    "Add a small numbered list (1-3 steps) when it helps understanding.",
-                    "Do NOT include footnote references like [1] or a citations section; the UI shows sources separately.",
-                    "Do NOT include enrichment markers like {{hint:...}}; they are handled separately.",
-                    "Do NOT include a conclusion section; keep it compact and practical.",
-                    "If context is insufficient, state what is missing briefly.");
-
-            // We pass a synthetic latestUserMessage that instructs the model to write the lesson
-            String latestUserMessage = "Write the lesson for: " + title + "\nFocus on: " + query;
-            List<Message> emptyHistory = List.of();
-            StringBuilder lessonMarkdownBuilder = new StringBuilder();
-            return chatService
-                    .streamAnswerWithContext(emptyHistory, latestUserMessage, bookDocuments, guidance)
-                    .doOnNext(lessonMarkdownBuilder::append)
-                    .doOnComplete(() -> putLessonCache(slug, lessonMarkdownBuilder.toString()));
-        });
-    }
-
-    // ===== In-memory cache for lesson markdown =====
-    private static final Duration LESSON_MARKDOWN_CACHE_TTL = Duration.ofMinutes(30);
-
-    /**
-     * Stores lesson markdown alongside the time it was cached to enforce an in-memory TTL.
-     */
-    private record LessonMarkdownCacheEntry(String markdown, Instant cachedAt) {}
-
-    private final ConcurrentMap<String, LessonMarkdownCacheEntry> lessonMarkdownCache = new ConcurrentHashMap<>();
-
-    /**
-     * Returns cached lesson markdown when present and not expired.
-     */
-    public Optional<String> getCachedLessonMarkdown(String slug) {
-        if (slug == null || slug.isBlank()) {
-            return Optional.empty();
-        }
-        LessonMarkdownCacheEntry cacheEntry = lessonMarkdownCache.get(slug);
-        if (cacheEntry == null) return Optional.empty();
-        if (Duration.between(cacheEntry.cachedAt(), Instant.now()).compareTo(LESSON_MARKDOWN_CACHE_TTL) > 0) {
-            lessonMarkdownCache.remove(slug);
-            return Optional.empty();
-        }
-        return Optional.of(cacheEntry.markdown());
+        GuidedLesson listedLesson = tocProvider
+                .findBySlug(slug)
+                .orElseThrow(() -> new NoSuchElementException(UNKNOWN_GUIDED_LESSON_MESSAGE));
+        String canonicalLessonSlug = listedLesson.getSlug();
+        String curatedMarkdown = loadCuratedLessonMarkdown(canonicalLessonSlug)
+                .orElseThrow(() -> new CuratedLessonResourceMissingException(canonicalLessonSlug));
+        return Flux.just(curatedMarkdown);
     }
 
     /**
-     * Caches lesson markdown for later reuse when the slug and content are non-blank.
+     * Signals a broken curated-lesson package invariant instead of substituting generated content.
      */
-    public void putLessonCache(String slug, String markdown) {
-        if (slug == null || slug.isBlank()) {
-            return;
+    public static final class CuratedLessonResourceMissingException extends IllegalStateException {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        /** Creates the invariant failure for the listed lesson whose resource is absent. */
+        public CuratedLessonResourceMissingException(String lessonSlug) {
+            super(CURATED_LESSON_RESOURCE_MISSING_MESSAGE + lessonSlug);
         }
-        if (markdown == null || markdown.isBlank()) {
-            return;
-        }
-        lessonMarkdownCache.put(slug, new LessonMarkdownCacheEntry(markdown, Instant.now()));
     }
 
     /**
-     * Loads curated lesson markdown from the classpath for slugs where LLM generation is unreliable.
+     * Loads curated lesson markdown from the authoritative classpath lesson package.
      *
      * <p>Curated lessons are stored as {@code .md} files under {@value #CURATED_LESSONS_RESOURCE_DIR}
      * on the classpath. Returns {@link Optional#empty()} when no resource exists for the given slug.</p>
@@ -453,7 +405,8 @@ public class GuidedLearningService {
      * @return complete guidance string for the LLM
      */
     private String buildGuidanceFromContext(String lessonContext) {
-        String thinkJavaGuidance = String.format(THINK_JAVA_GUIDANCE_TEMPLATE, lessonContext);
+        String thinkJavaGuidance =
+                String.format(THINK_JAVA_GUIDANCE_TEMPLATE, systemPromptConfig.getMarkerUsagePrompt(), lessonContext);
         String guidedLearningPrompt = systemPromptConfig.getGuidedLearningPrompt();
         return systemPromptConfig.buildFullPrompt(thinkJavaGuidance, guidedLearningPrompt);
     }

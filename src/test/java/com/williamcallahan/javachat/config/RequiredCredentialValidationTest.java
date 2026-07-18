@@ -5,7 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.OpenAiProviderRoutingService;
+import com.williamcallahan.javachat.service.RateLimitService;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Lazy;
 
@@ -14,39 +19,33 @@ import org.springframework.context.annotation.Lazy;
  */
 class RequiredCredentialValidationTest {
     private static final String EMPTY_CREDENTIAL = "";
-    private static final String GITHUB_TEST_TOKEN = "ghp_test123";
-    private static final String OPENAI_TEST_TOKEN = "sk-test123";
     private static final String QDRANT_TEST_API_KEY = "qdrant-key-123";
-    private static final String MISSING_LLM_MESSAGE_FRAGMENT = "No LLM API key configured";
+    private static final String MISSING_GITHUB_MODELS_MESSAGE_FRAGMENT = "requires GITHUB_TOKEN";
+    private static final String MISSING_OPENAI_MESSAGE_FRAGMENT = "requires OPENAI_API_KEY";
     private static final String MISSING_QDRANT_MESSAGE_FRAGMENT = "QDRANT_API_KEY";
 
     @Test
-    void bothKeysBlank_throwsIllegalStateException() {
+    void unavailableGithubModelsProvider_throwsIllegalStateException() {
         RequiredCredentialValidation validation =
-                createValidation(EMPTY_CREDENTIAL, EMPTY_CREDENTIAL, false, EMPTY_CREDENTIAL);
+                createValidation(false, RateLimitService.ApiProvider.GITHUB_MODELS, false, EMPTY_CREDENTIAL);
         IllegalStateException thrown =
                 assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
-        assertTrue(thrown.getMessage().contains(MISSING_LLM_MESSAGE_FRAGMENT));
+        assertTrue(thrown.getMessage().contains(MISSING_GITHUB_MODELS_MESSAGE_FRAGMENT));
     }
 
     @Test
-    void onlyGithubTokenSet_passes() {
+    void unavailableOpenAiProvider_throwsIllegalStateException() {
         RequiredCredentialValidation validation =
-                createValidation(GITHUB_TEST_TOKEN, EMPTY_CREDENTIAL, false, EMPTY_CREDENTIAL);
-        assertDoesNotThrow(validation::validateRequiredCredentials);
-    }
-
-    @Test
-    void onlyOpenaiApiKeySet_passes() {
-        RequiredCredentialValidation validation =
-                createValidation(EMPTY_CREDENTIAL, OPENAI_TEST_TOKEN, false, EMPTY_CREDENTIAL);
-        assertDoesNotThrow(validation::validateRequiredCredentials);
+                createValidation(false, RateLimitService.ApiProvider.OPENAI, false, EMPTY_CREDENTIAL);
+        IllegalStateException thrown =
+                assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
+        assertTrue(thrown.getMessage().contains(MISSING_OPENAI_MESSAGE_FRAGMENT));
     }
 
     @Test
     void tlsEnabledWithoutQdrantApiKey_throwsIllegalStateException() {
         RequiredCredentialValidation validation =
-                createValidation(GITHUB_TEST_TOKEN, EMPTY_CREDENTIAL, true, EMPTY_CREDENTIAL);
+                createValidation(true, RateLimitService.ApiProvider.GITHUB_MODELS, true, EMPTY_CREDENTIAL);
         IllegalStateException thrown =
                 assertThrows(IllegalStateException.class, validation::validateRequiredCredentials);
         assertTrue(thrown.getMessage().contains(MISSING_QDRANT_MESSAGE_FRAGMENT));
@@ -55,14 +54,14 @@ class RequiredCredentialValidationTest {
     @Test
     void tlsEnabledWithQdrantApiKey_passes() {
         RequiredCredentialValidation validation =
-                createValidation(GITHUB_TEST_TOKEN, EMPTY_CREDENTIAL, true, QDRANT_TEST_API_KEY);
+                createValidation(true, RateLimitService.ApiProvider.GITHUB_MODELS, true, QDRANT_TEST_API_KEY);
         assertDoesNotThrow(validation::validateRequiredCredentials);
     }
 
     @Test
     void tlsDisabledWithoutQdrantApiKey_passes() {
         RequiredCredentialValidation validation =
-                createValidation(GITHUB_TEST_TOKEN, EMPTY_CREDENTIAL, false, EMPTY_CREDENTIAL);
+                createValidation(true, RateLimitService.ApiProvider.OPENAI, false, EMPTY_CREDENTIAL);
         assertDoesNotThrow(validation::validateRequiredCredentials);
     }
 
@@ -75,7 +74,15 @@ class RequiredCredentialValidationTest {
     }
 
     private RequiredCredentialValidation createValidation(
-            String githubToken, String openaiApiKey, boolean qdrantTlsEnabled, String qdrantApiKey) {
-        return new RequiredCredentialValidation(githubToken, openaiApiKey, qdrantTlsEnabled, qdrantApiKey);
+            boolean streamingAvailable,
+            RateLimitService.ApiProvider configuredProvider,
+            boolean qdrantTlsEnabled,
+            String qdrantApiKey) {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        OpenAiProviderRoutingService providerRoutingService = mock(OpenAiProviderRoutingService.class);
+        when(streamingService.isAvailable()).thenReturn(streamingAvailable);
+        when(providerRoutingService.configuredProvider()).thenReturn(configuredProvider);
+        return new RequiredCredentialValidation(
+                streamingService, providerRoutingService, qdrantTlsEnabled, qdrantApiKey);
     }
 }

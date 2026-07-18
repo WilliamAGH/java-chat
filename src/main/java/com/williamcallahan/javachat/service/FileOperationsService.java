@@ -1,10 +1,6 @@
 package com.williamcallahan.javachat.service;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,33 +17,23 @@ public class FileOperationsService {
      * Saves text content to a file, creating parent directories as needed.
      *
      * @param filePath The path to the file
-     * @param content The text content to write
+     * @param text The text to write
      * @throws IOException If file operations fail
      */
-    public void saveTextFile(Path filePath, String content) throws IOException {
+    public void saveTextFile(Path filePath, String text) throws IOException {
         ensureParentDirectoryExists(filePath);
-        Files.writeString(filePath, content, StandardCharsets.UTF_8);
+        Files.writeString(filePath, text, StandardCharsets.UTF_8);
     }
 
     /**
-     * Reads text content from a file.
+     * Reads UTF-8 text from a file and rejects malformed or unmappable input.
      *
      * @param filePath The path to the file
-     * @return The file content as a string
-     * @throws IOException If file operations fail
+     * @return The decoded file text
+     * @throws IOException If the file cannot be read or contains invalid UTF-8
      */
     public String readTextFile(Path filePath) throws IOException {
-        try {
-            return Files.readString(filePath, StandardCharsets.UTF_8);
-        } catch (MalformedInputException mie) {
-            // Fallback: decode with replacement to handle non-UTF8 bytes gracefully
-            byte[] bytes = Files.readAllBytes(filePath);
-            CharsetDecoder decoder = StandardCharsets.UTF_8
-                    .newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPLACE)
-                    .onUnmappableCharacter(CodingErrorAction.REPLACE);
-            return decoder.decode(ByteBuffer.wrap(bytes)).toString();
-        }
+        return Files.readString(filePath, StandardCharsets.UTF_8);
     }
 
     /**
@@ -80,11 +66,11 @@ public class FileOperationsService {
         if (filePath == null) {
             throw new IOException("File path is required");
         }
-        Path parentDir = filePath.getParent();
-        if (parentDir == null) {
+        Path parentDirectory = filePath.getParent();
+        if (parentDirectory == null) {
             throw new IOException("File path has no parent directory: " + filePath);
         }
-        Files.createDirectories(parentDir);
+        Files.createDirectories(parentDirectory);
     }
 
     /**

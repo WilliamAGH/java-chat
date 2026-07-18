@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { streamSseMock, streamSseGetMock } = vi.hoisted(() => {
   return { streamSseMock: vi.fn(), streamSseGetMock: vi.fn() };
@@ -8,12 +8,38 @@ vi.mock("./sse", () => {
   return { streamSse: streamSseMock, streamSseGet: streamSseGetMock };
 });
 
-import { streamGuidedChat, streamLessonContent } from "./guided";
+import { fetchGuidedLessonCitations, streamGuidedChat, streamLessonContent } from "./guided";
 
 describe("streamGuidedChat", () => {
   beforeEach(() => {
     streamSseMock.mockReset();
     streamSseGetMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards the caller-owned cancellation signal to guided citation fetches", async () => {
+    const citationAbortController = new AbortController();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ url: "https://example.com/source", title: "Source" }]), {
+        status: 200,
+        statusText: "OK",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchGuidedLessonCitations("intro", { signal: citationAbortController.signal }),
+    ).resolves.toEqual({
+      success: true,
+      citations: [{ url: "https://example.com/source", title: "Source" }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/guided/citations?slug=intro", {
+      signal: citationAbortController.signal,
+    });
   });
 
   it("surfaces a recoverable stream failure without replaying the POST", async () => {
@@ -92,16 +118,17 @@ describe("streamGuidedChat", () => {
     expect(firstOnErrorCall[0]).toEqual({ message: "429 rate limit exceeded" });
   });
 
-  it("does not retry when backend marks stream failure as non-retryable", async () => {
+  it("forwards a terminal non-retryable provider failure without replaying the POST", async () => {
+    const streamError = {
+      message: "Streaming error",
+      details: "The response stream encountered an error. Please try again.",
+      code: "stream.provider.fatal-error",
+      retryable: false,
+      stage: "stream",
+    };
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
-      callbacks.onStatus?.({
-        message: "Primary and fallback streams both failed",
-        code: "stream.provider.fatal-error",
-        retryable: false,
-        stage: "stream",
-      });
-      callbacks.onError?.({ message: "Provider stream unavailable" });
-      throw new Error("Provider stream unavailable");
+      callbacks.onError?.(streamError);
+      throw new Error(streamError.message);
     });
 
     const onChunk = vi.fn();
@@ -116,15 +143,27 @@ describe("streamGuidedChat", () => {
         onError,
         onCitations,
       }),
-    ).rejects.toThrow("Provider stream unavailable");
+    ).rejects.toThrow(streamError.message);
 
     expect(streamSseMock).toHaveBeenCalledTimes(1);
-    expect(onStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        code: "stream.provider.fatal-error",
-        retryable: false,
-      }),
-    );
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(streamError);
+  });
+
+  it("forwards the selected provider event", async () => {
+    const selectedProvider = { provider: "GitHub Models" };
+    streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
+      callbacks.onProvider?.(selectedProvider);
+    });
+    const onProvider = vi.fn();
+
+    await streamGuidedChat("session-provider", "records", "Explain records", {
+      onChunk: vi.fn(),
+      onProvider,
+    });
+
+    expect(onProvider).toHaveBeenCalledOnce();
+    expect(onProvider).toHaveBeenCalledWith(selectedProvider);
   });
 
   it("streams lesson content from the guided content stream endpoint", async () => {

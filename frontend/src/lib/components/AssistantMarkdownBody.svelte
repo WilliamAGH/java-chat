@@ -26,11 +26,7 @@
 </script>
 
 <div class="assistant-content" bind:this={markdownElement}>
-  {#if renderedMarkdownHtml}
-    {@html renderedMarkdownHtml}
-  {:else}
-    <p>{markdown}</p>
-  {/if}
+  {@html renderedMarkdownHtml}
   <span class={['cursor', isStreaming && 'visible']}></span>
 </div>
 

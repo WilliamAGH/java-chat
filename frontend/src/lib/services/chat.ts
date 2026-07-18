@@ -10,6 +10,7 @@ import {
   type StreamStatus,
   type StreamError,
   type Citation,
+  type ProviderEvent,
 } from "../validation/schemas";
 import { validateFetchJson } from "../validation/validate";
 import { csrfHeader, extractApiErrorMessage, fetchWithCsrfRetry } from "./csrf";
@@ -30,6 +31,7 @@ export interface StreamChatOptions {
   onStatus?: (status: StreamStatus) => void;
   onError?: (error: StreamError) => void;
   onCitations?: (citations: Citation[]) => void;
+  onProvider?: (provider: ProviderEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -37,6 +39,11 @@ export interface StreamChatOptions {
 export type CitationFetchResult =
   | { success: true; citations: Citation[] }
   | { success: false; error: string };
+
+/** Configures a citation request without introducing another transport shape. */
+export interface CitationFetchOptions {
+  signal?: AbortSignal;
+}
 
 /**
  * Stream chat response from the backend using Server-Sent Events.
@@ -60,6 +67,7 @@ export async function streamChat(
       onStatus: options.onStatus,
       onError: options.onError,
       onCitations: options.onCitations,
+      onProvider: options.onProvider,
     },
     "chat.ts",
     { signal: options.signal },
@@ -102,13 +110,15 @@ export async function clearChatSession(sessionId: string): Promise<void> {
  *
  * @param citationUrl - Full URL to fetch citations from
  * @param logLabel - Label for validation and error logging context
+ * @param options - Cancellation signal owned by the caller's active request
  */
 export async function fetchCitationsByEndpoint(
   citationUrl: string,
   logLabel: string,
+  options: CitationFetchOptions = {},
 ): Promise<CitationFetchResult> {
   try {
-    const citationsResponse = await fetch(citationUrl);
+    const citationsResponse = await fetch(citationUrl, { signal: options.signal });
     const citationsValidation = await validateFetchJson(
       citationsResponse,
       CitationsArraySchema,
@@ -121,6 +131,9 @@ export async function fetchCitationsByEndpoint(
 
     return { success: true, citations: citationsValidation.validated };
   } catch (error) {
+    if (options.signal?.aborted) {
+      throw error;
+    }
     const errorMessage =
       error instanceof Error ? error.message : "Network error fetching citations";
     console.error(`[${logLabel}] Unexpected error:`, error);
@@ -133,9 +146,13 @@ export async function fetchCitationsByEndpoint(
  * Used by LearnView to fetch lesson-level citations separately from the chat stream.
  * Returns a Result type to distinguish between empty results and fetch failures.
  */
-export async function fetchCitations(query: string): Promise<CitationFetchResult> {
+export async function fetchCitations(
+  query: string,
+  options: CitationFetchOptions = {},
+): Promise<CitationFetchResult> {
   return fetchCitationsByEndpoint(
     `/api/chat/citations?q=${encodeURIComponent(query)}`,
     `fetchCitations [query=${query}]`,
+    options,
   );
 }

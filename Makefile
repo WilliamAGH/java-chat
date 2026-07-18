@@ -11,17 +11,20 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 clean: ## Clean build outputs
-	$(GRADLEW) clean
+	$(LOCKED_GRADLEW) clean
 
-build: frontend-build ## Build the project (skip tests)
+build: ## Build the project (skip tests)
+	./scripts/with_build_state_lock.sh $(MAKE) build-with-lock
+
+build-with-lock: frontend-build-with-lock
 	$(GRADLEW) build -x test
 
 test: ## Run tests (loads .env if present)
 	@$(call load_env); \
-	  $(GRADLEW) test
+	  $(LOCKED_GRADLEW) test
 
 lint: lint-ast lint-frontend ## Run static analysis (Java + Frontend)
-	$(GRADLEW) spotbugsMain pmdMain
+	$(LOCKED_GRADLEW) spotbugsMain spotbugsTest pmdMain pmdTest
 
 lint-frontend: ## Run frontend linting (oxlint + ast-grep + svelte-check)
 	cd frontend && npm run lint && npm run check
@@ -32,7 +35,7 @@ lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@ast-grep scan -c config/sgconfig.yml src/main/java/
 
 format: ## Apply Java formatting (Palantir via Spotless)
-	$(GRADLEW) spotlessApply
+	$(LOCKED_GRADLEW) spotlessApply
 
 hooks: ## Install git hooks via lefthook
 	@$(call require_cmd,lefthook,brew install lefthook)
@@ -84,7 +87,10 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install
 
-frontend-build: frontend-install ## Build frontend for production
+frontend-build: ## Build frontend for production
+	./scripts/with_build_state_lock.sh $(MAKE) frontend-build-with-lock
+
+frontend-build-with-lock: frontend-install
 	cd frontend && npm run build
 
 compose-up: ## Start local Qdrant via Docker Compose (detached)

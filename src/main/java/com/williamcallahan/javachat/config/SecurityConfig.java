@@ -31,6 +31,7 @@ public class SecurityConfig {
     private static final String READINESS_ENDPOINT = "/actuator/health/readiness";
     private static final String DEPENDENCIES_ENDPOINT = "/actuator/health/dependencies";
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
+    private static final String INFO_ENDPOINT = "/actuator/info";
 
     /**
      * CORS configuration source for Spring Security filter chain integration.
@@ -68,7 +69,8 @@ public class SecurityConfig {
                                 LIVENESS_ENDPOINT,
                                 READINESS_ENDPOINT,
                                 DEPENDENCIES_ENDPOINT,
-                                PROMETHEUS_ENDPOINT)
+                                PROMETHEUS_ENDPOINT,
+                                INFO_ENDPOINT)
                         .permitAll()
                         .anyRequest()
                         .denyAll())

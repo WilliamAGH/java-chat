@@ -2,10 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
 
+type GuidedCitationFetchResult = Awaited<
+  ReturnType<typeof import("../services/guided").fetchGuidedLessonCitations>
+>;
+type GuidedCitationFetchOptions = Parameters<
+  typeof import("../services/guided").fetchGuidedLessonCitations
+>[1];
+
 const fetchTocMock = vi.fn();
 const streamLessonContentMock = vi.fn();
 const fetchGuidedLessonCitationsMock = vi.fn();
 const streamGuidedChatMock = vi.fn();
+const OFFSCREEN_MESSAGES_SCROLL_HEIGHT = 1_000;
+const VISIBLE_MESSAGES_CONTAINER_HEIGHT = 200;
+const NEW_UPDATES_INDICATOR_NAME = "1 new updates, jump to bottom";
+const ANY_NEW_UPDATES_INDICATOR_NAME = /jump to/i;
 
 vi.mock("../services/guided", async () => {
   const actualGuidedService =
@@ -24,6 +35,58 @@ async function renderLearnView() {
   return render(LearnViewComponent);
 }
 
+function configureGuidedChatWithPendingStream() {
+  streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+    lessonStreamCallbacks.onChunk("# Lesson");
+  });
+  fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+  streamGuidedChatMock.mockImplementation(async () => new Promise<void>(() => {}));
+}
+
+function makeDesktopMessagesContainerAppearScrolledAway(messagesContainer: HTMLElement) {
+  Object.defineProperties(messagesContainer, {
+    scrollTop: { configurable: true, value: 0, writable: true },
+    scrollHeight: {
+      configurable: true,
+      value: OFFSCREEN_MESSAGES_SCROLL_HEIGHT,
+    },
+    clientHeight: {
+      configurable: true,
+      value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+    },
+  });
+}
+
+async function openLessonWithPendingNewUpdatesIndicator(initialLessonName: RegExp) {
+  configureGuidedChatWithPendingStream();
+
+  const learnView = await renderLearnView();
+  const initialLessonButton = await learnView.findByRole("button", {
+    name: initialLessonName,
+  });
+  await fireEvent.click(initialLessonButton);
+  await tick();
+
+  const messagesContainer = learnView.container.querySelector<HTMLElement>(
+    ".chat-panel--desktop .messages-container",
+  );
+  if (!messagesContainer) {
+    throw new Error("Expected the desktop messages container to be rendered");
+  }
+  makeDesktopMessagesContainerAppearScrolledAway(messagesContainer);
+
+  vi.useFakeTimers();
+  const messageInput = learnView.getByLabelText("Message input");
+  if (!(messageInput instanceof HTMLTextAreaElement)) {
+    throw new Error("Expected message input element to be a textarea");
+  }
+  await fireEvent.input(messageInput, { target: { value: "Hi" } });
+  await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+  await tick();
+
+  return learnView;
+}
+
 describe("LearnView guided chat streaming stability", () => {
   beforeEach(() => {
     fetchTocMock.mockReset();
@@ -33,6 +96,7 @@ describe("LearnView guided chat streaming stability", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -124,6 +188,79 @@ describe("LearnView guided chat streaming stability", () => {
     expect(
       container.querySelector(".chat-panel--desktop .message.assistant .cursor.visible"),
     ).toBeNull();
+  });
+
+  it("shows the provider selected for the active guided stream", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamCallbacks.onChunk("# Lesson");
+    });
+    fetchGuidedLessonCitationsMock.mockResolvedValue({ success: true, citations: [] });
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        callbacks.onProvider?.({ provider: "GitHub Models" });
+        return new Promise<void>(() => {});
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+
+    expect(await learnView.findAllByText("Provider: GitHub Models")).not.toHaveLength(0);
+  });
+
+  it("clears the new-updates indicator when clearing chat", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => "",
+      }),
+    );
+
+    const learnView = await openLessonWithPendingNewUpdatesIndicator(/test lesson/i);
+
+    await vi.runAllTimersAsync();
+    await tick();
+
+    expect(learnView.getByRole("button", { name: NEW_UPDATES_INDICATOR_NAME })).toBeInTheDocument();
+
+    await fireEvent.click(learnView.getByRole("button", { name: "Clear chat" }));
+    await tick();
+
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
+  });
+
+  it("clears the new-updates indicator when switching lessons", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Intro Lesson", summary: "Lesson summary", keywords: [] },
+      {
+        slug: "classes",
+        title: "Classes Lesson",
+        summary: "Classes summary",
+        keywords: [],
+      },
+    ]);
+
+    const learnView = await openLessonWithPendingNewUpdatesIndicator(/intro lesson/i);
+
+    await fireEvent.click(learnView.getByRole("button", { name: "All Lessons" }));
+    await fireEvent.click(learnView.getByRole("button", { name: /classes lesson/i }));
+    await vi.runAllTimersAsync();
+    await tick();
+
+    expect(learnView.queryByRole("button", { name: ANY_NEW_UPDATES_INDICATOR_NAME })).toBeNull();
   });
 
   it("cancels the guided stream and clears messages without late writes after clear chat", async () => {
@@ -219,5 +356,86 @@ describe("LearnView guided chat streaming stability", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(abortSignalsByStream[0]?.aborted ?? false).toBe(true);
+  });
+
+  it("ignores stale citations when the same lesson is reselected", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamCallbacks.onChunk("# Lesson");
+    });
+    const firstCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
+    const currentCitationRequest = Promise.withResolvers<GuidedCitationFetchResult>();
+    let firstCitationAbortSignal: AbortSignal | undefined;
+    fetchGuidedLessonCitationsMock
+      .mockImplementationOnce(
+        (_lessonSlug: string, citationFetchOptions: GuidedCitationFetchOptions = {}) => {
+          firstCitationAbortSignal = citationFetchOptions.signal;
+          return firstCitationRequest.promise;
+        },
+      )
+      .mockReturnValueOnce(currentCitationRequest.promise);
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(1));
+
+    await fireEvent.click(learnView.getByRole("button", { name: "All Lessons" }));
+    expect(firstCitationAbortSignal?.aborted).toBe(true);
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(fetchGuidedLessonCitationsMock).toHaveBeenCalledTimes(2));
+
+    currentCitationRequest.resolve({
+      success: true,
+      citations: [{ url: "https://example.com/current", title: "Current Source" }],
+    });
+    await fireEvent.click(await learnView.findByRole("button", { name: /1 source/i }));
+    expect(await learnView.findByText("Current Source")).toBeInTheDocument();
+
+    firstCitationRequest.resolve({
+      success: true,
+      citations: [{ url: "https://example.com/stale", title: "Stale Source" }],
+    });
+    await tick();
+
+    expect(learnView.queryByText("Stale Source")).toBeNull();
+    expect(learnView.getByText("Current Source")).toBeInTheDocument();
+  });
+
+  it("aborts lesson and guided streams when the view unmounts", async () => {
+    fetchTocMock.mockResolvedValue([
+      { slug: "intro", title: "Test Lesson", summary: "Lesson summary", keywords: [] },
+    ]);
+    let lessonStreamSignal: AbortSignal | undefined;
+    streamLessonContentMock.mockImplementation(async (_lessonSlug, lessonStreamCallbacks) => {
+      lessonStreamSignal = lessonStreamCallbacks.signal;
+      return new Promise<void>((resolve) => {
+        lessonStreamSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    let guidedStreamSignal: AbortSignal | undefined;
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        guidedStreamSignal = callbacks.signal;
+        return new Promise<void>((resolve) => {
+          guidedStreamSignal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+    await vi.waitFor(() => expect(lessonStreamSignal).toBeDefined());
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+    await vi.waitFor(() => expect(guidedStreamSignal).toBeDefined());
+
+    learnView.unmount();
+
+    expect(lessonStreamSignal?.aborted).toBe(true);
+    expect(guidedStreamSignal?.aborted).toBe(true);
   });
 });

@@ -2,21 +2,28 @@ package com.williamcallahan.javachat.application.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /**
  * Verifies structure-aware prompt truncation preserves semantic boundaries.
  */
 class PromptTruncatorTest {
+
+    private static final Logger PROMPT_TRUNCATOR_LOGGER = (Logger) LoggerFactory.getLogger(PromptTruncator.class);
 
     private PromptTruncator truncator;
 
@@ -97,14 +104,25 @@ class PromptTruncatorTest {
                 new CurrentQuerySegment("Important question", 200));
 
         // Limit smaller than system + query alone
-        PromptTruncator.TruncatedPrompt result = truncator.truncate(prompt, 350, true);
+        PromptTruncator.TruncatedPrompt truncationOutcome;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROMPT_TRUNCATOR_LOGGER)) {
+            truncationOutcome = truncator.truncate(prompt, 350, true);
 
-        assertTrue(result.wasTruncated());
-        assertEquals(0, result.contextDocumentCount());
-        assertEquals(0, result.conversationTurnCount());
+            assertEquals(1, expectedLogEvents.events().size());
+            var truncationWarning = expectedLogEvents.events().getFirst();
+            assertEquals(Level.WARN, truncationWarning.getLevel());
+            assertEquals(
+                    "System prompt (200 tokens) + query (200 tokens) exceed limit (350 tokens)",
+                    truncationWarning.getFormattedMessage());
+            assertNull(truncationWarning.getThrowableProxy());
+        }
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(0, truncationOutcome.contextDocumentCount());
+        assertEquals(0, truncationOutcome.conversationTurnCount());
 
         // System and query must be present
-        String rendered = result.render();
+        String rendered = truncationOutcome.render();
         assertTrue(rendered.contains("Critical system instructions"));
         assertTrue(rendered.contains("Important question"));
     }

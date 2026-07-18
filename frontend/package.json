@@ -11,11 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "npm run lint:ox && npm run lint:ox:typeaware && npm run lint:sg",
+    "lint": "npm run lint:ox && npm run lint:zod && npm run lint:ox:typeaware && npm run lint:sg",
     "lint:sg": "ast-grep scan -c config/sgconfig.yml src vite.config.ts vitest.config.ts --globs '!**/node_modules/**' && echo 'No naming violations found'",
-    "lint:ox": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin .",
+    "lint:ox": "oxlint -c config/oxlintrc.json .",
     "lint:ox:typeaware": "oxlint -c config/oxlintrc.json --type-aware .",
-    "lint:fix": "oxlint -c config/oxlintrc.json --import-plugin --nextjs-plugin --react-plugin --jsx-a11y-plugin --promise-plugin --vitest-plugin --fix .",
+    "lint:zod": "eslint --config config/eslint.config.js .",
+    "lint:fix": "oxlint -c config/oxlintrc.json --fix . && eslint --config config/eslint.config.js --fix .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "validate:node-version": "node scripts/verify-node-version.mjs",
@@ -34,7 +35,9 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",
     "@tsconfig/svelte": "^5.0.4",
+    "@typescript-eslint/parser": "^8.55.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.33.0",
     "eslint-plugin-zod": "^3.1.0",
     "jsdom": "^27.4.0",
     "lint-staged": "^15.2.10",
@@ -55,7 +58,8 @@
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
       "oxfmt --write",
-      "oxlint -c config/oxlintrc.json --type-aware"
+      "oxlint -c config/oxlintrc.json --type-aware",
+      "eslint --config config/eslint.config.js --fix"
     ]
   },
   "engines": {

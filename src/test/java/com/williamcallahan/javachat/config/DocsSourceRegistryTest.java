@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,34 @@ class DocsSourceRegistryTest {
                 javaApiDocumentationSources.size(),
                 javaApiDocumentationSources.stream()
                         .map(JavaApiDocumentationSource::relativeMirrorPath)
+                        .distinct()
+                        .count());
+    }
+
+    @Test
+    void mapsEveryCanonicalDocumentationMirrorToItsCitationBaseUrl() {
+        List<DocumentationSource> documentationSources = DocsSourceRegistry.documentationSources();
+        documentationSources.forEach(documentationSource -> {
+            String localDocumentationFileUrl =
+                    "file:///data/docs/" + documentationSource.relativeMirrorPath() + "/index.html";
+            String expectedOfficialDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
+            assertEquals(
+                    expectedOfficialDocumentationUrl, DocsSourceRegistry.normalizeDocUrl(localDocumentationFileUrl));
+            assertEquals(
+                    documentationSource,
+                    DocsSourceRegistry.documentationSourceForRelativeMirrorPath(
+                                    documentationSource.relativeMirrorPath())
+                            .orElseThrow());
+            assertEquals(
+                    documentationSource,
+                    DocsSourceRegistry.documentationSourceForRelativeDocumentPath(
+                                    documentationSource.relativeMirrorPath() + "/index.html")
+                            .orElseThrow());
+        });
+        assertEquals(
+                documentationSources.size(),
+                documentationSources.stream()
+                        .map(DocumentationSource::relativeMirrorPath)
                         .distinct()
                         .count());
     }

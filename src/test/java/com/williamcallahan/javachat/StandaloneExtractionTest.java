@@ -38,7 +38,10 @@ public class StandaloneExtractionTest {
                                 javaApiDocumentationSource.relativeMirrorPath(),
                                 javaApiDocumentationSource.displayName()))
                         .toList());
-        extractionSources.add(new ExtractionSource("spring-boot-complete", "Spring Boot"));
+        extractionSources.addAll(DocsSourceRegistry.documentationSources().stream()
+                .map(documentationSource -> new ExtractionSource(
+                        documentationSource.relativeMirrorPath(), documentationSource.displayName()))
+                .toList());
         extractionSources.add(new ExtractionSource("spring-framework-complete", "Spring Framework"));
 
         System.out.println("\n========================================");

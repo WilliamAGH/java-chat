@@ -331,4 +331,81 @@
         <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
         <Class name="com.williamcallahan.javachat.web.ErrorTestController"/>
     </Match>
+
+    <!--
+        Qdrant initialization deliberately propagates typed runtime failures for invalid schemas and
+        non-retryable HTTP responses. The startup boundary must fail instead of degrading silently.
+    -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantIndexInitializer"/>
+    </Match>
+
+    <!--
+        CustomErrorController bounds and strips control characters from request-owned fields before
+        logging them; FindSecBugs does not follow the safeLogField sanitization boundary.
+    -->
+    <Match>
+        <Bug pattern="SERVLET_HEADER_USER_AGENT"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+        <Method name="logRequestFailure"/>
+    </Match>
+    <Match>
+        <Bug pattern="SERVLET_SERVER_NAME"/>
+        <Class name="com.williamcallahan.javachat.web.CustomErrorController"/>
+        <Method name="logRequestFailure"/>
+    </Match>
+
+    <!--
+        The Qdrant fixture intentionally formats a multiline JSON text block. No platform-dependent
+        line separator is required because Jackson accepts the fixed JSON whitespace.
+    -->
+    <Match>
+        <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+        <Class name="com.williamcallahan.javachat.config.QdrantIndexInitializerTest"/>
+        <Method name="collectionMetadataJson"/>
+    </Match>
+
+    <!--
+        Manifest parity tests execute repository-owned scripts with ProcessBuilder argument arrays;
+        they do not invoke a command shell or interpolate external input.
+    -->
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="com.williamcallahan.javachat.cli.DocumentationSourceCatalogParityTest"/>
+    </Match>
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="com.williamcallahan.javachat.cli.JavaApiDocumentationSourceParityTest"/>
+    </Match>
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="com.williamcallahan.javachat.config.DocumentationSourceManifestTest"/>
+    </Match>
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="com.williamcallahan.javachat.config.JavaApiDocumentationManifestTest"/>
+    </Match>
+
+    <!--
+        SecurityConfigTest constructs cookies specifically to verify CSRF cookie attributes and
+        rejection behavior; it does not persist application secrets in cookies.
+    -->
+    <Match>
+        <Bug pattern="COOKIE_USAGE"/>
+        <Class name="com.williamcallahan.javachat.config.SecurityConfigTest"/>
+    </Match>
+
+    <!--
+        Manual extraction runners walk repository-owned documentation roots projected from the
+        canonical source manifests. They do not accept filesystem paths from runtime users.
+    -->
+    <Match>
+        <Bug pattern="PATH_TRAVERSAL_IN"/>
+        <Class name="com.williamcallahan.javachat.ExtractorQualityTest"/>
+    </Match>
+    <Match>
+        <Bug pattern="PATH_TRAVERSAL_IN"/>
+        <Class name="com.williamcallahan.javachat.StandaloneExtractionTest"/>
+    </Match>
 </FindBugsFilter>

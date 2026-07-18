@@ -3,14 +3,12 @@ package com.williamcallahan.javachat.service;
 import reactor.core.publisher.Flux;
 
 /**
- * Result of streaming response containing the content flux and the provider that handled the request.
+ * Result of a streaming response and its selected provider.
  *
  * @param textChunks the streaming response flux
- * @param provider the initially selected LLM provider for this request
- * @param notices runtime streaming notices (for example, pre-first-token provider failover)
+ * @param provider the LLM provider selected for this request
  */
-public record StreamingResult(
-        Flux<String> textChunks, RateLimitService.ApiProvider provider, Flux<StreamingNotice> notices) {
+public record StreamingResult(Flux<String> textChunks, RateLimitService.ApiProvider provider) {
     /** Returns a user-friendly display name for the provider. */
     public String providerDisplayName() {
         return provider.getName();

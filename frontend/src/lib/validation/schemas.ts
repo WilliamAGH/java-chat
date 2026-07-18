@@ -20,10 +20,7 @@ const sseEventFieldShape = {
   details: z.string().nullish(),
   code: z.string().nullish(),
   retryable: z.boolean().nullish(),
-  provider: z.string().nullish(),
   stage: z.string().nullish(),
-  attempt: z.int().positive().nullish(),
-  maxAttempts: z.int().positive().nullish(),
 };
 
 /** Status message from SSE status events. */

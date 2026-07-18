@@ -1,18 +1,25 @@
 package com.williamcallahan.javachat.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import com.openai.core.http.Headers;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnexpectedStatusCodeException;
+import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;
@@ -23,6 +30,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
  */
 class RateLimitServiceTest {
 
+    private static final Logger RATE_LIMIT_SERVICE_LOGGER = (Logger) LoggerFactory.getLogger(RateLimitService.class);
+
     @Test
     void recordRateLimitFromOpenAiServiceExceptionUsesRetryAfterHeaderSeconds() {
         RateLimitState rateLimitState = mock(RateLimitState.class);
@@ -32,7 +41,10 @@ class RateLimitServiceTest {
         RateLimitException exception =
                 RateLimitException.builder().headers(headers).build();
 
-        rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RATE_LIMIT_SERVICE_LOGGER)) {
+            rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+            assertRateLimitWarning(expectedLogEvents, "[openai] Rate limited (retryAfterSeconds=12)");
+        }
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -49,7 +61,10 @@ class RateLimitServiceTest {
                 .headers(headers)
                 .build();
 
-        rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RATE_LIMIT_SERVICE_LOGGER)) {
+            rateLimitService.recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, exception);
+            assertRateLimitWarning(expectedLogEvents, "[openai] Rate limited (retryAfterSeconds=");
+        }
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -102,7 +117,10 @@ class RateLimitServiceTest {
         WebClientResponseException exception = WebClientResponseException.create(
                 429, "Too Many Requests", headers, new byte[0], StandardCharsets.UTF_8);
 
-        rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception);
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(RATE_LIMIT_SERVICE_LOGGER)) {
+            rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception);
+            assertRateLimitWarning(expectedLogEvents, "[openai] Rate limited (retryAfterSeconds=8)");
+        }
 
         verify(rateLimitState).recordRateLimit(eq("openai"), any(Instant.class), eq("1m"));
     }
@@ -119,5 +137,13 @@ class RateLimitServiceTest {
                 () -> rateLimitService.recordRateLimitFromException(RateLimitService.ApiProvider.OPENAI, exception));
 
         verifyNoInteractions(rateLimitState);
+    }
+
+    private static void assertRateLimitWarning(ExpectedLogEvents expectedLogEvents, String expectedMessagePrefix) {
+        assertEquals(1, expectedLogEvents.events().size());
+        var rateLimitWarning = expectedLogEvents.events().getFirst();
+        assertEquals(Level.WARN, rateLimitWarning.getLevel());
+        assertTrue(rateLimitWarning.getFormattedMessage().startsWith(expectedMessagePrefix));
+        assertNull(rateLimitWarning.getThrowableProxy());
     }
 }

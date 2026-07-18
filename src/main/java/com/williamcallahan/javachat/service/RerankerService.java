@@ -1,17 +1,22 @@
 package com.williamcallahan.javachat.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.config.AppProperties;
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -26,32 +31,37 @@ public class RerankerService {
 
     private static final Logger log = LoggerFactory.getLogger(RerankerService.class);
 
-    /** Markdown code fence delimiter used when parsing fenced LLM output. */
-    private static final String CODE_FENCE_MARKER = "```";
-
     /** Maximum character length of document text included in the rerank prompt. */
     private static final int RERANK_PROMPT_TEXT_MAX_LENGTH = 500;
-
-    /** Output budget including hidden reasoning before the small JSON ordering. */
-    private static final int RERANKER_OUTPUT_TOKEN_BUDGET = 4_000;
 
     private final OpenAIStreamingService openAIStreamingService;
     private final ObjectMapper mapper;
     private final Duration rerankerTimeout;
+    private final double rerankerTemperature;
+    private final int rerankerOutputTokenBudget;
 
     /**
      * Creates a reranker backed by the streaming LLM client.
      *
      * @param openAIStreamingService streaming LLM client
      * @param objectMapper Jackson object mapper
-     * @param appProperties application configuration containing reranker timeout budget
+     * @param appProperties application configuration containing reranker request settings
      */
     public RerankerService(
             OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper, AppProperties appProperties) {
         this.openAIStreamingService = openAIStreamingService;
-        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
-        this.rerankerTimeout =
-                Objects.requireNonNull(appProperties, "appProperties").getRag().getRerankerTimeout();
+        this.mapper = Objects.requireNonNull(objectMapper, "objectMapper")
+                .copy()
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature());
+        this.mapper
+                .coercionConfigFor(LogicalType.Integer)
+                .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                .setCoercion(CoercionInputShape.String, CoercionAction.Fail);
+        AppProperties configuredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
+        AppProperties.Llm llmConfiguration = configuredAppProperties.getLlm();
+        this.rerankerTimeout = configuredAppProperties.getRag().getRerankerTimeout();
+        this.rerankerTemperature = llmConfiguration.getRerankerTemperature();
+        this.rerankerOutputTokenBudget = llmConfiguration.getRerankerOutputTokenBudget();
     }
 
     /**
@@ -80,9 +90,6 @@ public class RerankerService {
         } catch (JsonProcessingException jsonException) {
             throw new RerankingFailureException("Reranking response parse failed", jsonException);
         }
-        if (reordered.isEmpty()) {
-            throw new RerankingFailureException("Reranking response produced no valid ordering");
-        }
 
         log.debug("Successfully reranked {} documents", reordered.size());
         return limitDocuments(reordered, returnK);
@@ -103,7 +110,7 @@ public class RerankerService {
 
         try {
             return openAIStreamingService
-                    .completeJsonObject(prompt, 0.0, RERANKER_OUTPUT_TOKEN_BUDGET, rerankerTimeout)
+                    .completeJsonObject(prompt, rerankerTemperature, rerankerOutputTokenBudget, rerankerTimeout)
                     .doOnError(
                             timeoutOrApiError -> log.debug("Reranker LLM call timed out or failed", timeoutOrApiError))
                     .blockOptional();
@@ -153,110 +160,45 @@ public class RerankerService {
         return prompt.toString();
     }
 
-    /**
-     * Parse the LLM response to extract document ordering.
-     */
+    /** Parses an untrusted LLM ordering only when it is a complete source-index permutation. */
     private List<Document> parseRerankResponse(String llmOutput, List<Document> documents)
             throws JsonProcessingException {
         List<Document> reordered = new ArrayList<>();
+        Set<Integer> includedDocumentIndices = new HashSet<>();
         RerankOrderResponse orderResponse = parseRerankOrderResponse(llmOutput);
-        if (orderResponse == null || orderResponse.order() == null) {
-            return reordered;
+        if (orderResponse == null
+                || orderResponse.order() == null
+                || orderResponse.order().size() != documents.size()) {
+            throw new RerankParsingException("Rerank order must contain every source index exactly once");
         }
         for (Integer documentIndex : orderResponse.order()) {
-            if (documentIndex == null) {
-                continue;
+            if (documentIndex == null
+                    || documentIndex < 0
+                    || documentIndex >= documents.size()
+                    || !includedDocumentIndices.add(documentIndex)) {
+                throw new RerankParsingException("Rerank order must be a permutation of all source indices");
             }
-            if (documentIndex >= 0 && documentIndex < documents.size()) {
-                reordered.add(documents.get(documentIndex));
-            }
+            reordered.add(documents.get(documentIndex));
         }
         return reordered;
     }
 
-    /**
-     * Extracts a JSON object from the LLM response, preferring fenced blocks when present.
-     */
+    /** Parses the complete structured response without prose or fenced compatibility paths. */
     private RerankOrderResponse parseRerankOrderResponse(String llmOutput) throws JsonProcessingException {
-        String jsonObject = extractFirstJsonObject(llmOutput);
-        if (jsonObject.isBlank()) {
-            throw new RerankParsingException("Rerank response did not contain a JSON object");
+        if (llmOutput == null || llmOutput.isBlank()) {
+            throw new RerankParsingException("Rerank response was empty");
         }
         try {
-            return mapper.readerFor(RerankOrderResponse.class).readValue(jsonObject);
-        } catch (IOException ioException) {
-            throw new RerankParsingException("Failed to parse rerank JSON payload", ioException);
+            return mapper.reader()
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .forType(RerankOrderResponse.class)
+                    .readValue(llmOutput);
+        } catch (JsonProcessingException jsonProcessingException) {
+            throw new RerankParsingException("Failed to parse rerank JSON payload", jsonProcessingException);
         }
     }
 
-    private String extractFirstJsonObject(String llmOutput) {
-        if (llmOutput == null || llmOutput.isBlank()) {
-            return "";
-        }
-        String fencedCandidate = extractFirstFencedBlock(llmOutput);
-        String candidate = fencedCandidate.isEmpty() ? llmOutput : fencedCandidate;
-        return findFirstJsonObject(candidate);
-    }
-
-    private String extractFirstFencedBlock(String text) {
-        int fenceStartIndex = text.indexOf(CODE_FENCE_MARKER);
-        if (fenceStartIndex < 0) {
-            return "";
-        }
-        int fenceLineBreakIndex = text.indexOf('\n', fenceStartIndex + CODE_FENCE_MARKER.length());
-        if (fenceLineBreakIndex < 0) {
-            return "";
-        }
-        int fenceEndIndex = text.indexOf(CODE_FENCE_MARKER, fenceLineBreakIndex + 1);
-        if (fenceEndIndex < 0) {
-            return "";
-        }
-        return text.substring(fenceLineBreakIndex + 1, fenceEndIndex).trim();
-    }
-
-    private String findFirstJsonObject(String text) {
-        int firstBraceIndex = text.indexOf('{');
-        if (firstBraceIndex < 0) {
-            return "";
-        }
-        boolean inString = false;
-        boolean escaped = false;
-        int braceDepth = 0;
-        for (int index = firstBraceIndex; index < text.length(); index++) {
-            char character = text.charAt(index);
-            if (inString) {
-                if (escaped) {
-                    escaped = false;
-                    continue;
-                }
-                if (character == '\\') {
-                    escaped = true;
-                    continue;
-                }
-                if (character == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-
-            if (character == '"') {
-                inString = true;
-                continue;
-            }
-
-            if (character == '{') {
-                braceDepth++;
-            } else if (character == '}') {
-                braceDepth--;
-                if (braceDepth == 0) {
-                    return text.substring(firstBraceIndex, index + 1).trim();
-                }
-            }
-        }
-        return text.substring(firstBraceIndex).trim();
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
     private record RerankOrderResponse(
             @JsonProperty("order") List<Integer> order) {}
 

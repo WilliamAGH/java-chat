@@ -15,7 +15,12 @@
 cp .env.example .env
 ```
 
-2) Edit `.env` and set `GITHUB_TOKEN` (GitHub Models) or `OPENAI_API_KEY` (OpenAI).
+2) Edit `.env` and select one chat provider with its matching credential:
+
+- GitHub Models: `LLM_PRIMARY_PROVIDER=github_models` and `GITHUB_TOKEN`
+- OpenAI: `LLM_PRIMARY_PROVIDER=openai` and `OPENAI_API_KEY`
+
+Java Chat does not dispatch a failed request to another provider.
 
 3) Start local Qdrant (optional but recommended for full RAG):
 

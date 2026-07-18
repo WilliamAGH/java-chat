@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,7 @@ public class LocalStoreService {
     private static final String FILE_MARKER_EXTENSION = ".marker";
     private static final String FILE_MARKER_HASH_PREFIX = "hash=";
     private static final String FILE_MARKER_FINGERPRINT_PREFIX = "fingerprint=";
+    private static final String FILE_MARKER_EXTRACTION_SEMANTICS_VERSION_PREFIX = "extractorSemanticsVersion=";
     private static final String HASH_MARKER_INGESTED_FLAG = "1";
     private static final String HASH_MARKER_TITLE_PREFIX = "titleB64=";
     private static final String HASH_MARKER_PACKAGE_PREFIX = "packageB64=";
@@ -210,7 +212,7 @@ public class LocalStoreService {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL is required for file ingestion marker");
         }
-        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", List.of());
+        markFileIngested(url, new FileIngestionRecord(fileSizeBytes, lastModifiedMillis, "", List.of()));
     }
 
     private Path fileMarkerPath(String url) {
@@ -235,7 +237,7 @@ public class LocalStoreService {
      */
     public void markFileIngested(String url, long fileSizeBytes, long lastModifiedMillis, List<String> chunkHashes)
             throws IOException {
-        markFileIngested(url, fileSizeBytes, lastModifiedMillis, "", chunkHashes);
+        markFileIngested(url, new FileIngestionRecord(fileSizeBytes, lastModifiedMillis, "", chunkHashes));
     }
 
     /**
@@ -258,12 +260,29 @@ public class LocalStoreService {
             String contentFingerprint,
             List<String> chunkHashes)
             throws IOException {
+        markFileIngested(
+                url, new FileIngestionRecord(fileSizeBytes, lastModifiedMillis, contentFingerprint, chunkHashes));
+    }
+
+    /**
+     * Records a canonical file-level ingestion marker keyed by URL.
+     *
+     * <p>The record owns every persisted marker field so extraction semantics can invalidate an otherwise
+     * unchanged file without changing the generic local-store contract.</p>
+     *
+     * @param url authoritative URL used for chunk hashing and citations
+     * @param fileIngestionRecord canonical marker contents
+     * @throws IOException if marker write fails
+     */
+    public void markFileIngested(String url, FileIngestionRecord fileIngestionRecord) throws IOException {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL is required for file ingestion marker");
         }
+        FileIngestionRecord canonicalFileIngestionRecord =
+                Objects.requireNonNull(fileIngestionRecord, "fileIngestionRecord");
         Path markerPath = fileMarkerPath(url);
         ensureParentDirectoryExists(markerPath);
-        String payload = buildFileMarkerPayload(fileSizeBytes, lastModifiedMillis, contentFingerprint, chunkHashes);
+        String payload = buildFileMarkerPayload(canonicalFileIngestionRecord);
         Files.writeString(markerPath, payload, StandardCharsets.UTF_8);
     }
 
@@ -373,6 +392,7 @@ public class LocalStoreService {
         long size = -1;
         long mtime = -1;
         String fingerprint = "";
+        String extractionSemanticsVersion = "";
         List<String> hashes = new ArrayList<>();
         for (String line : raw.split("\n")) {
             String trimmed = line == null ? "" : line.trim();
@@ -382,6 +402,9 @@ public class LocalStoreService {
                 mtime = parseLongSafely(trimmed.substring("mtime=".length()));
             } else if (trimmed.startsWith(FILE_MARKER_FINGERPRINT_PREFIX)) {
                 fingerprint = trimmed.substring(FILE_MARKER_FINGERPRINT_PREFIX.length())
+                        .trim();
+            } else if (trimmed.startsWith(FILE_MARKER_EXTRACTION_SEMANTICS_VERSION_PREFIX)) {
+                extractionSemanticsVersion = trimmed.substring(FILE_MARKER_EXTRACTION_SEMANTICS_VERSION_PREFIX.length())
                         .trim();
             } else if (trimmed.startsWith(FILE_MARKER_HASH_PREFIX)) {
                 String hash =
@@ -394,7 +417,7 @@ public class LocalStoreService {
         if (size < 0 || mtime < 0) {
             throw new IOException("Invalid file ingestion marker format: " + markerPath);
         }
-        return new FileIngestionRecord(size, mtime, fingerprint, List.copyOf(hashes));
+        return new FileIngestionRecord(size, mtime, fingerprint, extractionSemanticsVersion, List.copyOf(hashes));
     }
 
     private long parseLongSafely(String value) throws IOException {
@@ -405,21 +428,23 @@ public class LocalStoreService {
         }
     }
 
-    private String buildFileMarkerPayload(
-            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
+    private String buildFileMarkerPayload(FileIngestionRecord fileIngestionRecord) {
         StringBuilder payload = new StringBuilder();
-        payload.append("size=").append(fileSizeBytes).append('\n');
-        payload.append("mtime=").append(lastModifiedMillis).append('\n');
-        payload.append(FILE_MARKER_FINGERPRINT_PREFIX)
-                .append(contentFingerprint == null ? "" : contentFingerprint)
+        payload.append("size=").append(fileIngestionRecord.fileSizeBytes()).append('\n');
+        payload.append("mtime=")
+                .append(fileIngestionRecord.lastModifiedMillis())
                 .append('\n');
-        if (chunkHashes != null) {
-            for (String hash : chunkHashes) {
-                if (hash == null || hash.isBlank()) {
-                    continue;
-                }
-                payload.append(FILE_MARKER_HASH_PREFIX).append(hash).append('\n');
+        payload.append(FILE_MARKER_FINGERPRINT_PREFIX)
+                .append(fileIngestionRecord.contentFingerprint())
+                .append('\n');
+        payload.append(FILE_MARKER_EXTRACTION_SEMANTICS_VERSION_PREFIX)
+                .append(fileIngestionRecord.extractionSemanticsVersion())
+                .append('\n');
+        for (String chunkHash : fileIngestionRecord.chunkHashes()) {
+            if (chunkHash == null || chunkHash.isBlank()) {
+                continue;
             }
+            payload.append(FILE_MARKER_HASH_PREFIX).append(chunkHash).append('\n');
         }
         return payload.toString();
     }
@@ -490,13 +515,30 @@ public class LocalStoreService {
      * @param fileSizeBytes file size in bytes at ingestion time
      * @param lastModifiedMillis file last modified timestamp in millis at ingestion time
      * @param contentFingerprint SHA-256 file content fingerprint captured at ingestion time
+     * @param extractionSemanticsVersion version of the extraction semantics used to create chunks
      * @param chunkHashes chunk hashes ingested for the file
      */
     public record FileIngestionRecord(
-            long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
+            long fileSizeBytes,
+            long lastModifiedMillis,
+            String contentFingerprint,
+            String extractionSemanticsVersion,
+            List<String> chunkHashes) {
         public FileIngestionRecord {
             contentFingerprint = contentFingerprint == null ? "" : contentFingerprint;
+            extractionSemanticsVersion = extractionSemanticsVersion == null ? "" : extractionSemanticsVersion;
             chunkHashes = chunkHashes == null ? List.of() : List.copyOf(chunkHashes);
+        }
+
+        /**
+         * Creates a legacy marker record without an extraction semantics version.
+         *
+         * <p>Older callers represent content-only markers and therefore intentionally force a reindex when a
+         * processor requires a versioned extraction contract.</p>
+         */
+        public FileIngestionRecord(
+                long fileSizeBytes, long lastModifiedMillis, String contentFingerprint, List<String> chunkHashes) {
+            this(fileSizeBytes, lastModifiedMillis, contentFingerprint, "", chunkHashes);
         }
     }
 

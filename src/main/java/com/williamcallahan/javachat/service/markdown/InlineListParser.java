@@ -2,6 +2,8 @@ package com.williamcallahan.javachat.service.markdown;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import org.jsoup.nodes.Element;
 
 /**
@@ -12,7 +14,7 @@ import org.jsoup.nodes.Element;
  * letter (a. b. c.), and bullet (-, *, +, •) markers.</p>
  *
  * <p>This is a stateless parser with all utility methods exposed statically.
- * Follow the pattern established by {@link CodeFenceStateTracker}.</p>
+ * Follow the pattern established by {@link MarkdownBlockContext}.</p>
  */
 final class InlineListParser {
 
@@ -20,6 +22,8 @@ final class InlineListParser {
     private static final int MIN_MARKER_COUNT = 2;
     private static final int BULLET_MARKER_WIDTH = 2;
     private static final int COLON_BACKTRACK_OFFSET = 2;
+    private static final Set<String> NON_TERMINAL_ABBREVIATIONS =
+            Set.of("dr", "e.g", "i.e", "mr", "mrs", "ms", "prof", "vs");
 
     private InlineListParser() {}
 
@@ -351,29 +355,42 @@ final class InlineListParser {
         }
 
         private static int findTrailingTextStart(String rawEntryText) {
-            int trailingStart = -1;
             for (int index = 0; index < rawEntryText.length(); index++) {
                 char token = rawEntryText.charAt(index);
                 if (token == '.' || token == '!' || token == '?') {
-                    if (index + 1 < rawEntryText.length()) {
-                        int candidateStart = index + 1;
-                        boolean sawWhitespace = false;
-                        while (candidateStart < rawEntryText.length()
-                                && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
-                            sawWhitespace = true;
-                            candidateStart++;
-                        }
-                        if (!sawWhitespace) {
-                            continue; // punctuation inside token (e.g., 1.8, e.g.)
-                        }
-                        if (candidateStart < rawEntryText.length()) {
-                            trailingStart = candidateStart;
-                        }
+                    int candidateStart = index + 1;
+                    boolean sawWhitespace = false;
+                    while (candidateStart < rawEntryText.length()
+                            && Character.isWhitespace(rawEntryText.charAt(candidateStart))) {
+                        sawWhitespace = true;
+                        candidateStart++;
                     }
-                    break;
+                    if (!sawWhitespace || candidateStart >= rawEntryText.length()) {
+                        continue;
+                    }
+                    if (token == '.' && isNonTerminalAbbreviation(rawEntryText, index)) {
+                        continue;
+                    }
+                    return candidateStart;
                 }
             }
-            return trailingStart;
+            return -1;
+        }
+
+        private static boolean isNonTerminalAbbreviation(String rawEntryText, int periodIndex) {
+            int abbreviationStart = periodIndex;
+            while (abbreviationStart > 0 && !Character.isWhitespace(rawEntryText.charAt(abbreviationStart - 1))) {
+                abbreviationStart--;
+            }
+            String abbreviation =
+                    rawEntryText.substring(abbreviationStart, periodIndex).toLowerCase(Locale.ROOT);
+            int firstLetterIndex = 0;
+            while (firstLetterIndex < abbreviation.length()
+                    && !Character.isLetterOrDigit(abbreviation.charAt(firstLetterIndex))) {
+                firstLetterIndex++;
+            }
+            abbreviation = abbreviation.substring(firstLetterIndex);
+            return NON_TERMINAL_ABBREVIATIONS.contains(abbreviation);
         }
     }
 

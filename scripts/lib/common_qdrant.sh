@@ -159,7 +159,7 @@ build_application() {
     local log_file="${1:-/dev/null}"
     echo -e "${YELLOW}Building application...${NC}"
     cd "$PROJECT_ROOT" || exit 1
-    if ! ./gradlew buildForScripts --no-configuration-cache --quiet >> "$log_file" 2>&1; then
+    if ! ./scripts/with_build_state_lock.sh ./gradlew buildForScripts --no-configuration-cache --quiet >> "$log_file" 2>&1; then
         echo -e "${RED}Build failed. Last 20 lines of build output:${NC}"
         tail -20 "$log_file" 2>/dev/null || true
         exit 1

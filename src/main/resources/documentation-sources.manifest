@@ -1,0 +1,8 @@
+fetchUrl|citationBaseUrl|relativeMirrorPath|displayName|docSet|sourceKind|docType|docVersion
+https://dev.java/learn/|https://dev.java/learn/|dev-java|Dev.java Learning|dev-java|official|tutorial|
+https://kotlinlang.org/docs/|https://kotlinlang.org/docs/|kotlin|Kotlin Documentation|kotlin|official|language-reference|
+https://docs.scala-lang.org/scala3/|https://docs.scala-lang.org/scala3/|scala|Scala 3 Documentation|scala|official|language-reference|3
+https://docs.groovy-lang.org/docs/latest/html/documentation/|https://docs.groovy-lang.org/docs/latest/html/documentation/|groovy|Groovy Documentation|groovy|official|language-reference|latest
+https://clojure.org/guides/|https://clojure.org/guides/|clojure|Clojure Guides|clojure|official|language-guide|
+https://docs.spring.io/spring-boot/4.1.0/reference/|https://docs.spring.io/spring-boot/4.1.0/reference/|spring-boot/4.1.0|Spring Boot 4.1.0 Reference|spring-boot|official|framework-reference|4.1.0
+https://quarkus.io/guides/|https://quarkus.io/guides/|quarkus/3.37.3|Quarkus 3.37.3 Guides|quarkus|official|framework-guide|3.37.3
