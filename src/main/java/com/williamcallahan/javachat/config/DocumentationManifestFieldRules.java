@@ -4,6 +4,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 /** Enforces the shared field grammar used by canonical documentation source manifests. */
 final class DocumentationManifestFieldRules {
@@ -12,6 +13,8 @@ final class DocumentationManifestFieldRules {
     private static final String MIRROR_PATH_PARENT_SEGMENT = "..";
     private static final String MIRROR_PATH_SEGMENT_SEPARATOR = "/";
     private static final String REMOTE_BASE_URL_HTTPS_SCHEME = "https";
+    private static final String REMOTE_BASE_URL_HTTP_SCHEME = "http";
+    private static final Pattern CANONICAL_UNSIGNED_INTEGER = Pattern.compile("(?:0|[1-9][0-9]*)");
     private static final int MANIFEST_ASCII_CONTROL_MAXIMUM = 0x1F;
     private static final int MANIFEST_ASCII_DELETE_CHARACTER = 0x7F;
     private static final char MIRROR_PATH_BACKSLASH = '\\';
@@ -38,18 +41,37 @@ final class DocumentationManifestFieldRules {
         if (!remoteBaseUrl.endsWith(MIRROR_PATH_SEGMENT_SEPARATOR)) {
             throw new IllegalArgumentException(fieldName + " must have a trailing slash");
         }
+        requireRemoteUrl(remoteBaseUrl, fieldName, false);
+    }
+
+    static void requireHttpsRemoteUrl(String remoteUrl, String fieldName) {
+        requireManifestText(remoteUrl, fieldName, false);
+        requireRemoteUrl(remoteUrl, fieldName, false);
+    }
+
+    static void requireHttpRemoteBaseUrl(String remoteBaseUrl, String fieldName) {
+        requireManifestText(remoteBaseUrl, fieldName, false);
+        if (!remoteBaseUrl.endsWith(MIRROR_PATH_SEGMENT_SEPARATOR)) {
+            throw new IllegalArgumentException(fieldName + " must have a trailing slash");
+        }
+        requireRemoteUrl(remoteBaseUrl, fieldName, true);
+    }
+
+    private static void requireRemoteUrl(String remoteUrl, String fieldName, boolean allowHttp) {
         try {
-            URI remoteBaseUri = new URI(remoteBaseUrl).parseServerAuthority();
-            if (!remoteBaseUri.isAbsolute()
-                    || !REMOTE_BASE_URL_HTTPS_SCHEME.equals(remoteBaseUri.getScheme())
-                    || remoteBaseUri.getRawAuthority() == null
-                    || remoteBaseUri.getRawAuthority().isEmpty()
-                    || remoteBaseUri.getHost() == null) {
-                throw new IllegalArgumentException(fieldName + " must be an absolute HTTPS URL with authority");
+            URI remoteUri = new URI(remoteUrl).parseServerAuthority();
+            boolean supportedScheme = REMOTE_BASE_URL_HTTPS_SCHEME.equals(remoteUri.getScheme())
+                    || (allowHttp && REMOTE_BASE_URL_HTTP_SCHEME.equals(remoteUri.getScheme()));
+            if (!remoteUri.isAbsolute()
+                    || !supportedScheme
+                    || remoteUri.getRawAuthority() == null
+                    || remoteUri.getRawAuthority().isEmpty()
+                    || remoteUri.getHost() == null) {
+                throw new IllegalArgumentException(fieldName + " must be an absolute HTTP(S) URL with authority");
             }
-        } catch (URISyntaxException invalidRemoteBaseUrl) {
+        } catch (URISyntaxException invalidRemoteUrl) {
             throw new IllegalArgumentException(
-                    fieldName + " must be an absolute HTTPS URL with authority", invalidRemoteBaseUrl);
+                    fieldName + " must be an absolute HTTP(S) URL with authority", invalidRemoteUrl);
         }
     }
 
@@ -78,6 +100,28 @@ final class DocumentationManifestFieldRules {
                 throw new IllegalArgumentException("relativeMirrorPath contains an invalid segment");
             }
         }
+    }
+
+    static int requireCanonicalUnsignedInteger(String integerText, String fieldName) {
+        if (integerText == null
+                || !CANONICAL_UNSIGNED_INTEGER.matcher(integerText).matches()) {
+            throw new IllegalArgumentException(fieldName + " must be a canonical ASCII unsigned integer");
+        }
+        try {
+            return Integer.parseInt(integerText);
+        } catch (NumberFormatException integerOverflow) {
+            throw new IllegalArgumentException(fieldName + " exceeds the supported integer range", integerOverflow);
+        }
+    }
+
+    static boolean requireBoolean(String booleanText, String fieldName) {
+        if ("true".equals(booleanText)) {
+            return true;
+        }
+        if ("false".equals(booleanText)) {
+            return false;
+        }
+        throw new IllegalArgumentException(fieldName + " must be true or false");
     }
 
     private static boolean hasBoundaryWhitespace(String manifestText) {

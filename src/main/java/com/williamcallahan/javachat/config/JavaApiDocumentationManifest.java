@@ -12,7 +12,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Interprets the canonical complete-Java documentation source manifest.
@@ -26,7 +25,6 @@ final class JavaApiDocumentationManifest {
     private static final String MANIFEST_DELIMITER = "|";
     private static final String MANIFEST_DELIMITER_REGEX = "\\|";
     private static final int MINIMUM_MANIFEST_LINE_COUNT = 2;
-    private static final Pattern CANONICAL_UNSIGNED_INTEGER = Pattern.compile("(?:0|[1-9][0-9]*)");
 
     private JavaApiDocumentationManifest() {}
 
@@ -79,18 +77,6 @@ final class JavaApiDocumentationManifest {
         return List.copyOf(sources);
     }
 
-    static int requireCanonicalUnsignedInteger(String integerText, String fieldName) {
-        if (integerText == null
-                || !CANONICAL_UNSIGNED_INTEGER.matcher(integerText).matches()) {
-            throw new IllegalArgumentException(fieldName + " must be a canonical ASCII unsigned integer");
-        }
-        try {
-            return Integer.parseInt(integerText);
-        } catch (NumberFormatException integerOverflow) {
-            throw new IllegalArgumentException(fieldName + " exceeds the supported integer range", integerOverflow);
-        }
-    }
-
     static String serialize(JavaApiDocumentationSource source) {
         return String.join(
                 MANIFEST_DELIMITER,
@@ -128,26 +114,18 @@ final class JavaApiDocumentationManifest {
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next(),
-                    requireCanonicalUnsignedInteger(sourceColumnIterator.next(), "cutDirectories"),
-                    requireCanonicalUnsignedInteger(sourceColumnIterator.next(), "minimumHtmlFiles"),
+                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(
+                            sourceColumnIterator.next(), "cutDirectories"),
+                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(
+                            sourceColumnIterator.next(), "minimumHtmlFiles"),
                     sourceColumnIterator.next(),
-                    parseBoolean(sourceColumnIterator.next(), "allowPartial"));
+                    DocumentationManifestFieldRules.requireBoolean(sourceColumnIterator.next(), "allowPartial"));
         } catch (IllegalArgumentException invalidField) {
             throw new IllegalStateException(
                     "Canonical Java API documentation source manifest line " + manifestLineNumber
                             + " has an invalid field: " + invalidField.getMessage(),
                     invalidField);
         }
-    }
-
-    private static boolean parseBoolean(String booleanText, String fieldName) {
-        if ("true".equals(booleanText)) {
-            return true;
-        }
-        if ("false".equals(booleanText)) {
-            return false;
-        }
-        throw new IllegalArgumentException(fieldName + " must be true or false");
     }
 
     private static IllegalStateException invalidLine(int manifestLineNumber, String problem) {

@@ -38,7 +38,15 @@ Run `./scripts/fetch_all_docs.sh --list-java-api-sources` to inspect the exact r
 script; the CLI catalog and citation registry project the same rows and parity is enforced by tests.
 
 The non-Java manifest is the single semantic owner of each official source's fetch URL, citation base URL,
-mirror path, display name, and ingestion provenance. Add, change, or remove an official non-Java source by
+mirror path, display name, ingestion provenance, minimum HTML-file count, rejection expression, and
+partial-mirror policy. The optional `seedDocumentType`, `seedDiscoveryUrl`, and `seedSourcePrefix` fields
+also own structured sitemap or navigation discovery for sources whose recursive landing page is incomplete.
+`src/main/resources/documentation-seed-document-types.manifest` is the single semantic owner of supported
+`seedDocumentType` values; do not restate that inventory in Java, shell, Python, tests, or documentation.
+Discovered URLs must match the exact source prefix and are deterministically mapped onto the pinned fetch URL
+before `wget` receives the seed list. Recursive mirrors retain linked page requisites but intentionally omit an
+extension allow-list so extensionless documentation pages remain eligible; `--no-parent` still bounds each crawl
+to its declared source path. Add, change, or remove an official non-Java source by
 editing one manifest row only. Do not duplicate its field values in Java constants, shell arrays, tests, or
 documentation. Run `./scripts/fetch_all_docs.sh --list-documentation-sources` to inspect the exact rows
 consumed by the fetch script; the CLI catalog, citation registry, and provenance deriver project those rows.
@@ -54,7 +62,7 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 ### Script flags
 
 ```bash
-./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]
+./scripts/fetch_all_docs.sh [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]
 ```
 
 | Flag | Effect |
@@ -62,9 +70,13 @@ make fetch-force        # Full: force refetch even if mirrors look complete
 | `--include-quick` | Also fetch small landing-page mirrors (Spring Framework/AI quick sets) |
 | `--no-clean` | Do not quarantine incomplete mirrors before refetching |
 | `--force` | Refresh all sources even if they look complete |
+| `--doc-sets=DOC_SET,...` | Fetch exactly the selected canonical non-Java `docSet` rows; omit Java API, legacy, and quick rows |
 | `--list-java-api-sources` | Print configured Java API source projections without fetching |
 | `--list-documentation-sources` | Print configured official non-Java source projections without fetching |
 | `--help` | Show usage |
+
+Copy selector tokens from the `docSet` column printed by `--list-documentation-sources`. Blank, duplicate,
+and unknown selector tokens are rejected.
 
 ### What "incremental" means for scraping
 

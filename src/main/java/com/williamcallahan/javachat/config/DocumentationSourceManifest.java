@@ -57,6 +57,7 @@ final class DocumentationSourceManifest {
 
         List<DocumentationSource> documentationSources = new ArrayList<>();
         Set<String> retainedRelativeMirrorPaths = new HashSet<>();
+        Set<String> retainedDocSets = new HashSet<>();
         for (int manifestLineIndex = 1; manifestLineIndex < manifestLines.size(); manifestLineIndex++) {
             int manifestLineNumber = manifestLineIndex + 1;
             String manifestLine = manifestLines.get(manifestLineIndex);
@@ -68,6 +69,9 @@ final class DocumentationSourceManifest {
             if (!retainedRelativeMirrorPaths.add(documentationSource.relativeMirrorPath())) {
                 throw invalidLine(
                         manifestLineNumber, "duplicates mirror path " + documentationSource.relativeMirrorPath());
+            }
+            if (!retainedDocSets.add(documentationSource.docSet())) {
+                throw invalidLine(manifestLineNumber, "duplicates docSet " + documentationSource.docSet());
             }
             documentationSources.add(documentationSource);
         }
@@ -84,7 +88,13 @@ final class DocumentationSourceManifest {
                 documentationSource.docSet(),
                 documentationSource.sourceKind(),
                 documentationSource.docType(),
-                documentationSource.docVersion());
+                documentationSource.docVersion(),
+                Integer.toString(documentationSource.minimumHtmlFiles()),
+                documentationSource.rejectRegex(),
+                Boolean.toString(documentationSource.allowPartial()),
+                documentationSource.seedDocumentType(),
+                documentationSource.seedDiscoveryUrl(),
+                documentationSource.seedSourcePrefix());
     }
 
     private static void validateHeader(String manifestHeader) {
@@ -112,6 +122,13 @@ final class DocumentationSourceManifest {
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next(),
+                    sourceColumnIterator.next(),
+                    sourceColumnIterator.next(),
+                    sourceColumnIterator.next(),
+                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(
+                            sourceColumnIterator.next(), "minimumHtmlFiles"),
+                    sourceColumnIterator.next(),
+                    DocumentationManifestFieldRules.requireBoolean(sourceColumnIterator.next(), "allowPartial"),
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next(),
                     sourceColumnIterator.next());

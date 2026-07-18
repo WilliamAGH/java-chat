@@ -30,6 +30,8 @@ CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
 LIST_JAVA_API_SOURCES="false"
 LIST_DOCUMENTATION_SOURCES="false"
+DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="false"
+DOCUMENTATION_DOC_SET_SELECTOR=""
 DOCUMENTATION_FETCH_PARTIAL_STATUS=2
 
 parse_fetch_arguments() {
@@ -51,11 +53,20 @@ parse_fetch_arguments() {
             --list-documentation-sources)
                 LIST_DOCUMENTATION_SOURCES="true"
                 ;;
+            --doc-sets=*)
+                if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
+                    echo "--doc-sets can be specified only once"
+                    exit 1
+                fi
+                DOCUMENTATION_DOC_SET_SELECTOR_ENABLED="true"
+                DOCUMENTATION_DOC_SET_SELECTOR="${fetch_argument#--doc-sets=}"
+                ;;
             --help|-h)
-                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--list-java-api-sources] [--list-documentation-sources]"
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=DOC_SET,...] [--list-java-api-sources] [--list-documentation-sources]"
                 echo "  --include-quick : Also refresh small 'quick' doc mirrors"
                 echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
                 echo "  --force         : Refresh even when mirrors look complete"
+                echo "  --doc-sets      : Fetch only selected canonical non-Java docSet rows"
                 echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
                 echo "  --list-documentation-sources : Print canonical non-Java source projections without fetching"
                 exit 0
@@ -289,151 +300,6 @@ generate_java_api_javadoc_seed() {
     log "${BLUE}ℹ Java API Javadoc seed URLs: $seed_url_count${NC}"
 }
 
-# Validates a wget fetch result: checks exit code, counts HTML files, and
-# enforces the minimum-files threshold. Returns 0 on success, 2 for a retained
-# partial mirror, and 1 for any other failure.
-#
-# Arguments:
-#   $1 - wget exit code
-#   $2 - target directory (for HTML count)
-#   $3 - human-readable name
-#   $4 - minimum required HTML files (0 = no minimum)
-#   $5 - whether a nonempty partial mirror is retained for incremental reruns
-validate_fetch_result() {
-    local wget_exit_code="$1"
-    local target_dir="$2"
-    local name="$3"
-    local min_files="$4"
-    local partial_mirror_allowed="$5"
-
-    local fetched_html_count
-    fetched_html_count="$(count_html_files "$target_dir")"
-
-    # wget returns 8 for HTTP errors (e.g., a few 404s) even when the mirror is usable.
-    # Prefer our post-fetch validation over raw exit status.
-    if [ "$wget_exit_code" -ne 0 ] && [ "$wget_exit_code" -ne 8 ]; then
-        log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
-        return 1
-    fi
-
-    if [ "$fetched_html_count" -eq 0 ]; then
-        log "${RED}✗ $name fetch produced no HTML files${NC}"
-        return 1
-    fi
-    if [ "$min_files" -gt 0 ] && [ "$fetched_html_count" -lt "$min_files" ]; then
-        if [ "$partial_mirror_allowed" = "true" ]; then
-            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+); keeping partial mirror for incremental reruns${NC}"
-            return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
-        else
-            log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $min_files+)${NC}"
-            return 1
-        fi
-    fi
-    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
-    return 0
-}
-
-# Fetches a manifest-governed Java API using the current explicit Javadoc seed.
-# Reconciliation has already removed unseeded HTML files before this function runs.
-#
-# Arguments:
-#   $1 - target directory
-#   $2 - human-readable name
-#   $3 - --cut-dirs value
-#   $4 - minimum required HTML files
-#   $5 - reject regex (optional)
-#   $6 - whether a validated partial mirror is accepted
-fetch_java_api_javadoc_seed() {
-    local target_dir="$1"
-    local name="$2"
-    local cut_dirs="$3"
-    local min_files="$4"
-    local reject_regex="${5:-}"
-    local partial_mirror_allowed="$6"
-
-    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
-
-    local wget_seed_args=(
-        --timestamping
-        --no-host-directories
-        --cut-dirs="$cut_dirs"
-        --input-file="$seed_file"
-        --directory-prefix="$target_dir"
-        --show-progress
-        --progress=bar:force
-        --timeout=120
-        --dns-timeout=30
-        --connect-timeout=30
-        --read-timeout=120
-        --tries=5
-        --waitretry=1
-        --retry-connrefused
-        --user-agent="java-chat-doc-fetcher/1.0"
-    )
-    if [ -n "$reject_regex" ]; then
-        wget_seed_args+=(--reject-regex="$reject_regex")
-    fi
-
-    wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
-    cd - > /dev/null
-
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
-}
-
-# Fetches documentation using wget --mirror for generic (non-Oracle) sites.
-#
-# Arguments:
-#   $1 - URL to mirror
-#   $2 - target directory
-#   $3 - human-readable name
-#   $4 - --cut-dirs value
-#   $5 - minimum required HTML files
-#   $6 - reject regex (optional)
-#   $7 - whether a nonempty partial mirror is retained for incremental reruns
-fetch_docs_mirror() {
-    local url="$1"
-    local target_dir="$2"
-    local name="$3"
-    local cut_dirs="$4"
-    local min_files="$5"
-    local reject_regex="${6:-}"
-    local partial_mirror_allowed="$7"
-
-    local wget_args=(
-        --mirror \
-        --convert-links \
-        --adjust-extension \
-        --page-requisites \
-        --no-parent \
-        --no-host-directories \
-        --cut-dirs="$cut_dirs" \
-        --reject="index.html?*" \
-        --accept="*.html,*.css,*.js,*.png,*.gif,*.jpg,*.jpeg,*.svg,*.pdf,*.woff,*.woff2,*.ttf,*.eot" \
-        --quiet \
-        --show-progress \
-        --progress=bar:force \
-        --timeout=30 \
-        --dns-timeout=30 \
-        --connect-timeout=30 \
-        --read-timeout=30 \
-        --tries=3 \
-        --waitretry=1 \
-        --retry-connrefused \
-        --no-verbose \
-    )
-
-    if [ -n "$reject_regex" ]; then
-        wget_args+=(--reject-regex="$reject_regex")
-    fi
-
-    wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
-    local wget_exit_code=$?
-    cd - > /dev/null
-
-    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$min_files" "$partial_mirror_allowed"
-}
-
 # Dispatches documentation fetching: performs pre-fetch housekeeping (existing
 # mirror check, quarantine, legacy cleanup), then delegates to the appropriate
 # strategy — seed-list for manifest-governed Java APIs, wget --mirror for everything else.
@@ -447,6 +313,9 @@ fetch_docs_mirror() {
 #   $6 - minimum required HTML files
 #   $7 - reject regex (optional)
 #   $8 - whether a nonempty partial mirror is retained for incremental reruns
+#   $9 - structured seed document type, blank for recursive mirroring
+#   $10 - structured seed discovery URL
+#   $11 - exact source prefix mapped onto the canonical URL
 fetch_docs() {
     local java_release="$1"
     local url="$2"
@@ -456,6 +325,9 @@ fetch_docs() {
     local min_files="$6"
     local reject_regex="${7:-}"
     local partial_mirror_allowed="$8"
+    local seed_document_type="${9:-}"
+    local seed_discovery_url="${10:-}"
+    local seed_source_prefix="${11:-}"
     local target_dir="$DOCS_ROOT/$relative_mirror_path"
 
     # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
@@ -496,8 +368,35 @@ fetch_docs() {
             return 0
         fi
         fetch_java_api_javadoc_seed "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+    elif [ -n "$seed_discovery_url" ]; then
+        fetch_discovered_documentation_seed \
+            "$url" \
+            "$target_dir" \
+            "$name" \
+            "$cut_dirs" \
+            "$min_files" \
+            "$reject_regex" \
+            "$partial_mirror_allowed" \
+            "$seed_document_type" \
+            "$seed_discovery_url" \
+            "$seed_source_prefix"
     else
         fetch_docs_mirror "$url" "$target_dir" "$name" "$cut_dirs" "$min_files" "$reject_regex" "$partial_mirror_allowed"
+    fi
+}
+
+build_documentation_fetch_sources() {
+    DOC_SOURCES=()
+    if [ "$DOCUMENTATION_DOC_SET_SELECTOR_ENABLED" = "true" ]; then
+        append_manifest_documentation_fetch_sources "$DOCUMENTATION_DOC_SET_SELECTOR"
+        return
+    fi
+
+    append_legacy_documentation_fetch_sources
+    append_manifest_documentation_fetch_sources
+    append_java_api_fetch_sources
+    if [ "$INCLUDE_QUICK" = "true" ]; then
+        append_quick_documentation_fetch_sources
     fi
 }
 
@@ -510,6 +409,7 @@ parse_fetch_arguments "$@"
 
 load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
 load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
+build_documentation_fetch_sources
 
 if [ "$LIST_JAVA_API_SOURCES" = "true" ]; then
     printf '%s\n' "${JAVA_API_SOURCE_PROJECTIONS[@]}"
@@ -518,18 +418,6 @@ fi
 if [ "$LIST_DOCUMENTATION_SOURCES" = "true" ]; then
     printf '%s\n' "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"
     exit 0
-fi
-
-# Format: JAVA_RELEASE|URL|RELATIVE_MIRROR_PATH|NAME|CUT_DIRS|MIN_FILES|REJECT_REGEX|ALLOW_PARTIAL
-# Java API rows are projected from their dedicated manifest; generic official sources are projected
-# from documentation-sources.manifest; older specialized sources remain isolated in their legacy catalog.
-DOC_SOURCES=()
-append_legacy_documentation_fetch_sources
-append_manifest_documentation_fetch_sources
-append_java_api_fetch_sources
-
-if [ "$INCLUDE_QUICK" = "true" ]; then
-    append_quick_documentation_fetch_sources
 fi
 
 echo "=============================================="

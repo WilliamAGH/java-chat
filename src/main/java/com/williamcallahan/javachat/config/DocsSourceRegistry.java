@@ -131,7 +131,7 @@ public final class DocsSourceRegistry {
             boolean allowPartial) {
         public JavaApiDocumentationSource {
             int parsedJavaRelease =
-                    JavaApiDocumentationManifest.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
+                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
             if (parsedJavaRelease < 1) {
                 throw new IllegalArgumentException("Java release must be positive");
             }
@@ -177,6 +177,12 @@ public final class DocsSourceRegistry {
      * @param sourceKind provenance category for the upstream publisher
      * @param docType content classification for retrieval metadata
      * @param docVersion upstream release token, or blank for an unversioned source
+     * @param minimumHtmlFiles minimum accepted mirror size
+     * @param rejectRegex crawler exclusion expression, or blank when no exclusion applies
+     * @param allowPartial whether the fetcher accepts a validated partial mirror
+     * @param seedDocumentType structured discovery document type, or blank for recursive mirroring
+     * @param seedDiscoveryUrl structured discovery document URL, or blank for recursive mirroring
+     * @param seedSourcePrefix exact discovered URL prefix mapped onto {@code fetchUrl}
      */
     public record DocumentationSource(
             String fetchUrl,
@@ -186,7 +192,13 @@ public final class DocsSourceRegistry {
             String docSet,
             String sourceKind,
             String docType,
-            String docVersion) {
+            String docVersion,
+            int minimumHtmlFiles,
+            String rejectRegex,
+            boolean allowPartial,
+            String seedDocumentType,
+            String seedDiscoveryUrl,
+            String seedSourcePrefix) {
         public DocumentationSource {
             DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(fetchUrl, "fetchUrl");
             DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(citationBaseUrl, "citationBaseUrl");
@@ -196,6 +208,22 @@ public final class DocsSourceRegistry {
             DocumentationManifestFieldRules.requireManifestText(sourceKind, "sourceKind", false);
             DocumentationManifestFieldRules.requireManifestText(docType, "docType", false);
             DocumentationManifestFieldRules.requireManifestText(docVersion, "docVersion", true);
+            if (minimumHtmlFiles < 1) {
+                throw new IllegalArgumentException("Documentation minimum HTML files must be positive");
+            }
+            DocumentationManifestFieldRules.requireManifestText(rejectRegex, "rejectRegex", true);
+            DocumentationManifestFieldRules.requireManifestText(seedDocumentType, "seedDocumentType", true);
+            DocumentationManifestFieldRules.requireManifestText(seedDiscoveryUrl, "seedDiscoveryUrl", true);
+            DocumentationManifestFieldRules.requireManifestText(seedSourcePrefix, "seedSourcePrefix", true);
+            boolean hasSeedDiscovery = !seedDiscoveryUrl.isEmpty();
+            if (hasSeedDiscovery != !seedDocumentType.isEmpty() || hasSeedDiscovery != !seedSourcePrefix.isEmpty()) {
+                throw new IllegalArgumentException("Documentation seed discovery fields must be all blank or all set");
+            }
+            if (hasSeedDiscovery) {
+                DocumentationSeedDocumentTypeCatalog.requireSupported(seedDocumentType);
+                DocumentationManifestFieldRules.requireHttpsRemoteUrl(seedDiscoveryUrl, "seedDiscoveryUrl");
+                DocumentationManifestFieldRules.requireHttpRemoteBaseUrl(seedSourcePrefix, "seedSourcePrefix");
+            }
         }
 
         /**

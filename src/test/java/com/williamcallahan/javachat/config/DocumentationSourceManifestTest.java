@@ -49,6 +49,7 @@ class DocumentationSourceManifestTest {
         List<String> canonicalManifestLines = Files.readAllLines(CANONICAL_MANIFEST_PATH, StandardCharsets.UTF_8);
         List<List<String>> invalidManifestFixtures = List.of(
                 withLine(canonicalManifestLines, 0, "invalidHeader"),
+                withHeaderField(canonicalManifestLines, "docSet", "unknownField"),
                 withInsertedLine(canonicalManifestLines, 2, " "),
                 withLine(
                         canonicalManifestLines,
@@ -56,18 +57,53 @@ class DocumentationSourceManifestTest {
                         canonicalManifestLines
                                 .get(1)
                                 .substring(0, canonicalManifestLines.get(1).lastIndexOf('|'))),
-                withColumn(canonicalManifestLines, 1, 0, " https://dev.java/learn/"),
-                withColumn(canonicalManifestLines, 1, 1, "http://example.invalid/reference/"),
-                withColumn(canonicalManifestLines, 1, 1, "https:///reference/"),
-                withColumn(canonicalManifestLines, 1, 1, "https://example.invalid/reference"),
-                withColumn(canonicalManifestLines, 1, 2, ""),
-                withColumn(canonicalManifestLines, 1, 2, "docs/./reference"),
-                withColumn(canonicalManifestLines, 1, 2, "docs/../reference"),
-                withColumn(canonicalManifestLines, 1, 2, "/docs/reference"),
-                withColumn(canonicalManifestLines, 1, 2, "docs\\reference"),
-                withColumn(canonicalManifestLines, 1, 4, ""),
-                withColumn(canonicalManifestLines, 1, 7, "\u0001"),
-                withDuplicateMirrorPath(canonicalManifestLines));
+                withField(canonicalManifestLines, 1, "fetchUrl", " https://dev.java/learn/"),
+                withField(canonicalManifestLines, 1, "citationBaseUrl", "http://example.invalid/reference/"),
+                withField(canonicalManifestLines, 1, "citationBaseUrl", "https:///reference/"),
+                withField(canonicalManifestLines, 1, "citationBaseUrl", "https://example.invalid/reference"),
+                withField(canonicalManifestLines, 1, "relativeMirrorPath", ""),
+                withField(canonicalManifestLines, 1, "relativeMirrorPath", "docs/./reference"),
+                withField(canonicalManifestLines, 1, "relativeMirrorPath", "docs/../reference"),
+                withField(canonicalManifestLines, 1, "relativeMirrorPath", "/docs/reference"),
+                withField(canonicalManifestLines, 1, "relativeMirrorPath", "docs\\reference"),
+                withField(canonicalManifestLines, 1, "docSet", ""),
+                withField(canonicalManifestLines, 1, "docVersion", "\u0001"),
+                withField(canonicalManifestLines, 1, "minimumHtmlFiles", "+1"),
+                withField(canonicalManifestLines, 1, "minimumHtmlFiles", "01"),
+                withField(canonicalManifestLines, 1, "minimumHtmlFiles", "0"),
+                withField(canonicalManifestLines, 1, "minimumHtmlFiles", "2147483648"),
+                withField(canonicalManifestLines, 1, "rejectRegex", " excluded "),
+                withField(canonicalManifestLines, 1, "rejectRegex", "\u0001"),
+                withField(canonicalManifestLines, 1, "allowPartial", "TRUE"),
+                withField(canonicalManifestLines, 1, "seedDocumentType", "xml-sitemap"),
+                withField(canonicalManifestLines, 1, "seedDiscoveryUrl", "https://example.invalid/sitemap.xml"),
+                withField(canonicalManifestLines, 1, "seedSourcePrefix", "https://example.invalid/reference/"),
+                withSeedDiscovery(
+                        canonicalManifestLines,
+                        1,
+                        "xml-sitemap",
+                        "http://example.invalid/sitemap.xml",
+                        "https://example.invalid/reference/"),
+                withSeedDiscovery(
+                        canonicalManifestLines,
+                        1,
+                        "html-links",
+                        "https://example.invalid/reference/index.html",
+                        "http://example.invalid/reference"),
+                withSeedDiscovery(
+                        canonicalManifestLines,
+                        1,
+                        "unsupported-discovery",
+                        "https://example.invalid/reference/index.html",
+                        "https://example.invalid/reference/"),
+                withSeedDiscovery(
+                        canonicalManifestLines,
+                        1,
+                        " html-links",
+                        "https://example.invalid/reference/index.html",
+                        "http://example.invalid/reference/"),
+                withDuplicateMirrorPath(canonicalManifestLines),
+                withDuplicateDocSet(canonicalManifestLines));
 
         for (int fixtureIndex = 0; fixtureIndex < invalidManifestFixtures.size(); fixtureIndex++) {
             List<String> invalidManifestLines = invalidManifestFixtures.get(fixtureIndex);
@@ -113,19 +149,59 @@ class DocumentationSourceManifestTest {
         return List.copyOf(changedManifestLines);
     }
 
-    private static List<String> withColumn(
-            List<String> manifestLines, int lineIndex, int columnIndex, String replacementColumn) {
+    private static List<String> withField(
+            List<String> manifestLines, int lineIndex, String canonicalFieldName, String replacementField) {
         String[] sourceColumns = manifestLines.get(lineIndex).split("\\|", -1);
-        sourceColumns[columnIndex] = replacementColumn;
+        sourceColumns[canonicalFieldIndex(manifestLines, canonicalFieldName)] = replacementField;
         return withLine(manifestLines, lineIndex, String.join("|", sourceColumns));
     }
 
+    private static List<String> withHeaderField(
+            List<String> manifestLines, String canonicalFieldName, String replacementField) {
+        String[] manifestHeaderFields = manifestLines.getFirst().split("\\|", -1);
+        manifestHeaderFields[canonicalFieldIndex(manifestLines, canonicalFieldName)] = replacementField;
+        return withLine(manifestLines, 0, String.join("|", manifestHeaderFields));
+    }
+
+    private static int canonicalFieldIndex(List<String> manifestLines, String canonicalFieldName) {
+        String[] manifestHeaderFields = manifestLines.getFirst().split("\\|", -1);
+        for (int fieldIndex = 0; fieldIndex < manifestHeaderFields.length; fieldIndex++) {
+            if (manifestHeaderFields[fieldIndex].equals(canonicalFieldName)) {
+                return fieldIndex;
+            }
+        }
+        throw new IllegalArgumentException(
+                "Canonical documentation source manifest has no field " + canonicalFieldName);
+    }
+
     private static List<String> withDuplicateMirrorPath(List<String> manifestLines) {
-        String[] duplicateSourceColumns = manifestLines.get(1).split("\\|", -1);
-        duplicateSourceColumns[4] = "alternate-doc-set";
-        List<String> changedManifestLines = new ArrayList<>(manifestLines);
-        changedManifestLines.add(String.join("|", duplicateSourceColumns));
-        return List.copyOf(changedManifestLines);
+        List<String> manifestLinesWithAlternateDocSet = withField(manifestLines, 1, "docSet", "alternate-doc-set");
+        return withInsertedLine(
+                manifestLinesWithAlternateDocSet,
+                manifestLinesWithAlternateDocSet.size(),
+                manifestLinesWithAlternateDocSet.get(1));
+    }
+
+    private static List<String> withSeedDiscovery(
+            List<String> manifestLines,
+            int lineIndex,
+            String seedDocumentType,
+            String seedDiscoveryUrl,
+            String seedSourcePrefix) {
+        List<String> manifestLinesWithDocumentType =
+                withField(manifestLines, lineIndex, "seedDocumentType", seedDocumentType);
+        List<String> manifestLinesWithDiscoveryUrl =
+                withField(manifestLinesWithDocumentType, lineIndex, "seedDiscoveryUrl", seedDiscoveryUrl);
+        return withField(manifestLinesWithDiscoveryUrl, lineIndex, "seedSourcePrefix", seedSourcePrefix);
+    }
+
+    private static List<String> withDuplicateDocSet(List<String> manifestLines) {
+        List<String> manifestLinesWithAlternateMirrorPath =
+                withField(manifestLines, 1, "relativeMirrorPath", "alternate/mirror-path");
+        return withInsertedLine(
+                manifestLinesWithAlternateMirrorPath,
+                manifestLinesWithAlternateMirrorPath.size(),
+                manifestLinesWithAlternateMirrorPath.get(1));
     }
 
     private record ShellValidation(int exitCode, String standardOutput) {}

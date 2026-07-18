@@ -1,42 +1,93 @@
 #!/bin/bash
 
-DOCUMENTATION_FETCH_DEFAULT_MINIMUM_HTML_FILES='1'
-DOCUMENTATION_FETCH_DEFAULT_REJECT_REGEX=''
-DOCUMENTATION_FETCH_DEFAULT_ALLOW_PARTIAL='false'
-
-documentation_fetch_cut_directories() {
-    local fetch_url="$1"
-    local authority_and_path="${fetch_url#https://}"
-    local fetch_path="${authority_and_path#*/}"
-    fetch_path="${fetch_path%/}"
-    if [ -z "$fetch_path" ]; then
-        printf '0\n'
-        return 0
-    fi
-
-    local IFS='/'
-    local -a fetch_path_segments
-    read -r -a fetch_path_segments <<< "$fetch_path"
-    printf '%s\n' "${#fetch_path_segments[@]}"
-}
+DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS=(
+    --timeout=120
+    --dns-timeout=30
+    --connect-timeout=30
+    --read-timeout=120
+    --tries=5
+    --waitretry=1
+    --retry-connrefused
+)
 
 append_manifest_documentation_fetch_sources() {
-    local documentation_source_projection
-    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-        local fetchUrl
-        local citationBaseUrl
-        local relativeMirrorPath
-        local displayName
-        local docSet
-        local sourceKind
-        local docType
-        local docVersion
-        IFS='|' read -r fetchUrl citationBaseUrl relativeMirrorPath displayName docSet sourceKind docType docVersion <<< "$documentation_source_projection"
+    local selected_doc_sets="${1:-}"
+    local selection_enabled="false"
+    local -a requested_doc_sets=()
+    local -a retained_requested_doc_sets=("")
+    if [ "$#" -gt 0 ]; then
+        selection_enabled="true"
+        if [ -z "$selected_doc_sets" ] \
+            || [[ "$selected_doc_sets" == ,* ]] \
+            || [[ "$selected_doc_sets" == *, ]] \
+            || [[ "$selected_doc_sets" == *,,* ]]; then
+            echo "Documentation source selector contains a blank docSet" >&2
+            return 1
+        fi
 
-        local cut_directories
-        cut_directories="$(documentation_fetch_cut_directories "$fetchUrl")"
-        DOC_SOURCES+=("|$fetchUrl|$relativeMirrorPath|$displayName|$cut_directories|$DOCUMENTATION_FETCH_DEFAULT_MINIMUM_HTML_FILES|$DOCUMENTATION_FETCH_DEFAULT_REJECT_REGEX|$DOCUMENTATION_FETCH_DEFAULT_ALLOW_PARTIAL")
+        local IFS=','
+        read -r -a requested_doc_sets <<< "$selected_doc_sets"
+        local requested_doc_set
+        local retained_requested_doc_set
+        for requested_doc_set in "${requested_doc_sets[@]}"; do
+            if has_boundary_whitespace "$requested_doc_set" \
+                || has_manifest_control_character "$requested_doc_set"; then
+                echo "Documentation source selector has an invalid docSet: $requested_doc_set" >&2
+                return 1
+            fi
+            for retained_requested_doc_set in "${retained_requested_doc_sets[@]}"; do
+                if [ "$retained_requested_doc_set" = "$requested_doc_set" ]; then
+                    echo "Documentation source selector duplicates docSet: $requested_doc_set" >&2
+                    return 1
+                fi
+            done
+            retained_requested_doc_sets+=("$requested_doc_set")
+        done
+    fi
+
+    local -a matched_doc_sets=("")
+    local -a selected_fetch_projections=()
+    local documentation_source_index
+    for documentation_source_index in "${!DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[@]}"; do
+        local docSet="${DOCUMENTATION_SOURCE_DOC_SET_PROJECTIONS[$documentation_source_index]}"
+        local documentation_fetch_projection="${DOCUMENTATION_SOURCE_FETCH_PROJECTIONS[$documentation_source_index]}"
+
+        if [ "$selection_enabled" = "true" ]; then
+            local doc_set_requested="false"
+            local requested_doc_set
+            for requested_doc_set in "${requested_doc_sets[@]}"; do
+                if [ "$requested_doc_set" = "$docSet" ]; then
+                    doc_set_requested="true"
+                    matched_doc_sets+=("$docSet")
+                    break
+                fi
+            done
+            if [ "$doc_set_requested" = "false" ]; then
+                continue
+            fi
+        fi
+
+        selected_fetch_projections+=("$documentation_fetch_projection")
     done
+
+    if [ "$selection_enabled" = "true" ]; then
+        local requested_doc_set
+        local matched_doc_set
+        for requested_doc_set in "${requested_doc_sets[@]}"; do
+            local requested_doc_set_matched="false"
+            for matched_doc_set in "${matched_doc_sets[@]}"; do
+                if [ "$matched_doc_set" = "$requested_doc_set" ]; then
+                    requested_doc_set_matched="true"
+                    break
+                fi
+            done
+            if [ "$requested_doc_set_matched" = "false" ]; then
+                echo "Unknown documentation source docSet: $requested_doc_set" >&2
+                return 1
+            fi
+        done
+    fi
+    DOC_SOURCES+=("${selected_fetch_projections[@]}")
 }
 
 append_legacy_documentation_fetch_sources() {
@@ -61,11 +112,177 @@ append_quick_documentation_fetch_sources() {
     )
 }
 
+# Validates the crawler exit status and manifest-owned completeness policy.
+validate_fetch_result() {
+    local wget_exit_code="$1"
+    local target_dir="$2"
+    local name="$3"
+    local minimum_html_files="$4"
+    local partial_mirror_allowed="$5"
+    local fetched_html_count
+    fetched_html_count="$(count_html_files "$target_dir")"
+
+    if [ "$wget_exit_code" -ne 0 ] && [ "$wget_exit_code" -ne 8 ]; then
+        log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
+        return 1
+    fi
+    if [ "$fetched_html_count" -eq 0 ]; then
+        log "${RED}✗ $name fetch produced no HTML files${NC}"
+        return 1
+    fi
+    if [ "$minimum_html_files" -gt 0 ] && [ "$fetched_html_count" -lt "$minimum_html_files" ]; then
+        if [ "$partial_mirror_allowed" = "true" ]; then
+            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $minimum_html_files+); keeping partial mirror for incremental reruns${NC}"
+            return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
+        fi
+        log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $minimum_html_files+)${NC}"
+        return 1
+    fi
+    log "${GREEN}✓ $name fetched successfully: $fetched_html_count HTML files${NC}"
+}
+
+# Fetches a manifest-governed Java API using its explicit Javadoc seed.
+fetch_java_api_javadoc_seed() {
+    local target_dir="$1"
+    local name="$2"
+    local cut_dirs="$3"
+    local minimum_html_files="$4"
+    local reject_regex="${5:-}"
+    local partial_mirror_allowed="$6"
+    local seed_file="$target_dir/.oracle-javadoc-seed.txt"
+    local wget_seed_args=(
+        --timestamping
+        --no-host-directories
+        --force-directories
+        --cut-dirs="$cut_dirs"
+        --input-file="$seed_file"
+        --directory-prefix="$target_dir"
+        --show-progress
+        --progress=bar:force
+        "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
+        --user-agent="java-chat-doc-fetcher/1.0"
+    )
+    if [ -n "$reject_regex" ]; then
+        wget_seed_args+=(--reject-regex="$reject_regex")
+    fi
+
+    wget "${wget_seed_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+    local wget_exit_code=$?
+    cd - > /dev/null
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+}
+
+# Fetches generic documentation recursively, retaining extensionless pages and their page requisites.
+fetch_docs_mirror() {
+    local url="$1"
+    local target_dir="$2"
+    local name="$3"
+    local cut_dirs="$4"
+    local minimum_html_files="$5"
+    local reject_regex="${6:-}"
+    local partial_mirror_allowed="$7"
+    local wget_args=(
+        --mirror
+        --convert-links
+        --adjust-extension
+        --page-requisites
+        --no-parent
+        --no-host-directories
+        --cut-dirs="$cut_dirs"
+        --reject="index.html?*"
+        --quiet
+        --show-progress
+        --progress=bar:force
+        --timeout=30
+        --dns-timeout=30
+        --connect-timeout=30
+        --read-timeout=30
+        --tries=3
+        --waitretry=1
+        --retry-connrefused
+        --no-verbose
+    )
+    if [ -n "$reject_regex" ]; then
+        wget_args+=(--reject-regex="$reject_regex")
+    fi
+
+    wget "${wget_args[@]}" "$url" 2>&1 | tee -a "$LOG_FILE"
+    local wget_exit_code=$?
+    cd - > /dev/null
+    validate_fetch_result "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+}
+
+# Fetches an explicit manifest-governed seed discovered from structured XML or HTML.
+fetch_discovered_documentation_seed() {
+    local canonical_prefix="$1"
+    local target_dir="$2"
+    local name="$3"
+    local cut_directories="$4"
+    local minimum_html_files="$5"
+    local reject_regex="${6:-}"
+    local partial_mirror_allowed="$7"
+    local seed_document_type="$8"
+    local seed_discovery_url="$9"
+    local seed_source_prefix="${10}"
+    local discovery_file
+    discovery_file="$(mktemp "$target_dir/.documentation-discovery.XXXXXX")"
+    local seed_file="$target_dir/.documentation-seed.txt"
+    local wget_discovery_arguments=(
+        --quiet
+        --output-document="$discovery_file"
+        "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
+    )
+
+    if ! wget "${wget_discovery_arguments[@]}" "$seed_discovery_url"; then
+        rm -f "$discovery_file"
+        cd - > /dev/null
+        log "${RED}✗ Failed to fetch structured discovery document for $name${NC}"
+        return 1
+    fi
+    if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+        --document-type "$seed_document_type" \
+        --input "$discovery_file" \
+        --discovery-url "$seed_discovery_url" \
+        --source-prefix "$seed_source_prefix" \
+        --canonical-prefix "$canonical_prefix" \
+        --output "$seed_file"; then
+        rm -f "$discovery_file"
+        cd - > /dev/null
+        log "${RED}✗ Structured discovery failed for $name${NC}"
+        return 1
+    fi
+    rm -f "$discovery_file"
+
+    local wget_seed_arguments=(
+        --timestamping
+        --no-host-directories
+        --force-directories
+        --cut-dirs="$cut_directories"
+        --input-file="$seed_file"
+        --directory-prefix="$target_dir"
+        --adjust-extension
+        --convert-links
+        --show-progress
+        --progress=bar:force
+        "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"
+        --user-agent="java-chat-doc-fetcher/1.0"
+    )
+    if [ -n "$reject_regex" ]; then
+        wget_seed_arguments+=(--reject-regex="$reject_regex")
+    fi
+    wget "${wget_seed_arguments[@]}" 2>&1 | tee -a "$LOG_FILE"
+    local wget_exit_code=$?
+    cd - > /dev/null
+    validate_fetch_result \
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
+}
+
 fetch_documentation_source() {
     local documentation_source_projection="$1"
     local fetch_projection_delimiters="${documentation_source_projection//[^|]/}"
-    if [ "${#fetch_projection_delimiters}" -ne 7 ]; then
-        log "${RED}✗ Documentation source projection must contain exactly eight fields${NC}"
+    if [ "${#fetch_projection_delimiters}" -ne 7 ] \
+        && [ "${#fetch_projection_delimiters}" -ne 10 ]; then
+        log "${RED}✗ Documentation source projection must contain exactly eight or eleven fields${NC}"
         return 1
     fi
 
@@ -77,7 +294,10 @@ fetch_documentation_source() {
     local minimum_html_files
     local reject_regex
     local partial_mirror_allowed
-    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed <<< "$documentation_source_projection"
+    local seed_document_type
+    local seed_discovery_url
+    local seed_source_prefix
+    IFS='|' read -r java_release documentation_source_url relative_mirror_path documentation_source_name cut_directories minimum_html_files reject_regex partial_mirror_allowed seed_document_type seed_discovery_url seed_source_prefix <<< "$documentation_source_projection"
 
     if [ -z "$documentation_source_url" ] || [ -z "$relative_mirror_path" ] || [ -z "$documentation_source_name" ]; then
         log "${RED}✗ Documentation source projection has a blank required field${NC}"
@@ -87,10 +307,16 @@ fetch_documentation_source() {
         || has_boundary_whitespace "$relative_mirror_path" \
         || has_boundary_whitespace "$documentation_source_name" \
         || has_boundary_whitespace "$reject_regex" \
+        || has_boundary_whitespace "$seed_document_type" \
+        || has_boundary_whitespace "$seed_discovery_url" \
+        || has_boundary_whitespace "$seed_source_prefix" \
         || has_manifest_control_character "$documentation_source_url" \
         || has_manifest_control_character "$relative_mirror_path" \
         || has_manifest_control_character "$documentation_source_name" \
-        || has_manifest_control_character "$reject_regex"; then
+        || has_manifest_control_character "$reject_regex" \
+        || has_manifest_control_character "$seed_document_type" \
+        || has_manifest_control_character "$seed_discovery_url" \
+        || has_manifest_control_character "$seed_source_prefix"; then
         log "${RED}✗ Documentation source projection has invalid text fields${NC}"
         return 1
     fi
@@ -119,11 +345,47 @@ fetch_documentation_source() {
         log "${RED}✗ Documentation source partial-mirror policy must be true or false${NC}"
         return 1
     fi
+    if [ -n "$seed_discovery_url" ]; then
+        if [ -n "$java_release" ] \
+            || [ -z "$seed_document_type" ] \
+            || [ -z "$seed_source_prefix" ] \
+            || ! is_absolute_https_remote_url "$seed_discovery_url" \
+            || ! is_absolute_http_remote_base_url "$seed_source_prefix"; then
+            log "${RED}✗ Documentation source seed discovery fields are invalid${NC}"
+            return 1
+        fi
+    elif [ -n "$seed_document_type" ] || [ -n "$seed_source_prefix" ]; then
+        log "${RED}✗ Documentation source seed discovery fields are incomplete${NC}"
+        return 1
+    fi
 
     echo ""
     log "Processing: $documentation_source_name"
     log "URL: $documentation_source_url"
     log "Target: $DOCS_ROOT/$relative_mirror_path"
 
-    fetch_docs "$java_release" "$documentation_source_url" "$relative_mirror_path" "$documentation_source_name" "$cut_directories" "$minimum_html_files" "$reject_regex" "$partial_mirror_allowed"
+    if [ "${#fetch_projection_delimiters}" -eq 10 ]; then
+        fetch_docs \
+            "$java_release" \
+            "$documentation_source_url" \
+            "$relative_mirror_path" \
+            "$documentation_source_name" \
+            "$cut_directories" \
+            "$minimum_html_files" \
+            "$reject_regex" \
+            "$partial_mirror_allowed" \
+            "$seed_document_type" \
+            "$seed_discovery_url" \
+            "$seed_source_prefix"
+        return
+    fi
+    fetch_docs \
+        "$java_release" \
+        "$documentation_source_url" \
+        "$relative_mirror_path" \
+        "$documentation_source_name" \
+        "$cut_directories" \
+        "$minimum_html_files" \
+        "$reject_regex" \
+        "$partial_mirror_allowed"
 }
