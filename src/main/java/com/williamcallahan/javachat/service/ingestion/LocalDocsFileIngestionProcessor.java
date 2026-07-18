@@ -10,6 +10,7 @@ import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngesti
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.service.QdrantCollectionKind;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardDecision;
 import com.williamcallahan.javachat.service.ingestion.HtmlContentGuard.GuardInput;
 import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver.IngestionProvenance;
@@ -401,12 +402,12 @@ public class LocalDocsFileIngestionProcessor {
     private void markDocumentsIngested(List<Document> documents) {
         LocalStoreService localStore = storage.localStore();
         for (Document indexedDocument : documents) {
-            Object hashMetadata = indexedDocument.getMetadata().get("hash");
+            Object hashMetadata = indexedDocument.getMetadata().get(QdrantPayloadFieldSchema.HASH_FIELD);
             if (hashMetadata == null) {
                 continue;
             }
-            String title = DocumentFactory.metadataText(indexedDocument, "title");
-            String packageName = DocumentFactory.metadataText(indexedDocument, "package");
+            String title = DocumentFactory.metadataText(indexedDocument, QdrantPayloadFieldSchema.TITLE_FIELD);
+            String packageName = DocumentFactory.metadataText(indexedDocument, QdrantPayloadFieldSchema.PACKAGE_FIELD);
             try {
                 localStore.markHashIngested(hashMetadata.toString(), title, packageName);
             } catch (IOException markHashException) {
@@ -431,22 +432,22 @@ public class LocalDocsFileIngestionProcessor {
         Objects.requireNonNull(provenance, "provenance");
         for (Document indexedDocument : documents) {
             if (!provenance.docSet().isBlank()) {
-                indexedDocument.getMetadata().put("docSet", provenance.docSet());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_SET_FIELD, provenance.docSet());
             }
             if (!provenance.docPath().isBlank()) {
-                indexedDocument.getMetadata().put("docPath", provenance.docPath());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_PATH_FIELD, provenance.docPath());
             }
             if (!provenance.sourceName().isBlank()) {
-                indexedDocument.getMetadata().put("sourceName", provenance.sourceName());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.SOURCE_NAME_FIELD, provenance.sourceName());
             }
             if (!provenance.sourceKind().isBlank()) {
-                indexedDocument.getMetadata().put("sourceKind", provenance.sourceKind());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, provenance.sourceKind());
             }
             if (!provenance.docVersion().isBlank()) {
-                indexedDocument.getMetadata().put("docVersion", provenance.docVersion());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, provenance.docVersion());
             }
             if (!provenance.docType().isBlank()) {
-                indexedDocument.getMetadata().put("docType", provenance.docType());
+                indexedDocument.getMetadata().put(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, provenance.docType());
             }
         }
     }

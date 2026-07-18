@@ -91,7 +91,7 @@ final class EmbeddingBatchEmbedder {
         if (document == null) {
             return "unknown-url@" + fallbackIndex;
         }
-        Object urlMetadata = document.getMetadata().get("url");
+        Object urlMetadata = document.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
         if (urlMetadata instanceof String documentUrl && !documentUrl.isBlank()) {
             return documentUrl;
         }

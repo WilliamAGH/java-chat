@@ -33,11 +33,6 @@ public class RetrievalService {
     private static final int CITATION_SNIPPET_MAX_LENGTH = 500;
     private static final double TRUNCATION_BREAK_THRESHOLD = 0.8;
 
-    private static final String METADATA_URL = QdrantPayloadFieldSchema.URL_FIELD;
-    private static final String METADATA_TITLE = "title";
-    private static final String METADATA_PACKAGE = "package";
-    private static final String METADATA_HASH = "hash";
-    private static final String METADATA_DOC_TYPE = QdrantPayloadFieldSchema.DOC_TYPE_FIELD;
     private static final String DOCUMENT_TYPE_API_DOCS = DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
@@ -273,8 +268,8 @@ public class RetrievalService {
         VersionFilterPatterns filter = versionFilter.get();
         List<Document> matched = documents.stream()
                 .filter(document -> filter.matchesMetadata(
-                        stringMetadataValue(document.getMetadata(), METADATA_URL),
-                        stringMetadataValue(document.getMetadata(), METADATA_TITLE)))
+                        stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.URL_FIELD),
+                        stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.TITLE_FIELD)))
                 .toList();
         return matched.isEmpty() ? documents : matched;
     }
@@ -304,13 +299,13 @@ public class RetrievalService {
         List<Document> deduplicatedDocuments = new ArrayList<>(documents.size());
         int unidentifiedDocumentCount = 0;
         for (Document document : documents) {
-            String contentHash = stringMetadataValue(document.getMetadata(), METADATA_HASH);
+            String contentHash = stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.HASH_FIELD);
             if (!contentHash.isBlank()) {
                 if (!retainedContentHashes.add(contentHash)) {
                     continue;
                 }
             } else {
-                String documentUrl = stringMetadataValue(document.getMetadata(), METADATA_URL)
+                String documentUrl = stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.URL_FIELD)
                         .trim();
                 if (!documentUrl.isBlank()) {
                     String canonicalDocumentUrl = documentUrl.startsWith(FILE_URL_PREFIX)
@@ -418,10 +413,10 @@ public class RetrievalService {
             }
             try {
                 Map<String, ?> sourceDocMetadata = sourceDocument.getMetadata();
-                String rawUrl = stringMetadataValue(sourceDocMetadata, METADATA_URL);
-                String title = stringMetadataValue(sourceDocMetadata, METADATA_TITLE);
-                String packageName = stringMetadataValue(sourceDocMetadata, METADATA_PACKAGE);
-                String documentType = stringMetadataValue(sourceDocMetadata, METADATA_DOC_TYPE);
+                String rawUrl = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.URL_FIELD);
+                String title = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.TITLE_FIELD);
+                String packageName = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.PACKAGE_FIELD);
+                String documentType = stringMetadataValue(sourceDocMetadata, QdrantPayloadFieldSchema.DOC_TYPE_FIELD);
                 String refinedCitationUrl =
                         refineCitationUrl(rawUrl, sourceDocument.getText(), packageName, documentType);
                 String citationIdentity = citationIdentityFor(rawUrl, refinedCitationUrl);
@@ -438,8 +433,8 @@ public class RetrievalService {
                 log.warn(
                         "Citation conversion failed (exceptionType={}, docUrl={}, docTitle={})",
                         citationConversionFailure.getClass().getSimpleName(),
-                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_URL),
-                        safeMetadataValueForLogging(sourceDocument.getMetadata(), METADATA_TITLE),
+                        safeMetadataValueForLogging(sourceDocument.getMetadata(), QdrantPayloadFieldSchema.URL_FIELD),
+                        safeMetadataValueForLogging(sourceDocument.getMetadata(), QdrantPayloadFieldSchema.TITLE_FIELD),
                         citationConversionFailure);
             }
         }
@@ -516,7 +511,9 @@ public class RetrievalService {
         }
         try {
             String metadataText = String.valueOf(metadataValue);
-            return METADATA_URL.equals(key) ? DocsSourceRegistry.normalizeDocUrl(metadataText) : metadataText;
+            return QdrantPayloadFieldSchema.URL_FIELD.equals(key)
+                    ? DocsSourceRegistry.normalizeDocUrl(metadataText)
+                    : metadataText;
         } catch (RuntimeException _) {
             return "[unprintable:" + metadataValue.getClass().getSimpleName() + "]";
         }

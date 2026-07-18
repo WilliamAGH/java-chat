@@ -196,8 +196,8 @@ public class AuditService {
             headers.set(QdrantRestConnection.API_KEY_HEADER, qdrantApiKey);
         }
 
-        QdrantScrollFilter scrollFilter =
-                new QdrantScrollFilter(List.of(new QdrantScrollMustCondition("url", new QdrantScrollMatch(url))));
+        QdrantScrollFilter scrollFilter = new QdrantScrollFilter(
+                List.of(new QdrantScrollMustCondition(QdrantPayloadFieldSchema.URL_FIELD, new QdrantScrollMatch(url))));
 
         // Paginate through all results using next_page_offset
         JsonNode nextOffset = null;
@@ -291,5 +291,7 @@ public class AuditService {
             @JsonProperty("payload") QdrantScrollPayload payload) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record QdrantScrollPayload(@JsonProperty("hash") String hash) {}
+    private record QdrantScrollPayload(
+            @JsonProperty(QdrantPayloadFieldSchema.HASH_FIELD)
+            String hash) {}
 }

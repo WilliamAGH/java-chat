@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Test;
 /** Verifies that manifest-governed mirrors retain their declared ingestion provenance. */
 class IngestionProvenanceDeriverTest {
 
+    private static final String FINGERPRINT_TEST_DOCUMENT_PATH = "gamma";
+    private static final String FINGERPRINT_TEST_SOURCE_NAME = "oracle";
+    private static final String FINGERPRINT_TEST_SOURCE_KIND = "official";
+
     @Test
     void usesCanonicalManifestMetadataForEveryDocumentationSource() {
         IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
@@ -54,20 +58,10 @@ class IngestionProvenanceDeriverTest {
     void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
         String representedJavaRelease =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst().javaRelease();
-        IngestionProvenance embeddedSeparatorProvenance = new IngestionProvenance(
-                "alpha\u001fbeta",
-                "gamma",
-                "oracle",
-                "official",
-                representedJavaRelease,
-                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
-        IngestionProvenance shiftedSeparatorProvenance = new IngestionProvenance(
-                "beta",
-                "gamma",
-                "oracle",
-                "official",
-                representedJavaRelease,
-                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
+        IngestionProvenance embeddedSeparatorProvenance =
+                javaApiProvenanceForDocumentSet("alpha\u001fbeta", representedJavaRelease);
+        IngestionProvenance shiftedSeparatorProvenance =
+                javaApiProvenanceForDocumentSet("beta", representedJavaRelease);
 
         String embeddedSeparatorFingerprintInput = embeddedSeparatorProvenance.fingerprintInput("fingerprint");
         String shiftedSeparatorFingerprintInput = shiftedSeparatorProvenance.fingerprintInput("fingerprint\u001falpha");
@@ -75,5 +69,16 @@ class IngestionProvenanceDeriverTest {
         assertNotEquals(embeddedSeparatorFingerprintInput, shiftedSeparatorFingerprintInput);
         assertFalse(embeddedSeparatorFingerprintInput.contains("\u001f"));
         assertEquals(embeddedSeparatorFingerprintInput, embeddedSeparatorProvenance.fingerprintInput("fingerprint"));
+    }
+
+    private static IngestionProvenance javaApiProvenanceForDocumentSet(
+            String documentationSet, String representedJavaRelease) {
+        return new IngestionProvenance(
+                documentationSet,
+                FINGERPRINT_TEST_DOCUMENT_PATH,
+                FINGERPRINT_TEST_SOURCE_NAME,
+                FINGERPRINT_TEST_SOURCE_KIND,
+                representedJavaRelease,
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
     }
 }

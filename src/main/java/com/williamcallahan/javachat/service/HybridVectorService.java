@@ -45,7 +45,6 @@ public class HybridVectorService {
     private static final long SCROLL_TIMEOUT_SECONDS = 30;
     private static final long SET_PAYLOAD_TIMEOUT_SECONDS = 30;
     private static final int SCROLL_PAGE_LIMIT = 256;
-    private static final String URL_PAYLOAD_FIELD = "url";
     private static final String NULL_MESSAGE_COLLECTION_KIND = "collectionKind";
     private static final String NULL_MESSAGE_COLLECTION_NAME = "collectionName";
 
@@ -183,7 +182,8 @@ public class HybridVectorService {
         }
 
         Set<String> collectedUrls = new LinkedHashSet<>();
-        List<String> urlPayloadFields = Objects.requireNonNull(List.of(URL_PAYLOAD_FIELD), "urlPayloadFields");
+        List<String> urlPayloadFields =
+                Objects.requireNonNull(List.of(QdrantPayloadFieldSchema.URL_FIELD), "urlPayloadFields");
         ScrollPoints.Builder scrollRequestBuilder = ScrollPoints.newBuilder()
                 .setCollectionName(collectionName)
                 .setWithPayload(WithPayloadSelectorFactory.include(urlPayloadFields))
@@ -198,7 +198,7 @@ public class HybridVectorService {
                     "Qdrant scroll URLs");
 
             for (RetrievedPoint retrievedPoint : scrollResponse.getResultList()) {
-                Value urlPayloadValue = retrievedPoint.getPayloadMap().get(URL_PAYLOAD_FIELD);
+                Value urlPayloadValue = retrievedPoint.getPayloadMap().get(QdrantPayloadFieldSchema.URL_FIELD);
                 if (urlPayloadValue != null && urlPayloadValue.hasStringValue()) {
                     String urlString = urlPayloadValue.getStringValue();
                     if (!urlString.isBlank()) {
@@ -313,7 +313,7 @@ public class HybridVectorService {
         }
 
         Filter filter = Filter.newBuilder()
-                .addMust(matchKeyword(URL_PAYLOAD_FIELD, url))
+                .addMust(matchKeyword(QdrantPayloadFieldSchema.URL_FIELD, url))
                 .build();
 
         RetrySupport.executeWithRetry(
@@ -333,7 +333,7 @@ public class HybridVectorService {
         }
 
         Filter filter = Filter.newBuilder()
-                .addMust(matchKeyword(URL_PAYLOAD_FIELD, url))
+                .addMust(matchKeyword(QdrantPayloadFieldSchema.URL_FIELD, url))
                 .build();
 
         Long count = RetrySupport.executeWithRetry(

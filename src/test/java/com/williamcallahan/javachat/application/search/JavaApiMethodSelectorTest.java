@@ -49,6 +49,18 @@ class JavaApiMethodSelectorTest {
     }
 
     @Test
+    void normalizesWhitespaceWhenConstructedDirectly() {
+        JavaApiMethodSelector selector = new JavaApiMethodSelector(" java.util ", " List ", " of ");
+
+        assertEquals("java.util", selector.packageName());
+        assertEquals("List", selector.typePageName());
+        assertEquals("of", selector.methodName());
+        assertEquals("List.html", selector.typePageFileName());
+        assertEquals("List", selector.sparseQueryTerms());
+        assertTrue(selector.matchesJavadocPath("/java.base/java/util/List.html"));
+    }
+
+    @Test
     void ignoresQualifiedNamesWithoutAnExplicitTypeMethodSelector() {
         assertTrue(
                 JavaApiMethodSelector.fromQuery("Read java.util documentation").isEmpty());

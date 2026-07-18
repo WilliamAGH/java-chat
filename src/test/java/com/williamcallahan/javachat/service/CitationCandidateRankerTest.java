@@ -11,13 +11,18 @@ import org.springframework.ai.document.Document;
 /** Verifies deterministic local ordering of sparse static-citation candidates. */
 class CitationCandidateRankerTest {
 
+    private static final String TUTORIAL_DOCUMENT_TYPE = "tutorial";
+
     @Test
     void prioritizesExactJavadocTypePagesOverHigherRankedMethodOnlyMatches() {
-        Document classFileCandidate =
-                javadocCandidate("class-file", "ClassFileFormatVersion factory of()", "ClassFileFormatVersion.html");
-        Document firstListCandidate = javadocCandidate("list-first", "static <E> List<E> of(E element)", "List.html");
-        Document secondListCandidate =
-                javadocCandidate("list-second", "static <E> List<E> of(E first, E second)", "List.html");
+        Document classFileCandidate = javaApiJavadocCandidate(
+                "class-file",
+                "ClassFileFormatVersion factory of()",
+                javaUtilJavadocPage("ClassFileFormatVersion.html"));
+        Document firstListCandidate = javaApiJavadocCandidate(
+                "list-first", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
+        Document secondListCandidate = javaApiJavadocCandidate(
+                "list-second", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "What does Java List.of() return?",
@@ -30,9 +35,10 @@ class CitationCandidateRankerTest {
 
     @Test
     void recognizesUnparenthesizedTypeMethodSelectorsDuringCandidateOrdering() {
-        Document classFileCandidate =
-                javadocCandidate("class-file", "A utility map() method", "ClassFileFormatVersion.html");
-        Document streamCandidate = javadocCandidate("stream", "<R> Stream<R> map(Function mapper)", "Stream.html");
+        Document classFileCandidate = javaApiJavadocCandidate(
+                "class-file", "A utility map() method", javaUtilJavadocPage("ClassFileFormatVersion.html"));
+        Document streamCandidate = javaApiJavadocCandidate(
+                "stream", "<R> Stream<R> map(Function mapper)", javaUtilJavadocPage("Stream.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "Explain Stream.map in Java", List.of(classFileCandidate, streamCandidate));
@@ -44,10 +50,10 @@ class CitationCandidateRankerTest {
 
     @Test
     void matchesTheDeclaredPackageWhenASelectorIsFullyQualified() {
-        Document sqlDateCandidate = javadocCandidate(
-                "sql-date", "String toString()", "java.sql", "Date.html", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
-        Document utilDateCandidate = javadocCandidate(
-                "util-date", "String toString()", "java.util", "Date.html", DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
+        Document sqlDateCandidate =
+                javaApiJavadocCandidate("sql-date", "String toString()", javadocPage("java.sql", "Date.html"));
+        Document utilDateCandidate =
+                javaApiJavadocCandidate("util-date", "String toString()", javaUtilJavadocPage("Date.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "What does java.util.Date.toString return?", List.of(sqlDateCandidate, utilDateCandidate));
@@ -59,14 +65,10 @@ class CitationCandidateRankerTest {
 
     @Test
     void excludesNonApiDocumentationFromSelectorEvidence() {
-        Document apiMethodOnlyCandidate = javadocCandidate(
-                "api-method",
-                "A utility of() method",
-                "java.lang",
-                "Object.html",
-                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
-        Document tutorialListCandidate = javadocCandidate(
-                "tutorial-list", "static <E> List<E> of(E element)", "java.util", "List.html", "tutorial");
+        Document apiMethodOnlyCandidate =
+                javaApiJavadocCandidate("api-method", "A utility of() method", javadocPage("java.lang", "Object.html"));
+        Document tutorialListCandidate = tutorialJavadocCandidate(
+                "tutorial-list", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "What does List.of return?", List.of(apiMethodOnlyCandidate, tutorialListCandidate));
@@ -78,10 +80,10 @@ class CitationCandidateRankerTest {
 
     @Test
     void treatsMethodDeclarationEvidenceAsCaseSensitive() {
-        Document uppercaseMethodCandidate =
-                javadocCandidate("uppercase-method", "A utility Of() method", "Object.html");
-        Document lowercaseMethodCandidate =
-                javadocCandidate("lowercase-method", "A utility of() method", "Object.html");
+        Document uppercaseMethodCandidate = javaApiJavadocCandidate(
+                "uppercase-method", "A utility Of() method", javaUtilJavadocPage("Object.html"));
+        Document lowercaseMethodCandidate = javaApiJavadocCandidate(
+                "lowercase-method", "A utility of() method", javaUtilJavadocPage("Object.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "What does List.of return?", List.of(uppercaseMethodCandidate, lowercaseMethodCandidate));
@@ -93,8 +95,9 @@ class CitationCandidateRankerTest {
 
     @Test
     void retainsOriginalQdrantOrderWhenNoSelectorIsPresent() {
-        Document firstCandidate = javadocCandidate("first", "Collection overview", "Collection.html");
-        Document secondCandidate = javadocCandidate("second", "List overview", "List.html");
+        Document firstCandidate =
+                javaApiJavadocCandidate("first", "Collection overview", javaUtilJavadocPage("Collection.html"));
+        Document secondCandidate = javaApiJavadocCandidate("second", "List overview", javaUtilJavadocPage("List.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
                 "How do Java collections work?", List.of(firstCandidate, secondCandidate));
@@ -119,13 +122,17 @@ class CitationCandidateRankerTest {
                         "What does List.of return?", List.of(malformedCandidate)));
     }
 
-    private static Document javadocCandidate(String documentId, String documentText, String pageFilename) {
-        return javadocCandidate(
-                documentId, documentText, "java.util", pageFilename, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
+    private static Document javaApiJavadocCandidate(String documentId, String documentText, JavadocPage javadocPage) {
+        return javadocCandidateWithDocumentType(
+                documentId, documentText, javadocPage, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
     }
 
-    private static Document javadocCandidate(
-            String documentId, String documentText, String packageName, String pageFilename, String documentType) {
+    private static Document tutorialJavadocCandidate(String documentId, String documentText, JavadocPage javadocPage) {
+        return javadocCandidateWithDocumentType(documentId, documentText, javadocPage, TUTORIAL_DOCUMENT_TYPE);
+    }
+
+    private static Document javadocCandidateWithDocumentType(
+            String documentId, String documentText, JavadocPage javadocPage, String documentType) {
         DocsSourceRegistry.JavaApiDocumentationSource representedJavaApiSource =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst();
         return Document.builder()
@@ -135,10 +142,20 @@ class CitationCandidateRankerTest {
                         QdrantPayloadFieldSchema.URL_FIELD,
                         representedJavaApiSource.remoteBaseUrl()
                                 + "java.base/"
-                                + packageName.replace('.', '/')
+                                + javadocPage.packageName().replace('.', '/')
                                 + "/"
-                                + pageFilename)
+                                + javadocPage.filename())
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, documentType)
                 .build();
     }
+
+    private static JavadocPage javaUtilJavadocPage(String filename) {
+        return javadocPage("java.util", filename);
+    }
+
+    private static JavadocPage javadocPage(String packageName, String filename) {
+        return new JavadocPage(packageName, filename);
+    }
+
+    private record JavadocPage(String packageName, String filename) {}
 }

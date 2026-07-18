@@ -13,7 +13,6 @@ import org.springframework.ai.document.Document;
  * preserve only known metadata keys used by ranking, citations, and UI rendering.</p>
  */
 final class QdrantScoredPointDocumentMapper {
-    private static final String PAYLOAD_DOC_CONTENT = QdrantPayloadFieldSchema.DOC_CONTENT_FIELD;
     private static final String METADATA_KEY_SCORE = "score";
     private static final String METADATA_KEY_COLLECTION = "collection";
 
@@ -31,7 +30,7 @@ final class QdrantScoredPointDocumentMapper {
     static Document toDocument(ScoredPoint scoredPoint, String pointId, double fusedScore, String sourceCollection) {
         Document document = Document.builder()
                 .id(pointId)
-                .text(extractPayloadString(scoredPoint.getPayloadMap(), PAYLOAD_DOC_CONTENT))
+                .text(extractPayloadString(scoredPoint.getPayloadMap(), QdrantPayloadFieldSchema.DOC_CONTENT_FIELD))
                 .build();
 
         // Keep metadata explicit and typed; do not attempt to round-trip arbitrary payloads.

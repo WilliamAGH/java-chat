@@ -17,6 +17,9 @@ import org.junit.jupiter.api.Test;
  */
 class QdrantRetrievalConstraintBuilderTest {
 
+    private static final String OFFICIAL_DOCUMENTATION_SOURCE_KIND = "official";
+    private static final String UNCONSTRAINED_SOURCE_NAME = "";
+
     private final QdrantRetrievalConstraintBuilder builder = new QdrantRetrievalConstraintBuilder();
 
     @Test
@@ -30,13 +33,9 @@ class QdrantRetrievalConstraintBuilderTest {
     void buildsMustConditionsForConstrainedInput() {
         DocsSourceRegistry.JavaApiDocumentationSource representedJavaApiSource =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst();
-        List<String> allowedDocSet = DocsSourceRegistry.officialDocumentationSourceIdentities();
-        RetrievalConstraint retrievalConstraint = new RetrievalConstraint(
-                representedJavaApiSource.javaRelease(),
-                "official",
-                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE,
-                "",
-                allowedDocSet);
+        List<String> allowedDocumentationSets = DocsSourceRegistry.officialDocumentationSourceIdentities();
+        RetrievalConstraint retrievalConstraint =
+                officialJavaApiRetrievalConstraint(representedJavaApiSource, allowedDocumentationSets);
         Optional<Filter> optionalFilter = builder.buildFilter(retrievalConstraint);
 
         assertTrue(optionalFilter.isPresent());
@@ -51,12 +50,22 @@ class QdrantRetrievalConstraintBuilderTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(
-                allowedDocSet,
+                allowedDocumentationSets,
                 docSetCondition.getField().getMatch().getKeywords().getStringsList());
     }
 
     @Test
     void rejectsEmptyOfficialDocSetConstraint() {
         assertThrows(IllegalArgumentException.class, () -> RetrievalConstraint.forOfficialDocSets(List.of()));
+    }
+
+    private static RetrievalConstraint officialJavaApiRetrievalConstraint(
+            DocsSourceRegistry.JavaApiDocumentationSource javaApiDocumentationSource,
+            List<String> allowedDocumentationSets) {
+        String documentVersion = javaApiDocumentationSource.javaRelease();
+        String sourceKind = OFFICIAL_DOCUMENTATION_SOURCE_KIND;
+        String documentType = DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
+        String sourceName = UNCONSTRAINED_SOURCE_NAME;
+        return new RetrievalConstraint(documentVersion, sourceKind, documentType, sourceName, allowedDocumentationSets);
     }
 }

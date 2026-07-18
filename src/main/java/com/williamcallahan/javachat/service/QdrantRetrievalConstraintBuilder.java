@@ -20,12 +20,6 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class QdrantRetrievalConstraintBuilder {
-    private static final String METADATA_DOC_VERSION = "docVersion";
-    private static final String METADATA_SOURCE_KIND = "sourceKind";
-    private static final String METADATA_DOC_TYPE = "docType";
-    private static final String METADATA_SOURCE_NAME = "sourceName";
-    private static final String METADATA_DOC_SET = "docSet";
-
     /**
      * Builds a Qdrant filter from the provided retrieval constraint.
      *
@@ -39,27 +33,30 @@ public class QdrantRetrievalConstraintBuilder {
         int mustConditionCount = 0;
 
         if (!retrievalConstraint.docVersion().isBlank()) {
-            filterBuilder.addMust(
-                    matchKeyword(METADATA_DOC_VERSION, Objects.requireNonNull(retrievalConstraint.docVersion())));
+            filterBuilder.addMust(matchKeyword(
+                    QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
+                    Objects.requireNonNull(retrievalConstraint.docVersion())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceKind().isBlank()) {
-            filterBuilder.addMust(
-                    matchKeyword(METADATA_SOURCE_KIND, Objects.requireNonNull(retrievalConstraint.sourceKind())));
+            filterBuilder.addMust(matchKeyword(
+                    QdrantPayloadFieldSchema.SOURCE_KIND_FIELD,
+                    Objects.requireNonNull(retrievalConstraint.sourceKind())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.docType().isBlank()) {
-            filterBuilder.addMust(
-                    matchKeyword(METADATA_DOC_TYPE, Objects.requireNonNull(retrievalConstraint.docType())));
+            filterBuilder.addMust(matchKeyword(
+                    QdrantPayloadFieldSchema.DOC_TYPE_FIELD, Objects.requireNonNull(retrievalConstraint.docType())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceName().isBlank()) {
-            filterBuilder.addMust(
-                    matchKeyword(METADATA_SOURCE_NAME, Objects.requireNonNull(retrievalConstraint.sourceName())));
+            filterBuilder.addMust(matchKeyword(
+                    QdrantPayloadFieldSchema.SOURCE_NAME_FIELD,
+                    Objects.requireNonNull(retrievalConstraint.sourceName())));
             mustConditionCount++;
         }
         if (!retrievalConstraint.docSet().isEmpty()) {
-            filterBuilder.addMust(matchKeywords(METADATA_DOC_SET, retrievalConstraint.docSet()));
+            filterBuilder.addMust(matchKeywords(QdrantPayloadFieldSchema.DOC_SET_FIELD, retrievalConstraint.docSet()));
             mustConditionCount++;
         }
 

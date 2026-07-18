@@ -205,7 +205,7 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
         if (nonNullText.isBlank()) {
             throw new IllegalArgumentException(fieldName + " cannot be blank");
         }
-        return nonNullText;
+        return nonNullText.trim();
     }
 
     private record ParsedQualifiedName(List<String> segments, int endIndex) {
