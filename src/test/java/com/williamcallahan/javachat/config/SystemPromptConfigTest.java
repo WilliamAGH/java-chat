@@ -1,10 +1,8 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,15 +40,19 @@ class SystemPromptConfigTest {
     }
 
     @Test
-    void shouldProjectEveryCanonicalMarkerIntoPrompts() {
-        EnrichmentKindCatalog enrichmentKindCatalog = EnrichmentKindCatalog.load();
+    void shouldTeachMarkerSyntaxAndPresentationPurpose() {
         String markerUsagePrompt = systemPromptConfig.getMarkerUsagePrompt();
 
-        assertEquals(
-                enrichmentKindCatalog.all().size(), markerUsagePrompt.lines().count());
-        enrichmentKindCatalog
-                .all()
-                .forEach(presentation ->
-                        assertTrue(markerUsagePrompt.contains("{{" + presentation.token() + ":Text here}}")));
+        assertAll(
+                () -> assertTrue(markerUsagePrompt.contains("{{hint:Text here}}")),
+                () -> assertTrue(markerUsagePrompt.contains("{{background:Text here}}")),
+                () -> assertTrue(markerUsagePrompt.contains("{{reminder:Text here}}")),
+                () -> assertTrue(markerUsagePrompt.contains("{{warning:Text here}}")),
+                () -> assertTrue(markerUsagePrompt.contains("{{example:Text here}}")),
+                () -> assertTrue(markerUsagePrompt.contains("Helpful Hints")),
+                () -> assertTrue(markerUsagePrompt.contains("Background Context")),
+                () -> assertTrue(markerUsagePrompt.contains("Important Reminders")),
+                () -> assertTrue(markerUsagePrompt.contains("Warning")),
+                () -> assertTrue(markerUsagePrompt.contains("Example")));
     }
 }

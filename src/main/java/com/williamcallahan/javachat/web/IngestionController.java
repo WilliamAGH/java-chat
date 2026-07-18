@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
+import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.domain.ingestion.IngestionErrorResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalResponse;
@@ -55,7 +57,8 @@ public class IngestionController extends BaseController {
 
         try {
             log.info("Starting ingestion for up to {} pages", maxPages);
-            documentationIngestionUseCase.crawlAndIngest(maxPages);
+            PageLimit pageLimit = new PageLimit(maxPages);
+            documentationIngestionUseCase.crawlAndIngest(pageLimit);
 
             return ResponseEntity.ok(
                     IngestionRunOutcome.success(String.format("Ingestion completed for up to %d pages", maxPages)));
@@ -82,7 +85,8 @@ public class IngestionController extends BaseController {
             @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000") @Min(1) @Max(1000000) int maxFiles) {
         try {
-            IngestionLocalOutcome outcome = documentationIngestionUseCase.ingestLocalDirectory(directory, maxFiles);
+            FileLimit fileLimit = new FileLimit(maxFiles);
+            IngestionLocalOutcome outcome = documentationIngestionUseCase.ingestLocalDirectory(directory, fileLimit);
             return ResponseEntity.ok(outcome);
         } catch (IllegalArgumentException illegalArgumentException) {
             return buildIngestionValidationError(illegalArgumentException);

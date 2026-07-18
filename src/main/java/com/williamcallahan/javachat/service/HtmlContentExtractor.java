@@ -1,8 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import java.util.ArrayList;
-import java.util.List;
+import com.williamcallahan.javachat.support.JavaApiPageExtractor;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -25,13 +24,6 @@ public class HtmlContentExtractor {
     private static final String CODE_FENCE_MARKER = "```";
     private static final int CODE_FENCE_LENGTH = CODE_FENCE_MARKER.length();
     private static final int MAX_CONSECUTIVE_NEWLINES = 2;
-    private static final String JAVA_API_CLASS_DECLARATION_PAGE_CLASS = "class-declaration-page";
-    private static final String JAVA_API_CLASS_USE_PAGE_CLASS = "class-use-page";
-    private static final String JAVA_API_CLASS_TITLE_SELECTOR = "main > .header .title, .header .title, h1.title";
-    private static final String JAVA_API_CLASS_DESCRIPTION_SELECTOR =
-            "main > section.class-description, section.class-description";
-    private static final String JAVA_API_MEMBER_DETAIL_SELECTOR = "body.class-declaration-page section.detail[id]";
-
     // Common noise patterns to filter out
     private static final Set<String> NOISE_PATTERNS = Set.of(
             "JavaScript is disabled",
@@ -83,6 +75,19 @@ public class HtmlContentExtractor {
         ".detail", // Detail sections
         ".summary" // Summary sections
     };
+
+    private final JavaApiPageExtractor javaApiPageExtractor;
+
+    /**
+     * Creates the generic extractor and its focused Java API page collaborator.
+     */
+    public HtmlContentExtractor() {
+        this.javaApiPageExtractor = new JavaApiPageExtractor(
+                this::extractCleanContentFromClone,
+                this::removeNonContentElements,
+                this::filterNoise,
+                this::containsExcessiveNoise);
+    }
 
     /**
      * Extract clean content from HTML document, filtering out navigation
@@ -364,77 +369,6 @@ public class HtmlContentExtractor {
      *     pages
      */
     public JavaApiPageExtraction extractJavaApiPage(Document document) {
-        Document extractionDocument =
-                Objects.requireNonNull(document, "document").clone();
-        Element documentBody = Objects.requireNonNull(extractionDocument.body(), "document.body");
-        if (documentBody.hasClass(JAVA_API_CLASS_USE_PAGE_CLASS)) {
-            return JavaApiPageExtraction.excludedClassUsePage();
-        }
-        if (!documentBody.hasClass(JAVA_API_CLASS_DECLARATION_PAGE_CLASS)) {
-            return JavaApiPageExtraction.included(extractJavaApiUnanchoredOverview(extractionDocument), List.of());
-        }
-
-        String overviewText = extractJavaApiClassOverview(extractionDocument);
-        List<JavaApiAnchoredSection> anchoredSections = extractJavaApiAnchoredSections(extractionDocument);
-        return JavaApiPageExtraction.included(overviewText, anchoredSections);
-    }
-
-    private String extractJavaApiClassOverview(Document extractionDocument) {
-        StringBuilder overviewText = new StringBuilder();
-        appendJavaApiElementText(overviewText, extractionDocument.selectFirst(JAVA_API_CLASS_TITLE_SELECTOR));
-        appendJavaApiElementText(overviewText, extractionDocument.selectFirst(JAVA_API_CLASS_DESCRIPTION_SELECTOR));
-        return filterNoise(overviewText.toString()).trim();
-    }
-
-    private String extractJavaApiUnanchoredOverview(Document extractionDocument) {
-        StringBuilder overviewText = new StringBuilder();
-        appendJavaApiElementText(overviewText, extractionDocument.selectFirst(JAVA_API_CLASS_TITLE_SELECTOR));
-        appendJavaApiText(overviewText, extractCleanContentFromClone(extractionDocument));
-        return filterNoise(overviewText.toString()).trim();
-    }
-
-    private List<JavaApiAnchoredSection> extractJavaApiAnchoredSections(Document extractionDocument) {
-        List<JavaApiAnchoredSection> anchoredSections = new ArrayList<>();
-        for (Element memberDetail : extractionDocument.select(JAVA_API_MEMBER_DETAIL_SELECTOR)) {
-            String memberAnchor = memberDetail.id();
-            String memberText = extractJavaApiMemberText(memberDetail);
-            if (!memberAnchor.isBlank() && !memberText.isBlank()) {
-                anchoredSections.add(new JavaApiAnchoredSection(memberAnchor, memberText));
-            }
-        }
-        return List.copyOf(anchoredSections);
-    }
-
-    private String extractJavaApiMemberText(Element memberDetail) {
-        Element extractionDetail = memberDetail.clone();
-        removeNonContentElements(extractionDetail);
-        Element signatureElement = extractionDetail.selectFirst(".member-signature");
-        String signatureText =
-                signatureElement == null ? "" : signatureElement.text().trim();
-        String detailText = extractionDetail.text().trim();
-        if (!signatureText.isBlank() && !detailText.contains(signatureText)) {
-            detailText = signatureText + "\n\n" + detailText;
-        }
-        return filterNoise(detailText).trim();
-    }
-
-    private void appendJavaApiElementText(StringBuilder overviewText, Element sourceElement) {
-        if (sourceElement == null) {
-            return;
-        }
-        Element extractionElement = sourceElement.clone();
-        removeNonContentElements(extractionElement);
-        appendJavaApiText(overviewText, extractionElement.text());
-    }
-
-    private void appendJavaApiText(StringBuilder overviewText, String sourceText) {
-        String sectionText = sourceText.trim();
-        if (sectionText.isBlank() || containsExcessiveNoise(sectionText)) {
-            return;
-        }
-        if (!overviewText.isEmpty()) {
-            overviewText.append("\n\n");
-        }
-        overviewText.append(sectionText);
+        return javaApiPageExtractor.extract(document);
     }
 }

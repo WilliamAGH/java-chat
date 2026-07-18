@@ -10,7 +10,7 @@ import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
-/** Verifies that manifest-governed mirrors retain their declared ingestion provenance. */
+/** Verifies that configured official mirrors retain their declared ingestion provenance. */
 class IngestionProvenanceDeriverTest {
 
     private static final String FINGERPRINT_TEST_DOCUMENT_PATH = "gamma";
@@ -18,7 +18,7 @@ class IngestionProvenanceDeriverTest {
     private static final String FINGERPRINT_TEST_SOURCE_KIND = "official";
 
     @Test
-    void usesCanonicalManifestMetadataForEveryDocumentationSource() {
+    void usesConfiguredMetadataForEveryDocumentationSource() {
         IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
         Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
 

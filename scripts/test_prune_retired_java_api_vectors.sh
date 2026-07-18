@@ -235,38 +235,14 @@ fi
 if [ "$non_java_selection_status" -ne 1 ]; then
     fail_retired_java_api_vector_prune_test "non-Java selector did not return the skip status"
 fi
-
-canonical_java_api_sources_manifest="$JAVA_API_SOURCES_MANIFEST"
-JAVA_API_SOURCES_MANIFEST="$TEST_WORK_DIRECTORY/missing-java-api-sources.manifest"
-if java_api_vector_prune_required "kotlin" 2>/dev/null; then
-    fail_retired_java_api_vector_prune_test "unreadable Java API manifest unexpectedly selected a mirror"
+if java_api_vector_prune_required "java/java999-complete" 2>/dev/null; then
+    fail_retired_java_api_vector_prune_test "unknown Java API selector unexpectedly required pruning"
 else
-    manifest_selection_status=$?
+    unknown_java_selection_status=$?
 fi
-if [ "$manifest_selection_status" -ne 2 ]; then
-    fail_retired_java_api_vector_prune_test "unreadable Java API manifest did not return the hard-failure status"
+if [ "$unknown_java_selection_status" -ne 2 ]; then
+    fail_retired_java_api_vector_prune_test "unknown Java API selector did not return the validation status"
 fi
-if java_api_vector_prune_required "" 2>/dev/null; then
-    fail_retired_java_api_vector_prune_test "blank selector accepted an unreadable Java API manifest"
-else
-    blank_manifest_selection_status=$?
-fi
-if [ "$blank_manifest_selection_status" -ne 2 ]; then
-    fail_retired_java_api_vector_prune_test "blank selector did not fail hard for an unreadable Java API manifest"
-fi
-malformed_java_api_sources_manifest="$TEST_WORK_DIRECTORY/malformed-java-api-sources.manifest"
-printf 'javaRelease|remoteBaseUrl|unexpectedColumn\n25|https://docs.oracle.com/|java/java25-complete\n' \
-    > "$malformed_java_api_sources_manifest"
-JAVA_API_SOURCES_MANIFEST="$malformed_java_api_sources_manifest"
-if java_api_vector_prune_required "java/java25-complete" 2>/dev/null; then
-    fail_retired_java_api_vector_prune_test "malformed Java API manifest unexpectedly selected a mirror"
-else
-    malformed_manifest_selection_status=$?
-fi
-if [ "$malformed_manifest_selection_status" -ne 2 ]; then
-    fail_retired_java_api_vector_prune_test "malformed Java API manifest did not return the hard-failure status"
-fi
-JAVA_API_SOURCES_MANIFEST="$canonical_java_api_sources_manifest"
 
 reset_mock_qdrant
 unset QDRANT_COLLECTION_DOCS
@@ -279,6 +255,17 @@ if find "$MOCK_QDRANT_DIRECTORY" -maxdepth 1 -name '*target-*' | grep -q .; then
 fi
 if [ -e "$MOCK_QDRANT_DIRECTORY/environment-loads" ]; then
     fail_retired_java_api_vector_prune_test "non-Java-only prune invocation loaded the environment"
+fi
+
+reset_mock_qdrant
+if prune_retired_java_api_vectors "java/java25-complete,java/java999-complete" > /dev/null 2>&1; then
+    fail_retired_java_api_vector_prune_test "mixed canonical and unknown Java API prune invocation succeeded"
+fi
+if find "$MOCK_QDRANT_DIRECTORY" -maxdepth 1 -name '*target-*' | grep -q .; then
+    fail_retired_java_api_vector_prune_test "unknown Java API selector contacted Qdrant"
+fi
+if [ -e "$MOCK_QDRANT_DIRECTORY/environment-loads" ]; then
+    fail_retired_java_api_vector_prune_test "unknown Java API selector loaded the environment"
 fi
 
 reset_mock_qdrant

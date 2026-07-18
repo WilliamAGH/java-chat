@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -12,11 +13,18 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.sun.net.httpserver.HttpServer;
+import com.williamcallahan.javachat.application.ingestion.PageLimit;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import com.williamcallahan.javachat.service.ingestion.LocalDocsDirectoryIngestionService;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,6 +41,9 @@ class DocsIngestionServiceTest {
             "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/class-use/List.html";
     private static final String JAVA_API_QUERY_URL = JAVA_API_URL + "?view=all";
     private static final String JAVA_API_TITLE = "Interface Stream<T>";
+    private static final int HTTP_OK_STATUS = 200;
+    private static final int HTTP_FOUND_STATUS = 302;
+    private static final int RESPONSE_BODY_OVERFLOW_BYTES = 2;
 
     private HybridVectorService hybridVectorService;
     private ChunkProcessingService chunkProcessingService;
@@ -95,7 +106,7 @@ class DocsIngestionServiceTest {
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
         DocsIngestionService ingestionService = ingestionServiceFor(JAVA_API_URL);
 
-        ingestionService.crawlAndIngest(2, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher);
 
         assertEquals(List.of(JAVA_API_URL, JAVA_API_QUERY_URL), rootSnapshot.discoveredLinks());
         ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
@@ -105,11 +116,132 @@ class DocsIngestionServiceTest {
     }
 
     @Test
+    void rejectsCandidatesOutsideConfiguredOriginPortAndPathBoundary() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String allowedChildUrl = rootUrl + "allowed";
+        String rootHtml = """
+            <html><body>
+              <a href="/root/allowed">Allowed child</a>
+              <a href="/root-adjacent">Adjacent path</a>
+              <a href="/root/%2e%2e/private">Encoded path escape</a>
+              <a href="https://docs.example.com.evil/root/host">Deceptive host</a>
+              <a href="https://docs.example.com:444/root/port">Different port</a>
+              <a href="http://docs.example.com/root/scheme">Different scheme</a>
+            </body></html>
+            """;
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(rootUrl, rootHtml));
+        when(crawlPageFetcher.fetch(allowedChildUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(allowedChildUrl, "<html></html>"));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn("");
+        when(chunkProcessingService.processAndStoreChunks(any(), any(), any(), any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        ingestionService.crawlAndIngest(new PageLimit(2), crawlPageFetcher);
+
+        ArgumentCaptor<String> fetchedUrlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(crawlPageFetcher, times(2)).fetch(fetchedUrlCaptor.capture());
+        assertEquals(List.of(rootUrl, allowedChildUrl), fetchedUrlCaptor.getAllValues());
+    }
+
+    @Test
+    void rejectsRedirectFinalUrlOutsideConfiguredBoundaryBeforePersistence() throws IOException {
+        String rootUrl = "https://docs.example.com/root/";
+        String offBoundaryFinalUrl = "https://docs.example.com/private/redirected";
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(rootUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(
+                        offBoundaryFinalUrl, "<html><body>Redirected</body></html>"));
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        IOException redirectException = assertThrows(
+                IOException.class, () -> ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher));
+
+        assertEquals(
+                "Documentation response redirected outside the configured crawl boundary",
+                redirectException.getMessage());
+        verify(localStoreService, never()).saveHtml(any(), any());
+        verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+    }
+
+    @Test
+    void rejectsOffBoundaryRedirectBeforeRequestingTarget() throws IOException {
+        AtomicInteger offBoundaryRequestCount = new AtomicInteger();
+        HttpServer offBoundaryServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        offBoundaryServer.createContext("/private/", httpExchange -> {
+            offBoundaryRequestCount.incrementAndGet();
+            httpExchange.sendResponseHeaders(HTTP_OK_STATUS, 0);
+            httpExchange.close();
+        });
+        offBoundaryServer.start();
+
+        HttpServer documentationServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        String offBoundaryUrl =
+                "http://127.0.0.1:" + offBoundaryServer.getAddress().getPort() + "/private/redirected";
+        documentationServer.createContext("/docs/", httpExchange -> {
+            httpExchange.getResponseHeaders().set("Location", offBoundaryUrl);
+            httpExchange.sendResponseHeaders(HTTP_FOUND_STATUS, -1);
+            httpExchange.close();
+        });
+        documentationServer.start();
+        String rootUrl = "http://127.0.0.1:" + documentationServer.getAddress().getPort() + "/docs/";
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        try {
+            IOException redirectException =
+                    assertThrows(IOException.class, () -> ingestionService.crawlAndIngest(new PageLimit(1)));
+
+            assertEquals(
+                    "Documentation response redirected outside the configured crawl boundary",
+                    redirectException.getMessage());
+            assertEquals(0, offBoundaryRequestCount.get());
+            verify(localStoreService, never()).saveHtml(any(), any());
+        } finally {
+            documentationServer.stop(0);
+            offBoundaryServer.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsTruncatedOversizedResponseBeforePersistence() throws IOException {
+        byte[] oversizedResponseBody =
+                new byte[DocsIngestionService.MAX_RESPONSE_BODY_BYTES + RESPONSE_BODY_OVERFLOW_BYTES];
+        HttpServer documentationServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        documentationServer.createContext("/docs/", httpExchange -> {
+            httpExchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+            httpExchange.sendResponseHeaders(HTTP_OK_STATUS, oversizedResponseBody.length);
+            try (OutputStream responseBodyStream = httpExchange.getResponseBody()) {
+                responseBodyStream.write(oversizedResponseBody);
+            }
+        });
+        documentationServer.start();
+        String rootUrl = "http://127.0.0.1:" + documentationServer.getAddress().getPort() + "/docs/";
+        DocsIngestionService ingestionService = ingestionServiceFor(rootUrl);
+
+        try {
+            IOException oversizedResponseException =
+                    assertThrows(IOException.class, () -> ingestionService.crawlAndIngest(new PageLimit(1)));
+
+            assertEquals(
+                    "Documentation response exceeds maximum body size of "
+                            + DocsIngestionService.MAX_RESPONSE_BODY_BYTES
+                            + " bytes",
+                    oversizedResponseException.getMessage());
+            verify(localStoreService, never()).saveHtml(any(), any());
+            verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+        } finally {
+            documentationServer.stop(0);
+        }
+    }
+
+    @Test
     void mapsJavaApiOverviewAndExactMemberAnchorsToIndependentChunkSegments() {
         JavaApiPageExtraction javaApiExtraction = JavaApiPageExtraction.included(
                 "Stream API overview.",
                 List.of(new JavaApiAnchoredSection(
-                        "map(java.util.function.Function)",
+                        new JavadocMemberAnchor("map(java.util.function.Function)"),
                         "<R> Stream<R> map(Function<? super T,? extends R> mapper)")));
 
         Optional<ChunkProcessingService.JavaApiPage> javaApiPage = DocsIngestionService.javaApiPageFor(
@@ -121,10 +253,10 @@ class DocsIngestionServiceTest {
         List<ChunkProcessingService.JavaApiPageSegment> pageSegments =
                 javaApiPage.orElseThrow().segments();
         assertEquals(2, pageSegments.size());
-        assertTrue(pageSegments.getFirst().javadocAnchor().isEmpty());
+        assertTrue(pageSegments.getFirst().javadocMemberAnchor().isEmpty());
         assertEquals(
                 "map(java.util.function.Function)",
-                pageSegments.get(1).javadocAnchor().orElseThrow());
+                pageSegments.get(1).javadocMemberAnchor().orElseThrow().domIdentifier());
     }
 
     @Test
@@ -150,7 +282,7 @@ class DocsIngestionServiceTest {
         when(htmlContentExtractor.extractJavaApiPage(any())).thenReturn(JavaApiPageExtraction.excludedClassUsePage());
         DocsIngestionService ingestionService = ingestionServiceFor(CLASS_USE_URL);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         verify(localStoreService).saveHtml(CLASS_USE_URL, classUseHtml);
         InOrder extractionAndDeletionOrder = inOrder(htmlContentExtractor, hybridVectorService);
@@ -174,10 +306,10 @@ class DocsIngestionServiceTest {
                 .thenReturn(JavaApiPageExtraction.included(
                         "Stream overview.",
                         List.of(new JavaApiAnchoredSection(
-                                "map(java.util.function.Function)",
+                                new JavadocMemberAnchor("map(java.util.function.Function)"),
                                 "<R> Stream<R> map(Function<? super T,? extends R> mapper)"))));
         org.springframework.ai.document.Document initialIndexedDocument =
-                new org.springframework.ai.document.Document("Stream overview.");
+                replacementDocument("Stream overview.", "chunk-hash");
         when(chunkProcessingService.processAndStoreJavaApiPage(any()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(initialIndexedDocument), List.of("chunk-hash"), 1, 0));
@@ -193,7 +325,7 @@ class DocsIngestionServiceTest {
                 .replaceUrlDocuments(eq(QdrantCollectionKind.DOCS), eq(JAVA_API_URL), any());
         DocsIngestionService ingestionService = ingestionServiceFor(JAVA_API_URL);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         ArgumentCaptor<ChunkProcessingService.JavaApiPage> javaApiPageCaptor =
                 ArgumentCaptor.forClass(ChunkProcessingService.JavaApiPage.class);
@@ -209,7 +341,12 @@ class DocsIngestionServiceTest {
         assertEquals("java.util.stream", indexedJavaApiPage.packageName());
         assertEquals(
                 "map(java.util.function.Function)",
-                indexedJavaApiPage.segments().get(1).javadocAnchor().orElseThrow());
+                indexedJavaApiPage
+                        .segments()
+                        .get(1)
+                        .javadocMemberAnchor()
+                        .orElseThrow()
+                        .domIdentifier());
     }
 
     @Test
@@ -226,7 +363,7 @@ class DocsIngestionServiceTest {
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
         DocsIngestionService ingestionService = ingestionServiceFor(JAVA_API_URL);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         verify(chunkProcessingService).processAndStoreJavaApiPage(any());
         verify(chunkProcessingService, never()).processAndStoreJavaApiPageForce(any());
@@ -255,7 +392,7 @@ class DocsIngestionServiceTest {
                 .thenReturn(true);
         DocsIngestionService ingestionService = ingestionServiceFor(JAVA_API_URL);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         verify(chunkProcessingService).processAndStoreJavaApiPage(any());
         verify(hybridVectorService)
@@ -288,14 +425,14 @@ class DocsIngestionServiceTest {
         when(chunkProcessingService.processAndStoreJavaApiPageForce(any()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(
-                                new org.springframework.ai.document.Document("First Stream chunk."),
-                                new org.springframework.ai.document.Document("Second Stream chunk.")),
+                                replacementDocument("First Stream chunk.", "first-chunk-hash"),
+                                replacementDocument("Second Stream chunk.", "second-chunk-hash")),
                         List.of("first-chunk-hash", "second-chunk-hash"),
                         2,
                         0));
         DocsIngestionService ingestionService = ingestionServiceFor(JAVA_API_URL);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         InOrder replacementOrder = inOrder(chunkProcessingService, hybridVectorService);
         replacementOrder.verify(chunkProcessingService).processAndStoreJavaApiPage(any());
@@ -317,11 +454,11 @@ class DocsIngestionServiceTest {
             """;
         String extractedText = "Current collections guidance.";
         org.springframework.ai.document.Document partialChangedDocument =
-                new org.springframework.ai.document.Document("Changed collections chunk only.");
+                replacementDocument("Changed collections chunk only.", "changed-collections-hash");
         org.springframework.ai.document.Document unchangedReplacementDocument =
-                new org.springframework.ai.document.Document("Unchanged collections chunk.");
+                replacementDocument("Unchanged collections chunk.", "unchanged-collections-hash");
         org.springframework.ai.document.Document changedReplacementDocument =
-                new org.springframework.ai.document.Document("Changed collections chunk.");
+                replacementDocument("Changed collections chunk.", "changed-collections-hash");
         List<org.springframework.ai.document.Document> completeReplacementDocuments =
                 List.of(unchangedReplacementDocument, changedReplacementDocument);
         DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
@@ -349,7 +486,7 @@ class DocsIngestionServiceTest {
                 .replaceUrlDocuments(eq(QdrantCollectionKind.DOCS), eq(ordinaryUrl), any());
         DocsIngestionService ingestionService = ingestionServiceFor(ordinaryUrl);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         InOrder replacementOrder = inOrder(chunkProcessingService, hybridVectorService);
         replacementOrder
@@ -373,8 +510,8 @@ class DocsIngestionServiceTest {
             """;
         String extractedText = "Current collections guidance.";
         List<org.springframework.ai.document.Document> initialDocuments = List.of(
-                new org.springframework.ai.document.Document("First collections chunk."),
-                new org.springframework.ai.document.Document("Second collections chunk."));
+                replacementDocument("First collections chunk.", "first-collections-hash"),
+                replacementDocument("Second collections chunk.", "second-collections-hash"));
         DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
         when(crawlPageFetcher.fetch(ordinaryUrl))
                 .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(ordinaryUrl, ordinaryHtml));
@@ -391,7 +528,7 @@ class DocsIngestionServiceTest {
                 .replaceUrlDocuments(eq(QdrantCollectionKind.DOCS), eq(ordinaryUrl), any());
         DocsIngestionService ingestionService = ingestionServiceFor(ordinaryUrl);
 
-        ingestionService.crawlAndIngest(1, crawlPageFetcher);
+        ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher);
 
         InOrder replacementOrder = inOrder(chunkProcessingService, hybridVectorService);
         replacementOrder
@@ -405,14 +542,60 @@ class DocsIngestionServiceTest {
         verify(hybridVectorService, never()).upsert(eq(QdrantCollectionKind.DOCS), any());
     }
 
+    @Test
+    void rejectsAnyReplacementDocumentWithoutHashBeforeQdrantMutation() throws IOException {
+        String ordinaryUrl = "https://docs.example.com/guides/collections";
+        String ordinaryHtml = """
+            <html><head><title>Collections guide</title></head>
+            <body><main>Current collections guidance.</main></body></html>
+            """;
+        String extractedText = "Current collections guidance.";
+        org.springframework.ai.document.Document validReplacementDocument =
+                replacementDocument("First collections chunk.", "first-collections-hash");
+        org.springframework.ai.document.Document missingHashReplacementDocument =
+                new org.springframework.ai.document.Document("Second collections chunk.");
+        DocsIngestionService.CrawlPageFetcher crawlPageFetcher = mock(DocsIngestionService.CrawlPageFetcher.class);
+        when(crawlPageFetcher.fetch(ordinaryUrl))
+                .thenReturn(DocsIngestionService.prepareCrawlPageSnapshot(ordinaryUrl, ordinaryHtml));
+        when(htmlContentExtractor.extractCleanContent(any())).thenReturn(extractedText);
+        when(chunkProcessingService.processAndStoreChunks(extractedText, ordinaryUrl, "Collections guide", ""))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(validReplacementDocument, missingHashReplacementDocument),
+                        List.of("first-collections-hash", "second-collections-hash"),
+                        2,
+                        0));
+        DocsIngestionService ingestionService = ingestionServiceFor(ordinaryUrl);
+
+        IllegalStateException missingHashException = assertThrows(
+                IllegalStateException.class, () -> ingestionService.crawlAndIngest(new PageLimit(1), crawlPageFetcher));
+
+        assertEquals(
+                "Replacement document at index 1 for source URL "
+                        + ordinaryUrl
+                        + " must contain non-blank string hash metadata",
+                missingHashException.getMessage());
+        verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+        verify(localStoreService, never()).markHashIngested(any(), any(), any());
+    }
+
     private DocsIngestionService ingestionServiceFor(String rootUrl) {
+        AppProperties appProperties = new AppProperties();
+        appProperties.getDocs().setRootUrl(rootUrl);
         return new DocsIngestionService(
-                rootUrl,
+                appProperties,
                 hybridVectorService,
                 chunkProcessingService,
                 contentHasher,
                 localStoreService,
                 htmlContentExtractor,
                 localDirectoryIngestionService);
+    }
+
+    private static org.springframework.ai.document.Document replacementDocument(
+            String documentText, String contentHash) {
+        org.springframework.ai.document.Document replacementDocument =
+                new org.springframework.ai.document.Document(documentText);
+        replacementDocument.getMetadata().put(QdrantPayloadFieldSchema.HASH_FIELD, contentHash);
+        return replacementDocument;
     }
 }

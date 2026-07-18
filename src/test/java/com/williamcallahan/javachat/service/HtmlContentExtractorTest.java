@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.junit.jupiter.api.Test;
@@ -13,8 +14,10 @@ import org.junit.jupiter.api.Test;
  */
 class HtmlContentExtractorTest {
 
-    private static final String MAP_MEMBER_ANCHOR = "map(java.util.function.Function)";
-    private static final String MAP_TO_DOUBLE_MEMBER_ANCHOR = "mapToDouble(java.util.function.ToDoubleFunction)";
+    private static final JavadocMemberAnchor MAP_MEMBER_ANCHOR =
+            new JavadocMemberAnchor("map(java.util.function.Function)");
+    private static final JavadocMemberAnchor MAP_TO_DOUBLE_MEMBER_ANCHOR =
+            new JavadocMemberAnchor("mapToDouble(java.util.function.ToDoubleFunction)");
 
     @Test
     void preservesCodeIndentationAndNormalizesProse() {

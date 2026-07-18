@@ -65,6 +65,7 @@ class HybridVectorServiceTest {
     void setUp() {
         qdrantClient = mock(QdrantClient.class);
         embeddingClient = mock(EmbeddingClient.class);
+        when(embeddingClient.dimensions()).thenReturn(2);
         sparseVectorEncoder = mock(LexicalSparseVectorEncoder.class);
         AppProperties appProperties = new AppProperties();
         QdrantCollectionNames collectionNames = appProperties.getQdrant().getCollections();

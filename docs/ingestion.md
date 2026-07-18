@@ -44,15 +44,13 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 
 ### Doc set filtering (CLI)
 
-List canonical source paths, then limit ingestion to a selected doc set:
+Limit ingestion to a selected mirror path:
 
 ```bash
-./scripts/fetch_all_docs.sh --list-java-api-sources
-./scripts/fetch_all_docs.sh --list-documentation-sources
-DOCS_SETS=relative/path/from/listing make process-doc-sets
+DOCS_SETS=java/java25-complete make process-doc-sets
 ```
 
-See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for filtering and the canonical source listing commands.
+See [pipeline-commands.md](pipeline-commands.md#doc-set-filtering) for filtering.
 
 ## Hybrid vector storage
 
@@ -78,7 +76,7 @@ Deduplication is based on per-chunk SHA-256 markers stored locally:
 
 A file is skipped only when every file-level marker value, including the extractor-semantics version and
 the provenance-aware ingestion fingerprint, matches the current ingestion contract.
-Changing extraction behavior or manifest provenance therefore invalidates otherwise
+Changing extraction behavior or source provenance therefore invalidates otherwise
 identical HTML: the prior vectors and local chunks are pruned, then the file is re-chunked and upserted.
 Older markers with a missing or prior extractor-semantics version are intentionally reindexed once.
 

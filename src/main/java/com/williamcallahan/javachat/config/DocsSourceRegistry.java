@@ -1,320 +1,250 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.stream.Stream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Central registry for documentation source URL mappings.
+ * Resolves documentation mirror paths into citation and provenance values used by the JVM runtime.
  *
- * Provides a single place to define how locally mirrored paths map back to
- * authoritative remote URLs for citations and ingestion.
- *
- * Complete Java API sources are governed by {@code java-api-documentation-sources.manifest},
- * official non-Java sources are governed by {@code documentation-sources.manifest}, and legacy
- * citation-only bases remain in {@code docs-sources.properties}.
+ * <p>The executable fetch script owns crawling policy. This class contains only the smaller set of values the
+ * application actually consumes while ingesting and citing already-mirrored documentation.</p>
  */
 public final class DocsSourceRegistry {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(DocsSourceRegistry.class);
-
-    private static final String DOCS_SOURCES_RESOURCE = "/docs-sources.properties";
-    private static final String LOG_DOCS_SOURCES_LOADED = "Loaded docs-sources.properties with {} entries";
-    private static final String LOG_DOCS_SOURCES_MISSING = "docs-sources.properties not found on classpath";
-    private static final String LOG_DOCS_SOURCES_LOAD_FAILED =
-            "Failed to load docs-sources.properties (exceptionType={})";
-
-    private static final String ORACLE_JAVASE_BASE_KEY = "ORACLE_JAVASE_BASE";
-    private static final String IBM_ARTICLES_BASE_KEY = "IBM_ARTICLES_BASE";
-    private static final String JETBRAINS_IDEA_2025_09_BASE_KEY = "JETBRAINS_IDEA_2025_09_BASE";
-    private static final String SPRING_FRAMEWORK_BASE_KEY = "SPRING_FRAMEWORK_BASE";
-    private static final String SPRING_AI_BASE_KEY = "SPRING_AI_BASE";
-
-    private static final String SPRING_FRAMEWORK_API_BASE_KEY = "SPRING_FRAMEWORK_API_BASE";
-    private static final String SPRING_AI_API_STABLE_BASE_KEY = "SPRING_AI_API_STABLE_BASE";
-    private static final String SPRING_AI_API_2_BASE_KEY = "SPRING_AI_API_2_BASE";
-
     private static final String REDACTED_LOCAL_URL = "(local file path redacted)";
     private static final String OFFICIAL_DOCUMENTATION_SOURCE_KIND = "official";
+    private static final String LOCAL_DOCS_ROOT = "/data/docs/";
+    private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
+    private static final String PUBLIC_PDFS_BASE = "/pdfs/";
+    private static final String PDF_EXTENSION = ".pdf";
+    private static final String HTTPS_PREFIX = "https://";
+    private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
+    private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
+    private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
+    private static final String EMPTY_TEXT = "";
+    private static final String PATH_SEPARATOR_TEXT = "/";
+    private static final String SPRING_FRAMEWORK_MARKER = "spring-framework";
+    private static final String SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX =
+            "docs/current/api/current/javadoc-api/";
+    private static final String SPRING_FRAMEWORK_LEGACY_API_CURRENT_PREFIX = "api/current/javadoc-api/";
+    private static final String SPRING_FRAMEWORK_DOCS_JAVADOC_PREFIX = "docs/current/javadoc-api/";
+    private static final String SPRING_FRAMEWORK_LEGACY_DOCS_JAVADOC_JAVA_PREFIX = "docs/current/javadoc-api/java/";
+    private static final String SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX = "javadoc-api/java/";
+    private static final String SPRING_FRAMEWORK_JAVADOC_PREFIX = "javadoc-api/";
+    private static final String SPRING_BOOT_MARKER = "spring-boot";
+    private static final String DOCS_SEGMENT = "docs";
+    private static final String CURRENT_SEGMENT = "current";
+    private static final String REFERENCE_SEGMENT = "reference";
+    private static final String API_SEGMENT = "api";
+    private static final String JAVADOC_API_SEGMENT = "javadoc-api";
+    private static final String JAVA_SEGMENT = "java";
+    private static final String VERSION_SEPARATOR = ".";
+    private static final String DOCS_API_SUFFIX = "/docs/api";
+    private static final String DOCS_API_PREFIX = "docs/api/";
+    private static final String API_SUFFIX = "/api";
+    private static final String API_PREFIX = "api/";
+
+    private static final String SPRING_FRAMEWORK_REFERENCE_URL_PREFIX =
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/reference/current";
+    private static final String SPRING_FRAMEWORK_JAVADOC_URL_PREFIX =
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_FRAMEWORK_MARKER + "/docs/current/javadoc-api";
+    private static final String SPRING_BOOT_REFERENCE_URL_PREFIX =
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/reference/current";
+    private static final String SPRING_BOOT_API_URL_PREFIX =
+            SPRING_DOCS_HTTPS_PREFIX + SPRING_BOOT_MARKER + "/docs/current/api";
+
+    private static final char WINDOWS_PATH_SEPARATOR = '\\';
+    private static final char UNIX_PATH_SEPARATOR = '/';
+    private static final char VERSION_PREFIX = 'v';
+
+    private static final int MINIMUM_SPRING_PROJECT_SEGMENTS = 2;
+    private static final int SPRING_PROJECT_SEGMENT_INDEX = 0;
+    private static final int FIRST_SPRING_PATH_SEGMENT_INDEX = 1;
+    private static final int SPRING_URL_BUFFER_PADDING = 64;
+
+    private static final String[] DOCS_CURRENT_REFERENCE_SEQUENCE = {DOCS_SEGMENT, CURRENT_SEGMENT, REFERENCE_SEGMENT};
+    private static final String[] REFERENCE_ROOT_SEQUENCE = {REFERENCE_SEGMENT};
+    private static final String[] FRAMEWORK_API_CURRENT_SEQUENCE = {
+        DOCS_SEGMENT, CURRENT_SEGMENT, API_SEGMENT, CURRENT_SEGMENT, JAVADOC_API_SEGMENT
+    };
+    private static final String[] FRAMEWORK_API_JAVA_SEQUENCE = {
+        DOCS_SEGMENT, CURRENT_SEGMENT, JAVADOC_API_SEGMENT, JAVA_SEGMENT
+    };
+    private static final String[] BOOT_API_JAVA_SEQUENCE = {DOCS_SEGMENT, CURRENT_SEGMENT, API_SEGMENT, JAVA_SEGMENT};
+
+    private static final String ORACLE_JAVASE_BASE_SETTING = "ORACLE_JAVASE_BASE";
+    private static final String IBM_ARTICLES_BASE_SETTING = "IBM_ARTICLES_BASE";
+    private static final String JETBRAINS_IDEA_2025_09_BASE_SETTING = "JETBRAINS_IDEA_2025_09_BASE";
+    private static final String SPRING_FRAMEWORK_BASE_SETTING = "SPRING_FRAMEWORK_BASE";
+    private static final String SPRING_AI_BASE_SETTING = "SPRING_AI_BASE";
+    private static final String SPRING_FRAMEWORK_API_BASE_SETTING = "SPRING_FRAMEWORK_API_BASE";
+    private static final String SPRING_AI_API_STABLE_BASE_SETTING = "SPRING_AI_API_STABLE_BASE";
+    private static final String SPRING_AI_API_2_BASE_SETTING = "SPRING_AI_API_2_BASE";
 
     private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
     private static final String DEFAULT_JETBRAINS_IDEA_2025_09_BASE = "https://blog.jetbrains.com/idea/2025/09/";
-
     private static final String DEFAULT_SPRING_FRAMEWORK_BASE = "https://docs.spring.io/spring-framework/";
     private static final String DEFAULT_SPRING_AI_BASE = "https://docs.spring.io/spring-ai/";
-
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
     private static final String DEFAULT_SPRING_AI_API_STABLE_BASE =
             "https://docs.spring.io/spring-ai/docs/current/api/";
     private static final String DEFAULT_SPRING_AI_API_2_BASE = "https://docs.spring.io/spring-ai/docs/2.0.x/api/";
 
-    private static final String LOCAL_DOCS_ROOT = "/data/docs/";
-    private static final String RELATIVE_MIRROR_PATH_SEPARATOR = "/";
-    private static final String LOCAL_DOCS_SPRING_FRAMEWORK = LOCAL_DOCS_ROOT + "spring-framework/";
-    private static final String LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE = LOCAL_DOCS_ROOT + "spring-framework-complete/";
-    private static final String LOCAL_DOCS_SPRING_AI = LOCAL_DOCS_ROOT + "spring-ai/";
-    private static final String LOCAL_DOCS_SPRING_AI_COMPLETE = LOCAL_DOCS_ROOT + "spring-ai-complete/";
-    private static final String LOCAL_DOCS_SPRING_AI_REFERENCE = LOCAL_DOCS_ROOT + "spring-ai-reference/";
-    private static final String LOCAL_DOCS_SPRING_AI_REFERENCE_2 = LOCAL_DOCS_ROOT + "spring-ai-reference-2/";
-    private static final String LOCAL_DOCS_SPRING_AI_API_STABLE = LOCAL_DOCS_ROOT + "spring-ai-api-stable/";
-    private static final String LOCAL_DOCS_SPRING_AI_API_2 = LOCAL_DOCS_ROOT + "spring-ai-api-2/";
-    private static final String LOCAL_DOCS_BOOKS = LOCAL_DOCS_ROOT + "books/";
-    private static final String LOCAL_DOCS_ORACLE_JAVASE = LOCAL_DOCS_ROOT + "oracle/javase/";
-    private static final String LOCAL_DOCS_IBM_ARTICLES = LOCAL_DOCS_ROOT + "ibm/articles/";
-    private static final String LOCAL_DOCS_JETBRAINS_IDEA_2025_09 = LOCAL_DOCS_ROOT + "jetbrains/idea/2025/09/";
-
-    private static final String PUBLIC_PDFS_BASE = "/pdfs/";
-    private static final String PDF_EXTENSION = ".pdf";
-
-    private static final String HTTPS_PREFIX = "https://";
-    private static final String DOCS_ORACLE_HOST_MARKER = "docs.oracle.com/";
-    private static final String SPRING_DOCS_HOST_MARKER = "docs.spring.io/";
-    private static final String SPRING_DOCS_HTTPS_PREFIX = HTTPS_PREFIX + SPRING_DOCS_HOST_MARKER;
-
-    private static final Properties PROPS = loadDocsSourceProperties();
-    private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES =
-            JavaApiDocumentationManifest.load();
-    private static final List<DocumentationSource> DOCUMENTATION_SOURCES = DocumentationSourceManifest.load();
-    private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
-            projectOfficialDocumentationSourceIdentities(DOCUMENTATION_SOURCES, JAVA_API_DOCUMENTATION_SOURCES);
-
-    /**
-     * Canonical provenance type for Java API documentation projected from Java API source mirrors.
-     *
-     * <p>Ingestion and citation retrieval share this value so Java API pages retain one semantic
-     * classification across the document lifecycle.</p>
-     */
+    /** Provenance type stored for Java API documentation. */
     public static final String JAVA_API_DOCUMENT_TYPE = "api-docs";
 
-    public static final String ORACLE_JAVASE_BASE = resolveSetting(ORACLE_JAVASE_BASE_KEY, DEFAULT_ORACLE_JAVASE_BASE);
-    public static final String IBM_ARTICLES_BASE = resolveSetting(IBM_ARTICLES_BASE_KEY, DEFAULT_IBM_ARTICLES_BASE);
+    public static final String ORACLE_JAVASE_BASE =
+            resolveRuntimeBaseUrl(ORACLE_JAVASE_BASE_SETTING, DEFAULT_ORACLE_JAVASE_BASE);
+    public static final String IBM_ARTICLES_BASE =
+            resolveRuntimeBaseUrl(IBM_ARTICLES_BASE_SETTING, DEFAULT_IBM_ARTICLES_BASE);
     public static final String JETBRAINS_IDEA_2025_09_BASE =
-            resolveSetting(JETBRAINS_IDEA_2025_09_BASE_KEY, DEFAULT_JETBRAINS_IDEA_2025_09_BASE);
-
+            resolveRuntimeBaseUrl(JETBRAINS_IDEA_2025_09_BASE_SETTING, DEFAULT_JETBRAINS_IDEA_2025_09_BASE);
     public static final String SPRING_FRAMEWORK_BASE =
-            resolveSetting(SPRING_FRAMEWORK_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_BASE);
-    public static final String SPRING_AI_BASE = resolveSetting(SPRING_AI_BASE_KEY, DEFAULT_SPRING_AI_BASE);
-
+            resolveRuntimeBaseUrl(SPRING_FRAMEWORK_BASE_SETTING, DEFAULT_SPRING_FRAMEWORK_BASE);
+    public static final String SPRING_AI_BASE = resolveRuntimeBaseUrl(SPRING_AI_BASE_SETTING, DEFAULT_SPRING_AI_BASE);
     public static final String SPRING_FRAMEWORK_API_BASE =
-            resolveSetting(SPRING_FRAMEWORK_API_BASE_KEY, DEFAULT_SPRING_FRAMEWORK_API_BASE);
+            resolveRuntimeBaseUrl(SPRING_FRAMEWORK_API_BASE_SETTING, DEFAULT_SPRING_FRAMEWORK_API_BASE);
     public static final String SPRING_AI_API_STABLE_BASE =
-            resolveSetting(SPRING_AI_API_STABLE_BASE_KEY, DEFAULT_SPRING_AI_API_STABLE_BASE);
+            resolveRuntimeBaseUrl(SPRING_AI_API_STABLE_BASE_SETTING, DEFAULT_SPRING_AI_API_STABLE_BASE);
     public static final String SPRING_AI_API_2_BASE =
-            resolveSetting(SPRING_AI_API_2_BASE_KEY, DEFAULT_SPRING_AI_API_2_BASE);
+            resolveRuntimeBaseUrl(SPRING_AI_API_2_BASE_SETTING, DEFAULT_SPRING_AI_API_2_BASE);
+
+    private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES = List.of(
+            new JavaApiDocumentationSource(
+                    "21",
+                    "https://docs.oracle.com/en/java/javase/21/docs/api/",
+                    "java/java21-complete",
+                    "Java 21 Complete API"),
+            new JavaApiDocumentationSource(
+                    "24",
+                    "https://docs.oracle.com/en/java/javase/24/docs/api/",
+                    "java/java24-complete",
+                    "Java 24 Complete API"),
+            new JavaApiDocumentationSource(
+                    "25",
+                    "https://docs.oracle.com/en/java/javase/25/docs/api/",
+                    "java/java25-complete",
+                    "Java 25 Complete API"));
+
+    private static final List<DocumentationSource> DOCUMENTATION_SOURCES = List.of(
+            new DocumentationSource(
+                    "https://dev.java/learn/", "dev-java", "Dev.java Learning", "dev-java", "official", "tutorial", ""),
+            new DocumentationSource(
+                    "https://kotlinlang.org/docs/",
+                    "kotlin",
+                    "Kotlin Documentation",
+                    "kotlin",
+                    "official",
+                    "language-reference",
+                    ""),
+            new DocumentationSource(
+                    "https://docs.scala-lang.org/scala3/reference/",
+                    "scala",
+                    "Scala 3 Documentation",
+                    "scala",
+                    "official",
+                    "language-reference",
+                    ""),
+            new DocumentationSource(
+                    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/",
+                    "groovy/5.0.7",
+                    "Groovy 5.0.7 Documentation",
+                    "groovy",
+                    "official",
+                    "language-reference",
+                    "5.0.7"),
+            new DocumentationSource(
+                    "https://clojure.org/guides/",
+                    "clojure",
+                    "Clojure Guides",
+                    "clojure",
+                    "official",
+                    "language-guide",
+                    ""),
+            new DocumentationSource(
+                    "https://docs.spring.io/spring-boot/reference/",
+                    "spring-boot",
+                    "Spring Boot Reference",
+                    "spring-boot",
+                    "official",
+                    "framework-reference",
+                    ""),
+            new DocumentationSource(
+                    "https://quarkus.io/guides/",
+                    "quarkus",
+                    "Quarkus Guides",
+                    "quarkus",
+                    "official",
+                    "framework-guide",
+                    ""));
+
+    private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES = Stream.concat(
+                    DOCUMENTATION_SOURCES.stream()
+                            .filter(documentationSource ->
+                                    OFFICIAL_DOCUMENTATION_SOURCE_KIND.equals(documentationSource.sourceKind()))
+                            .map(DocumentationSource::docSet),
+                    JAVA_API_DOCUMENTATION_SOURCES.stream().map(JavaApiDocumentationSource::relativeMirrorPath))
+            .toList();
 
     private static final String[] EMBEDDED_HOST_MARKERS = {DOCS_ORACLE_HOST_MARKER, SPRING_DOCS_HOST_MARKER};
-
     private static final Map<String, String> LOCAL_PREFIX_TO_REMOTE_BASE = buildLocalPrefixLookup();
-
-    static {
-        validateLifecycleMirrorRoots(DOCUMENTATION_SOURCES);
-    }
 
     private DocsSourceRegistry() {}
 
-    /**
-     * Describes one complete Java API mirror projected from the canonical manifest.
-     *
-     * @param javaRelease Java release number used by retrieval provenance
-     * @param remoteBaseUrl authoritative Javadoc base URL
-     * @param relativeMirrorPath canonical path beneath {@code data/docs}
-     * @param displayName operator-facing ingestion name
-     * @param cutDirectories number of leading remote path segments removed during mirroring
-     * @param minimumHtmlFiles minimum accepted mirror size
-     * @param rejectRegex crawler exclusion expression, or blank when no exclusion applies
-     * @param allowPartial whether the fetcher accepts a validated partial mirror
-     */
+    /** Describes the Java API identity and citation fields consumed by JVM ingestion. */
     public record JavaApiDocumentationSource(
-            String javaRelease,
-            String remoteBaseUrl,
-            String relativeMirrorPath,
-            String displayName,
-            int cutDirectories,
-            int minimumHtmlFiles,
-            String rejectRegex,
-            boolean allowPartial) {
+            String javaRelease, String remoteBaseUrl, String relativeMirrorPath, String displayName) {
         public JavaApiDocumentationSource {
-            int parsedJavaRelease =
-                    DocumentationManifestFieldRules.requireCanonicalUnsignedInteger(javaRelease, "javaRelease");
-            if (parsedJavaRelease < 1) {
-                throw new IllegalArgumentException("Java release must be positive");
-            }
-            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(remoteBaseUrl, "remoteBaseUrl");
-            DocumentationManifestFieldRules.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
-            DocumentationManifestFieldRules.requireManifestText(displayName, "displayName", false);
-            if (cutDirectories < 0) {
-                throw new IllegalArgumentException("Java API cut directories cannot be negative");
-            }
-            if (minimumHtmlFiles < 1) {
-                throw new IllegalArgumentException("Java API minimum HTML files must be positive");
-            }
-            DocumentationManifestFieldRules.requireManifestText(rejectRegex, "rejectRegex", true);
-        }
-
-        /**
-         * Serializes this validated source with the canonical manifest grammar.
-         *
-         * @return exact manifest record row
-         */
-        public String toManifestRow() {
-            return JavaApiDocumentationManifest.serialize(this);
+            Objects.requireNonNull(javaRelease, "javaRelease");
+            Objects.requireNonNull(remoteBaseUrl, "remoteBaseUrl");
+            Objects.requireNonNull(relativeMirrorPath, "relativeMirrorPath");
+            Objects.requireNonNull(displayName, "displayName");
         }
     }
 
-    /**
-     * Returns complete Java API sources projected from the canonical manifest.
-     *
-     * @return immutable sources in manifest order
-     */
+    /** Returns the Java API sources the JVM can recognize in already-mirrored content. */
     public static List<JavaApiDocumentationSource> javaApiDocumentationSources() {
-        return List.copyOf(JAVA_API_DOCUMENTATION_SOURCES);
+        return JAVA_API_DOCUMENTATION_SOURCES;
     }
 
-    /**
-     * Describes one official non-Java documentation mirror projected from the canonical manifest.
-     *
-     * @param fetchUrl upstream URL mirrored by the fetch script
-     * @param citationBaseUrl authoritative URL prefix used for local citation reconstruction
-     * @param relativeMirrorPath canonical path beneath {@code data/docs}
-     * @param displayName operator-facing ingestion name
-     * @param docSet canonical Qdrant documentation-set token
-     * @param sourceKind provenance category for the upstream publisher
-     * @param docType content classification for retrieval metadata
-     * @param docVersion upstream release token, or blank for an unversioned source
-     * @param minimumHtmlFiles minimum accepted mirror size
-     * @param rejectRegex crawler exclusion expression, or blank when no exclusion applies
-     * @param allowPartial whether the fetcher accepts a validated partial mirror
-     * @param seedDocumentType structured discovery document type, or blank for recursive mirroring
-     * @param seedDiscoveryUrl structured discovery document URL, or blank for recursive mirroring
-     * @param seedSourcePrefix exact discovered URL prefix mapped onto {@code fetchUrl}
-     * @param supersededRelativeMirrorPath prior mirror root quarantined only after its canonical replacement succeeds;
-     *     manifest validation keeps lifecycle roots unique and disjoint from every other active source root
-     */
+    /** Describes provenance and citation fields consumed by JVM ingestion. */
     public record DocumentationSource(
-            String fetchUrl,
             String citationBaseUrl,
             String relativeMirrorPath,
             String displayName,
             String docSet,
             String sourceKind,
             String docType,
-            String docVersion,
-            int minimumHtmlFiles,
-            String rejectRegex,
-            boolean allowPartial,
-            String seedDocumentType,
-            String seedDiscoveryUrl,
-            String seedSourcePrefix,
-            String supersededRelativeMirrorPath) {
+            String docVersion) {
         public DocumentationSource {
-            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(fetchUrl, "fetchUrl");
-            DocumentationManifestFieldRules.requireHttpsRemoteBaseUrl(citationBaseUrl, "citationBaseUrl");
-            DocumentationManifestFieldRules.requireNormalizedRelativeMirrorPath(relativeMirrorPath);
-            DocumentationManifestFieldRules.requireManifestText(displayName, "displayName", false);
-            DocumentationManifestFieldRules.requireDocSet(docSet);
-            DocumentationManifestFieldRules.requireManifestText(sourceKind, "sourceKind", false);
-            DocumentationManifestFieldRules.requireManifestText(docType, "docType", false);
-            DocumentationManifestFieldRules.requireManifestText(docVersion, "docVersion", true);
-            if (minimumHtmlFiles < 1) {
-                throw new IllegalArgumentException("Documentation minimum HTML files must be positive");
-            }
-            DocumentationManifestFieldRules.requireManifestText(rejectRegex, "rejectRegex", true);
-            DocumentationManifestFieldRules.requireManifestText(seedDocumentType, "seedDocumentType", true);
-            DocumentationManifestFieldRules.requireManifestText(seedDiscoveryUrl, "seedDiscoveryUrl", true);
-            DocumentationManifestFieldRules.requireManifestText(seedSourcePrefix, "seedSourcePrefix", true);
-            DocumentationManifestFieldRules.requireOptionalNormalizedRelativeMirrorPath(
-                    supersededRelativeMirrorPath, "supersededRelativeMirrorPath");
-            if (!supersededRelativeMirrorPath.isEmpty()
-                    && mirrorRootContains(supersededRelativeMirrorPath, relativeMirrorPath)) {
-                throw new IllegalArgumentException(
-                        "Superseded mirror path must not equal or contain the canonical mirror path");
-            }
-            boolean hasSeedDiscovery = !seedDiscoveryUrl.isEmpty();
-            if (hasSeedDiscovery != !seedDocumentType.isEmpty() || hasSeedDiscovery != !seedSourcePrefix.isEmpty()) {
-                throw new IllegalArgumentException("Documentation seed discovery fields must be all blank or all set");
-            }
-            if (hasSeedDiscovery) {
-                DocumentationManifestFieldRules.requireCanonicalSeedDocumentType(seedDocumentType);
-                DocumentationSeedDocumentTypeCatalog.requireSupported(seedDocumentType);
-                DocumentationManifestFieldRules.requireHttpsRemoteUrl(seedDiscoveryUrl, "seedDiscoveryUrl");
-                DocumentationManifestFieldRules.requireHttpRemoteBaseUrl(seedSourcePrefix, "seedSourcePrefix");
-            }
-        }
-
-        static boolean mirrorRootContains(String containingMirrorRoot, String candidateMirrorRoot) {
-            return candidateMirrorRoot.equals(containingMirrorRoot)
-                    || candidateMirrorRoot.startsWith(containingMirrorRoot + RELATIVE_MIRROR_PATH_SEPARATOR);
-        }
-
-        static boolean mirrorRootsOverlap(String firstMirrorRoot, String secondMirrorRoot) {
-            return mirrorRootContains(firstMirrorRoot, secondMirrorRoot)
-                    || mirrorRootContains(secondMirrorRoot, firstMirrorRoot);
-        }
-
-        /**
-         * Serializes this validated source with the canonical manifest grammar.
-         *
-         * @return exact manifest record row
-         */
-        public String toManifestRow() {
-            return DocumentationSourceManifest.serialize(this);
+            Objects.requireNonNull(citationBaseUrl, "citationBaseUrl");
+            Objects.requireNonNull(relativeMirrorPath, "relativeMirrorPath");
+            Objects.requireNonNull(displayName, "displayName");
+            Objects.requireNonNull(docSet, "docSet");
+            Objects.requireNonNull(sourceKind, "sourceKind");
+            Objects.requireNonNull(docType, "docType");
+            Objects.requireNonNull(docVersion, "docVersion");
         }
     }
 
-    /**
-     * Returns official non-Java documentation sources projected from the canonical manifest.
-     *
-     * @return immutable sources in manifest order
-     */
+    /** Returns the non-Java documentation sources the JVM can recognize in already-mirrored content. */
     public static List<DocumentationSource> documentationSources() {
-        return List.copyOf(DOCUMENTATION_SOURCES);
+        return DOCUMENTATION_SOURCES;
     }
 
-    /**
-     * Returns retrieval identities for every official documentation source in the canonical manifests.
-     *
-     * <p>Non-Java documentation is identified by its canonical {@code docSet}; Java API documentation
-     * is identified by its canonical relative mirror path because that is the ingestion-owned
-     * {@code docSet} projection.</p>
-     *
-     * @return immutable source identities in non-Java then Java API manifest order
-     */
+    /** Returns retrieval identities used by official-document filters. */
     public static List<String> officialDocumentationSourceIdentities() {
         return List.copyOf(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
     }
 
-    static List<String> projectOfficialDocumentationSourceIdentities(
-            List<DocumentationSource> documentationSources,
-            List<JavaApiDocumentationSource> javaApiDocumentationSources) {
-        Objects.requireNonNull(documentationSources, "documentationSources");
-        Objects.requireNonNull(javaApiDocumentationSources, "javaApiDocumentationSources");
-        return Stream.concat(
-                        documentationSources.stream()
-                                .filter(documentationSource ->
-                                        OFFICIAL_DOCUMENTATION_SOURCE_KIND.equals(documentationSource.sourceKind()))
-                                .map(DocumentationSource::docSet),
-                        javaApiDocumentationSources.stream().map(JavaApiDocumentationSource::relativeMirrorPath))
-                .toList();
-    }
-
-    /**
-     * Finds the canonical source for a local mirror path.
-     *
-     * @param relativeMirrorPath path beneath {@code data/docs}
-     * @return matching source when the path is manifest governed
-     */
+    /** Finds an exact documentation mirror root. */
     public static Optional<DocumentationSource> documentationSourceForRelativeMirrorPath(String relativeMirrorPath) {
         if (relativeMirrorPath == null || relativeMirrorPath.isBlank()) {
             return Optional.empty();
@@ -325,15 +255,7 @@ public final class DocsSourceRegistry {
                 .findFirst();
     }
 
-    /**
-     * Finds the canonical source governing a file path beneath {@code data/docs}.
-     *
-     * <p>The longest matching mirror root owns the file, so a catalog can safely contain nested
-     * source roots.</p>
-     *
-     * @param relativeDocumentPath file path beneath {@code data/docs}
-     * @return matching source when the path is manifest governed
-     */
+    /** Finds the longest documentation mirror root containing a relative document path. */
     public static Optional<DocumentationSource> documentationSourceForRelativeDocumentPath(
             String relativeDocumentPath) {
         if (relativeDocumentPath == null || relativeDocumentPath.isBlank()) {
@@ -342,192 +264,335 @@ public final class DocsSourceRegistry {
         String normalizedDocumentPath = relativeDocumentPath.replace('\\', '/');
         return DOCUMENTATION_SOURCES.stream()
                 .filter(documentationSource -> normalizedDocumentPath.equals(documentationSource.relativeMirrorPath())
-                        || normalizedDocumentPath.startsWith(
-                                documentationSource.relativeMirrorPath() + RELATIVE_MIRROR_PATH_SEPARATOR))
+                        || normalizedDocumentPath.startsWith(documentationSource.relativeMirrorPath() + "/"))
                 .max(Comparator.comparingInt(documentationSource ->
                         documentationSource.relativeMirrorPath().length()));
     }
 
-    static void validateLifecycleMirrorRoots(List<DocumentationSource> candidateDocumentationSources) {
-        for (DocumentationSource documentationSource : candidateDocumentationSources) {
-            String supersededRelativeMirrorPath = documentationSource.supersededRelativeMirrorPath();
-            if (supersededRelativeMirrorPath.isEmpty()) {
-                continue;
-            }
-            for (String activeLocalPrefix : LOCAL_PREFIX_TO_REMOTE_BASE.keySet()) {
-                String activeRelativeMirrorPath = relativeMirrorPathFromLocalPrefix(activeLocalPrefix);
-                if (activeRelativeMirrorPath.equals(documentationSource.relativeMirrorPath())) {
-                    continue;
-                }
-                if (DocumentationSource.mirrorRootsOverlap(supersededRelativeMirrorPath, activeRelativeMirrorPath)) {
-                    throw new IllegalStateException("Documentation source superseded mirror path "
-                            + supersededRelativeMirrorPath
-                            + " overlaps active registry mirror path "
-                            + activeRelativeMirrorPath);
-                }
-            }
+    /** Resolves a citation base by preferring a JVM property, then process environment, then built-in default. */
+    static String resolveRuntimeBaseUrl(String settingKey, String defaultBaseUrl) {
+        String systemPropertyBaseUrl = System.getProperty(settingKey);
+        if (systemPropertyBaseUrl != null) {
+            return systemPropertyBaseUrl;
         }
-    }
-
-    private static String relativeMirrorPathFromLocalPrefix(String activeLocalPrefix) {
-        if (!activeLocalPrefix.startsWith(LOCAL_DOCS_ROOT)
-                || !activeLocalPrefix.endsWith(RELATIVE_MIRROR_PATH_SEPARATOR)) {
-            throw new IllegalStateException("Documentation registry contains an invalid local mirror prefix");
-        }
-        return activeLocalPrefix.substring(LOCAL_DOCS_ROOT.length(), activeLocalPrefix.length() - 1);
-    }
-
-    private static Properties loadDocsSourceProperties() {
-        final Properties docsSourceProperties = new Properties();
-        try (InputStream inputStream = DocsSourceRegistry.class.getResourceAsStream(DOCS_SOURCES_RESOURCE)) {
-            if (inputStream != null) {
-                docsSourceProperties.load(inputStream);
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug(LOG_DOCS_SOURCES_LOADED, docsSourceProperties.size());
-                }
-            } else if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(LOG_DOCS_SOURCES_MISSING);
-            }
-        } catch (IOException configLoadError) {
-            if (LOGGER.isWarnEnabled()) {
-                LOGGER.warn(
-                        LOG_DOCS_SOURCES_LOAD_FAILED, configLoadError.getClass().getName());
-            }
-        }
-        return docsSourceProperties;
-    }
-
-    private static String resolveSetting(final String settingKey, final String fallbackText) {
-        final String systemProperty = System.getProperty(settingKey);
-        final String envSetting = systemProperty != null ? systemProperty : System.getenv(settingKey);
-        final String propertySetting = envSetting != null ? envSetting : PROPS.getProperty(settingKey);
-        return Objects.requireNonNullElse(propertySetting, fallbackText);
+        String environmentBaseUrl = System.getenv(settingKey);
+        return environmentBaseUrl != null ? environmentBaseUrl : defaultBaseUrl;
     }
 
     private static Map<String, String> buildLocalPrefixLookup() {
-        final Map<String, String> prefixLookup = new LinkedHashMap<>();
-
+        Map<String, String> prefixLookup = new LinkedHashMap<>();
         for (JavaApiDocumentationSource javaApiDocumentationSource : JAVA_API_DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + javaApiDocumentationSource.relativeMirrorPath() + "/",
                     javaApiDocumentationSource.remoteBaseUrl());
         }
-
         for (DocumentationSource documentationSource : DOCUMENTATION_SOURCES) {
             prefixLookup.put(
                     LOCAL_DOCS_ROOT + documentationSource.relativeMirrorPath() + "/",
                     documentationSource.citationBaseUrl());
         }
-
-        // Spring Framework documentation
-        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK, SPRING_FRAMEWORK_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_FRAMEWORK_COMPLETE, SPRING_FRAMEWORK_BASE);
-
-        // Spring AI documentation
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI, SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_COMPLETE, SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_REFERENCE, SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_REFERENCE_2, SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_API_STABLE, SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_SPRING_AI_API_2, SPRING_AI_BASE);
-
-        // External Java 25 sources
-        prefixLookup.put(LOCAL_DOCS_ORACLE_JAVASE, ORACLE_JAVASE_BASE);
-        prefixLookup.put(LOCAL_DOCS_IBM_ARTICLES, IBM_ARTICLES_BASE);
-        prefixLookup.put(LOCAL_DOCS_JETBRAINS_IDEA_2025_09, JETBRAINS_IDEA_2025_09_BASE);
-
-        return prefixLookup;
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-framework/", SPRING_FRAMEWORK_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-framework-complete/", SPRING_FRAMEWORK_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-complete/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-reference/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-reference-2/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-api-stable/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-api-2/", SPRING_AI_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "oracle/javase/", ORACLE_JAVASE_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "ibm/articles/", IBM_ARTICLES_BASE);
+        prefixLookup.put(LOCAL_DOCS_ROOT + "jetbrains/idea/2025/09/", JETBRAINS_IDEA_2025_09_BASE);
+        return Map.copyOf(prefixLookup);
     }
 
-    private static Optional<String> reconstructFromEmbeddedHost(final String localPath) {
-        Optional<String> reconstructedUrl = Optional.empty();
+    private static Optional<String> reconstructFromEmbeddedHost(String localPath) {
+        if (localPath == null) {
+            return Optional.empty();
+        }
+        String normalizedPath = localPath.replace('\\', '/');
+        for (String hostMarker : EMBEDDED_HOST_MARKERS) {
+            int markerIndex = normalizedPath.indexOf(hostMarker);
+            if (markerIndex >= 0) {
+                String candidateUrl = HTTPS_PREFIX + normalizedPath.substring(markerIndex);
+                String normalizedUrl = candidateUrl.startsWith(SPRING_DOCS_HTTPS_PREFIX)
+                        ? normalizeEmbeddedSpringDocsUrl(candidateUrl)
+                        : candidateUrl;
+                return Optional.of(normalizedUrl);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static String normalizeEmbeddedSpringDocsUrl(String url) {
+        String normalizedUrl = url;
+        if (url != null && url.startsWith(SPRING_DOCS_HTTPS_PREFIX)) {
+            String path = url.substring(SPRING_DOCS_HTTPS_PREFIX.length());
+            String[] segments = path.split(PATH_SEPARATOR_TEXT);
+            if (segments.length >= MINIMUM_SPRING_PROJECT_SEGMENTS) {
+                String projectSegment = segments[SPRING_PROJECT_SEGMENT_INDEX];
+                if (SPRING_FRAMEWORK_MARKER.equals(projectSegment)) {
+                    normalizedUrl = normalizeSpringFrameworkEmbeddedUrl(segments, url);
+                } else if (SPRING_BOOT_MARKER.equals(projectSegment)) {
+                    normalizedUrl = normalizeSpringBootEmbeddedUrl(segments, url);
+                }
+            }
+        }
+        return normalizedUrl;
+    }
+
+    private static String normalizeSpringFrameworkEmbeddedUrl(String[] segments, String originalUrl) {
+        String normalizedUrl = normalizeSpringFrameworkReference(segments);
+        if (normalizedUrl == null) {
+            normalizedUrl = normalizeSpringFrameworkReferenceRoot(segments);
+        }
+        if (normalizedUrl == null) {
+            normalizedUrl = normalizeSpringFrameworkApiCurrent(segments);
+        }
+        if (normalizedUrl == null) {
+            normalizedUrl = normalizeSpringFrameworkApiJava(segments);
+        }
+        return normalizedUrl == null ? originalUrl : normalizedUrl;
+    }
+
+    private static String normalizeSpringBootEmbeddedUrl(String[] segments, String originalUrl) {
+        String normalizedUrl = normalizeSpringBootReference(segments);
+        if (normalizedUrl == null) {
+            normalizedUrl = normalizeSpringBootReferenceRoot(segments);
+        }
+        if (normalizedUrl == null) {
+            normalizedUrl = normalizeSpringBootApiJava(segments);
+        }
+        return normalizedUrl == null ? originalUrl : normalizedUrl;
+    }
+
+    private static String normalizeSpringFrameworkReference(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, DOCS_CURRENT_REFERENCE_SEQUENCE)) {
+            return null;
+        }
+        int payloadIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + DOCS_CURRENT_REFERENCE_SEQUENCE.length;
+        int contentIndex = skipSpringVersionSegment(segments, payloadIndex);
+        return buildSpringDocsUrl(SPRING_FRAMEWORK_REFERENCE_URL_PREFIX, segments, contentIndex);
+    }
+
+    private static String normalizeSpringFrameworkReferenceRoot(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, REFERENCE_ROOT_SEQUENCE)) {
+            return null;
+        }
+        int versionIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + REFERENCE_ROOT_SEQUENCE.length;
+        if (!hasSegmentAt(segments, versionIndex) || !isSpringVersion(segments[versionIndex])) {
+            return null;
+        }
+        return buildSpringDocsUrl(SPRING_FRAMEWORK_REFERENCE_URL_PREFIX, segments, versionIndex + 1);
+    }
+
+    private static String normalizeSpringFrameworkApiCurrent(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, FRAMEWORK_API_CURRENT_SEQUENCE)) {
+            return null;
+        }
+        int contentIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + FRAMEWORK_API_CURRENT_SEQUENCE.length;
+        return buildSpringDocsUrl(SPRING_FRAMEWORK_JAVADOC_URL_PREFIX, segments, contentIndex);
+    }
+
+    private static String normalizeSpringFrameworkApiJava(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, FRAMEWORK_API_JAVA_SEQUENCE)) {
+            return null;
+        }
+        int contentIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + FRAMEWORK_API_JAVA_SEQUENCE.length;
+        return buildSpringDocsUrl(SPRING_FRAMEWORK_JAVADOC_URL_PREFIX, segments, contentIndex);
+    }
+
+    private static String normalizeSpringBootReference(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, DOCS_CURRENT_REFERENCE_SEQUENCE)) {
+            return null;
+        }
+        int payloadIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + DOCS_CURRENT_REFERENCE_SEQUENCE.length;
+        int contentIndex = skipSpringVersionSegment(segments, payloadIndex);
+        return buildSpringDocsUrl(SPRING_BOOT_REFERENCE_URL_PREFIX, segments, contentIndex);
+    }
+
+    private static String normalizeSpringBootReferenceRoot(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, REFERENCE_ROOT_SEQUENCE)) {
+            return null;
+        }
+        int versionIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + REFERENCE_ROOT_SEQUENCE.length;
+        if (!hasSegmentAt(segments, versionIndex) || !isSpringVersion(segments[versionIndex])) {
+            return null;
+        }
+        return buildSpringDocsUrl(SPRING_BOOT_REFERENCE_URL_PREFIX, segments, versionIndex + 1);
+    }
+
+    private static String normalizeSpringBootApiJava(String[] segments) {
+        if (!matchesSequence(segments, FIRST_SPRING_PATH_SEGMENT_INDEX, BOOT_API_JAVA_SEQUENCE)) {
+            return null;
+        }
+        int contentIndex = FIRST_SPRING_PATH_SEGMENT_INDEX + BOOT_API_JAVA_SEQUENCE.length;
+        return buildSpringDocsUrl(SPRING_BOOT_API_URL_PREFIX, segments, contentIndex);
+    }
+
+    private static String buildSpringDocsUrl(String normalizedPrefix, String[] segments, int startIndex) {
+        StringBuilder urlBuilder = new StringBuilder(normalizedPrefix.length() + SPRING_URL_BUFFER_PADDING);
+        urlBuilder.append(normalizedPrefix);
+        for (int segmentIndex = startIndex; segmentIndex < segments.length; segmentIndex++) {
+            urlBuilder.append(UNIX_PATH_SEPARATOR).append(segments[segmentIndex]);
+        }
+        return urlBuilder.toString();
+    }
+
+    private static boolean matchesSequence(String[] segments, int startIndex, String[] expectedSegments) {
+        int expectedLength = expectedSegments.length;
+        if (segments.length < startIndex + expectedLength) {
+            return false;
+        }
+        for (int offsetIndex = 0; offsetIndex < expectedLength; offsetIndex++) {
+            String expectedSegment = expectedSegments[offsetIndex];
+            if (!expectedSegment.equals(segments[startIndex + offsetIndex])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int skipSpringVersionSegment(String[] segments, int startIndex) {
+        if (hasSegmentAt(segments, startIndex) && isSpringVersion(segments[startIndex])) {
+            return startIndex + 1;
+        }
+        return startIndex;
+    }
+
+    private static boolean hasSegmentAt(String[] segments, int segmentIndex) {
+        return segments.length > segmentIndex;
+    }
+
+    private static boolean isSpringVersion(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        char firstCharacter = text.charAt(0);
+        return text.contains(VERSION_SEPARATOR)
+                && (Character.isDigit(firstCharacter) || firstCharacter == VERSION_PREFIX);
+    }
+
+    private static Optional<String> mapLocalPrefixToRemote(String localPath) {
+        Optional<String> mappedUrl = Optional.empty();
         if (localPath != null) {
-            final String normalizedPath = localPath.replace('\\', '/');
-            for (final String hostMarker : EMBEDDED_HOST_MARKERS) {
-                final int markerIndex = normalizedPath.indexOf(hostMarker);
-                if (markerIndex >= 0) {
-                    final String candidateUrl = HTTPS_PREFIX + normalizedPath.substring(markerIndex);
-                    // Fix Spring URLs using proper string parsing
-                    final String normalizedUrl = candidateUrl.startsWith(SPRING_DOCS_HTTPS_PREFIX)
-                            ? SpringDocsUrlNormalizer.normalize(candidateUrl)
-                            : candidateUrl;
-                    reconstructedUrl = Optional.of(normalizedUrl);
+            String normalizedPath = localPath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+            for (Map.Entry<String, String> prefixEntry : LOCAL_PREFIX_TO_REMOTE_BASE.entrySet()) {
+                String localPrefix = prefixEntry.getKey();
+                if (normalizedPath.contains(localPrefix)) {
+                    String relativePath =
+                            normalizedPath.substring(normalizedPath.indexOf(localPrefix) + localPrefix.length());
+                    String adjustedPath = normalizeRelativePath(localPrefix, relativePath);
+                    mappedUrl = joinBaseAndRel(prefixEntry.getValue(), adjustedPath);
                     break;
                 }
             }
         }
-        return reconstructedUrl;
-    }
-
-    private static Optional<String> mapLocalPrefixToRemote(final String localPath) {
-        Optional<String> mappedUrl = Optional.empty();
-        if (localPath != null && !localPath.isBlank()) {
-            mappedUrl = DocsLocalPathMapper.mapLocalPrefixToRemote(localPath, LOCAL_PREFIX_TO_REMOTE_BASE);
-        }
         return mappedUrl;
     }
 
-    /**
-     * Map a local book PDF under data/docs/books to a server-hosted public PDF path (/pdfs/...).
-     *
-     * @param localPath local filesystem-like path
-     * @return public PDF URL when the local path maps to a book PDF
-     */
-    public static Optional<String> mapBookLocalToPublic(final String localPath) {
-        Optional<String> publicPdfUrl = Optional.empty();
-        if (localPath != null) {
-            final String normalizedPath = localPath.replace('\\', '/');
-            if (AsciiTextNormalizer.toLowerAscii(normalizedPath).endsWith(PDF_EXTENSION)) {
-                final int markerIndex = normalizedPath.indexOf(LOCAL_DOCS_BOOKS);
-                if (markerIndex >= 0) {
-                    final String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
-                    // Only map the basename to avoid subfolder leakage
-                    final int lastSlash = fileName.lastIndexOf('/');
-                    final String baseName = lastSlash >= 0 ? fileName.substring(lastSlash + 1) : fileName;
-                    publicPdfUrl = Optional.of(PUBLIC_PDFS_BASE + baseName);
-                }
-            }
+    private static String normalizeRelativePath(String localPrefix, String relativePath) {
+        String adjustedPath = relativePath == null ? EMPTY_TEXT : relativePath;
+        if (localPrefix.contains(SPRING_FRAMEWORK_MARKER)) {
+            adjustedPath = normalizeSpringFrameworkRelativePath(adjustedPath);
         }
-        return publicPdfUrl;
+        return adjustedPath;
     }
 
-    /**
-     * Canonicalizes HTTP/HTTPS documentation URLs by fixing common path duplications
-     * and collapsing double slashes.
-     *
-     * @param url HTTP/HTTPS URL to canonicalize
-     * @return canonicalized URL with path duplications fixed
-     */
+    private static String normalizeSpringFrameworkRelativePath(String relativePath) {
+        String adjustedPath = relativePath;
+        if (adjustedPath.startsWith(SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX)) {
+            adjustedPath = SPRING_FRAMEWORK_DOCS_JAVADOC_PREFIX
+                    + adjustedPath.substring(SPRING_FRAMEWORK_LEGACY_DUPLICATE_JAVADOC_PREFIX.length());
+        } else if (adjustedPath.startsWith(SPRING_FRAMEWORK_LEGACY_API_CURRENT_PREFIX)) {
+            adjustedPath = SPRING_FRAMEWORK_DOCS_JAVADOC_PREFIX
+                    + adjustedPath.substring(SPRING_FRAMEWORK_LEGACY_API_CURRENT_PREFIX.length());
+        }
+        if (adjustedPath.startsWith(SPRING_FRAMEWORK_LEGACY_DOCS_JAVADOC_JAVA_PREFIX)) {
+            adjustedPath = SPRING_FRAMEWORK_DOCS_JAVADOC_PREFIX
+                    + adjustedPath.substring(SPRING_FRAMEWORK_LEGACY_DOCS_JAVADOC_JAVA_PREFIX.length());
+        } else if (adjustedPath.startsWith(SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX)) {
+            adjustedPath = SPRING_FRAMEWORK_JAVADOC_PREFIX
+                    + adjustedPath.substring(SPRING_FRAMEWORK_LEGACY_JAVADOC_JAVA_PREFIX.length());
+        }
+        return adjustedPath;
+    }
+
+    private static Optional<String> joinBaseAndRel(String baseUrl, String relativePath) {
+        Optional<String> joinedUrl = Optional.empty();
+        if (baseUrl != null) {
+            String normalizedBase = trimTrailingSlashes(baseUrl);
+            String normalizedRelativePath = relativePath == null
+                    ? EMPTY_TEXT
+                    : relativePath.replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+            normalizedRelativePath = trimLeadingSlashes(normalizedRelativePath);
+
+            if (normalizedBase.endsWith(DOCS_API_SUFFIX)) {
+                if (normalizedRelativePath.startsWith(DOCS_API_PREFIX)) {
+                    normalizedRelativePath = normalizedRelativePath.substring(DOCS_API_PREFIX.length());
+                } else if (normalizedRelativePath.startsWith(API_PREFIX)) {
+                    normalizedRelativePath = normalizedRelativePath.substring(API_PREFIX.length());
+                }
+            } else if (normalizedBase.endsWith(API_SUFFIX) && normalizedRelativePath.startsWith(API_PREFIX)) {
+                normalizedRelativePath = normalizedRelativePath.substring(API_PREFIX.length());
+            }
+
+            joinedUrl = Optional.of(normalizedBase + PATH_SEPARATOR_TEXT + normalizedRelativePath);
+        }
+        return joinedUrl;
+    }
+
+    private static String trimLeadingSlashes(String pathText) {
+        String trimmedPath = pathText;
+        while (trimmedPath.startsWith(PATH_SEPARATOR_TEXT)) {
+            trimmedPath = trimmedPath.substring(1);
+        }
+        return trimmedPath;
+    }
+
+    private static String trimTrailingSlashes(String baseUrl) {
+        int endIndex = baseUrl.length();
+        while (endIndex > 0 && baseUrl.charAt(endIndex - 1) == UNIX_PATH_SEPARATOR) {
+            endIndex--;
+        }
+        return baseUrl.substring(0, endIndex);
+    }
+
+    /** Maps a locally mirrored book PDF to its public application path. */
+    public static Optional<String> mapBookLocalToPublic(String localPath) {
+        if (localPath == null) {
+            return Optional.empty();
+        }
+        String normalizedPath = localPath.replace('\\', '/');
+        if (!AsciiTextNormalizer.toLowerAscii(normalizedPath).endsWith(PDF_EXTENSION)) {
+            return Optional.empty();
+        }
+        int markerIndex = normalizedPath.indexOf(LOCAL_DOCS_BOOKS);
+        if (markerIndex < 0) {
+            return Optional.empty();
+        }
+        String fileName = normalizedPath.substring(markerIndex + LOCAL_DOCS_BOOKS.length());
+        int lastSlash = fileName.lastIndexOf('/');
+        String baseName = lastSlash >= 0 ? fileName.substring(lastSlash + 1) : fileName;
+        return Optional.of(PUBLIC_PDFS_BASE + baseName);
+    }
+
+    /** Canonicalizes common duplicated path segments in HTTP documentation URLs. */
     public static String canonicalizeHttpDocUrl(String url) {
         if (url == null || url.isBlank()) {
             return url;
         }
-        String result = url;
-        // Collapse duplicated segments for Oracle and EA docs
-        result = result.replace("/docs/api/api/", "/docs/api/");
-        result = result.replace("/api/api/", "/api/");
-        // Fix malformed Spring docs paths that accidentally include '/java/' segment
-        if (result.contains(SPRING_DOCS_HTTPS_PREFIX)) {
-            // Legacy path normalization for older local mirrors
-            result = result.replace(
+        String canonicalUrl = url.replace("/docs/api/api/", "/docs/api/").replace("/api/api/", "/api/");
+        if (canonicalUrl.contains(SPRING_DOCS_HTTPS_PREFIX)) {
+            canonicalUrl = canonicalUrl.replace(
                     "/spring-framework/docs/current/javadoc-api/java/", "/spring-framework/docs/current/javadoc-api/");
         }
-        // Remove accidental double slashes (but keep protocol)
-        int protoIdx = result.indexOf("://");
-        String prefix = protoIdx >= 0 ? result.substring(0, protoIdx + 3) : "";
-        String rest = protoIdx >= 0 ? result.substring(protoIdx + 3) : result;
-        rest = rest.replaceAll("/+", "/");
-        return prefix + rest;
+        int protocolIndex = canonicalUrl.indexOf("://");
+        String protocolPrefix = protocolIndex >= 0 ? canonicalUrl.substring(0, protocolIndex + 3) : "";
+        String urlRemainder = protocolIndex >= 0 ? canonicalUrl.substring(protocolIndex + 3) : canonicalUrl;
+        return protocolPrefix + urlRemainder.replaceAll("/+", "/");
     }
 
-    /**
-     * Resolves a local filesystem path to its authoritative remote URL.
-     * Tries book PDF mapping, embedded host reconstruction, and prefix-based mapping in order.
-     * Returns empty for null or blank paths (defensive null handling for chained Optional calls).
-     *
-     * @param absolutePath absolute local filesystem path (forward slashes normalized), may be null
-     * @return resolved remote URL, or empty if no mapping found or path is null/blank
-     */
+    /** Resolves a local filesystem path to its authoritative remote URL. */
     public static Optional<String> resolveLocalPath(String absolutePath) {
         if (absolutePath == null || absolutePath.isBlank()) {
             return Optional.empty();
@@ -537,46 +602,30 @@ public final class DocsSourceRegistry {
                 .or(() -> mapLocalPrefixToRemote(absolutePath));
     }
 
-    /**
-     * Normalizes a documentation URL from local file paths or mirrors to authoritative remote URLs.
-     * Handles file:// URLs, embedded host paths, and already-HTTP URLs.
-     *
-     * @param rawUrl raw URL that may be file://, local path, or HTTP(S)
-     * @return normalized authoritative URL
-     */
+    /** Normalizes a local or remote documentation URL for citations. */
     public static String normalizeDocUrl(String rawUrl) {
         if (rawUrl == null || rawUrl.isBlank()) {
             return rawUrl;
         }
         String trimmedUrl = rawUrl.trim();
-
-        // Already HTTP(S): canonicalize and return
         if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
             return canonicalizeHttpDocUrl(trimmedUrl);
         }
-
-        // Map book PDFs to public server path
         String resolvedPath = trimmedUrl.startsWith("file://") ? trimmedUrl.substring("file://".length()) : trimmedUrl;
-        Optional<String> publicPdf = mapBookLocalToPublic(resolvedPath);
-        if (publicPdf.isPresent()) {
-            return publicPdf.get();
+        Optional<String> publicPdfUrl = mapBookLocalToPublic(resolvedPath);
+        if (publicPdfUrl.isPresent()) {
+            return publicPdfUrl.get();
         }
-
-        // Only handle file:// beyond this point
         if (!trimmedUrl.startsWith("file://")) {
             return trimmedUrl;
         }
-
         String localPath = trimmedUrl.substring("file://".length());
-
-        // Try embedded host reconstruction first
         Optional<String> embeddedUrl = reconstructFromEmbeddedHost(localPath);
         if (embeddedUrl.isPresent()) {
             return canonicalizeHttpDocUrl(embeddedUrl.get());
         }
-
-        // Try local prefix mapping
-        Optional<String> mappedUrl = mapLocalPrefixToRemote(localPath);
-        return mappedUrl.map(DocsSourceRegistry::canonicalizeHttpDocUrl).orElse(REDACTED_LOCAL_URL);
+        return mapLocalPrefixToRemote(localPath)
+                .map(DocsSourceRegistry::canonicalizeHttpDocUrl)
+                .orElse(REDACTED_LOCAL_URL);
     }
 }

@@ -472,7 +472,7 @@ public class RetrievalService {
     }
 
     /**
-     * Projects an authoritative ingested Javadoc anchor before applying legacy nested-type refinement.
+     * Canonicalizes a citation source URL and projects its authoritative ingested Javadoc anchor.
      */
     private String refineCitationUrl(String rawUrl, String exactAnchor) {
         String normalizedUrl = DocsSourceRegistry.normalizeDocUrl(rawUrl);

@@ -134,7 +134,7 @@ publish_staged_documentation_mirror() {
     fi
 }
 
-# Writes the manifest-governed local paths represented by the current Java API seed.
+# Writes the local paths represented by the current Java API seed.
 write_java_api_seed_mirror_paths() {
     local remote_base_url="$1"
     local seed_file="$2"
@@ -277,7 +277,7 @@ verify_java_api_seed_mirror() {
     rm -f "$mirror_paths_file"
 }
 
-# Generates the explicit Java API URL seed from the manifest-owned remote base.
+# Generates the explicit Java API URL seed from the configured remote base.
 generate_java_api_javadoc_seed() {
     local remote_base_url="$1"
     local target_dir="$2"

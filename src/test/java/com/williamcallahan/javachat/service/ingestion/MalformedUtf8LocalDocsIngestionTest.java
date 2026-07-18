@@ -69,7 +69,7 @@ class MalformedUtf8LocalDocsIngestionTest {
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
         IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
         FileIngestionRecord changedPriorIngestionRecord = new FileIngestionRecord(
                 0,
@@ -78,7 +78,8 @@ class MalformedUtf8LocalDocsIngestionTest {
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
                 "prior-documentation",
                 List.of("prior-document-hash"));
-        when(fileMarkerStore.readFileIngestionRecord(anyString())).thenReturn(Optional.of(changedPriorIngestionRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
+                .thenReturn(Optional.of(changedPriorIngestionRecord));
         when(hybridVectorService.countPointsForUrl(anyString(), anyString())).thenReturn(1L);
 
         LocalDocsFileIngestionProcessor ingestionProcessor = new LocalDocsFileIngestionProcessor(
@@ -94,7 +95,7 @@ class MalformedUtf8LocalDocsIngestionTest {
                         chunkProcessingService,
                         new ContentHasher(),
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),
                 new IngestionProvenanceDeriver(),
@@ -113,7 +114,10 @@ class MalformedUtf8LocalDocsIngestionTest {
                 .anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR
                         && logEvent.getFormattedMessage().contains("MalformedInputException")));
         verify(hybridVectorService).resolveCollectionName(any());
+        verify(fileIngestionMarkerStore).readFileIngestionRecord(anyString());
         verifyNoMoreInteractions(hybridVectorService);
-        verifyNoInteractions(chunkProcessingService, localStoreService, ingestedFilePruneService);
+        verifyNoMoreInteractions(localStoreService);
+        verifyNoMoreInteractions(fileIngestionMarkerStore);
+        verifyNoInteractions(chunkProcessingService, ingestedFilePruneService);
     }
 }

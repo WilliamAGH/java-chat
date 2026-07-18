@@ -11,6 +11,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.domain.ingestion.GitHubRepoMetadata;
@@ -52,7 +53,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
@@ -63,7 +64,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 progressTracker,
                 ingestedFilePruneService);
@@ -90,7 +91,7 @@ class SourceCodeFileIngestionProcessorTest {
                 fileSizeBytes, lastModifiedMillis, "old-fingerprint", "", PRIOR_COLLECTION_NAME, List.of("oldhash"));
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("new-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
         when(progressTracker.formatPercent()).thenReturn("100%");
 
         Document indexedDocument = new Document("point-1", "package demo; class Main {}", new HashMap<>());
@@ -114,7 +115,7 @@ class SourceCodeFileIngestionProcessorTest {
         verify(chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
         ArgumentCaptor<FileIngestionRecord> ingestionRecordCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(fileMarkerStore).markFileIngested(eq(sourceUrl), ingestionRecordCaptor.capture());
+        verify(fileIngestionMarkerStore).markFileIngested(eq(sourceUrl), ingestionRecordCaptor.capture());
         assertEquals("new-fingerprint", ingestionRecordCaptor.getValue().ingestionFingerprint());
         assertTrue(ingestionRecordCaptor.getValue().extractionSemanticsVersion().isBlank());
         assertEquals(TARGET_COLLECTION_NAME, ingestionRecordCaptor.getValue().collectionName());
@@ -126,7 +127,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
@@ -137,7 +138,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 progressTracker,
                 ingestedFilePruneService);
@@ -169,7 +170,7 @@ class SourceCodeFileIngestionProcessorTest {
                 List.of("existing-hash"));
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
         when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
                 .thenReturn(0L);
         when(progressTracker.formatPercent()).thenReturn("100%");
@@ -202,7 +203,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
         SourceCodeFileIngestionProcessor ingestionProcessor = new SourceCodeFileIngestionProcessor(
@@ -211,7 +212,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 Mockito.mock(ProgressTracker.class),
                 ingestedFilePruneService);
@@ -237,7 +238,8 @@ class SourceCodeFileIngestionProcessorTest {
                 "",
                 List.of("unbound-hash"));
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(unboundIngestionRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl))
+                .thenReturn(Optional.of(unboundIngestionRecord));
         when(chunkProcessingService.processAndStoreChunksForce(
                         anyString(), eq(sourceUrl), eq("Main.java"), anyString()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
@@ -246,8 +248,8 @@ class SourceCodeFileIngestionProcessorTest {
 
         FileIngestionRecord boundIngestionRecord =
                 unboundIngestionRecord.bindCollectionIdentity(TARGET_COLLECTION_NAME);
-        InOrder migrationOrder = inOrder(fileMarkerStore, ingestedFilePruneService);
-        migrationOrder.verify(fileMarkerStore).markFileIngested(sourceUrl, boundIngestionRecord);
+        InOrder migrationOrder = inOrder(fileIngestionMarkerStore, ingestedFilePruneService);
+        migrationOrder.verify(fileIngestionMarkerStore).markFileIngested(sourceUrl, boundIngestionRecord);
         migrationOrder
                 .verify(ingestedFilePruneService)
                 .pruneCollectionFileStrict(TARGET_COLLECTION_NAME, sourceUrl, boundIngestionRecord);
@@ -259,7 +261,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
         SourceCodeFileIngestionProcessor ingestionProcessor = new SourceCodeFileIngestionProcessor(
@@ -268,7 +270,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 Mockito.mock(ProgressTracker.class),
                 ingestedFilePruneService);
@@ -294,9 +296,10 @@ class SourceCodeFileIngestionProcessorTest {
                 "",
                 List.of("unbound-hash"));
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(unboundIngestionRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl))
+                .thenReturn(Optional.of(unboundIngestionRecord));
         doThrow(new IOException("marker write failed"))
-                .when(fileMarkerStore)
+                .when(fileIngestionMarkerStore)
                 .markFileIngested(eq(sourceUrl), any(FileIngestionRecord.class));
 
         SourceFileProcessingResult sourceFileProcessing =
@@ -308,7 +311,11 @@ class SourceCodeFileIngestionProcessorTest {
                 sourceFileProcessing.outcome().failure().orElseThrow().phase());
         verify(ingestedFilePruneService, never())
                 .pruneCollectionFileStrict(anyString(), eq(sourceUrl), any(FileIngestionRecord.class));
-        verifyNoInteractions(chunkProcessingService, hybridVectorService, localStoreService);
+        verify(fileIngestionMarkerStore).readFileIngestionRecord(sourceUrl);
+        verify(fileIngestionMarkerStore).markFileIngested(eq(sourceUrl), any(FileIngestionRecord.class));
+        verifyNoMoreInteractions(localStoreService);
+        verifyNoMoreInteractions(fileIngestionMarkerStore);
+        verifyNoInteractions(chunkProcessingService, hybridVectorService);
     }
 
     @Test
@@ -316,7 +323,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
@@ -327,7 +334,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 progressTracker,
                 ingestedFilePruneService);
@@ -355,7 +362,7 @@ class SourceCodeFileIngestionProcessorTest {
                 fileSizeBytes, lastModifiedMillis, "same-fingerprint", "", TARGET_COLLECTION_NAME, List.of("h1", "h2"));
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
         when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
                 .thenReturn(2L);
 
@@ -379,7 +386,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
@@ -390,7 +397,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 progressTracker,
                 ingestedFilePruneService);
@@ -418,7 +425,7 @@ class SourceCodeFileIngestionProcessorTest {
                 fileSizeBytes, lastModifiedMillis, "same-fingerprint", "", TARGET_COLLECTION_NAME, null);
 
         when(contentHasher.sha256(sourceFilePath)).thenReturn("same-fingerprint");
-        when(fileMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl)).thenReturn(Optional.of(previousFileRecord));
         when(hybridVectorService.countPointsForUrl(TARGET_COLLECTION_NAME, sourceUrl))
                 .thenReturn(1L);
 
@@ -438,7 +445,7 @@ class SourceCodeFileIngestionProcessorTest {
         ChunkProcessingService chunkProcessingService = Mockito.mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = Mockito.mock(HybridVectorService.class);
         LocalStoreService localStoreService = Mockito.mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = Mockito.mock(FileIngestionMarkerStore.class);
         ContentHasher contentHasher = Mockito.mock(ContentHasher.class);
         ProgressTracker progressTracker = Mockito.mock(ProgressTracker.class);
         IngestedFilePruneService ingestedFilePruneService = Mockito.mock(IngestedFilePruneService.class);
@@ -449,7 +456,7 @@ class SourceCodeFileIngestionProcessorTest {
                         chunkProcessingService,
                         contentHasher,
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         Mockito.mock(QdrantCollectionRouter.class)),
                 progressTracker,
                 ingestedFilePruneService);

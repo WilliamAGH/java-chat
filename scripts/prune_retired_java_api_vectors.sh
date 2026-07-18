@@ -9,8 +9,6 @@
 set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
-JAVA_API_SOURCES_MANIFEST="$PROJECT_ROOT/src/main/resources/java-api-documentation-sources.manifest"
 
 readonly RETIRED_JAVA_API_VECTOR_COLLECTION_DEFAULT="java-docs"
 readonly RETIRED_JAVA_API_VECTOR_SCROLL_LIMIT=256
@@ -21,43 +19,10 @@ readonly RETIRED_JAVA_API_VECTOR_REQUEST_TIMEOUT_SECONDS=30
 # shellcheck source=lib/common_qdrant.sh
 source "$SCRIPT_DIRECTORY/lib/common_qdrant.sh"
 
-# Prints the canonical Java API mirror paths from the manifest.
-java_api_relative_mirror_paths() {
-    if [ ! -r "$JAVA_API_SOURCES_MANIFEST" ]; then
-        printf 'Java API source manifest is unreadable: %s\n' "$JAVA_API_SOURCES_MANIFEST" >&2
-        return 1
-    fi
-
-    awk -F '|' '
-        NR == 1 {
-            if ($3 != "relativeMirrorPath") {
-                exit 1
-            }
-            next
-        }
-        NF == 8 && $3 != "" {
-            print $3
-        }
-        NF != 8 {
-            exit 1
-        }
-    ' "$JAVA_API_SOURCES_MANIFEST"
-}
-
 # Returns success when the effective CLI selector includes a Java API mirror.
-# A blank selector and the CLI's canonical "all" selector both include Java API mirrors.
+# A blank selector and "all" both include Java API mirrors.
 java_api_vector_prune_required() {
     local doc_set_filter="$1"
-    local mirror_paths
-    if ! mirror_paths="$(java_api_relative_mirror_paths)"; then
-        printf 'Java API source manifest is invalid: %s\n' "$JAVA_API_SOURCES_MANIFEST" >&2
-        return 2
-    fi
-    if [ -z "$mirror_paths" ]; then
-        printf 'Java API source manifest contains no mirror paths: %s\n' "$JAVA_API_SOURCES_MANIFEST" >&2
-        return 2
-    fi
-
     local compact_filter="${doc_set_filter//[[:space:]]/}"
     if [ -z "$compact_filter" ]; then
         return 0
@@ -65,7 +30,7 @@ java_api_vector_prune_required() {
 
     local selector
     local trimmed_selector
-    local mirror_path
+    local canonical_java_api_selected=false
     local -a selectors=()
     IFS=',' read -r -a selectors <<< "$doc_set_filter"
     for selector in "${selectors[@]}"; do
@@ -74,13 +39,20 @@ java_api_vector_prune_required() {
         if [[ "$trimmed_selector" =~ ^[Aa][Ll][Ll]$ ]]; then
             return 0
         fi
-        while IFS= read -r mirror_path; do
-            if [ "$trimmed_selector" = "$mirror_path" ]; then
-                return 0
-            fi
-        done <<< "$mirror_paths"
+        case "$trimmed_selector" in
+            java/java21-complete|java/java24-complete|java/java25-complete)
+                canonical_java_api_selected=true
+                ;;
+            java/java*-complete)
+                printf 'Unknown Java API documentation selector: %s\n' "$trimmed_selector" >&2
+                return 2
+                ;;
+        esac
     done
 
+    if [ "$canonical_java_api_selected" = true ]; then
+        return 0
+    fi
     return 1
 }
 

@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.cli;
 
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
+import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.ProgressTracker;
@@ -74,6 +76,35 @@ public class DocumentProcessor {
 
     private static final String DOCSET_ALL_SELECTOR = "all";
     private static final String DOCSET_FILTER_DELIMITER = ",";
+    private static final FileLimit CLI_FILE_LIMIT = new FileLimit(Integer.MAX_VALUE);
+
+    private static final String DOCSET_PDF_BOOKS_NAME = "PDF Books";
+    private static final String DOCSET_PDF_BOOKS_PATH = "books";
+    private static final String DOCSET_JAVA_25_RELEASE_NOTES_NAME = "Java 25 Release Notes Issues";
+    private static final String DOCSET_JAVA_25_RELEASE_NOTES_PATH = "oracle/javase";
+    private static final String DOCSET_IBM_JAVA_25_ARTICLE_NAME = "IBM Java 25 Overview";
+    private static final String DOCSET_IBM_JAVA_25_ARTICLE_PATH = "ibm/articles";
+    private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_NAME = "JetBrains Java 25 Blog";
+    private static final String DOCSET_JETBRAINS_JAVA_25_BLOG_PATH = "jetbrains/idea/2025/09";
+    private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME = "Spring Framework Complete";
+    private static final String DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH = "spring-framework-complete";
+    private static final String DOCSET_SPRING_AI_COMPLETE_NAME = "Spring AI Complete";
+    private static final String DOCSET_SPRING_AI_COMPLETE_PATH = "spring-ai-complete";
+
+    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_NAME = "Spring Framework Quick";
+    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_PATH = "spring-framework";
+    private static final String DOCSET_SPRING_AI_QUICK_NAME = "Spring AI Quick";
+    private static final String DOCSET_SPRING_AI_QUICK_PATH = "spring-ai";
+
+    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = buildBaseDocumentationSets();
+
+    private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
+            new DocumentationSet(DOCSET_SPRING_FRAMEWORK_QUICK_NAME, DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
+            new DocumentationSet(DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH));
+
+    private static final List<DocumentationSet> ALL_DOCUMENTATION_SETS = Stream.concat(
+                    BASE_DOCUMENTATION_SETS.stream(), QUICK_DOCUMENTATION_SETS.stream())
+            .toList();
 
     private static final String SKIP_REASON_INVALID_PATH = "invalid path";
     private static final String SKIP_REASON_DIR_MISSING = "directory not found";
@@ -198,7 +229,7 @@ public class DocumentProcessor {
         final long startMillis = System.currentTimeMillis();
         try {
             final IngestionLocalOutcome outcome =
-                    ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
+                    ingestionService.ingestLocalDirectory(docsPath.toString(), CLI_FILE_LIMIT);
             final int processed = outcome.processed();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
@@ -274,20 +305,43 @@ public class DocumentProcessor {
         LOGGER.info(LOG_BLANK_LINE);
     }
 
+    private static List<DocumentationSet> buildBaseDocumentationSets() {
+        List<DocumentationSet> baseDocumentationSets = new ArrayList<>();
+        baseDocumentationSets.add(new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH));
+        baseDocumentationSets.addAll(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                .map(javaApiDocumentationSource -> new DocumentationSet(
+                        javaApiDocumentationSource.displayName(), javaApiDocumentationSource.relativeMirrorPath()))
+                .toList());
+        baseDocumentationSets.addAll(DocsSourceRegistry.documentationSources().stream()
+                .map(documentationSource -> new DocumentationSet(
+                        documentationSource.displayName(), documentationSource.relativeMirrorPath()))
+                .toList());
+        baseDocumentationSets.addAll(List.of(
+                new DocumentationSet(DOCSET_JAVA_25_RELEASE_NOTES_NAME, DOCSET_JAVA_25_RELEASE_NOTES_PATH),
+                new DocumentationSet(DOCSET_IBM_JAVA_25_ARTICLE_NAME, DOCSET_IBM_JAVA_25_ARTICLE_PATH),
+                new DocumentationSet(DOCSET_JETBRAINS_JAVA_25_BLOG_NAME, DOCSET_JETBRAINS_JAVA_25_BLOG_PATH),
+                new DocumentationSet(DOCSET_SPRING_FRAMEWORK_COMPLETE_NAME, DOCSET_SPRING_FRAMEWORK_COMPLETE_PATH),
+                new DocumentationSet(DOCSET_SPRING_AI_COMPLETE_NAME, DOCSET_SPRING_AI_COMPLETE_PATH)));
+        return List.copyOf(baseDocumentationSets);
+    }
+
     private List<DocumentationSet> selectDocumentationSets(final EnvironmentConfig config) {
-        final String filter = config.docSetFilter();
+        return selectDocumentationSets(config.docSetFilter(), config.includeQuickSets());
+    }
+
+    List<DocumentationSet> selectDocumentationSets(final String filter, final boolean includeQuickSets) {
         if (filter == null || filter.isBlank()) {
-            if (config.includeQuickSets()) {
-                return DocumentationSetCatalog.allSets();
+            if (includeQuickSets) {
+                return ALL_DOCUMENTATION_SETS;
             }
-            return DocumentationSetCatalog.baseSets();
+            return BASE_DOCUMENTATION_SETS;
         }
         final Set<String> selectorTokens = parseDocSetFilter(filter);
         if (selectorTokens.isEmpty() || selectorTokens.stream().anyMatch(DOCSET_ALL_SELECTOR::equalsIgnoreCase)) {
-            return DocumentationSetCatalog.allSets();
+            return ALL_DOCUMENTATION_SETS;
         }
         final List<DocumentationSet> selectedDocumentationSets = new ArrayList<>();
-        for (DocumentationSet documentationSet : DocumentationSetCatalog.allSets()) {
+        for (DocumentationSet documentationSet : ALL_DOCUMENTATION_SETS) {
             if (documentationSet.matchesSelectorTokens(selectorTokens)) {
                 selectedDocumentationSets.add(documentationSet);
             }
@@ -296,7 +350,7 @@ public class DocumentProcessor {
             throw new DocumentProcessingException(String.format(
                     Locale.ROOT,
                     "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                    formatDocSetSummary(DocumentationSetCatalog.allSets())));
+                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
         }
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_DOCSET_FILTER);

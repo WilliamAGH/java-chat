@@ -24,30 +24,32 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class IngestedFilePruneService {
+    private static final int TRUNCATED_CHUNK_HASH_PREFIX_LENGTH = 12;
+    private static final int SHA_256_HEX_LENGTH = 64;
     private static final String PARSED_CHUNK_FILE_EXTENSION = ".txt";
 
     private final HybridVectorService hybridVectorService;
     private final LocalStoreService localStoreService;
+    private final FileIngestionMarkerStore fileIngestionMarkerStore;
     private final ContentHasher contentHasher;
-    private final FileIngestionMarkerStore fileMarkerStore;
 
     /**
      * Creates a prune service for vector-store and local-marker cleanup.
      *
      * @param hybridVectorService hybrid vector storage service
      * @param localStoreService local marker and parsed-chunk store
+     * @param fileIngestionMarkerStore file marker storage
      * @param contentHasher content hash helper
-     * @param fileMarkerStore canonical file-level marker store
      */
     public IngestedFilePruneService(
             HybridVectorService hybridVectorService,
             LocalStoreService localStoreService,
-            ContentHasher contentHasher,
-            FileIngestionMarkerStore fileMarkerStore) {
+            FileIngestionMarkerStore fileIngestionMarkerStore,
+            ContentHasher contentHasher) {
         this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
         this.localStoreService = Objects.requireNonNull(localStoreService, "localStoreService");
+        this.fileIngestionMarkerStore = Objects.requireNonNull(fileIngestionMarkerStore, "fileIngestionMarkerStore");
         this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
-        this.fileMarkerStore = Objects.requireNonNull(fileMarkerStore, "fileMarkerStore");
     }
 
     /**
@@ -69,7 +71,7 @@ public class IngestedFilePruneService {
      * Strictly prunes a file from every specified collection before deleting its local ingestion state.
      *
      * <p>Deferring local cleanup until every vector deletion succeeds preserves the marker needed to retry
-     * a partially completed legacy-record prune.</p>
+     * a partially completed prior-format marker prune.</p>
      *
      * @param collectionNames target Qdrant collection names
      * @param sourceUrl authoritative URL key for file markers and vectors
@@ -92,7 +94,7 @@ public class IngestedFilePruneService {
      * <p>The current collection is intentionally absent from {@code supersededCollectionNames}; its URL-scoped
      * replacement is owned by {@link HybridVectorService#replaceUrlDocuments}. The file marker is also retained so
      * the caller can atomically replace it only after every vector and chunk-state operation succeeds. Marker cleanup
-     * precedes parsed-chunk deletion so a failed cleanup retains the stored hash-prefix evidence required for retry.</p>
+     * precedes parsed-chunk deletion so a failed cleanup retains the exact stored hash evidence required for retry.</p>
      *
      * @param supersededCollectionNames prior collections that no longer own the source URL
      * @param sourceUrl authoritative URL key for local state and vectors
@@ -122,13 +124,15 @@ public class IngestedFilePruneService {
         if (previousFileRecord != null) {
             obsoleteChunkHashes.addAll(previousFileRecord.chunkHashes());
         }
+        parsedChunkReferences.stream()
+                .map(ParsedChunkReference::canonicalChunkHash)
+                .filter(parsedChunkHash -> !parsedChunkHash.isBlank())
+                .filter(parsedChunkHash -> !replacementHashSet.contains(parsedChunkHash))
+                .forEach(obsoleteChunkHashes::add);
         obsoleteChunkHashes.removeAll(replacementHashSet);
         if (!obsoleteChunkHashes.isEmpty()) {
             localStoreService.deleteChunkIngestionMarkers(List.copyOf(obsoleteChunkHashes));
         }
-        localStoreService.deleteObsoleteChunkIngestionMarkersByHashPrefixes(
-                obsoleteStoredHashPrefixes(parsedChunkReferences, replacementHashSet),
-                List.copyOf(replacementChunkHashes));
         deleteObsoleteParsedChunks(parsedChunkReferences, replacementHashSet);
     }
 
@@ -150,7 +154,7 @@ public class IngestedFilePruneService {
             localStoreService.deleteChunkIngestionMarkers(staleChunkHashes);
         }
         localStoreService.deleteParsedChunksForUrl(sourceUrl);
-        fileMarkerStore.deleteFileIngestionRecord(sourceUrl);
+        fileIngestionMarkerStore.deleteFileIngestionRecord(sourceUrl);
     }
 
     private List<String> resolveChunkHashesForPrune(String sourceUrl, FileIngestionRecord previousFileRecord)
@@ -165,11 +169,12 @@ public class IngestedFilePruneService {
     }
 
     private List<String> reconstructChunkHashesFromParsedChunks(String sourceUrl) throws IOException {
-        Set<String> reconstructedHashSet = new LinkedHashSet<>();
+        Set<String> canonicalHashSet = new LinkedHashSet<>();
         readParsedChunkReferences(sourceUrl).stream()
-                .map(ParsedChunkReference::reconstructedChunkHash)
-                .forEach(reconstructedHashSet::add);
-        return List.copyOf(reconstructedHashSet);
+                .map(ParsedChunkReference::canonicalChunkHash)
+                .filter(canonicalChunkHash -> !canonicalChunkHash.isBlank())
+                .forEach(canonicalHashSet::add);
+        return List.copyOf(canonicalHashSet);
     }
 
     private List<ParsedChunkReference> readParsedChunkReferences(String sourceUrl) throws IOException {
@@ -206,24 +211,30 @@ public class IngestedFilePruneService {
                 if (firstUnderscorePosition <= 0) {
                     continue;
                 }
-                int hashPrefixStart = firstUnderscorePosition + 1;
-                int hashPrefixEnd = parsedChunkIdentitySuffix.length() - PARSED_CHUNK_FILE_EXTENSION.length();
-                if (hashPrefixStart >= hashPrefixEnd) {
+                int storedHashStart = firstUnderscorePosition + 1;
+                int storedHashEnd = parsedChunkIdentitySuffix.length() - PARSED_CHUNK_FILE_EXTENSION.length();
+                if (storedHashStart >= storedHashEnd) {
                     continue;
                 }
                 String chunkIndexToken = parsedChunkIdentitySuffix.substring(0, firstUnderscorePosition);
-                String storedChunkHashPrefix = parsedChunkIdentitySuffix.substring(hashPrefixStart, hashPrefixEnd);
+                String storedChunkHash = parsedChunkIdentitySuffix.substring(storedHashStart, storedHashEnd);
                 int chunkIndex;
                 try {
                     chunkIndex = Integer.parseInt(chunkIndexToken);
                 } catch (NumberFormatException malformedChunkIndex) {
                     continue;
                 }
-                String chunkText = Files.readString(parsedChunkPath, StandardCharsets.UTF_8);
-                String reconstructedHash = contentHasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
-                if (!reconstructedHash.isBlank()) {
+                if (isFullCanonicalChunkHash(storedChunkHash)) {
+                    parsedChunkReferences.add(new ParsedChunkReference(parsedChunkPath, storedChunkHash, ""));
+                    continue;
+                }
+                if (isTruncatedChunkHashPrefix(storedChunkHash)) {
+                    String chunkText = Files.readString(parsedChunkPath, StandardCharsets.UTF_8);
+                    String reconstructedChunkHash = contentHasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
+                    String canonicalChunkHash =
+                            reconstructedChunkHash.startsWith(storedChunkHash) ? reconstructedChunkHash : "";
                     parsedChunkReferences.add(
-                            new ParsedChunkReference(parsedChunkPath, storedChunkHashPrefix, reconstructedHash));
+                            new ParsedChunkReference(parsedChunkPath, canonicalChunkHash, storedChunkHash));
                 }
             }
         }
@@ -262,22 +273,31 @@ public class IngestedFilePruneService {
         }
     }
 
-    private static List<String> obsoleteStoredHashPrefixes(
-            List<ParsedChunkReference> parsedChunkReferences, Set<String> replacementHashSet) {
-        return parsedChunkReferences.stream()
-                .filter(parsedChunkReference -> !belongsToReplacement(parsedChunkReference, replacementHashSet))
-                .map(ParsedChunkReference::storedChunkHashPrefix)
-                .distinct()
-                .toList();
-    }
-
     private static boolean belongsToReplacement(
             ParsedChunkReference parsedChunkReference, Set<String> replacementHashSet) {
-        return replacementHashSet.stream()
-                .anyMatch(replacementChunkHash ->
-                        replacementChunkHash.startsWith(parsedChunkReference.storedChunkHashPrefix()));
+        String canonicalChunkHash = parsedChunkReference.canonicalChunkHash();
+        if (!canonicalChunkHash.isBlank()) {
+            return replacementHashSet.contains(canonicalChunkHash);
+        }
+        String storedHashPrefix = parsedChunkReference.storedHashPrefix();
+        return !storedHashPrefix.isBlank()
+                && replacementHashSet.stream()
+                        .anyMatch(replacementHash -> replacementHash.startsWith(storedHashPrefix));
     }
 
-    private record ParsedChunkReference(
-            Path parsedChunkPath, String storedChunkHashPrefix, String reconstructedChunkHash) {}
+    private static boolean isFullCanonicalChunkHash(String storedChunkHash) {
+        return storedChunkHash.length() == SHA_256_HEX_LENGTH
+                && storedChunkHash.chars().allMatch(IngestedFilePruneService::isLowercaseHexadecimalCharacter);
+    }
+
+    private static boolean isTruncatedChunkHashPrefix(String storedChunkHash) {
+        return storedChunkHash.length() == TRUNCATED_CHUNK_HASH_PREFIX_LENGTH
+                && storedChunkHash.chars().allMatch(IngestedFilePruneService::isLowercaseHexadecimalCharacter);
+    }
+
+    private static boolean isLowercaseHexadecimalCharacter(int characterCode) {
+        return (characterCode >= '0' && characterCode <= '9') || (characterCode >= 'a' && characterCode <= 'f');
+    }
+
+    private record ParsedChunkReference(Path parsedChunkPath, String canonicalChunkHash, String storedHashPrefix) {}
 }

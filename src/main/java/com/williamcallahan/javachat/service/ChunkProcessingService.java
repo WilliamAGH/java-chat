@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -193,15 +194,16 @@ public class ChunkProcessingService {
 
     private String generateChunkContentHash(
             ChunkSegment chunkSegment, String sourceUrl, int chunkIndex, String chunkText) {
-        return chunkSegment
-                .javadocAnchor()
-                .map(exactJavadocAnchor -> hasher.sha256(
-                        javadocMemberChunkHashInput(sourceUrl, chunkIndex, chunkText, exactJavadocAnchor)))
-                .orElseGet(() -> hasher.generateChunkHash(sourceUrl, chunkIndex, chunkText));
+        JavadocMemberAnchor memberAnchor = chunkSegment.javadocMemberAnchor();
+        if (memberAnchor == null) {
+            return hasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
+        }
+        return hasher.sha256(javadocMemberChunkHashInput(sourceUrl, chunkIndex, chunkText, memberAnchor));
     }
 
     private static String javadocMemberChunkHashInput(
-            String sourceUrl, int chunkIndex, String chunkText, String exactJavadocAnchor) {
+            String sourceUrl, int chunkIndex, String chunkText, JavadocMemberAnchor memberAnchor) {
+        String anchorIdentifier = memberAnchor.domIdentifier();
         return new StringBuilder(JAVADOC_MEMBER_CHUNK_HASH_VERSION)
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
                 .append(sourceUrl.length())
@@ -210,9 +212,9 @@ public class ChunkProcessingService {
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
                 .append(chunkIndex)
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
-                .append(exactJavadocAnchor.length())
+                .append(anchorIdentifier.length())
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
-                .append(exactJavadocAnchor)
+                .append(anchorIdentifier)
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
                 .append(chunkText.length())
                 .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
@@ -369,16 +371,15 @@ public class ChunkProcessingService {
      * <p>Overview sections have no member anchor. Member sections require the exact DOM identifier from the
      * source page, preserving precise citations without fragmenting the page's storage identity.</p>
      *
-     * @param text extracted section text
-     * @param javadocAnchor exact optional DOM member identifier
      */
-    public record JavaApiPageSegment(String text, Optional<String> javadocAnchor) {
+    public static final class JavaApiPageSegment {
 
-        /** Validates extracted section text and its optional exact DOM identifier. */
-        public JavaApiPageSegment {
-            text = Objects.requireNonNull(text, "text");
-            javadocAnchor = Objects.requireNonNull(javadocAnchor, "javadocAnchor");
-            javadocAnchor.ifPresent(ChunkProcessingService::requireExactJavadocAnchor);
+        private final String text;
+        private final JavadocMemberAnchor javadocMemberAnchor;
+
+        private JavaApiPageSegment(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            this.text = Objects.requireNonNull(text, "text");
+            this.javadocMemberAnchor = javadocMemberAnchor;
         }
 
         /**
@@ -388,22 +389,43 @@ public class ChunkProcessingService {
          * @return an unanchored page section
          */
         public static JavaApiPageSegment overview(String text) {
-            return new JavaApiPageSegment(text, Optional.empty());
+            return new JavaApiPageSegment(text, null);
         }
 
         /**
-         * Creates a member section that cites the exact DOM fragment on its containing page.
+         * Creates a member section from the canonical exact DOM identifier.
          *
          * @param text extracted member-section text
-         * @param exactJavadocAnchor exact DOM member identifier without a leading hash
+         * @param javadocMemberAnchor exact validated DOM member identifier
          * @return an anchored member section
          */
-        public static JavaApiPageSegment member(String text, String exactJavadocAnchor) {
-            return new JavaApiPageSegment(text, Optional.of(requireExactJavadocAnchor(exactJavadocAnchor)));
+        public static JavaApiPageSegment member(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            return new JavaApiPageSegment(text, Objects.requireNonNull(javadocMemberAnchor, "javadocMemberAnchor"));
+        }
+
+        /**
+         * Returns the extracted section text.
+         *
+         * @return section text supplied to the named factory
+         */
+        public String text() {
+            return text;
+        }
+
+        /**
+         * Returns the typed member anchor associated with this section.
+         *
+         * @return member anchor, or empty for a page overview
+         */
+        public Optional<JavadocMemberAnchor> javadocMemberAnchor() {
+            return Optional.ofNullable(javadocMemberAnchor);
         }
 
         private ChunkSegment toChunkSegment() {
-            return new ChunkSegment(text, javadocAnchor);
+            if (javadocMemberAnchor == null) {
+                return ChunkSegment.withoutJavadocAnchor(text);
+            }
+            return ChunkSegment.withJavadocAnchor(text, javadocMemberAnchor);
         }
     }
 
@@ -433,23 +455,28 @@ public class ChunkProcessingService {
         void saveChunkText(String url, int index, String text, String hash) throws IOException;
     }
 
-    private record ChunkSegment(String text, Optional<String> javadocAnchor) {
+    private record ChunkSegment(String text, JavadocMemberAnchor javadocMemberAnchor) {
+
         private ChunkSegment {
-            text = Objects.requireNonNull(text, "text");
-            javadocAnchor = Objects.requireNonNull(javadocAnchor, "javadocAnchor");
+            Objects.requireNonNull(text, "text");
         }
 
         private static ChunkSegment withoutJavadocAnchor(String text) {
-            return new ChunkSegment(text, Optional.empty());
+            return new ChunkSegment(text, null);
+        }
+
+        private static ChunkSegment withJavadocAnchor(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            return new ChunkSegment(text, Objects.requireNonNull(javadocMemberAnchor, "javadocMemberAnchor"));
         }
 
         private DocumentFactory.ChunkDocumentMetadata toDocumentMetadata(
                 String url, String title, int chunkIndex, String packageName, String contentHash) {
-            return javadocAnchor
-                    .map(anchor -> DocumentFactory.ChunkDocumentMetadata.withAnchor(
-                            url, title, chunkIndex, packageName, contentHash, anchor))
-                    .orElseGet(() -> DocumentFactory.ChunkDocumentMetadata.withoutAnchor(
-                            url, title, chunkIndex, packageName, contentHash));
+            if (javadocMemberAnchor == null) {
+                return DocumentFactory.ChunkDocumentMetadata.withoutAnchor(
+                        url, title, chunkIndex, packageName, contentHash);
+            }
+            return DocumentFactory.ChunkDocumentMetadata.withAnchor(
+                    url, title, chunkIndex, packageName, contentHash, javadocMemberAnchor);
         }
     }
 
@@ -459,15 +486,5 @@ public class ChunkProcessingService {
             throw new IllegalArgumentException("sourceUrl must be an unpadded URL without a fragment");
         }
         return requiredUrl;
-    }
-
-    private static String requireExactJavadocAnchor(String exactJavadocAnchor) {
-        String requiredAnchor = Objects.requireNonNull(exactJavadocAnchor, "exactJavadocAnchor");
-        if (requiredAnchor.isBlank()
-                || !requiredAnchor.equals(requiredAnchor.trim())
-                || requiredAnchor.indexOf('#') >= 0) {
-            throw new IllegalArgumentException("exactJavadocAnchor must be an unpadded DOM identifier without '#'");
-        }
-        return requiredAnchor;
     }
 }

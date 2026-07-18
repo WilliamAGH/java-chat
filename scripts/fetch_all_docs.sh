@@ -14,15 +14,9 @@ source "$SCRIPT_DIR/lib/env_loader.sh"
 source "$SCRIPT_DIR/lib/documentation_sources.sh"
 # shellcheck source=lib/documentation_fetch_sources.sh
 source "$SCRIPT_DIR/lib/documentation_fetch_sources.sh"
-# shellcheck source=lib/documentation_fetch_metadata.sh
-source "$SCRIPT_DIR/lib/documentation_fetch_metadata.sh"
 # shellcheck source=lib/documentation_seed_mirrors.sh
 source "$SCRIPT_DIR/lib/documentation_seed_mirrors.sh"
 
-# Centralized source definitions
-RES_PROPS="$SCRIPT_DIR/../src/main/resources/docs-sources.properties"
-JAVA_API_SOURCES_MANIFEST="$SCRIPT_DIR/../src/main/resources/java-api-documentation-sources.manifest"
-DOCUMENTATION_SOURCES_MANIFEST="$SCRIPT_DIR/../src/main/resources/documentation-sources.manifest"
 DOCS_ROOT="$SCRIPT_DIR/../data/docs"
 LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
 
@@ -30,11 +24,19 @@ LOG_FILE="$SCRIPT_DIR/../fetch_all_docs.log"
 INCLUDE_QUICK="${INCLUDE_QUICK:-false}"
 CLEAN_INCOMPLETE="${CLEAN_INCOMPLETE:-true}"
 FORCE_REFRESH="${FORCE_REFRESH:-false}"
-LIST_JAVA_API_SOURCES="false"
-LIST_DOCUMENTATION_SOURCES="false"
 DOCUMENTATION_SOURCE_SELECTOR_ENABLED="false"
 DOCUMENTATION_SOURCE_SELECTOR=""
 DOCUMENTATION_FETCH_PARTIAL_STATUS=2
+
+JAVA25_RELEASE_NOTES_ISSUES_URL="${JAVA25_RELEASE_NOTES_ISSUES_URL:-https://www.oracle.com/java/technologies/javase/25-relnote-issues.html}"
+IBM_JAVA25_ARTICLE_URL="${IBM_JAVA25_ARTICLE_URL:-https://developer.ibm.com/articles/java-whats-new-java25/}"
+JETBRAINS_JAVA25_BLOG_URL="${JETBRAINS_JAVA25_BLOG_URL:-https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/}"
+SPRING_FRAMEWORK_REFERENCE_BASE="${SPRING_FRAMEWORK_REFERENCE_BASE:-https://docs.spring.io/spring-framework/reference/}"
+SPRING_FRAMEWORK_API_BASE="${SPRING_FRAMEWORK_API_BASE:-https://docs.spring.io/spring-framework/docs/current/javadoc-api/}"
+SPRING_AI_REFERENCE_BASE="${SPRING_AI_REFERENCE_BASE:-https://docs.spring.io/spring-ai/reference/}"
+SPRING_AI_REFERENCE_2_BASE="${SPRING_AI_REFERENCE_2_BASE:-https://docs.spring.io/spring-ai/reference/2.0/}"
+SPRING_AI_API_STABLE_BASE="${SPRING_AI_API_STABLE_BASE:-https://docs.spring.io/spring-ai/docs/current/api/}"
+SPRING_AI_API_2_BASE="${SPRING_AI_API_2_BASE:-https://docs.spring.io/spring-ai/docs/2.0.x/api/}"
 
 parse_fetch_arguments() {
     local fetch_argument
@@ -49,12 +51,6 @@ parse_fetch_arguments() {
             --force)
                 FORCE_REFRESH="true"
                 ;;
-            --list-java-api-sources)
-                LIST_JAVA_API_SOURCES="true"
-                ;;
-            --list-documentation-sources)
-                LIST_DOCUMENTATION_SOURCES="true"
-                ;;
             --doc-sets=*)
                 if [ "$DOCUMENTATION_SOURCE_SELECTOR_ENABLED" = "true" ]; then
                     echo "--doc-sets can be specified only once"
@@ -64,13 +60,11 @@ parse_fetch_arguments() {
                 DOCUMENTATION_SOURCE_SELECTOR="${fetch_argument#--doc-sets=}"
                 ;;
             --help|-h)
-                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=SOURCE_IDENTIFIER,...] [--list-java-api-sources] [--list-documentation-sources]"
+                echo "Usage: $0 [--include-quick] [--no-clean] [--force] [--doc-sets=SOURCE_IDENTIFIER,...]"
                 echo "  --include-quick : Also refresh small 'quick' doc mirrors"
                 echo "  --no-clean      : Do not quarantine incomplete mirrors before refetch"
                 echo "  --force         : Refresh even when mirrors look complete"
-                echo "  --doc-sets      : Fetch only canonical non-Java docSet or Java API relativeMirrorPath rows"
-                echo "  --list-java-api-sources : Print canonical Java API source projections without fetching"
-                echo "  --list-documentation-sources : Print canonical non-Java source projections without fetching"
+                echo "  --doc-sets      : Fetch only named official documentation sets"
                 exit 0
                 ;;
             *)
@@ -187,48 +181,52 @@ quarantine_versioned_reference_subdirs() {
     shopt -u nullglob
 }
 
-# Dispatches documentation fetching, then retires a superseded mirror only after
-# the canonical replacement has passed its strategy-specific validation.
-#
-# Arguments (canonical manifest order):
-#   $1 - Java release, blank only for non-Java documentation
-#   $2 - URL
-#   $3 - relative mirror path beneath DOCS_ROOT
-#   $4 - human-readable name
-#   $5 - --cut-dirs value
-#   $6 - minimum required HTML files
-#   $7 - reject regex (optional)
-#   $8 - whether a nonempty partial mirror is retained for incremental reruns
-#   $9 - structured seed document type, blank for recursive mirroring
-#   $10 - structured seed discovery URL
-#   $11 - exact source prefix mapped onto the canonical URL
-#   $12 - exact superseded mirror path quarantined after successful replacement
-fetch_docs() {
-    local java_release="$1"
-    local url="$2"
-    local relative_mirror_path="$3"
-    local name="$4"
-    local cut_dirs="$5"
-    local min_files="$6"
-    local reject_regex="${7:-}"
-    local partial_mirror_allowed="$8"
-    local seed_document_type="${9:-}"
-    local seed_discovery_url="${10:-}"
-    local seed_source_prefix="${11:-}"
-    local superseded_relative_mirror_path="${12:-}"
+# Dispatches one explicitly named documentation source, then retires a superseded mirror only after
+# the replacement has passed its strategy-specific validation.
+fetch_source() {
+    local java_release=""
+    local url=""
+    local relative_mirror_path=""
+    local name=""
+    local cut_dirs=""
+    local min_files=""
+    local reject_regex=""
+    local partial_mirror_allowed="false"
+    local seed_document_type=""
+    local seed_discovery_url=""
+    local seed_source_prefix=""
+    local superseded_relative_mirror_path=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --java-release) java_release="$2"; shift 2 ;;
+            --url) url="$2"; shift 2 ;;
+            --mirror-path) relative_mirror_path="$2"; shift 2 ;;
+            --name) name="$2"; shift 2 ;;
+            --cut-directories) cut_dirs="$2"; shift 2 ;;
+            --minimum-html-files) min_files="$2"; shift 2 ;;
+            --reject-regex) reject_regex="$2"; shift 2 ;;
+            --allow-partial) partial_mirror_allowed="true"; shift ;;
+            --seed-document-type) seed_document_type="$2"; shift 2 ;;
+            --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
+            --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
+            --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
+            *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
+        esac
+    done
+    if [ -z "$url" ] || [ -z "$relative_mirror_path" ] || [ -z "$name" ] \
+        || [ -z "$cut_dirs" ] || [ -z "$min_files" ]; then
+        echo "Documentation fetch requires URL, mirror path, name, cut directories, and minimum HTML files" >&2
+        return 1
+    fi
+
+    echo ""
+    log "Processing: $name"
+    log "URL: $url"
+    log "Target: $DOCS_ROOT/$relative_mirror_path"
     local target_dir="$DOCS_ROOT/$relative_mirror_path"
     local fetch_target_directory="$target_dir"
     local staging_directory=""
-
-    # Allow config-friendly placeholder for regex alternation without breaking our field delimiter.
-    reject_regex="${reject_regex//__OR__/|}"
-
-    if [ -n "$superseded_relative_mirror_path" ] \
-        && ! require_lifecycle_root_disjoint_from_external_fetch_roots \
-            "$superseded_relative_mirror_path"; then
-        log "${RED}✗ Superseded mirror overlaps an external active mirror: $superseded_relative_mirror_path${NC}"
-        return 1
-    fi
 
     if [ -n "$superseded_relative_mirror_path" ] \
         && [ -e "$DOCS_ROOT/$superseded_relative_mirror_path" ] \
@@ -358,8 +356,8 @@ fetch_docs() {
 
 record_documentation_fetch() {
     local fetch_strategy="$1"
-    local documentation_source_projection="$2"
-    if "$fetch_strategy" "$documentation_source_projection"; then
+    shift
+    if "$fetch_strategy" "$@"; then
         TOTAL_FETCHED=$((TOTAL_FETCHED + 1))
         return
     else
@@ -375,133 +373,83 @@ record_documentation_fetch() {
     log "${RED}Error: Failed to fetch documentation source; auditing the remaining sources before exit${NC}"
 }
 
-# Selects exact canonical identities from both source manifests before any fetch begins.
-# Non-Java documentation retains its manifest-owned docSet identifier; Java APIs use
-# their manifest-owned relativeMirrorPath identifier. This keeps the CLI scoped while
-# preserving each source family's distinct fetch projection contract.
-select_canonical_documentation_fetch_sources() {
-    local requested_source_selector="$1"
-    local -a requested_source_identifiers=()
-    local -a retained_source_identifiers=("")
-    local -a selected_documentation_source_projections=()
-    local -a selected_java_api_source_projections=()
+fetch_named_official_source() {
+    local source_identifier="$1"
+    local source_dispatch="${2:-record_documentation_fetch}"
+    case "$source_identifier" in
+        dev-java) "$source_dispatch" fetch_source --url "https://dev.java/learn/" --mirror-path "dev-java" --name "Dev.java Learning" --cut-directories 1 --minimum-html-files 40 ;;
+        kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin Documentation" --cut-directories 1 --minimum-html-files 250 --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" --superseded-mirror-path "kotlin/2.4.10" ;;
+        scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --cut-directories 2 --minimum-html-files 200 --superseded-mirror-path "scala/3.8.4" ;;
+        groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --cut-directories 4 --minimum-html-files 15 ;;
+        clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" --superseded-mirror-path "clojure/1.12.5" ;;
+        spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" --superseded-mirror-path "spring-boot/4.1.0" ;;
+        quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --superseded-mirror-path "quarkus/3.37.3" ;;
+        java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --cut-directories 5 --minimum-html-files 5000 --allow-partial ;;
+        java/java24-complete) "$source_dispatch" fetch_source --java-release 24 --url "https://docs.oracle.com/en/java/javase/24/docs/api/" --mirror-path "java/java24-complete" --name "Java 24 Complete API" --cut-directories 5 --minimum-html-files 5000 --allow-partial ;;
+        java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --cut-directories 5 --minimum-html-files 5000 --allow-partial ;;
+        *) echo "Unknown documentation source identifier: $source_identifier" >&2; return 1 ;;
+    esac
+}
 
+fetch_selected_official_sources() {
+    local requested_source_selector="$1"
     if [ -z "$requested_source_selector" ] \
         || [[ "$requested_source_selector" == ,* ]] \
         || [[ "$requested_source_selector" == *, ]] \
         || [[ "$requested_source_selector" == *,,* ]]; then
-        echo "Documentation source selector contains a blank canonical identifier" >&2
+        echo "Documentation source selector contains a blank identifier" >&2
         return 1
     fi
-
+    local -a requested_source_identifiers=()
     local IFS=','
     read -r -a requested_source_identifiers <<< "$requested_source_selector"
-
+    local -a validated_source_identifiers=()
     local requested_source_identifier
-    local retained_source_identifier
     for requested_source_identifier in "${requested_source_identifiers[@]}"; do
-        if has_boundary_whitespace "$requested_source_identifier" \
-            || has_manifest_control_character "$requested_source_identifier"; then
-            echo "Documentation source selector has an invalid canonical identifier: $requested_source_identifier" >&2
-            return 1
-        fi
-        for retained_source_identifier in "${retained_source_identifiers[@]}"; do
-            if [ "$retained_source_identifier" = "$requested_source_identifier" ]; then
-                echo "Documentation source selector duplicates canonical identifier: $requested_source_identifier" >&2
+        local validated_source_identifier
+        for validated_source_identifier in "${validated_source_identifiers[@]+"${validated_source_identifiers[@]}"}"; do
+            if [ "$validated_source_identifier" = "$requested_source_identifier" ]; then
+                echo "Documentation source selector duplicates identifier: $requested_source_identifier" >&2
                 return 1
             fi
         done
-        retained_source_identifiers+=("$requested_source_identifier")
+        fetch_named_official_source "$requested_source_identifier" true || return 1
+        validated_source_identifiers+=("$requested_source_identifier")
     done
-
     for requested_source_identifier in "${requested_source_identifiers[@]}"; do
-        local source_identifier_match_count=0
-        local documentation_source_projection
-        for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-            local documentation_doc_set
-            documentation_doc_set="$(documentation_source_manifest_field \
-                "$documentation_source_projection" \
-                "docSet")"
-            if [ "$documentation_doc_set" = "$requested_source_identifier" ]; then
-                source_identifier_match_count=$((source_identifier_match_count + 1))
-            fi
-        done
-
-        local java_api_source_projection
-        for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
-            local java_api_relative_mirror_path
-            java_api_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
-                "$java_api_source_projection")"
-            if [ "$java_api_relative_mirror_path" = "$requested_source_identifier" ]; then
-                source_identifier_match_count=$((source_identifier_match_count + 1))
-            fi
-        done
-
-        if [ "$source_identifier_match_count" -eq 0 ]; then
-            echo "Unknown documentation source identifier: $requested_source_identifier" >&2
-            return 1
-        fi
-        if [ "$source_identifier_match_count" -gt 1 ]; then
-            echo "Canonical documentation source identifier is ambiguous: $requested_source_identifier" >&2
-            return 1
-        fi
+        fetch_named_official_source "$requested_source_identifier" || return 1
     done
+}
 
-    local documentation_source_projection
-    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-        local documentation_doc_set
-        documentation_doc_set="$(documentation_source_manifest_field \
-            "$documentation_source_projection" \
-            "docSet")"
-        for requested_source_identifier in "${requested_source_identifiers[@]}"; do
-            if [ "$documentation_doc_set" = "$requested_source_identifier" ]; then
-                selected_documentation_source_projections+=("$documentation_source_projection")
-                break
-            fi
-        done
+fetch_all_official_sources() {
+    local source_identifier
+    for source_identifier in dev-java kotlin scala groovy clojure spring-boot quarkus \
+        java/java21-complete java/java24-complete java/java25-complete; do
+        fetch_named_official_source "$source_identifier"
     done
+}
 
-    local java_api_source_projection
-    for java_api_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
-        local java_api_relative_mirror_path
-        java_api_relative_mirror_path="$(documentation_fetch_projection_relative_mirror_path \
-            "$java_api_source_projection")"
-        for requested_source_identifier in "${requested_source_identifiers[@]}"; do
-            if [ "$java_api_relative_mirror_path" = "$requested_source_identifier" ]; then
-                selected_java_api_source_projections+=("$java_api_source_projection")
-                break
-            fi
-        done
-    done
+fetch_legacy_sources() {
+    record_documentation_fetch fetch_source --url "$SPRING_AI_REFERENCE_BASE" --mirror-path "spring-ai-reference" --name "Spring AI Reference (stable)" --cut-directories 1 --minimum-html-files 80 --reject-regex "/spring-ai/reference/[0-9]|/spring-ai/reference/[^/]*SNAPSHOT"
+    record_documentation_fetch fetch_source --url "$SPRING_AI_REFERENCE_2_BASE" --mirror-path "spring-ai-reference-2" --name "Spring AI Reference (2.0)" --cut-directories 1 --minimum-html-files 80 --reject-regex "/spring-ai/reference/[^/]*SNAPSHOT"
+    record_documentation_fetch fetch_source --url "$SPRING_AI_API_STABLE_BASE" --mirror-path "spring-ai-api-stable" --name "Spring AI API (stable)" --cut-directories 1 --minimum-html-files 200
+    record_documentation_fetch fetch_source --url "$SPRING_AI_API_2_BASE" --mirror-path "spring-ai-api-2" --name "Spring AI API (2.x)" --cut-directories 1 --minimum-html-files 200
+    record_documentation_fetch fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework-complete" --name "Spring Framework Reference (current)" --cut-directories 1 --minimum-html-files 3000 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT"
+    record_documentation_fetch fetch_source --url "$SPRING_FRAMEWORK_API_BASE" --mirror-path "spring-framework-complete" --name "Spring Framework Javadoc (current)" --cut-directories 1 --minimum-html-files 7000
+    record_documentation_fetch fetch_source --url "$JAVA25_RELEASE_NOTES_ISSUES_URL" --mirror-path "oracle/javase" --name "Java 25 Release Notes Issues" --cut-directories 3 --minimum-html-files 1
+    record_documentation_fetch fetch_source --url "$IBM_JAVA25_ARTICLE_URL" --mirror-path "ibm/articles" --name "IBM Java 25 Overview" --cut-directories 1 --minimum-html-files 1
+    record_documentation_fetch fetch_source --url "$JETBRAINS_JAVA25_BLOG_URL" --mirror-path "jetbrains/idea/2025/09" --name "JetBrains Java 25 Blog" --cut-directories 3 --minimum-html-files 1
+}
 
-    SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS=(
-        "${selected_documentation_source_projections[@]+"${selected_documentation_source_projections[@]}"}"
-    )
-    SELECTED_JAVA_API_SOURCE_PROJECTIONS=(
-        "${selected_java_api_source_projections[@]+"${selected_java_api_source_projections[@]}"}"
-    )
+fetch_quick_sources() {
+    record_documentation_fetch fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework" --name "Spring Framework Quick (reference landing)" --cut-directories 1 --minimum-html-files 1 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT"
+    record_documentation_fetch fetch_source --url "$SPRING_AI_REFERENCE_BASE" --mirror-path "spring-ai" --name "Spring AI Quick (reference landing)" --cut-directories 1 --minimum-html-files 1 --reject-regex "/spring-ai/reference/[0-9]|/spring-ai/reference/[^/]*SNAPSHOT"
+    record_documentation_fetch fetch_source --url "$SPRING_AI_REFERENCE_2_BASE" --mirror-path "spring-ai-2" --name "Spring AI Quick (2.0 landing)" --cut-directories 1 --minimum-html-files 1 --reject-regex "/spring-ai/reference/[^/]*SNAPSHOT"
 }
 
 run_documentation_fetch() {
 set -euo pipefail
-if [ -f "$RES_PROPS" ]; then
-    preserve_process_env_then_source_file "$RES_PROPS"
-fi
 parse_fetch_arguments "$@"
-
-load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST" || return 1
-load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST" || return 1
-load_builtin_documentation_fetch_projections
-validate_documentation_source_lifecycle_external_roots || return 1
-
-if [ "$LIST_JAVA_API_SOURCES" = "true" ]; then
-    printf '%s\n' "${JAVA_API_SOURCE_PROJECTIONS[@]}"
-    exit 0
-fi
-if [ "$LIST_DOCUMENTATION_SOURCES" = "true" ]; then
-    printf '%s\n' "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"
-    exit 0
-fi
 
 echo "=============================================="
 echo "Consolidated Documentation Fetcher"
@@ -523,29 +471,12 @@ log "Starting documentation fetch process..."
 echo "=============================================="
 
 if [ "$DOCUMENTATION_SOURCE_SELECTOR_ENABLED" = "true" ]; then
-    SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS=()
-    SELECTED_JAVA_API_SOURCE_PROJECTIONS=()
-    select_canonical_documentation_fetch_sources "$DOCUMENTATION_SOURCE_SELECTOR" || return 1
-    for documentation_source_projection in "${SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS[@]+"${SELECTED_DOCUMENTATION_SOURCE_PROJECTIONS[@]}"}"; do
-        record_documentation_fetch fetch_manifest_documentation_source "$documentation_source_projection"
-    done
-    for documentation_source_projection in "${SELECTED_JAVA_API_SOURCE_PROJECTIONS[@]+"${SELECTED_JAVA_API_SOURCE_PROJECTIONS[@]}"}"; do
-        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
-    done
+    fetch_selected_official_sources "$DOCUMENTATION_SOURCE_SELECTOR" || return 1
 else
-    for documentation_source_projection in "${LEGACY_DOCUMENTATION_FETCH_PROJECTIONS[@]}"; do
-        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
-    done
-    for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-        record_documentation_fetch fetch_manifest_documentation_source "$documentation_source_projection"
-    done
-    for documentation_source_projection in "${JAVA_API_SOURCE_PROJECTIONS[@]}"; do
-        record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
-    done
+    fetch_legacy_sources
+    fetch_all_official_sources
     if [ "$INCLUDE_QUICK" = "true" ]; then
-        for documentation_source_projection in "${QUICK_DOCUMENTATION_FETCH_PROJECTIONS[@]}"; do
-            record_documentation_fetch fetch_projection_documentation_source "$documentation_source_projection"
-        done
+        fetch_quick_sources
     fi
 fi
 
@@ -570,7 +501,6 @@ else
 fi
 log "Check log for details: $LOG_FILE"
 
-write_documentation_fetch_metadata
 echo ""
 if [ "$TOTAL_FAILED" -gt 0 ] || [ "$TOTAL_PARTIAL" -gt 0 ]; then
     exit 1

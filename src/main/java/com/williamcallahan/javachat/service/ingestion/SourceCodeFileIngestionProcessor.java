@@ -175,8 +175,9 @@ public class SourceCodeFileIngestionProcessor {
         }
         FileIngestionRecord canonicalFileRecord = previousFileRecord.bindCollectionIdentity(canonicalCollectionName);
         storage.fileMarkers().markFileIngested(sourceUrl, canonicalFileRecord);
-        log.info(
-                "Persisted canonical repository collection identity '{}' for file marker: {}",
+        log.warn(
+                "Legacy repository marker lacked collection identity; bound current canonical collection '{}' "
+                        + "before prune because historical dynamic collection inventory is unavailable: {}",
                 canonicalCollectionName,
                 sourceUrl);
         return canonicalFileRecord;

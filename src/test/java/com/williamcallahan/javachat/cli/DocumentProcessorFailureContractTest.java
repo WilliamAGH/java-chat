@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Logger;
+import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.DocsIngestionService;
@@ -35,6 +36,7 @@ class DocumentProcessorFailureContractTest {
     private static final String FAILURE_PHASE = "synthetic-ingestion";
     private static final String SENSITIVE_FAILURE_DETAILS = "api-key=synthetic-private-value";
     private static final String FORGED_LOG_LINE = "forged-log-line";
+    private static final FileLimit EXPECTED_CLI_FILE_LIMIT = new FileLimit(Integer.MAX_VALUE);
 
     private final Logger documentProcessorLogger = (Logger) LoggerFactory.getLogger(DocumentProcessor.class);
     private ExpectedLogEvents documentProcessorLogEvents;
@@ -63,13 +65,14 @@ class DocumentProcessorFailureContractTest {
         DocsIngestionService ingestionService = mock(DocsIngestionService.class);
         ProgressTracker progressTracker = mock(ProgressTracker.class);
         when(progressTracker.formatPercent()).thenReturn("0%");
-        when(ingestionService.ingestLocalDirectory(failedDocumentationDirectory.toString(), Integer.MAX_VALUE))
+        when(ingestionService.ingestLocalDirectory(failedDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT))
                 .thenReturn(IngestionLocalOutcome.success(
                         1,
                         failedDocumentationDirectory.toString(),
                         List.of(new IngestionLocalFailure(
                                 hostileFailurePath, FAILURE_PHASE, SENSITIVE_FAILURE_DETAILS))));
-        when(ingestionService.ingestLocalDirectory(successfulDocumentationDirectory.toString(), Integer.MAX_VALUE))
+        when(ingestionService.ingestLocalDirectory(
+                        successfulDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT))
                 .thenReturn(IngestionLocalOutcome.success(1, successfulDocumentationDirectory.toString(), List.of()));
 
         DocumentProcessor documentProcessor = new DocumentProcessor(ingestionService, progressTracker);
@@ -88,8 +91,9 @@ class DocumentProcessorFailureContractTest {
                 () -> documentProcessor.processDocumentationSets(temporaryDirectory, documentationSets));
 
         assertEquals("Document processing completed with 1 failed documentation set(s)", thrown.getMessage());
-        verify(ingestionService).ingestLocalDirectory(failedDocumentationDirectory.toString(), Integer.MAX_VALUE);
-        verify(ingestionService).ingestLocalDirectory(successfulDocumentationDirectory.toString(), Integer.MAX_VALUE);
+        verify(ingestionService).ingestLocalDirectory(failedDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT);
+        verify(ingestionService)
+                .ingestLocalDirectory(successfulDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT);
         assertTrue(containsLogMessage(DOCUMENT_PROCESSING_FAILED));
         assertTrue(containsLogMessage(TOTAL_PROCESSED_TWO_DOCUMENTS));
         assertTrue(containsLogMessage(TOTAL_DUPLICATES_ONE_DOCUMENT));

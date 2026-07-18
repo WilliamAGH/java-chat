@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,8 +37,10 @@ class ChunkProcessingServiceTest {
     private static final String MEMBER_TEXT = "Member section for Stream.map.";
     private static final String MEMBER_FIRST_CHUNK_TEXT = "First Stream.map chunk.";
     private static final String MEMBER_SECOND_CHUNK_TEXT = "Second Stream.map chunk.";
-    private static final String STREAM_MAP_ANCHOR = "map(java.util.function.Function)";
-    private static final String STREAM_MAP_TO_DOUBLE_ANCHOR = "mapToDouble(java.util.function.ToDoubleFunction)";
+    private static final JavadocMemberAnchor STREAM_MAP_ANCHOR =
+            new JavadocMemberAnchor("map(java.util.function.Function)");
+    private static final JavadocMemberAnchor STREAM_MAP_TO_DOUBLE_ANCHOR =
+            new JavadocMemberAnchor("mapToDouble(java.util.function.ToDoubleFunction)");
 
     private Chunker chunker;
     private ContentHasher contentHasher;
@@ -129,7 +132,7 @@ class ChunkProcessingServiceTest {
                 .getMetadata()
                 .containsKey(QdrantPayloadFieldSchema.ANCHOR_FIELD));
         assertEquals(
-                List.of(STREAM_MAP_ANCHOR, STREAM_MAP_ANCHOR),
+                List.of(STREAM_MAP_ANCHOR.domIdentifier(), STREAM_MAP_ANCHOR.domIdentifier()),
                 processingOutcome.documents().subList(1, 3).stream()
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.ANCHOR_FIELD))
                         .toList());
@@ -176,7 +179,7 @@ class ChunkProcessingServiceTest {
 
         assertEquals(1, processingOutcome.documents().size());
         assertEquals(
-                STREAM_MAP_ANCHOR,
+                STREAM_MAP_ANCHOR.domIdentifier(),
                 processingOutcome.documents().getFirst().getMetadata().get(QdrantPayloadFieldSchema.ANCHOR_FIELD));
         assertEquals(0, processingOutcome.skippedChunks());
         verify(localStoreService, never()).isHashIngested(anyString());
@@ -222,7 +225,7 @@ class ChunkProcessingServiceTest {
                 originalMemberHash,
                 changedAnchorProcessingOutcome.allChunkHashes().getFirst());
         assertEquals(
-                STREAM_MAP_TO_DOUBLE_ANCHOR,
+                STREAM_MAP_TO_DOUBLE_ANCHOR.domIdentifier(),
                 changedAnchorProcessingOutcome
                         .documents()
                         .getFirst()
@@ -235,7 +238,7 @@ class ChunkProcessingServiceTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ChunkProcessingService.JavaApiPage(
-                        JAVA_API_PAGE_URL + "#" + STREAM_MAP_ANCHOR,
+                        JAVA_API_PAGE_URL + "#" + STREAM_MAP_ANCHOR.domIdentifier(),
                         JAVA_API_PAGE_TITLE,
                         JAVA_API_PACKAGE_NAME,
                         List.of(ChunkProcessingService.JavaApiPageSegment.overview(OVERVIEW_TEXT))));

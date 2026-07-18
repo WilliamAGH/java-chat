@@ -5,7 +5,6 @@ import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.DocumentFactory;
 import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
-import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.JavaApiPageExtraction;
 import com.williamcallahan.javachat.service.LocalStoreService;
@@ -113,7 +112,6 @@ public class LocalDocsFileIngestionProcessor {
         String provenanceAwareIngestionFingerprint =
                 provenanceAwareIngestionFingerprint(fileContentFingerprint, provenance);
         var router = storage.router();
-        FileIngestionMarkerStore fileMarkerStore = storage.fileMarkers();
         QdrantCollectionKind collectionKind =
                 router.route(provenance.docSet(), provenance.docPath(), provenance.docType(), url);
         String collectionName = storage.hybridVector().resolveCollectionName(collectionKind);
@@ -125,7 +123,7 @@ public class LocalDocsFileIngestionProcessor {
 
         final Optional<FileIngestionRecord> priorIngestionRecord;
         try {
-            priorIngestionRecord = fileMarkerStore.readFileIngestionRecord(url);
+            priorIngestionRecord = storage.fileMarkers().readFileIngestionRecord(url);
         } catch (RuntimeException markerReadException) {
             return LocalDocsFileOutcome.failedFile(
                     failureFactory.failure(file, "file-marker-read", markerReadException));
@@ -284,6 +282,78 @@ public class LocalDocsFileIngestionProcessor {
             return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "chunking", chunkingException));
         }
 
+        boolean skippedEveryChunk = chunkingOutcome.skippedAllChunks();
+        boolean skippedPartOfChunkSet = chunkingOutcome.skippedChunks() > 0 && !skippedEveryChunk;
+        if (skippedEveryChunk) {
+            final boolean hasExactPointIds;
+            try {
+                hasExactPointIds = storage.hybridVector()
+                        .hasExactPointIdsForUrl(
+                                collectionKind, url, expectedPointUuids(chunkingOutcome.allChunkHashes()));
+            } catch (RuntimeException consistencyException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(file, "qdrant-consistency-check", consistencyException));
+            }
+            if (hasExactPointIds) {
+                try {
+                    markFileIngested(
+                            url,
+                            new FileIngestionRecord(
+                                    fileSizeBytes,
+                                    lastModifiedMillis,
+                                    provenanceAwareIngestionFingerprint,
+                                    LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                                    collectionName,
+                                    chunkingOutcome.allChunkHashes()));
+                } catch (RuntimeException markerTransitionException) {
+                    return LocalDocsFileOutcome.failedFile(
+                            failureFactory.failure(file, "marker-transition", markerTransitionException));
+                }
+                INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
+                return LocalDocsFileOutcome.skippedFile();
+            }
+            INDEXING_LOG.warn("[INDEXING] Hash markers exist but Qdrant point identities differ; forcing reindex");
+        }
+
+        if (skippedPartOfChunkSet || skippedEveryChunk) {
+            if (skippedPartOfChunkSet) {
+                INDEXING_LOG.warn("[INDEXING] Partial chunk markers detected; forcing complete replacement");
+            }
+            final ChunkProcessingService.ChunkProcessingOutcome completeChunkingOutcome;
+            try {
+                if (fileName.endsWith(".pdf")) {
+                    completeChunkingOutcome =
+                            chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName);
+                } else if (isJavaApiPage) {
+                    completeChunkingOutcome = chunkProcessor.processAndStoreJavaApiPageForce(
+                            new ChunkProcessingService.JavaApiPage(url, title, packageName, javaApiPageSegments));
+                } else {
+                    completeChunkingOutcome =
+                            chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName);
+                }
+            } catch (IOException | RuntimeException completeChunkingException) {
+                return LocalDocsFileOutcome.failedFile(
+                        failureFactory.failure(file, "chunking", completeChunkingException));
+            }
+            List<Document> completeDocuments = completeChunkingOutcome.documents();
+            if (!completeDocuments.isEmpty()) {
+                applyProvenanceMetadata(completeDocuments, provenance);
+                return processDocuments(new DocumentProcessingRequest(
+                        markerContext,
+                        true,
+                        supersededCollectionNames(collectionName, priorIngestionRecord),
+                        completeDocuments,
+                        completeChunkingOutcome.allChunkHashes(),
+                        fileStartMillis));
+            }
+            if (completeChunkingOutcome.generatedNoChunks()) {
+                return LocalDocsFileOutcome.failedFile(
+                        new IngestionLocalFailure(file.toString(), "empty-document", "No content to chunk"));
+            }
+            return LocalDocsFileOutcome.failedFile(
+                    new IngestionLocalFailure(file.toString(), "empty-document", "No chunks generated"));
+        }
+
         List<Document> documents = chunkingOutcome.documents();
         if (!documents.isEmpty()) {
             applyProvenanceMetadata(documents, provenance);
@@ -294,61 +364,6 @@ public class LocalDocsFileIngestionProcessor {
                     documents,
                     chunkingOutcome.allChunkHashes(),
                     fileStartMillis));
-        }
-        if (chunkingOutcome.skippedAllChunks()) {
-            try {
-                boolean hasExactPointIds = storage.hybridVector()
-                        .hasExactPointIdsForUrl(
-                                collectionKind, url, expectedPointUuids(chunkingOutcome.allChunkHashes()));
-                if (!hasExactPointIds) {
-                    INDEXING_LOG.warn(
-                            "[INDEXING] Hash markers exist but Qdrant point identities differ; forcing reindex");
-                    ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome;
-                    if (fileName.endsWith(".pdf")) {
-                        forcedChunkingOutcome =
-                                chunkProcessor.processPdfAndStoreWithPagesForce(file, url, title, packageName);
-                    } else if (isJavaApiPage) {
-                        forcedChunkingOutcome = chunkProcessor.processAndStoreJavaApiPageForce(
-                                new ChunkProcessingService.JavaApiPage(url, title, packageName, javaApiPageSegments));
-                    } else {
-                        forcedChunkingOutcome =
-                                chunkProcessor.processAndStoreChunksForce(bodyText, url, title, packageName);
-                    }
-                    List<Document> forcedDocuments = forcedChunkingOutcome.documents();
-                    if (!forcedDocuments.isEmpty()) {
-                        applyProvenanceMetadata(forcedDocuments, provenance);
-                        return processDocuments(new DocumentProcessingRequest(
-                                markerContext,
-                                true,
-                                supersededCollectionNames(collectionName, priorIngestionRecord),
-                                forcedDocuments,
-                                forcedChunkingOutcome.allChunkHashes(),
-                                fileStartMillis));
-                    }
-                    if (forcedChunkingOutcome.generatedNoChunks()) {
-                        return LocalDocsFileOutcome.failedFile(
-                                new IngestionLocalFailure(file.toString(), "empty-document", "No content to chunk"));
-                    }
-                    return LocalDocsFileOutcome.failedFile(
-                            new IngestionLocalFailure(file.toString(), "empty-document", "No chunks generated"));
-                }
-            } catch (IOException chunkingException) {
-                return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "chunking", chunkingException));
-            } catch (RuntimeException consistencyException) {
-                return LocalDocsFileOutcome.failedFile(
-                        failureFactory.failure(file, "qdrant-consistency-check", consistencyException));
-            }
-            INDEXING_LOG.debug("[INDEXING] Skipping file where all chunks were previously ingested");
-            markFileIngested(
-                    url,
-                    new FileIngestionRecord(
-                            fileSizeBytes,
-                            lastModifiedMillis,
-                            provenanceAwareIngestionFingerprint,
-                            LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
-                            collectionName,
-                            chunkingOutcome.allChunkHashes()));
-            return LocalDocsFileOutcome.skippedFile();
         }
         if (chunkingOutcome.generatedNoChunks()) {
             return LocalDocsFileOutcome.failedFile(

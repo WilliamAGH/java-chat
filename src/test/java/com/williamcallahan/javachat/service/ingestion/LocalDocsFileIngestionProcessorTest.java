@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
@@ -48,7 +49,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.ai.document.Document;
 
-/** Verifies manifest-mapped local Javadoc files use structured Java API extraction. */
+/** Verifies configured local Javadoc files use structured Java API extraction. */
 class LocalDocsFileIngestionProcessorTest {
 
     private static final String JAVA_API_CLASS_NAME = "StringBuilder";
@@ -65,7 +66,7 @@ class LocalDocsFileIngestionProcessorTest {
                     .repeat(JAVA_API_DESCRIPTION_REPEAT_COUNT);
 
     @Test
-    void shouldSendAnchoredJavadocSectionsToChunkingForManifestMappedJavaApiFile(@TempDir Path temporaryDirectory)
+    void shouldSendAnchoredJavadocSectionsToChunkingForConfiguredJavaApiFile(@TempDir Path temporaryDirectory)
             throws IOException {
         JavaApiDocumentationSource javaApiDocumentationSource =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst();
@@ -73,25 +74,18 @@ class LocalDocsFileIngestionProcessorTest {
         Path localJavadocFile =
                 writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.empty());
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.empty());
         for (QdrantCollectionKind governedCollectionKind : QdrantCollectionKind.values()) {
-            when(hybridVectorService.resolveCollectionName(governedCollectionKind))
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(governedCollectionKind))
                     .thenReturn(testCollectionName(governedCollectionKind));
         }
-        when(chunkProcessingService.processAndStoreJavaApiPage(any()))
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPage(any()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                mock(IngestedFilePruneService.class));
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
@@ -99,17 +93,66 @@ class LocalDocsFileIngestionProcessorTest {
         assertTrue(processingOutcome.failure().isPresent());
         ArgumentCaptor<ChunkProcessingService.JavaApiPage> javaApiPageCaptor =
                 ArgumentCaptor.forClass(ChunkProcessingService.JavaApiPage.class);
-        verify(chunkProcessingService).processAndStoreJavaApiPage(javaApiPageCaptor.capture());
+        verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPage(javaApiPageCaptor.capture());
         ChunkProcessingService.JavaApiPage extractedJavaApiPage = javaApiPageCaptor.getValue();
         assertEquals(expectedJavadocUrl, extractedJavaApiPage.sourceUrl());
         assertEquals(JAVA_API_CLASS_NAME, extractedJavaApiPage.title());
         assertEquals(2, extractedJavaApiPage.segments().size());
         ChunkProcessingService.JavaApiPageSegment memberSegment =
                 extractedJavaApiPage.segments().get(1);
-        assertEquals(Optional.of(JAVA_API_METHOD_ANCHOR), memberSegment.javadocAnchor());
+        assertEquals(
+                Optional.of(JAVA_API_METHOD_ANCHOR),
+                memberSegment.javadocMemberAnchor().map(JavadocMemberAnchor::domIdentifier));
         assertTrue(memberSegment.text().contains(JAVA_API_METHOD_SIGNATURE));
-        verify(chunkProcessingService, never())
+        verify(ingestionFixture.chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldForceCompleteReplacementWhenOnlyPartOfChunkSetWasSkipped(@TempDir Path temporaryDirectory)
+            throws IOException {
+        JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path localJavadocFile =
+                writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
+        String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
+        Document incrementalDocument = new Document("incremental-point", "Incremental body", new HashMap<>());
+        Document completeFirstDocument = new Document("complete-first-point", "Complete first body", new HashMap<>());
+        Document completeSecondDocument =
+                new Document("complete-second-point", "Complete second body", new HashMap<>());
+        List<String> completeChunkHashes = List.of("retained-chunk-hash", "new-chunk-hash");
+        ChunkProcessingService.ChunkProcessingOutcome partialChunkingOutcome =
+                new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(incrementalDocument), completeChunkHashes, 2, 1);
+        ChunkProcessingService.ChunkProcessingOutcome completeChunkingOutcome =
+                new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(completeFirstDocument, completeSecondDocument), completeChunkHashes, 2, 0);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPage(any()))
+                .thenReturn(partialChunkingOutcome);
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+                .thenReturn(completeChunkingOutcome);
+
+        LocalDocsFileOutcome processingOutcome =
+                ingestionFixture.ingestionProcessor().process(localDocsRoot, localJavadocFile);
+
+        assertTrue(processingOutcome.processed());
+        verify(ingestionFixture.hybridVectorService)
+                .replaceUrlDocuments(
+                        any(QdrantCollectionKind.class),
+                        eq(expectedJavadocUrl),
+                        eq(List.of(completeFirstDocument, completeSecondDocument)));
+        verify(ingestionFixture.hybridVectorService, never()).upsert(any(QdrantCollectionKind.class), any());
+        verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(any());
+        ArgumentCaptor<FileIngestionRecord> completedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedJavadocUrl), completedMarkerCaptor.capture());
+        assertEquals(completeChunkHashes, completedMarkerCaptor.getValue().chunkHashes());
     }
 
     @Test
@@ -132,50 +175,51 @@ class LocalDocsFileIngestionProcessorTest {
                 "java-api-docs",
                 List.of("retained-javadoc-hash", "obsolete-javadoc-hash"));
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         Document indexedDocument = new Document("javadoc-point", "Javadoc body", new HashMap<>());
         ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-javadoc-hash"), 1, 0);
 
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.of(priorIngestionRecord));
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
-        when(chunkProcessingService.processAndStoreJavaApiPageForce(any())).thenReturn(forcedChunkingOutcome);
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.of(priorIngestionRecord));
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+                .thenReturn(forcedChunkingOutcome);
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
         assertTrue(processingOutcome.processed());
-        InOrder replacementOrder = inOrder(hybridVectorService, ingestedFilePruneService, fileMarkerStore);
+        InOrder replacementOrder = inOrder(
+                ingestionFixture.hybridVectorService,
+                ingestionFixture.ingestedFilePruneService,
+                ingestionFixture.fileIngestionMarkerStore);
         replacementOrder
-                .verify(hybridVectorService)
+                .verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(indexedDocument)));
         replacementOrder
-                .verify(ingestedFilePruneService)
+                .verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(
                         List.of(), expectedJavadocUrl, priorIngestionRecord, List.of("current-javadoc-hash"));
         ArgumentCaptor<ChunkProcessingService.JavaApiPage> javaApiPageCaptor =
                 ArgumentCaptor.forClass(ChunkProcessingService.JavaApiPage.class);
-        verify(chunkProcessingService).processAndStoreJavaApiPageForce(javaApiPageCaptor.capture());
+        verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(javaApiPageCaptor.capture());
         assertEquals(
                 Optional.of(JAVA_API_METHOD_ANCHOR),
-                javaApiPageCaptor.getValue().segments().get(1).javadocAnchor());
-        verify(chunkProcessingService, never())
+                javaApiPageCaptor
+                        .getValue()
+                        .segments()
+                        .get(1)
+                        .javadocMemberAnchor()
+                        .map(JavadocMemberAnchor::domIdentifier));
+        verify(ingestionFixture.chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
         ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
         replacementOrder
-                .verify(fileMarkerStore)
+                .verify(ingestionFixture.fileIngestionMarkerStore)
                 .markFileIngested(eq(expectedJavadocUrl), updatedMarkerCaptor.capture());
         assertEquals(
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
@@ -200,40 +244,33 @@ class LocalDocsFileIngestionProcessorTest {
                 "java-api-docs",
                 List.of("prior-first-hash", "prior-second-hash"));
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         Document replacementDocument = new Document("replacement-point", "Replacement Javadoc body", new HashMap<>());
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.of(priorIngestionRecord));
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
-        when(chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.of(priorIngestionRecord));
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(replacementDocument), List.of("replacement-hash"), 1, 0));
         doThrow(new com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException(
                         "embedding provider unavailable"))
-                .when(hybridVectorService)
+                .when(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(replacementDocument)));
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
         assertFalse(processingOutcome.processed());
         assertTrue(processingOutcome.failure().isPresent());
-        verify(ingestedFilePruneService, never()).pruneObsoleteStateAfterReplacement(any(), anyString(), any(), any());
-        verify(localStoreService, never()).deleteChunkIngestionMarkers(any());
-        verify(localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
-        verify(fileMarkerStore, never()).markFileIngested(anyString(), any());
-        verify(fileMarkerStore, never()).deleteFileIngestionRecord(anyString());
-        verify(hybridVectorService, never()).deleteByUrl(anyString(), anyString());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneObsoleteStateAfterReplacement(any(), anyString(), any(), any());
+        verify(ingestionFixture.localStoreService, never()).deleteChunkIngestionMarkers(any());
+        verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).deleteFileIngestionRecord(anyString());
+        verify(ingestionFixture.hybridVectorService, never()).deleteByUrl(anyString(), anyString());
     }
 
     @Test
@@ -246,30 +283,23 @@ class LocalDocsFileIngestionProcessorTest {
                 writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
         String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         Document indexedDocument = new Document("javadoc-point", "Javadoc body", new HashMap<>());
         ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-javadoc-hash"), 1, 0);
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.empty());
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.empty());
         for (QdrantCollectionKind governedCollectionKind : QdrantCollectionKind.values()) {
-            when(hybridVectorService.resolveCollectionName(governedCollectionKind))
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(governedCollectionKind))
                     .thenReturn(testCollectionName(governedCollectionKind));
         }
-        when(hybridVectorService.countPointsForUrl(anyString(), eq(expectedJavadocUrl)))
+        when(ingestionFixture.hybridVectorService.countPointsForUrl(anyString(), eq(expectedJavadocUrl)))
                 .thenReturn(1L);
-        when(chunkProcessingService.processAndStoreJavaApiPageForce(any())).thenReturn(forcedChunkingOutcome);
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+                .thenReturn(forcedChunkingOutcome);
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
@@ -287,9 +317,9 @@ class LocalDocsFileIngestionProcessorTest {
                 .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
                 .filter(collectionName -> !collectionName.equals(routedCollectionName))
                 .toList();
-        verify(hybridVectorService)
+        verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(routedCollectionKind, expectedJavadocUrl, List.of(indexedDocument));
-        verify(ingestedFilePruneService)
+        verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(
                         eq(supersededCollectionNames),
                         eq(expectedJavadocUrl),
@@ -298,10 +328,10 @@ class LocalDocsFileIngestionProcessorTest {
         for (String governedCollectionName : Arrays.stream(QdrantCollectionKind.values())
                 .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
                 .toList()) {
-            verify(hybridVectorService).countPointsForUrl(governedCollectionName, expectedJavadocUrl);
+            verify(ingestionFixture.hybridVectorService).countPointsForUrl(governedCollectionName, expectedJavadocUrl);
         }
-        verify(chunkProcessingService).processAndStoreJavaApiPageForce(any());
-        verify(chunkProcessingService, never()).processAndStoreJavaApiPage(any());
+        verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(any());
+        verify(ingestionFixture.chunkProcessingService, never()).processAndStoreJavaApiPage(any());
     }
 
     @Test
@@ -314,11 +344,7 @@ class LocalDocsFileIngestionProcessorTest {
                 writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
         String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         Document indexedDocument = new Document("javadoc-point", "Javadoc body", new HashMap<>());
         ChunkProcessingService.ChunkProcessingOutcome initialChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
@@ -326,44 +352,43 @@ class LocalDocsFileIngestionProcessorTest {
         ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("forced-javadoc-hash"), 1, 0);
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.empty());
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
-        when(hybridVectorService.countPointsForUrl(anyString(), eq(expectedJavadocUrl)))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.hybridVectorService.countPointsForUrl(anyString(), eq(expectedJavadocUrl)))
                 .thenReturn(0L);
-        when(chunkProcessingService.processAndStoreJavaApiPage(any())).thenReturn(initialChunkingOutcome);
-        when(chunkProcessingService.processAndStoreJavaApiPageForce(any())).thenReturn(forcedChunkingOutcome);
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPage(any()))
+                .thenReturn(initialChunkingOutcome);
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+                .thenReturn(forcedChunkingOutcome);
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         assertTrue(ingestionProcessor.process(localDocsRoot, localJavadocFile).processed());
         ArgumentCaptor<FileIngestionRecord> initialMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(fileMarkerStore).markFileIngested(eq(expectedJavadocUrl), initialMarkerCaptor.capture());
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedJavadocUrl), initialMarkerCaptor.capture());
         FileIngestionRecord initialIngestionRecord = initialMarkerCaptor.getValue();
-        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
                 .thenReturn(Optional.of(initialIngestionRecord));
         List<String> revertedPointUuids = List.of(new ContentHasher().uuidFromHash("initial-javadoc-hash"));
-        when(hybridVectorService.hasExactPointIdsForUrl(
+        when(ingestionFixture.hybridVectorService.hasExactPointIdsForUrl(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(revertedPointUuids)))
                 .thenReturn(false);
 
         LocalDocsFileOutcome reindexOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
         assertTrue(reindexOutcome.processed());
-        verify(hybridVectorService)
+        verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(indexedDocument)));
-        verify(ingestedFilePruneService)
+        verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(
                         List.of(), expectedJavadocUrl, initialIngestionRecord, List.of("forced-javadoc-hash"));
-        verify(hybridVectorService)
+        verify(ingestionFixture.hybridVectorService)
                 .hasExactPointIdsForUrl(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(revertedPointUuids));
-        verify(chunkProcessingService).processAndStoreJavaApiPageForce(any());
+        verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(any());
     }
 
     @Test
@@ -383,45 +408,36 @@ class LocalDocsFileIngestionProcessorTest {
                 "java-api-docs",
                 List.of("legacy-class-use-hash"));
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
-        IngestionQuarantineService quarantineService = mock(IngestionQuarantineService.class);
-        when(fileMarkerStore.readFileIngestionRecord(expectedClassUseUrl))
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedClassUseUrl))
                 .thenReturn(Optional.of(staleIngestionRecord));
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService,
-                quarantineService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome firstOutcome = ingestionProcessor.process(localDocsRoot, classUseFile);
 
         assertFalse(firstOutcome.processed());
         assertTrue(firstOutcome.failure().isEmpty());
-        verify(hybridVectorService).deleteByUrl(any(QdrantCollectionKind.class), eq(expectedClassUseUrl));
-        verify(ingestedFilePruneService)
+        verify(ingestionFixture.hybridVectorService)
+                .deleteByUrl(any(QdrantCollectionKind.class), eq(expectedClassUseUrl));
+        verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(List.of(), expectedClassUseUrl, staleIngestionRecord, List.of());
         ArgumentCaptor<FileIngestionRecord> excludedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(fileMarkerStore).markFileIngested(eq(expectedClassUseUrl), excludedMarkerCaptor.capture());
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedClassUseUrl), excludedMarkerCaptor.capture());
         FileIngestionRecord excludedIngestionRecord = excludedMarkerCaptor.getValue();
         assertEquals(
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
                 excludedIngestionRecord.extractionSemanticsVersion());
         assertTrue(excludedIngestionRecord.chunkHashes().isEmpty());
-        verify(chunkProcessingService, never()).processAndStoreJavaApiPage(any());
-        verify(chunkProcessingService, never()).processAndStoreJavaApiPageForce(any());
-        verify(quarantineService, never()).quarantine(any());
+        verify(ingestionFixture.chunkProcessingService, never()).processAndStoreJavaApiPage(any());
+        verify(ingestionFixture.chunkProcessingService, never()).processAndStoreJavaApiPageForce(any());
+        verify(ingestionFixture.quarantineService, never()).quarantine(any());
 
-        when(fileMarkerStore.readFileIngestionRecord(expectedClassUseUrl))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedClassUseUrl))
                 .thenReturn(Optional.of(excludedIngestionRecord));
-        when(hybridVectorService.hasExactPointIdsForUrl(
+        when(ingestionFixture.hybridVectorService.hasExactPointIdsForUrl(
                         any(QdrantCollectionKind.class), eq(expectedClassUseUrl), eq(List.of())))
                 .thenReturn(true);
 
@@ -429,10 +445,10 @@ class LocalDocsFileIngestionProcessorTest {
 
         assertFalse(repeatedOutcome.processed());
         assertTrue(repeatedOutcome.failure().isEmpty());
-        verify(ingestedFilePruneService, times(1))
+        verify(ingestionFixture.ingestedFilePruneService, times(1))
                 .pruneObsoleteStateAfterReplacement(List.of(), expectedClassUseUrl, staleIngestionRecord, List.of());
-        verify(fileMarkerStore, times(1)).markFileIngested(eq(expectedClassUseUrl), any());
-        verify(quarantineService, never()).quarantine(any());
+        verify(ingestionFixture.fileIngestionMarkerStore, times(1)).markFileIngested(eq(expectedClassUseUrl), any());
+        verify(ingestionFixture.quarantineService, never()).quarantine(any());
     }
 
     @Test
@@ -445,22 +461,15 @@ class LocalDocsFileIngestionProcessorTest {
                 localDocsRoot, javaApiDocumentationSource, JAVA_API_CLASS_USE_RELATIVE_PATH, classUseJavaApiHtml());
         String expectedClassUseUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_CLASS_USE_RELATIVE_PATH;
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        when(fileMarkerStore.readFileIngestionRecord(expectedClassUseUrl)).thenReturn(Optional.empty());
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedClassUseUrl))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
         doThrow(new IOException("marker write failed"))
-                .when(fileMarkerStore)
+                .when(ingestionFixture.fileIngestionMarkerStore)
                 .markFileIngested(eq(expectedClassUseUrl), any(FileIngestionRecord.class));
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                mock(IngestedFilePruneService.class));
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome markerTransitionOutcome =
                 assertDoesNotThrow(() -> ingestionProcessor.process(localDocsRoot, classUseFile));
@@ -469,6 +478,40 @@ class LocalDocsFileIngestionProcessorTest {
         assertEquals(
                 "marker-transition",
                 markerTransitionOutcome.failure().orElseThrow().phase());
+    }
+
+    @Test
+    void shouldReturnMarkerTransitionFailureWhenSkippedFileMarkerWriteFails(@TempDir Path temporaryDirectory)
+            throws IOException {
+        JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path localJavadocFile =
+                writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
+        String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
+        List<String> existingChunkHashes = List.of("existing-javadoc-hash");
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPage(any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), existingChunkHashes, 1, 1));
+        when(ingestionFixture.hybridVectorService.hasExactPointIdsForUrl(
+                        any(QdrantCollectionKind.class), eq(expectedJavadocUrl), any()))
+                .thenReturn(true);
+        doThrow(new IOException("marker write failed"))
+                .when(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedJavadocUrl), any(FileIngestionRecord.class));
+
+        LocalDocsFileOutcome markerTransitionOutcome = assertDoesNotThrow(
+                () -> ingestionFixture.ingestionProcessor().process(localDocsRoot, localJavadocFile));
+
+        assertFalse(markerTransitionOutcome.processed());
+        assertEquals(
+                "marker-transition",
+                markerTransitionOutcome.failure().orElseThrow().phase());
+        verify(ingestionFixture.chunkProcessingService, never()).processAndStoreJavaApiPageForce(any());
     }
 
     @Test
@@ -492,46 +535,38 @@ class LocalDocsFileIngestionProcessorTest {
                 "prior-documentation",
                 List.of("old-documentation-hash"));
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         Document indexedDocument = new Document("documentation-point", "Documentation body", new HashMap<>());
         ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-documentation-hash"), 1, 0);
 
-        when(fileMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
                 .thenReturn(Optional.of(contentOnlyMarker));
-        when(hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
-        when(chunkProcessingService.processAndStoreChunksForce(
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunksForce(
                         anyString(), eq(expectedDocumentationUrl), anyString(), anyString()))
                 .thenReturn(forcedChunkingOutcome);
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
 
         assertTrue(processingOutcome.processed());
-        verify(hybridVectorService)
+        verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedDocumentationUrl), eq(List.of(indexedDocument)));
-        verify(ingestedFilePruneService)
+        verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(
                         List.of("prior-documentation"),
                         expectedDocumentationUrl,
                         contentOnlyMarker,
                         List.of("current-documentation-hash"));
-        verify(chunkProcessingService)
+        verify(ingestionFixture.chunkProcessingService)
                 .processAndStoreChunksForce(anyString(), eq(expectedDocumentationUrl), anyString(), anyString());
         ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(fileMarkerStore).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
         assertNotEquals(
                 contentOnlyIngestionFingerprint, updatedMarkerCaptor.getValue().ingestionFingerprint());
         assertEquals(
@@ -560,31 +595,22 @@ class LocalDocsFileIngestionProcessorTest {
                 "",
                 List.of("legacy-documentation-hash"));
 
-        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
-        LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
-        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
         for (QdrantCollectionKind governedCollectionKind : QdrantCollectionKind.values()) {
-            when(hybridVectorService.resolveCollectionName(governedCollectionKind))
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(governedCollectionKind))
                     .thenReturn(testCollectionName(governedCollectionKind));
         }
         Document indexedDocument = new Document("documentation-point", "Documentation body", new HashMap<>());
         ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-documentation-hash"), 1, 0);
-        when(fileMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
                 .thenReturn(Optional.of(legacyIngestionRecord));
-        when(chunkProcessingService.processAndStoreChunksForce(
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunksForce(
                         anyString(), eq(expectedDocumentationUrl), anyString(), anyString()))
                 .thenReturn(forcedChunkingOutcome);
 
-        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService);
+        LocalDocsFileIngestionProcessor ingestionProcessor = ingestionFixture.ingestionProcessor();
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
 
@@ -602,62 +628,52 @@ class LocalDocsFileIngestionProcessorTest {
                 .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
                 .filter(collectionName -> !collectionName.equals(routedCollectionName))
                 .toList();
-        verify(hybridVectorService)
+        verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(routedCollectionKind, expectedDocumentationUrl, List.of(indexedDocument));
-        verify(ingestedFilePruneService)
+        verify(ingestionFixture.ingestedFilePruneService)
                 .pruneObsoleteStateAfterReplacement(
                         supersededCollectionNames,
                         expectedDocumentationUrl,
                         legacyIngestionRecord,
                         List.of("current-documentation-hash"));
         ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(fileMarkerStore).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        verify(ingestionFixture.fileIngestionMarkerStore)
+                .markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
         assertEquals(
                 testCollectionName(routedCollectionKind),
                 updatedMarkerCaptor.getValue().collectionName());
     }
 
-    private static LocalDocsFileIngestionProcessor createIngestionProcessor(
-            ChunkProcessingService chunkProcessingService,
-            LocalStoreService localStoreService,
-            FileIngestionMarkerStore fileMarkerStore,
-            HybridVectorService hybridVectorService,
-            IngestedFilePruneService ingestedFilePruneService) {
-        return createIngestionProcessor(
-                chunkProcessingService,
-                localStoreService,
-                fileMarkerStore,
-                hybridVectorService,
-                ingestedFilePruneService,
-                mock(IngestionQuarantineService.class));
-    }
+    /** Owns the collaborator graph shared by local documentation ingestion scenarios. */
+    private static final class LocalDocsIngestionFixture {
+        private final ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
+        private final LocalStoreService localStoreService = mock(LocalStoreService.class);
+        private final FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
+        private final HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        private final IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        private final IngestionQuarantineService quarantineService = mock(IngestionQuarantineService.class);
 
-    private static LocalDocsFileIngestionProcessor createIngestionProcessor(
-            ChunkProcessingService chunkProcessingService,
-            LocalStoreService localStoreService,
-            FileIngestionMarkerStore fileMarkerStore,
-            HybridVectorService hybridVectorService,
-            IngestedFilePruneService ingestedFilePruneService,
-            IngestionQuarantineService quarantineService) {
-        return new LocalDocsFileIngestionProcessor(
-                new FileContentServices(
-                        new HtmlContentExtractor(),
-                        mock(PdfContentExtractor.class),
-                        new FileOperationsService(),
-                        mock(PdfTitleExtractor.class),
-                        new HtmlContentGuard(),
-                        quarantineService),
-                new IngestionStorageServices(
-                        hybridVectorService,
-                        chunkProcessingService,
-                        new ContentHasher(),
-                        localStoreService,
-                        fileMarkerStore,
-                        new QdrantCollectionRouter()),
-                mock(ProgressTracker.class),
-                new IngestionProvenanceDeriver(),
-                new LocalIngestionFailureFactory(),
-                ingestedFilePruneService);
+        private LocalDocsFileIngestionProcessor ingestionProcessor() {
+            return new LocalDocsFileIngestionProcessor(
+                    new FileContentServices(
+                            new HtmlContentExtractor(),
+                            mock(PdfContentExtractor.class),
+                            new FileOperationsService(),
+                            mock(PdfTitleExtractor.class),
+                            new HtmlContentGuard(),
+                            quarantineService),
+                    new IngestionStorageServices(
+                            hybridVectorService,
+                            chunkProcessingService,
+                            new ContentHasher(),
+                            localStoreService,
+                            fileIngestionMarkerStore,
+                            new QdrantCollectionRouter()),
+                    mock(ProgressTracker.class),
+                    new IngestionProvenanceDeriver(),
+                    new LocalIngestionFailureFactory(),
+                    ingestedFilePruneService);
+        }
     }
 
     private static String testCollectionName(QdrantCollectionKind collectionKind) {
@@ -681,36 +697,36 @@ class LocalDocsFileIngestionProcessorTest {
 
     private static String javaApiHtml() {
         return """
-                <html>
-                  <head><title>__JAVA_API_CLASS__</title></head>
-                  <body class="class-declaration-page">
-                    <main>
-                      <div class="header"><h1 class="title">Class __JAVA_API_CLASS__</h1></div>
-                      <section class="class-description" id="class-description">
-                        <div class="type-signature">public final class __JAVA_API_CLASS__</div>
-                        <div class="block">__JAVA_API_DESCRIPTION__</div>
-                      </section>
-                      <section class="detail" id="append(java.lang.String)">
-                        <h3>append</h3>
-                        <div class="member-signature">public StringBuilder __JAVA_API_METHOD__</div>
-                        <div class="block">Appends the supplied text.</div>
-                      </section>
-                    </main>
-                  </body>
-                </html>
-                """.replace(JAVA_API_CLASS_PLACEHOLDER, JAVA_API_CLASS_NAME)
+            <html>
+              <head><title>__JAVA_API_CLASS__</title></head>
+              <body class="class-declaration-page">
+                <main>
+                  <div class="header"><h1 class="title">Class __JAVA_API_CLASS__</h1></div>
+                  <section class="class-description" id="class-description">
+                    <div class="type-signature">public final class __JAVA_API_CLASS__</div>
+                    <div class="block">__JAVA_API_DESCRIPTION__</div>
+                  </section>
+                  <section class="detail" id="append(java.lang.String)">
+                    <h3>append</h3>
+                    <div class="member-signature">public StringBuilder __JAVA_API_METHOD__</div>
+                    <div class="block">Appends the supplied text.</div>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """.replace(JAVA_API_CLASS_PLACEHOLDER, JAVA_API_CLASS_NAME)
                 .replace(JAVA_API_DESCRIPTION_PLACEHOLDER, JAVA_API_DESCRIPTION)
                 .replace(JAVA_API_METHOD_PLACEHOLDER, JAVA_API_METHOD_SIGNATURE);
     }
 
     private static String classUseJavaApiHtml() {
         return """
-                <html>
-                  <head><title>Uses of Class List</title></head>
-                  <body class="class-use-page">
-                    <main><section class="detail" id="java.util">irrelevant usage</section></main>
-                  </body>
-                </html>
-                """;
+            <html>
+              <head><title>Uses of Class List</title></head>
+              <body class="class-use-page">
+                <main><section class="detail" id="java.util">irrelevant usage</section></main>
+              </body>
+            </html>
+            """;
     }
 }

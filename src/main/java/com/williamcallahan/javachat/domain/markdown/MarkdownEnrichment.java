@@ -3,10 +3,7 @@ package com.williamcallahan.javachat.domain.markdown;
 import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
 
 /**
- * Represents one manifest-backed enrichment found in Markdown.
- *
- * <p>A generic record keeps the supported kind inventory in the canonical manifest. Adding a
- * manifest row therefore does not require another Java subtype, enum branch, or token method.</p>
+ * Represents one enrichment found in Markdown.
  */
 public record MarkdownEnrichment(String type, String content, int position) {
 

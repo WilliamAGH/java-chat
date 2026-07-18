@@ -43,6 +43,9 @@ public class IngestionQuarantineService {
     /**
      * Copies the supplied document to a content-addressed inspection path under {@code data/.quarantine}.
      *
+     * <p>The inspection name uses the SHA-256 fingerprint of the copied raw bytes, so identical rejected content
+     * reuses one inspection copy without decoding the document.
+     *
      * <p>The canonical document remains in place so rejected landing pages cannot shrink a source mirror or
      * disappear from a later ingestion run.
      *

@@ -10,7 +10,7 @@ import java.util.stream.Stream;
  * Identifies a documentation set processed by the CLI ingestion pipeline.
  *
  * <p>The relative path is resolved under the configured docs root (for example, {@code data/docs}).
- * Manifest-backed sets accept only their canonical relative mirror path; other sets retain their
+ * Configured official sets accept only their exact relative mirror path; other sets retain their
  * established filter tokens.</p>
  *
  * @param displayName user-facing name for logs
@@ -18,7 +18,7 @@ import java.util.stream.Stream;
  */
 record DocumentationSet(String displayName, String relativePath) {
 
-    private static final Set<String> MANIFEST_RELATIVE_MIRROR_PATHS = Stream.concat(
+    private static final Set<String> OFFICIAL_RELATIVE_MIRROR_PATHS = Stream.concat(
                     DocsSourceRegistry.javaApiDocumentationSources().stream()
                             .map(javaApiDocumentationSource -> javaApiDocumentationSource.relativeMirrorPath()),
                     DocsSourceRegistry.documentationSources().stream()
@@ -26,7 +26,7 @@ record DocumentationSet(String displayName, String relativePath) {
             .collect(Collectors.toUnmodifiableSet());
 
     String primarySelector() {
-        if (isManifestBackedDocumentationSet()) {
+        if (isOfficialDocumentationSet()) {
             return relativePath;
         }
         return normalizeToken(relativePath.replace('/', '-'));
@@ -36,7 +36,7 @@ record DocumentationSet(String displayName, String relativePath) {
         if (selectorTokens == null || selectorTokens.isEmpty()) {
             return false;
         }
-        if (isManifestBackedDocumentationSet()) {
+        if (isOfficialDocumentationSet()) {
             return selectorTokens.contains(relativePath);
         }
         final String normalizedName = normalizeToken(displayName);
@@ -53,8 +53,8 @@ record DocumentationSet(String displayName, String relativePath) {
         return false;
     }
 
-    private boolean isManifestBackedDocumentationSet() {
-        return MANIFEST_RELATIVE_MIRROR_PATHS.contains(relativePath);
+    private boolean isOfficialDocumentationSet() {
+        return OFFICIAL_RELATIVE_MIRROR_PATHS.contains(relativePath);
     }
 
     private static String normalizeToken(final String selectorToken) {

@@ -44,7 +44,7 @@ public class IngestionProvenanceDeriver {
                 : "";
 
         return DocsSourceRegistry.documentationSourceForRelativeDocumentPath(relativeDocumentPath)
-                .map(documentationSource -> manifestProvenance(
+                .map(documentationSource -> officialSourceProvenance(
                         documentationSource, documentPathWithinSource(relativeDocumentPath, documentationSource)))
                 .orElseGet(() -> legacyProvenance(relativeMirrorPath, docPath, url));
     }
@@ -58,10 +58,11 @@ public class IngestionProvenanceDeriver {
         return relativeDocumentPath.substring(relativeMirrorPath.length() + 1);
     }
 
-    private static IngestionProvenance manifestProvenance(DocumentationSource documentationSource, String docPath) {
+    private static IngestionProvenance officialSourceProvenance(
+            DocumentationSource documentationSource, String documentPath) {
         return new IngestionProvenance(
                 documentationSource.docSet(),
-                docPath,
+                documentPath,
                 documentationSource.docSet(),
                 documentationSource.sourceKind(),
                 documentationSource.docVersion(),
