@@ -12,7 +12,7 @@ Spring SSE endpoints ------------------------+
     |                                        |
     | text events                            | completed plain Markdown
     v                                        v
-Svelte stream owner                    Chat memory persistence
+Svelte stream owner                    In-memory chat history commit
     |
     v
 frontend Markdown service
@@ -27,7 +27,7 @@ MarkdownController -> MarkdownService -> UnifiedMarkdownService
                                       -> structured server result
 ```
 
-The browser and server have distinct consumers. The Svelte application renders streamed Markdown locally so it does not make a Markdown-rendering request for every partial response. The server renderer exists for the Markdown REST API and for server-owned lesson rendering. Chat persistence stores the completed plain Markdown response.
+The browser and server have distinct consumers. The Svelte application renders streamed Markdown locally so it does not make a Markdown-rendering request for every partial response. The server renderer exists for the Markdown REST API and for server-owned lesson rendering. Chat history keeps the completed plain Markdown response in process-local memory.
 
 ## Canonical owners
 
@@ -57,7 +57,7 @@ Do not describe `MarkdownService` as a legacy regex fallback. It delegates to th
 
 [`ChatController`](../../src/main/java/com/williamcallahan/javachat/web/ChatController.java) and [`GuidedLearningController`](../../src/main/java/com/williamcallahan/javachat/web/GuidedLearningController.java) own their SSE request lifecycles. They emit text and typed terminal events; the Svelte request owner accumulates the text and progressively re-renders it through the browser Markdown service.
 
-Only a successfully completed stream is persisted. Terminal failures, cancellation, and backpressure overflow do not persist a partial assistant response. The frontend also guards request ownership so callbacks from an aborted or superseded request cannot mutate the active view.
+Only a successfully completed stream is committed to in-memory chat history. Terminal failures, cancellation, and backpressure overflow do not retain a partial assistant response. The frontend also guards request ownership so callbacks from an aborted or superseded request cannot mutate the active view.
 
 ## Security boundary
 
