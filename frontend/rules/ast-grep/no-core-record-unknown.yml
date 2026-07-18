@@ -5,8 +5,8 @@ severity: error
 message: |
   [TY1c/CV1h] Record<string, unknown> and {[key: string]: unknown} bags are prohibited in core boundary code.
 
-  Use canonical contracts, explicit owned object types, or JsonValue-based shapes instead of loose
-  dictionary bags.
+  Use an explicit boundary-owned object type or JsonValue-based shape instead of a loose dictionary
+  bag.
 
 files:
   - "src/**/*.ts"

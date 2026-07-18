@@ -35,7 +35,7 @@ import reactor.core.publisher.Flux;
 
 /** Verifies guided content HTTP contracts resolve only authoritative curated lesson markdown. */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseStatusContractCatalog.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedLearningControllerCuratedContentTest {
     private static final String CURATED_LESSON_MARKDOWN = "Curated lesson markdown";

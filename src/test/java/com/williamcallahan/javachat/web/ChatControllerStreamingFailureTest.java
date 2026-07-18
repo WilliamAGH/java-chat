@@ -64,7 +64,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Disposable;
@@ -448,13 +447,12 @@ class ChatControllerStreamingFailureTest {
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        SseStatusContractCatalog statusContractCatalog = createStatusContractCatalog();
         ChatController chatController = new ChatController(
                 chatService,
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper, statusContractCatalog),
+                new SseSupport(objectMapper),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
@@ -475,7 +473,6 @@ class ChatControllerStreamingFailureTest {
                         .block(),
                 "chat stream events");
 
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         int citationPartialFailureIndex = -1;
         int citationEventIndex = -1;
         for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
@@ -489,10 +486,10 @@ class ChatControllerStreamingFailureTest {
             }
             SseSupport.SseEventPayload chatStatus = objectMapper.readValue(
                     Objects.requireNonNull(streamEvent.data(), "chat status data"), SseSupport.SseEventPayload.class);
-            if (citationContract.code().equals(chatStatus.code())) {
+            if ("citation.partial-failure".equals(chatStatus.code())) {
                 citationPartialFailureIndex = eventIndex;
-                assertEquals(Boolean.valueOf(citationContract.retryable()), chatStatus.retryable());
-                assertEquals(citationContract.stage(), chatStatus.stage());
+                assertEquals(Boolean.FALSE, chatStatus.retryable());
+                assertEquals("citation", chatStatus.stage());
             }
         }
 
@@ -586,11 +583,7 @@ class ChatControllerStreamingFailureTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper, createStatusContractCatalog());
-    }
-
-    private SseStatusContractCatalog createStatusContractCatalog() {
-        return new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"));
+        return new SseSupport(objectMapper);
     }
 }
 
