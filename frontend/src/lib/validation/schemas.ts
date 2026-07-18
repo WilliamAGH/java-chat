@@ -5,7 +5,6 @@
  * Schemas are co-located here to ensure single source of truth and DRY compliance.
  *
  * @see {@link ./validate.ts} for validation utilities
- * @see {@link docs/type-safety-zod-validation.md} for validation patterns
  */
 
 import { z } from "zod/v4";
