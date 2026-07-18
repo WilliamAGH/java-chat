@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -21,6 +22,22 @@ public class GuidedLesson {
      * Creates an empty guided lesson container.
      */
     public GuidedLesson() {}
+
+    /**
+     * Creates an independent lesson snapshot so callers cannot mutate the original metadata.
+     *
+     * @param lessonToCopy lesson metadata to snapshot
+     */
+    public GuidedLesson(GuidedLesson lessonToCopy) {
+        GuidedLesson sourceLesson = Objects.requireNonNull(lessonToCopy, "lessonToCopy");
+        this.slug = sourceLesson.slug;
+        this.title = sourceLesson.title;
+        this.summary = sourceLesson.summary;
+        this.keywords = sourceLesson.getKeywords();
+        this.technology = sourceLesson.technology;
+        this.sourceReferences = sourceLesson.sourceReferences();
+        this.docSet = sourceLesson.getDocSet();
+    }
 
     /**
      * Returns the lesson slug identifier.
