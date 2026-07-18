@@ -3,8 +3,6 @@ package com.williamcallahan.javachat.web;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
-import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_CITATION_PARTIAL_FAILURE;
-import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_CITATION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,7 +59,7 @@ import reactor.core.publisher.Mono;
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseStatusContractCatalog.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
 
@@ -76,6 +74,9 @@ class GuidedSseCitationEventTest {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Autowired
+    SseStatusContractCatalog statusContractCatalog;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -160,6 +161,7 @@ class GuidedSseCitationEventTest {
 
         int citationPartialFailureStatusIndex = -1;
         int citationEventIndex = -1;
+        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
             ServerSentEvent<String> streamEvent = streamEvents.get(eventIndex);
             if (EVENT_CITATION.equals(streamEvent.event())) {
@@ -169,12 +171,12 @@ class GuidedSseCitationEventTest {
             if (!EVENT_STATUS.equals(streamEvent.event())) {
                 continue;
             }
-            SseSupport.SseEventPayload statusPayload = objectMapper.readValue(
+            SseSupport.SseEventPayload guidedStatus = objectMapper.readValue(
                     Objects.requireNonNull(streamEvent.data(), "guided status data"), SseSupport.SseEventPayload.class);
-            if (STATUS_CODE_CITATION_PARTIAL_FAILURE.equals(statusPayload.code())) {
+            if (citationContract.code().equals(guidedStatus.code())) {
                 citationPartialFailureStatusIndex = eventIndex;
-                assertEquals(Boolean.FALSE, statusPayload.retryable());
-                assertEquals(STATUS_STAGE_CITATION, statusPayload.stage());
+                assertEquals(Boolean.valueOf(citationContract.retryable()), guidedStatus.retryable());
+                assertEquals(citationContract.stage(), guidedStatus.stage());
             }
         }
 

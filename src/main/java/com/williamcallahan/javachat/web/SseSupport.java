@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -65,6 +66,7 @@ public class SseSupport {
             Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
 
     private final ObjectWriter jsonWriter;
+    private final SseStatusContractCatalog statusContractCatalog;
     private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
@@ -72,9 +74,11 @@ public class SseSupport {
      * Creates SSE support wired to the application's ObjectMapper.
      *
      * @param objectMapper JSON mapper for safe SSE serialization
+     * @param statusContractCatalog canonical client-visible SSE status contracts
      */
-    public SseSupport(ObjectMapper objectMapper) {
+    public SseSupport(ObjectMapper objectMapper, SseStatusContractCatalog statusContractCatalog) {
         this.jsonWriter = objectMapper.writer();
+        this.statusContractCatalog = Objects.requireNonNull(statusContractCatalog, "statusContractCatalog");
     }
 
     /**
@@ -308,12 +312,13 @@ public class SseSupport {
         if (failedCitationConversionCount < 0) {
             throw new IllegalArgumentException("Failed citation conversion count cannot be negative");
         }
+        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         String citationWarning = CITATION_PARTIAL_FAILURE_MESSAGE_TEMPLATE.formatted(failedCitationConversionCount);
         return Flux.just(statusEvent(SseEventPayload.builder(citationWarning)
                 .details(CITATION_PARTIAL_FAILURE_DETAILS)
-                .code(STATUS_CODE_CITATION_PARTIAL_FAILURE)
-                .retryable(false)
-                .stage(STATUS_STAGE_CITATION)
+                .code(citationContract.code())
+                .retryable(citationContract.retryable())
+                .stage(citationContract.stage())
                 .build()));
     }
 

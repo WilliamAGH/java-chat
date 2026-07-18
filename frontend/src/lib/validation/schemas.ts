@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod/v4";
+import sseStatusContracts from "../../../../src/main/resources/sse-status-contracts.json";
 
 // =============================================================================
 // SSE Stream Event Schemas
@@ -23,27 +24,28 @@ const sseEventFieldShape = {
   stage: z.string().nullish(),
 };
 
-/** Canonical backend status code for a response with incomplete citations. */
-export const CITATION_PARTIAL_FAILURE_STATUS_CODE = "citation.partial-failure";
-
-/** Validates the canonical citation partial-failure status code. */
-export const CitationPartialFailureStatusCodeSchema = z.literal(
-  CITATION_PARTIAL_FAILURE_STATUS_CODE,
-);
+/** Frontend projection of the canonical citation partial-failure contract. */
+export const CITATION_PARTIAL_FAILURE_STATUS_CONTRACT = sseStatusContracts.citationPartialFailure;
 
 /** Validates citation partial-failure statuses before they enter durable UI state. */
 export const CitationPartialFailureStatusSchema = z.object({
   ...sseEventFieldShape,
-  code: CitationPartialFailureStatusCodeSchema,
-  retryable: z.literal(false),
-  stage: z.literal("citation"),
+  code: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code)
+    .brand<"CitationPartialFailureStatusCode">(),
+  retryable: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.retryable)
+    .brand<"CitationPartialFailureStatusRetryable">(),
+  stage: z
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.stage)
+    .brand<"CitationPartialFailureStatusStage">(),
 });
 
 /** Generic status message for status codes without specialized UI behavior. */
 const GenericStreamStatusSchema = z
   .object(sseEventFieldShape)
   .refine(
-    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CODE,
+    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code,
     "Citation partial-failure statuses must satisfy their specialized contract",
   );
 

@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
@@ -86,7 +87,9 @@ class GuidedLearningControllerBackpressureOverflowTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(objectMapper),
+                new SseSupport(
+                        objectMapper,
+                        new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"))),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
         Flux<String> partialAnswerThenOverflow = Flux.just("partial guided answer")

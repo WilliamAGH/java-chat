@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
-import {
-  CITATION_PARTIAL_FAILURE_STATUS_CODE,
-  CitationPartialFailureStatusSchema,
-} from "../validation/schemas";
-import { validateWithSchema } from "../validation/validate";
+import { createCitationPartialFailureStatusFixture } from "../../test/citationPartialFailureStatus";
 
 type StreamChatFunction = typeof import("../services/chat").streamChat;
 
@@ -36,26 +32,6 @@ async function sendChatMessage(
   }
   await fireEvent.input(messageInput, { target: { value: chatMessage } });
   await fireEvent.click(renderedChatView.getByRole("button", { name: "Send message" }));
-}
-
-function validatedCitationWarning() {
-  const citationWarningValidation = validateWithSchema(
-    CitationPartialFailureStatusSchema,
-    {
-      message: "Some citations could not be loaded (1 failed)",
-      details: "Citations could not be loaded",
-      code: CITATION_PARTIAL_FAILURE_STATUS_CODE,
-      retryable: false,
-      stage: "citation",
-    },
-    "ChatView citation warning fixture",
-  );
-
-  if (!citationWarningValidation.success) {
-    throw new Error("Expected the citation warning fixture to satisfy its canonical schema");
-  }
-
-  return citationWarningValidation.validated;
 }
 
 describe("ChatView streaming stability", () => {
@@ -112,7 +88,7 @@ describe("ChatView streaming stability", () => {
     let completeStream: () => void = () => {
       throw new Error("Expected stream completion callback to be set");
     };
-    const citationWarning = validatedCitationWarning();
+    const citationWarning = createCitationPartialFailureStatusFixture();
 
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
       options?.onStatus?.(citationWarning);
@@ -146,7 +122,7 @@ describe("ChatView streaming stability", () => {
     let failResponseStream: () => void = () => {
       throw new Error("Expected stream failure callback to be set");
     };
-    const citationWarning = validatedCitationWarning();
+    const citationWarning = createCitationPartialFailureStatusFixture();
 
     streamChatMock.mockImplementation(async (_sessionId, _message, onChunk, options) => {
       options?.onStatus?.(citationWarning);

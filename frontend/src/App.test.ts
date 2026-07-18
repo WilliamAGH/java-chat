@@ -4,6 +4,8 @@ import { tick } from "svelte";
 import { pageMetadataForPath } from "./lib/services/pageMetadata";
 
 const refreshCsrfTokenMock = vi.fn(async () => true);
+const CHAT_CANONICAL_PATH = "/";
+const LEARN_CANONICAL_PATH = "/learn";
 
 vi.mock("./lib/services/csrf", async () => {
   const actualCsrfService =
@@ -86,7 +88,7 @@ describe("App route synchronization", () => {
       "true",
     );
     expect(globalThis.location.pathname).toBe("/learn/");
-    expectCurrentRouteMetadata("/learn");
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 
   it("preserves a direct guided route while synchronizing its metadata", async () => {
@@ -100,7 +102,7 @@ describe("App route synchronization", () => {
       "true",
     );
     expect(globalThis.location.pathname).toBe("/guided");
-    expectCurrentRouteMetadata("/learn");
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 
   it("honors a direct chat alias", async () => {
@@ -112,7 +114,7 @@ describe("App route synchronization", () => {
 
     expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     expect(globalThis.location.pathname).toBe("/chat");
-    expectCurrentRouteMetadata("/");
+    expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
 
   it("projects an unknown route to the chat canonical metadata", async () => {
@@ -124,7 +126,7 @@ describe("App route synchronization", () => {
 
     expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     expect(globalThis.location.pathname).toBe("/unknown-route/");
-    expectCurrentRouteMetadata("/");
+    expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
 
   it("synchronizes tab selection, canonical paths, and document metadata", async () => {
@@ -133,11 +135,11 @@ describe("App route synchronization", () => {
 
     await fireEvent.click(application.getByRole("tab", { name: "Learn" }));
     expect(globalThis.location.pathname).toBe("/learn");
-    expectCurrentRouteMetadata("/learn");
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
 
     await fireEvent.click(application.getByRole("tab", { name: "Chat" }));
     expect(globalThis.location.pathname).toBe("/");
-    expectCurrentRouteMetadata("/");
+    expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
 
   it("restores the selected tab and metadata when browser history changes", async () => {
@@ -151,7 +153,7 @@ describe("App route synchronization", () => {
       "aria-selected",
       "true",
     );
-    expectCurrentRouteMetadata("/learn");
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
 
     globalThis.history.replaceState({}, "", "/chat/");
     globalThis.dispatchEvent(new PopStateEvent("popstate"));
@@ -160,6 +162,6 @@ describe("App route synchronization", () => {
       "aria-selected",
       "true",
     );
-    expectCurrentRouteMetadata("/");
+    expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
 });

@@ -1,35 +1,18 @@
-import { describe, expect, it } from "vitest";
-import {
-  CITATION_PARTIAL_FAILURE_STATUS_CODE,
-  CitationPartialFailureStatusSchema,
-} from "../validation/schemas";
-import { validateWithSchema } from "../validation/validate";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { createCitationPartialFailureStatusFixture } from "../../test/citationPartialFailureStatus";
+import type { CitationPartialFailureStatus } from "../validation/schemas";
 import { createStreamingState } from "./createStreamingState.svelte";
 
-function validatedCitationWarning() {
-  const citationWarningValidation = validateWithSchema(
-    CitationPartialFailureStatusSchema,
-    {
-      message: "Some citations could not be loaded (1 failed)",
-      details: "Citations could not be loaded",
-      code: CITATION_PARTIAL_FAILURE_STATUS_CODE,
-      retryable: false,
-      stage: "citation",
-    },
-    "createStreamingState citation warning fixture",
-  );
-
-  if (!citationWarningValidation.success) {
-    throw new Error("Expected the citation warning fixture to satisfy its canonical schema");
-  }
-
-  return citationWarningValidation.validated;
-}
-
 describe("createStreamingState citation warnings", () => {
+  it("keeps validated citation contract fields nominally discriminated", () => {
+    expectTypeOf<CitationPartialFailureStatus["code"]>().not.toEqualTypeOf<string>();
+    expectTypeOf<CitationPartialFailureStatus["stage"]>().not.toEqualTypeOf<string>();
+    expectTypeOf<CitationPartialFailureStatus["retryable"]>().not.toEqualTypeOf<boolean>();
+  });
+
   it("preserves a citation warning through stream completion and clears it for the next stream", () => {
     const streamingState = createStreamingState();
-    const citationWarning = validatedCitationWarning();
+    const citationWarning = createCitationPartialFailureStatusFixture();
 
     streamingState.startStream();
     streamingState.updateStatus(citationWarning);
@@ -49,7 +32,7 @@ describe("createStreamingState citation warnings", () => {
     const streamingState = createStreamingState();
 
     streamingState.startStream();
-    streamingState.updateStatus(validatedCitationWarning());
+    streamingState.updateStatus(createCitationPartialFailureStatusFixture());
     streamingState.failStream();
 
     expect(streamingState.isStreaming).toBe(false);

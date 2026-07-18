@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_TEXT;
@@ -34,6 +35,7 @@ import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.ReactorHooksConfig;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
@@ -51,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
@@ -169,7 +172,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
 
@@ -204,7 +207,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(streamingService.isAvailable()).thenReturn(false);
@@ -232,6 +235,64 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
+    void chatStreamSurfacesNonzeroCitationFailuresBeforeCitationEvent() throws JsonProcessingException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        SseStatusContractCatalog statusContractCatalog = createStatusContractCatalog();
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                new SseSupport(objectMapper, statusContractCatalog),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(chatService.buildStructuredPromptWithContextOutcome(
+                        anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
+                .thenReturn(new ChatService.StructuredPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(retrievalService.toCitations(anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(
+                        List.of(new Citation("https://example.com", "Example", "", "")), 2));
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "chat stream events");
+
+        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
+        int citationPartialFailureIndex = -1;
+        int citationEventIndex = -1;
+        for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
+            ServerSentEvent<String> streamEvent = streamEvents.get(eventIndex);
+            if (EVENT_CITATION.equals(streamEvent.event())) {
+                citationEventIndex = eventIndex;
+                continue;
+            }
+            if (!EVENT_STATUS.equals(streamEvent.event())) {
+                continue;
+            }
+            SseSupport.SseEventPayload chatStatus = objectMapper.readValue(
+                    Objects.requireNonNull(streamEvent.data(), "chat status data"), SseSupport.SseEventPayload.class);
+            if (citationContract.code().equals(chatStatus.code())) {
+                citationPartialFailureIndex = eventIndex;
+                assertEquals(Boolean.valueOf(citationContract.retryable()), chatStatus.retryable());
+                assertEquals(citationContract.stage(), chatStatus.stage());
+            }
+        }
+
+        assertTrue(citationPartialFailureIndex >= 0, "chat stream should surface partial citation failure");
+        assertTrue(citationEventIndex > citationPartialFailureIndex, "citation warning should precede citations");
+    }
+
+    @Test
     void streamBufferOverflowDoesNotPersistPartialChatAnswer() throws JsonProcessingException {
         ChatService chatService = mock(ChatService.class);
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
@@ -242,7 +303,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
@@ -289,7 +350,7 @@ class ChatControllerStreamingFailureTest {
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper),
+                createSseSupport(),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
 
@@ -314,6 +375,14 @@ class ChatControllerStreamingFailureTest {
         assertTrue(controllerAlert.getKeyValuePairs().stream()
                 .anyMatch(structuredField ->
                         structuredField.key.equals(fieldName) && structuredField.value.equals(expectedField)));
+    }
+
+    private SseSupport createSseSupport() {
+        return new SseSupport(objectMapper, createStatusContractCatalog());
+    }
+
+    private SseStatusContractCatalog createStatusContractCatalog() {
+        return new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"));
     }
 }
 
