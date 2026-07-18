@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import javax.lang.model.SourceVersion;
 
 /**
  * Identifies an explicitly named Java API type method within a natural-language query.
@@ -136,27 +137,7 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
                 || !candidatePackageName.equals(candidatePackageName.trim())) {
             return false;
         }
-
-        boolean segmentStart = true;
-        for (int characterIndex = 0; characterIndex < candidatePackageName.length(); characterIndex++) {
-            char packageCharacter = candidatePackageName.charAt(characterIndex);
-            if (packageCharacter == '.') {
-                if (segmentStart) {
-                    return false;
-                }
-                segmentStart = true;
-                continue;
-            }
-            if (segmentStart) {
-                if (!Character.isJavaIdentifierStart(packageCharacter)) {
-                    return false;
-                }
-                segmentStart = false;
-            } else if (!Character.isJavaIdentifierPart(packageCharacter)) {
-                return false;
-            }
-        }
-        return !segmentStart;
+        return SourceVersion.isName(candidatePackageName, SourceVersion.RELEASE_25);
     }
 
     private static ParsedQualifiedName parseQualifiedName(String query, int startIndex) {

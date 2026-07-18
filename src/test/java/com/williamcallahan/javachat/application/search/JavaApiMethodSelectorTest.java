@@ -87,6 +87,10 @@ class JavaApiMethodSelectorTest {
         assertFalse(selector.matchesJavadocPath("/java.base/java/util/class-use/List.html", "java.util.class-use"));
         assertFalse(selector.matchesJavadocPath("/List.html", ""));
         assertFalse(selector.matchesJavadocPath("/java.base/java/util/List.html", null));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/class/List.html", "java.class"));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/true/List.html", "java.true"));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/false/List.html", "java.false"));
+        assertFalse(selector.matchesJavadocPath("/java.base/java/null/List.html", "java.null"));
     }
 
     @Test
