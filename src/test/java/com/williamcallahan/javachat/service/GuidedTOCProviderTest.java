@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 class GuidedTOCProviderTest {
     private static final String SOURCE_KIND_OFFICIAL = "official";
     private static final String CANONICAL_SOURCE_REFERENCE_TEST_SLUG = "strings";
+    private static final String CALLER_MUTATED_LESSON_TITLE = "Caller-mutated lesson title";
     private static final String UNKNOWN_SOURCE_REFERENCE_TEST_SLUG = "unknown-source-reference";
     private static final String UNKNOWN_SOURCE_REFERENCE = "missing-canonical-source";
 
@@ -54,5 +55,20 @@ class GuidedTOCProviderTest {
                 () -> GuidedTOCProvider.projectOfficialSourceScopes(List.of(invalidLesson)));
 
         assertTrue(invalidSourceScope.getCause().getMessage().contains(UNKNOWN_SOURCE_REFERENCE));
+    }
+
+    @Test
+    void returnsImmutableDetachedLessonSnapshots() {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(new ObjectMapper());
+
+        List<GuidedLesson> firstSnapshot = tocProvider.getTOC();
+        GuidedLesson callerLesson = firstSnapshot.getFirst();
+        String originalLessonTitle = callerLesson.getTitle();
+
+        assertThrows(UnsupportedOperationException.class, firstSnapshot::removeFirst);
+        callerLesson.setTitle(CALLER_MUTATED_LESSON_TITLE);
+
+        GuidedLesson subsequentLesson = tocProvider.getTOC().getFirst();
+        assertEquals(originalLessonTitle, subsequentLesson.getTitle());
     }
 }

@@ -28,7 +28,7 @@ public record RetrievalConstraint(
         sourceKind = sanitize(sourceKind);
         docType = sanitize(docType);
         sourceName = sanitize(sourceName);
-        docSet = sanitizeDocSets(docSet);
+        docSet = List.copyOf(sanitizeDocSets(docSet));
     }
 
     /**
@@ -97,6 +97,6 @@ public record RetrievalConstraint(
                 sanitizedDocSets.add(sanitizedDocSet);
             }
         }
-        return List.copyOf(sanitizedDocSets);
+        return sanitizedDocSets;
     }
 }

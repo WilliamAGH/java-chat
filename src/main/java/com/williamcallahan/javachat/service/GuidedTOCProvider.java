@@ -7,7 +7,6 @@ import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,7 +22,7 @@ public class GuidedTOCProvider {
     private static final String OFFICIAL_SOURCE_KIND = "official";
 
     private final ObjectMapper objectMapper;
-    private volatile List<GuidedLesson> cachedLessons = Collections.emptyList();
+    private volatile List<GuidedLesson> cachedLessons = List.of();
     private volatile boolean tocLoaded = false;
 
     /**
@@ -36,10 +35,10 @@ public class GuidedTOCProvider {
     }
 
     /**
-     * Returns the lesson table of contents, loading it lazily from the classpath on first access.
+     * Returns an immutable lesson snapshot, loading the table of contents lazily on first access.
      */
     public synchronized List<GuidedLesson> getTOC() {
-        if (tocLoaded) return cachedLessons;
+        if (tocLoaded) return immutableLessonSnapshots(cachedLessons);
         try {
             ClassPathResource tocResource = new ClassPathResource("guided/toc.json");
             try (InputStream tocStream = tocResource.getInputStream()) {
@@ -47,13 +46,13 @@ public class GuidedTOCProvider {
                         .readerFor(new TypeReference<List<GuidedLesson>>() {})
                         .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                         .readValue(tocStream);
-                cachedLessons = projectOfficialSourceScopes(loadedLessons);
+                cachedLessons = immutableLessonSnapshots(projectOfficialSourceScopes(loadedLessons));
             }
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to load guided TOC from classpath", exception);
         }
         tocLoaded = true;
-        return cachedLessons;
+        return immutableLessonSnapshots(cachedLessons);
     }
 
     /**
@@ -101,6 +100,10 @@ public class GuidedTOCProvider {
             }
         }
         return List.copyOf(guidedLessons);
+    }
+
+    private static List<GuidedLesson> immutableLessonSnapshots(List<GuidedLesson> guidedLessons) {
+        return guidedLessons.stream().map(GuidedLesson::new).toList();
     }
 
     private static String resolveOfficialDocSet(String lessonSlug, String sourceReference) {
