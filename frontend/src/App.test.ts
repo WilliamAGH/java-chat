@@ -105,6 +105,20 @@ describe("App route synchronization", () => {
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 
+  it("recovers an unimplemented direct learn descendant to the canonical learn route", async () => {
+    globalThis.history.replaceState({}, "", "/learn/not-a-lesson/");
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
+    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(globalThis.location.pathname).toBe(LEARN_CANONICAL_PATH);
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
+  });
+
   it("honors a direct chat alias", async () => {
     globalThis.history.replaceState({}, "", "/chat");
     const App = (await import("./App.svelte")).default;
@@ -163,5 +177,21 @@ describe("App route synchronization", () => {
       "true",
     );
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
+  });
+
+  it("recovers an unimplemented guided descendant on browser history navigation", async () => {
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    globalThis.history.replaceState({}, "", "/guided/not-a-lesson/");
+    globalThis.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
+    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(globalThis.location.pathname).toBe(LEARN_CANONICAL_PATH);
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 });

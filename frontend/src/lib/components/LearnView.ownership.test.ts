@@ -3,6 +3,7 @@ import { fireEvent, render } from "@testing-library/svelte";
 import { tick } from "svelte";
 import type { CitationFetchOptions } from "../services/chat";
 import type { GuidedLessonContentCallbacks } from "../services/guided";
+import learnViewSource from "./LearnView.svelte?raw";
 
 const {
   fetchTocMock,
@@ -153,5 +154,23 @@ describe("LearnView async request ownership", () => {
     await tick();
 
     expect(citationAbortSignal()?.aborted).toBe(true);
+  });
+
+  it("reserves mobile chat FAB clearance below the scrollable lesson panel", async () => {
+    const learnView = await renderSelectedLesson();
+    const lessonContentPanel =
+      learnView.container.querySelector<HTMLElement>(".lesson-content-panel");
+    if (!lessonContentPanel) {
+      throw new Error("Expected a scrollable lesson content panel");
+    }
+
+    expect(lessonContentPanel).toHaveClass("lesson-content-panel");
+
+    expect(learnViewSource).toContain(
+      "--lesson-content-panel-mobile-reading-inset: var(--space-20)",
+    );
+    expect(learnViewSource).toContain(
+      "padding-bottom: var(--lesson-content-panel-mobile-reading-inset)",
+    );
   });
 });

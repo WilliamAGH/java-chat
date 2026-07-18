@@ -84,6 +84,101 @@ describe("ChatView streaming stability", () => {
     expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
   });
 
+  it("restores input focus after a submitted stream completes with focus in the form", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected stream completion callback to be set");
+    };
+    streamChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const renderedChatView = await renderChatView();
+    const messageInput = renderedChatView.getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+    messageInput.focus();
+
+    await sendChatMessage(renderedChatView, "Explain records");
+    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+    expect(messageInput).toHaveFocus();
+
+    completeStream();
+
+    await vi.waitFor(() => {
+      expect(messageInput).toBeEnabled();
+      expect(messageInput).toHaveFocus();
+    });
+  });
+
+  it("restores input focus after a submitted stream completes with focus on the document body", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected stream completion callback to be set");
+    };
+    streamChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const renderedChatView = await renderChatView();
+    const messageInput = renderedChatView.getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+
+    await sendChatMessage(renderedChatView, "Explain records");
+    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+
+    const transientFocusControl = document.createElement("button");
+    renderedChatView.container.append(transientFocusControl);
+    transientFocusControl.focus();
+    transientFocusControl.remove();
+    expect(document.activeElement).toBe(document.body);
+
+    completeStream();
+
+    await vi.waitFor(() => {
+      expect(messageInput).toBeEnabled();
+      expect(messageInput).toHaveFocus();
+    });
+  });
+
+  it("preserves external focus after a submitted stream completes", async () => {
+    let completeStream: () => void = () => {
+      throw new Error("Expected stream completion callback to be set");
+    };
+    streamChatMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeStream = resolve;
+        }),
+    );
+
+    const renderedChatView = await renderChatView();
+    const messageInput = renderedChatView.getByLabelText("Message input");
+    if (!(messageInput instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected message input element to be a textarea");
+    }
+
+    await sendChatMessage(renderedChatView, "Explain records");
+    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+
+    const externalNavigationButton = document.createElement("button");
+    renderedChatView.container.append(externalNavigationButton);
+    externalNavigationButton.focus();
+    expect(externalNavigationButton).toHaveFocus();
+
+    completeStream();
+
+    await vi.waitFor(() => expect(messageInput).toBeEnabled());
+    expect(externalNavigationButton).toHaveFocus();
+  });
+
   it("keeps a citation warning visible after response text and stream completion", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected stream completion callback to be set");
