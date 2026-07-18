@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.cli;
 
+import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.DocsIngestionService;
 import com.williamcallahan.javachat.service.ProgressTracker;
@@ -44,6 +45,7 @@ public class DocumentProcessor {
     private static final String LOG_BLANK_LINE = "";
     private static final String LOG_START_TITLE = "Starting Document Processing with Deduplication";
     private static final String LOG_COMPLETE_TITLE = "DOCUMENT PROCESSING COMPLETE";
+    private static final String LOG_FAILED_TITLE = "DOCUMENT PROCESSING FAILED";
     private static final String LOG_DEDUP_ENABLED = "Deduplication: ENABLED (using content hashes)";
     private static final String LOG_NEXT_STEPS = "Next steps:";
     private static final String LOG_DOCS_INDEXED =
@@ -57,6 +59,7 @@ public class DocumentProcessor {
     private static final String LOG_SKIP_DIR_NOT_FOUND = "Skipping documentation set (directory not found)";
     private static final String LOG_SKIP_NO_ELIGIBLE = "Skipping documentation set (no eligible files)";
     private static final String LOG_PROCESSING_FAILED = "Failed to process documentation set (exceptionType={})";
+    private static final String LOG_FILE_FAILURE = "File failed (phase={}): {}";
     private static final String LOG_STACK_TRACE = "Stack trace:";
     private static final String LOG_PROCESSED_STATS = "Processed {} files in {}s ({} files/sec) ({})";
     private static final String LOG_TOTAL_PROCESSED = "Total new documents processed: {}";
@@ -126,27 +129,37 @@ public class DocumentProcessor {
 
     private void runDocumentProcessing(final String... ignoredArgs) {
         final EnvironmentConfig config = EnvironmentConfig.fromEnvironment();
-        logStartBanner(config);
+        logStartBanner();
 
         final Path basePath = Path.of(config.docsDirectory()).toAbsolutePath().normalize();
         final List<DocumentationSet> selectedSets = selectDocumentationSets(config);
+        processDocumentationSets(basePath, selectedSets);
+    }
+
+    /**
+     * Processes the selected documentation sets and fails the CLI when any set reports file failures.
+     *
+     * <p>File-level failures are not partial CLI success because operators must be able to trust the
+     * completion marker as proof that every selected set ingested cleanly.</p>
+     */
+    void processDocumentationSets(final Path basePath, final List<DocumentationSet> selectedSets) {
         final IngestionTotals totals = selectedSets.stream()
                 .map(docSet -> processDocumentationSet(basePath, docSet))
                 .reduce(IngestionTotals.ZERO, this::accumulateOutcome, IngestionTotals::combine);
 
-        logSummary(config, totals);
-
         if (totals.failedSets() > 0) {
+            logFailureSummary(totals);
             throw new DocumentProcessingException(
                     String.format(Locale.ROOT, PROCESSING_FAILED_TEMPLATE, totals.failedSets()));
         }
+        logSummary(totals);
     }
 
     private IngestionTotals accumulateOutcome(final IngestionTotals totals, final ProcessingOutcome outcome) {
         return switch (outcome) {
             case ProcessingOutcome.Success success -> totals.addSuccess(success.processed(), success.duplicates());
             case ProcessingOutcome.Skipped _ -> totals.addSkipped();
-            case ProcessingOutcome.Failed _ -> totals.addFailed();
+            case ProcessingOutcome.Failed failed -> totals.addFailed(failed.processed(), failed.duplicates());
         };
     }
 
@@ -196,8 +209,12 @@ public class DocumentProcessor {
                     LOGGER.info(LOG_DUPLICATES_SKIPPED, duplicates);
                 }
             }
-            if (failureCount > 0 && LOGGER.isWarnEnabled()) {
-                LOGGER.warn("Ingestion completed with {} file failures", failureCount);
+            if (failureCount > 0) {
+                logFileFailures(outcome);
+                if (LOGGER.isWarnEnabled()) {
+                    LOGGER.warn("Ingestion completed with {} file failures", failureCount);
+                }
+                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
             }
             return new ProcessingOutcome.Success(processed, duplicates);
 
@@ -208,7 +225,20 @@ public class DocumentProcessor {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_STACK_TRACE, ioException);
             }
-            return new ProcessingOutcome.Failed(docSet.displayName());
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
+        }
+    }
+
+    private void logFileFailures(final IngestionLocalOutcome outcome) {
+        if (!LOGGER.isWarnEnabled()) {
+            return;
+        }
+        for (IngestionLocalFailure failure : outcome.failures()) {
+            // The detail field can contain provider input, so logs retain only safe triage identifiers.
+            final String safeFailurePhase = failure.phase().replace('\r', '?').replace('\n', '?');
+            final String safeFailureFilePath =
+                    failure.filePath().replace('\r', '?').replace('\n', '?');
+            LOGGER.warn(LOG_FILE_FAILURE, safeFailurePhase, safeFailureFilePath);
         }
     }
 
@@ -232,7 +262,7 @@ public class DocumentProcessor {
         return fileName.endsWith(EXT_HTML) || fileName.endsWith(EXT_HTM) || fileName.endsWith(EXT_PDF);
     }
 
-    private void logStartBanner(final EnvironmentConfig config) {
+    private void logStartBanner() {
         if (!LOGGER.isInfoEnabled()) {
             return;
         }
@@ -309,19 +339,8 @@ public class DocumentProcessor {
                 progressTracker.formatPercent());
     }
 
-    private void logSummary(final EnvironmentConfig config, final IngestionTotals totals) {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info(LOG_BLANK_LINE);
-            LOGGER.info(LOG_BANNER_LINE);
-            LOGGER.info(LOG_COMPLETE_TITLE);
-            LOGGER.info(LOG_BANNER_LINE);
-            LOGGER.info(LOG_TOTAL_PROCESSED, totals.processed());
-            LOGGER.info(LOG_TOTAL_DUPLICATES, totals.duplicates());
-            LOGGER.info(LOG_TOTAL_SKIPPED, totals.skippedSets());
-        }
-        if (totals.failedSets() > 0 && LOGGER.isWarnEnabled()) {
-            LOGGER.warn(LOG_TOTAL_FAILED, totals.failedSets());
-        }
+    private void logSummary(final IngestionTotals totals) {
+        logTotals(LOG_COMPLETE_TITLE, totals);
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_BLANK_LINE);
             LOGGER.info(LOG_DOCS_INDEXED);
@@ -332,6 +351,25 @@ public class DocumentProcessor {
             LOGGER.info(LOG_NEXT_STEP_RETRIEVAL);
             LOGGER.info(LOG_NEXT_STEP_CHAT);
             LOGGER.info(LOG_BANNER_LINE);
+        }
+    }
+
+    private void logFailureSummary(final IngestionTotals totals) {
+        logTotals(LOG_FAILED_TITLE, totals);
+        if (LOGGER.isWarnEnabled()) {
+            LOGGER.warn(LOG_TOTAL_FAILED, totals.failedSets());
+        }
+    }
+
+    private void logTotals(final String title, final IngestionTotals totals) {
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info(LOG_BLANK_LINE);
+            LOGGER.info(LOG_BANNER_LINE);
+            LOGGER.info(title.replace('\r', '?').replace('\n', '?'));
+            LOGGER.info(LOG_BANNER_LINE);
+            LOGGER.info(LOG_TOTAL_PROCESSED, totals.processed());
+            LOGGER.info(LOG_TOTAL_DUPLICATES, totals.duplicates());
+            LOGGER.info(LOG_TOTAL_SKIPPED, totals.skippedSets());
         }
     }
 
@@ -399,8 +437,9 @@ public class DocumentProcessor {
             return new IngestionTotals(processed, duplicates, skippedSets + 1, failedSets);
         }
 
-        IngestionTotals addFailed() {
-            return new IngestionTotals(processed, duplicates, skippedSets, failedSets + 1);
+        IngestionTotals addFailed(final long newProcessed, final long newDuplicates) {
+            return new IngestionTotals(
+                    processed + newProcessed, duplicates + newDuplicates, skippedSets, failedSets + 1);
         }
 
         static IngestionTotals combine(final IngestionTotals left, final IngestionTotals right) {
@@ -420,7 +459,7 @@ public class DocumentProcessor {
 
         record Skipped(String setName, String reason) implements ProcessingOutcome {}
 
-        record Failed(String setName) implements ProcessingOutcome {}
+        record Failed(String setName, long processed, long duplicates) implements ProcessingOutcome {}
     }
 
     /**

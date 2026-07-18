@@ -16,6 +16,10 @@ source "$COMMON_QDRANT_LIB_DIR/embedding_preflight.sh"
 
 require_command jq "brew install jq"
 
+readonly DOCUMENT_PROCESSING_COMPLETE_MARKER="DOCUMENT PROCESSING COMPLETE"
+readonly MANAGED_JAVA_PROCESS_TERMINATION_MAX_POLLS=5
+readonly MANAGED_JAVA_PROCESS_TERMINATION_POLL_SECONDS=1
+
 # Wraps curl with conditional Qdrant API key header injection.
 # All positional arguments are forwarded to curl unchanged.
 #
@@ -234,24 +238,53 @@ setup_pid_and_cleanup() {
     fi
 
     APP_PID=""
-    trap '_common_cleanup' INT TERM
+    trap '_common_cleanup INT' INT
+    trap '_common_cleanup TERM' TERM
 }
 
 # Internal cleanup handler used by setup_pid_and_cleanup.
 _common_cleanup() {
+    local received_signal="${1:-TERM}"
+    local signal_exit_status
+    case "$received_signal" in
+        INT)
+            signal_exit_status=130
+            ;;
+        TERM)
+            signal_exit_status=143
+            ;;
+        *)
+            signal_exit_status=1
+            ;;
+    esac
+
     echo ""
     echo -e "${YELLOW}Received interrupt signal. Shutting down...${NC}"
     if [ -n "${APP_PID:-}" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill -TERM "$APP_PID" 2>/dev/null || true
+        kill -s "$received_signal" "$APP_PID" 2>/dev/null || true
+
+        local termination_poll
+        for ((termination_poll = 0; termination_poll < MANAGED_JAVA_PROCESS_TERMINATION_MAX_POLLS; termination_poll++)); do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+                break
+            fi
+            sleep "$MANAGED_JAVA_PROCESS_TERMINATION_POLL_SECONDS"
+        done
+
+        if kill -0 "$APP_PID" 2>/dev/null; then
+            echo -e "${YELLOW}Managed Java process did not stop after $received_signal; forcing shutdown...${NC}"
+            kill -KILL "$APP_PID" 2>/dev/null || true
+        fi
+        wait "$APP_PID" 2>/dev/null || true
     fi
     rm -f "${COMMON_PID_FILE:-}"
-    exit 0
+    exit "$signal_exit_status"
 }
 
-# Monitors a background Java process for completion by watching a log file
-# for the "DOCUMENT PROCESSING COMPLETE" marker.
-# Exits successfully when the process completes (with or without marker).
-# Exits with error if the process fails unexpectedly with exit code > 0.
+# Monitors a background Java process until it exits and confirms its completion marker.
+# Returns success only when the child exits with status 0 and emits the completion marker.
+# Returns failure for every other child status, including SIGTERM's conventional status 143,
+# and when a zero-exit child omits the completion marker.
 #
 # Tracks progress via actual Java log patterns:
 #   "Files to process: N"              -> total files declared
@@ -272,52 +305,14 @@ monitor_java_process() {
     local last_display_hash=""
     local elapsed=0
 
-    while true; do
-        if grep -q "DOCUMENT PROCESSING COMPLETE" "$log_file" 2>/dev/null; then
-            local total_files_declared
-            total_files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
-                | awk -F': ' '{s+=$2} END {print s+0}')
-            local total_files_started
-            total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
-            total_files_started=${total_files_started:-0}
-            echo ""
-            echo -e "${GREEN}Processing completed${NC} ($total_files_started/$total_files_declared files, ${elapsed}s)"
-            break
-        fi
-
-        if ! kill -0 "$java_pid" 2>/dev/null; then
-            # Process has terminated. Check if it completed successfully or failed.
-            local exit_status
-            wait "$java_pid" 2>/dev/null
-            exit_status=$?
-            
-            # Exit code 143 means the process was terminated by signal 15 (SIGTERM), which is normal.
-            # Exit code 0 means successful completion (even without the marker).
-            if [ "$exit_status" -eq 0 ] || [ "$exit_status" -eq 143 ]; then
-                local total_files_declared
-                total_files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
-                    | awk -F': ' '{s+=$2} END {print s+0}')
-                local total_files_started
-                total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
-                total_files_started=${total_files_started:-0}
-                echo ""
-                echo -e "${GREEN}Processing completed${NC} ($total_files_started/$total_files_declared files, ${elapsed}s)"
-                break
-            else
-                echo ""
-                echo -e "${RED}Application failed with exit code $exit_status${NC}"
-                rm -f "$pid_file"
-                exit 1
-            fi
-        fi
-
+    while kill -0 "$java_pid" 2>/dev/null; do
         local current_time
         current_time=$(date +%s)
         elapsed=$((current_time - start_time))
 
         local files_declared
         files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
-            | awk -F': ' '{s+=$2} END {print s+0}')
+            | awk -F': ' '{totalFiles += $2} END {print totalFiles + 0}')
         local files_started
         files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
         files_started=${files_started:-0}
@@ -342,6 +337,42 @@ monitor_java_process() {
 
         sleep 2
     done
+
+    local exit_status
+    if wait "$java_pid" 2>/dev/null; then
+        exit_status=0
+    else
+        exit_status=$?
+    fi
+
+    local completed_time
+    completed_time=$(date +%s)
+    elapsed=$((completed_time - start_time))
+
+    if [ "$exit_status" -ne 0 ]; then
+        echo ""
+        echo -e "${RED}Application failed with exit code $exit_status${NC}"
+        rm -f "$pid_file"
+        return 1
+    fi
+
+    if ! grep -q "$DOCUMENT_PROCESSING_COMPLETE_MARKER" "$log_file" 2>/dev/null; then
+        echo ""
+        echo -e "${RED}Application exited without $DOCUMENT_PROCESSING_COMPLETE_MARKER${NC}"
+        rm -f "$pid_file"
+        return 1
+    fi
+
+    local total_files_declared
+    total_files_declared=$({ grep -o 'Files to process: [0-9]*' "$log_file" 2>/dev/null || true; } \
+        | awk -F': ' '{totalFiles += $2} END {print totalFiles + 0}')
+    local total_files_started
+    total_files_started=$(grep -c "Processing file with" "$log_file" 2>/dev/null || true)
+    total_files_started=${total_files_started:-0}
+    echo ""
+    echo -e "${GREEN}Processing completed${NC} ($total_files_started/$total_files_declared files, ${elapsed}s)"
+    rm -f "$pid_file"
+    return 0
 }
 
 # Returns the point count for a Qdrant collection, or "unknown" on failure.
