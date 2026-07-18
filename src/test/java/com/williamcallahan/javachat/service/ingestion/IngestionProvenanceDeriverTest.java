@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service.ingestion;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
@@ -30,5 +32,20 @@ class IngestionProvenanceDeriverTest {
             assertEquals(documentationSource.docVersion(), provenance.docVersion());
             assertEquals(documentationSource.docType(), provenance.docType());
         }
+    }
+
+    @Test
+    void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
+        IngestionProvenance embeddedSeparatorProvenance =
+                new IngestionProvenance("alpha\u001fbeta", "gamma", "oracle", "official", "21", "api-docs");
+        IngestionProvenance shiftedSeparatorProvenance =
+                new IngestionProvenance("beta", "gamma", "oracle", "official", "21", "api-docs");
+
+        String embeddedSeparatorFingerprintInput = embeddedSeparatorProvenance.fingerprintInput("fingerprint");
+        String shiftedSeparatorFingerprintInput = shiftedSeparatorProvenance.fingerprintInput("fingerprint\u001falpha");
+
+        assertNotEquals(embeddedSeparatorFingerprintInput, shiftedSeparatorFingerprintInput);
+        assertFalse(embeddedSeparatorFingerprintInput.contains("\u001f"));
+        assertEquals(embeddedSeparatorFingerprintInput, embeddedSeparatorProvenance.fingerprintInput("fingerprint"));
     }
 }

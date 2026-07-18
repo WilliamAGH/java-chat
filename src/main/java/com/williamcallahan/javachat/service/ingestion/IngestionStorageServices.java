@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
 import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.QdrantCollectionRouter;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
  * @param chunks chunk processing pipeline
  * @param hasher content hash helper for deterministic vector IDs
  * @param localStore local snapshot and chunk storage
+ * @param fileMarkers canonical file-level ingestion marker store
  * @param router routes documents to the correct Qdrant collection
  */
 @Service
@@ -26,4 +28,5 @@ public record IngestionStorageServices(
         ChunkProcessingService chunks,
         ContentHasher hasher,
         LocalStoreService localStore,
+        FileIngestionMarkerStore fileMarkers,
         QdrantCollectionRouter router) {}

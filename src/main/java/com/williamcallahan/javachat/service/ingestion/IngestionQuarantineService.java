@@ -1,10 +1,11 @@
 package com.williamcallahan.javachat.service.ingestion;
 
+import com.williamcallahan.javachat.service.ContentHasher;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,25 +20,28 @@ public class IngestionQuarantineService {
 
     private static final String DEFAULT_DOCUMENTATION_ROOT = "data/docs";
     private static final String QUARANTINE_DIRECTORY_NAME = ".quarantine";
-    private static final DateTimeFormatter QUARANTINE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
+    private static final String TEMPORARY_INSPECTION_FILE_PREFIX = ".inspection-copy-";
+    private static final String TEMPORARY_INSPECTION_FILE_SUFFIX = ".tmp";
 
     private final Path documentationRoot;
+    private final ContentHasher contentHasher;
 
     /**
      * Uses the canonical documentation root so inspection copies remain outside recursive ingestion.
      */
-    public IngestionQuarantineService() {
-        this(Path.of(DEFAULT_DOCUMENTATION_ROOT));
+    public IngestionQuarantineService(ContentHasher contentHasher) {
+        this(Path.of(DEFAULT_DOCUMENTATION_ROOT), contentHasher);
     }
 
-    IngestionQuarantineService(Path documentationRoot) {
+    IngestionQuarantineService(Path documentationRoot, ContentHasher contentHasher) {
         this.documentationRoot = Objects.requireNonNull(documentationRoot, "documentationRoot")
                 .toAbsolutePath()
                 .normalize();
+        this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
     }
 
     /**
-     * Copies the supplied document to a timestamped inspection path under {@code data/.quarantine}.
+     * Copies the supplied document to a content-addressed inspection path under {@code data/.quarantine}.
      *
      * <p>The canonical document remains in place so rejected landing pages cannot shrink a source mirror or
      * disappear from a later ingestion run.
@@ -50,18 +54,26 @@ public class IngestionQuarantineService {
         Objects.requireNonNull(canonicalDocument, "canonicalDocument");
 
         Path absoluteDocument = canonicalDocument.toAbsolutePath().normalize();
-        Path inspectionCopy = buildQuarantineTarget(absoluteDocument);
-        Path inspectionParent = inspectionCopy.getParent();
-        if (inspectionParent != null) {
-            Files.createDirectories(inspectionParent);
-        }
-        Files.copy(absoluteDocument, inspectionCopy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        QuarantineDestination quarantineDestination = resolveQuarantineDestination(absoluteDocument);
+        Files.createDirectories(quarantineDestination.inspectionDirectory());
+        Path temporaryInspectionCopy = Files.createTempFile(
+                quarantineDestination.inspectionDirectory(),
+                TEMPORARY_INSPECTION_FILE_PREFIX,
+                TEMPORARY_INSPECTION_FILE_SUFFIX);
+        try {
+            Files.copy(absoluteDocument, temporaryInspectionCopy, StandardCopyOption.REPLACE_EXISTING);
+            String contentFingerprint = contentHasher.sha256(temporaryInspectionCopy);
+            Path inspectionCopy = buildQuarantineTarget(quarantineDestination, contentFingerprint);
+            publishInspectionCopy(temporaryInspectionCopy, inspectionCopy, contentFingerprint);
 
-        log.warn("Copied rejected document to quarantine");
-        return new QuarantineResult(absoluteDocument, inspectionCopy);
+            log.warn("Copied rejected document to quarantine");
+            return new QuarantineResult(absoluteDocument, inspectionCopy);
+        } finally {
+            Files.deleteIfExists(temporaryInspectionCopy);
+        }
     }
 
-    private Path buildQuarantineTarget(Path absoluteDocument) {
+    private QuarantineDestination resolveQuarantineDestination(Path absoluteDocument) {
         Path documentFileName = absoluteDocument.getFileName();
         if (documentFileName == null) {
             throw new IllegalArgumentException("Cannot quarantine path without a filename: " + absoluteDocument);
@@ -75,18 +87,49 @@ public class IngestionQuarantineService {
             throw new IllegalArgumentException("Cannot quarantine path without a filename: " + relativeDocumentPath);
         }
 
-        String timestamp = LocalDateTime.now().format(QUARANTINE_TIMESTAMP_FORMAT);
-        String quarantinedName = appendTimestamp(relativeDocumentFileName.toString(), timestamp);
         Path quarantineRoot = quarantineRoot();
         Path relativeDocumentParent = relativeDocumentPath.getParent();
-        Path candidateTarget = relativeDocumentParent == null
-                ? quarantineRoot.resolve(quarantinedName)
-                : quarantineRoot.resolve(relativeDocumentParent).resolve(quarantinedName);
-        Path normalizedTarget = candidateTarget.toAbsolutePath().normalize();
-        if (!normalizedTarget.startsWith(quarantineRoot)) {
-            throw new IllegalArgumentException("Quarantine target escapes its root: " + normalizedTarget);
+        Path candidateInspectionDirectory =
+                relativeDocumentParent == null ? quarantineRoot : quarantineRoot.resolve(relativeDocumentParent);
+        Path normalizedInspectionDirectory =
+                candidateInspectionDirectory.toAbsolutePath().normalize();
+        if (!normalizedInspectionDirectory.startsWith(quarantineRoot)) {
+            throw new IllegalArgumentException("Quarantine target escapes its root: " + normalizedInspectionDirectory);
         }
-        return normalizedTarget;
+        return new QuarantineDestination(normalizedInspectionDirectory, relativeDocumentFileName.toString());
+    }
+
+    private Path buildQuarantineTarget(QuarantineDestination quarantineDestination, String contentFingerprint) {
+        String quarantinedName = appendContentFingerprint(quarantineDestination.documentFileName(), contentFingerprint);
+        return quarantineDestination.inspectionDirectory().resolve(quarantinedName);
+    }
+
+    private void publishInspectionCopy(Path temporaryInspectionCopy, Path inspectionCopy, String contentFingerprint)
+            throws IOException {
+        if (Files.exists(inspectionCopy)) {
+            validateInspectionFingerprint(inspectionCopy, contentFingerprint);
+            return;
+        }
+        try {
+            Files.move(temporaryInspectionCopy, inspectionCopy, StandardCopyOption.ATOMIC_MOVE);
+        } catch (FileAlreadyExistsException existingInspectionCopy) {
+            try {
+                validateInspectionFingerprint(inspectionCopy, contentFingerprint);
+            } catch (IOException invalidInspectionCopy) {
+                invalidInspectionCopy.addSuppressed(existingInspectionCopy);
+                throw invalidInspectionCopy;
+            }
+            return;
+        }
+        validateInspectionFingerprint(inspectionCopy, contentFingerprint);
+    }
+
+    private void validateInspectionFingerprint(Path inspectionCopy, String expectedContentFingerprint)
+            throws IOException {
+        String actualContentFingerprint = contentHasher.sha256(inspectionCopy);
+        if (!expectedContentFingerprint.equals(actualContentFingerprint)) {
+            throw new IOException("Quarantine fingerprint collision or corrupted inspection copy: " + inspectionCopy);
+        }
     }
 
     private Path quarantineRoot() {
@@ -103,16 +146,23 @@ public class IngestionQuarantineService {
         return quarantineRoot;
     }
 
-    private String appendTimestamp(String fileName, String timestamp) {
+    private String appendContentFingerprint(String fileName, String contentFingerprint) {
         int dotIndex = fileName.lastIndexOf('.');
         if (dotIndex > 0) {
-            return fileName.substring(0, dotIndex) + "." + timestamp + fileName.substring(dotIndex);
+            return fileName.substring(0, dotIndex) + "." + contentFingerprint + fileName.substring(dotIndex);
         }
-        return fileName + "." + timestamp;
+        return fileName + "." + contentFingerprint;
+    }
+
+    private record QuarantineDestination(Path inspectionDirectory, String documentFileName) {
+        private QuarantineDestination {
+            Objects.requireNonNull(inspectionDirectory, "inspectionDirectory");
+            Objects.requireNonNull(documentFileName, "documentFileName");
+        }
     }
 
     /**
-     * Describes the canonical document and timestamped inspection copy produced by quarantine.
+     * Describes the canonical document and content-addressed inspection copy produced by quarantine.
      *
      * @param original canonical document path retained for future ingestion
      * @param quarantined inspection copy path outside the documentation root

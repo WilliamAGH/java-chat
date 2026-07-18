@@ -77,7 +77,7 @@ Deduplication is based on per-chunk SHA-256 markers stored locally:
   extractor-semantics version, and chunk hashes.
 
 A file is skipped only when every file-level marker value, including the extractor-semantics version and
-the content fingerprint bound to canonical ingestion provenance, matches the current ingestion contract.
+the provenance-aware ingestion fingerprint, matches the current ingestion contract.
 Changing extraction behavior or manifest provenance therefore invalidates otherwise
 identical HTML: the prior vectors and local chunks are pruned, then the file is re-chunked and upserted.
 Older markers with a missing or prior extractor-semantics version are intentionally reindexed once.

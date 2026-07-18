@@ -17,19 +17,24 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSourc
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.FileOperationsService;
 import com.williamcallahan.javachat.service.HtmlContentExtractor;
 import com.williamcallahan.javachat.service.HybridVectorService;
 import com.williamcallahan.javachat.service.LocalStoreService;
 import com.williamcallahan.javachat.service.PdfContentExtractor;
 import com.williamcallahan.javachat.service.ProgressTracker;
+import com.williamcallahan.javachat.service.QdrantCollectionKind;
 import com.williamcallahan.javachat.service.QdrantCollectionRouter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -68,10 +73,12 @@ class LocalDocsFileIngestionProcessorTest {
 
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         String expectedJavadocUrl =
                 javaApiDocumentationSource.remoteBaseUrl() + "java.base/java/lang/" + JAVA_API_CLASS_NAME + ".html";
-        when(localStoreService.computeFileContentFingerprint(localJavadocFile)).thenReturn("javadoc-fingerprint");
-        when(localStoreService.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.empty());
+        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.empty());
+        when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
         when(chunkProcessingService.processAndStoreChunks(
                         anyString(), eq(expectedJavadocUrl), eq(JAVA_API_CLASS_NAME), anyString()))
                 .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(List.of(), List.of(), 0, 0));
@@ -79,7 +86,8 @@ class LocalDocsFileIngestionProcessorTest {
         LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
                 chunkProcessingService,
                 localStoreService,
-                mock(HybridVectorService.class),
+                fileMarkerStore,
+                hybridVectorService,
                 mock(IngestedFilePruneService.class));
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
@@ -117,11 +125,17 @@ class LocalDocsFileIngestionProcessorTest {
                 javaApiDocumentationSource.remoteBaseUrl() + "java.base/java/lang/" + JAVA_API_CLASS_NAME + ".html";
         long fileSizeBytes = Files.size(localJavadocFile);
         long lastModifiedMillis = Files.getLastModifiedTime(localJavadocFile).toMillis();
-        LocalStoreService.FileIngestionRecord oldMarker = new LocalStoreService.FileIngestionRecord(
-                fileSizeBytes, lastModifiedMillis, "javadoc-fingerprint", List.of("old-javadoc-hash"));
+        FileIngestionRecord priorIngestionRecord = new FileIngestionRecord(
+                fileSizeBytes,
+                lastModifiedMillis,
+                "javadoc-fingerprint",
+                "",
+                "java-api-docs",
+                List.of("old-javadoc-hash"));
 
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
         HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
         Document indexedDocument = new Document("javadoc-point", "Javadoc body", new HashMap<>());
@@ -129,28 +143,32 @@ class LocalDocsFileIngestionProcessorTest {
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-javadoc-hash"), 1, 0);
 
-        when(localStoreService.computeFileContentFingerprint(localJavadocFile)).thenReturn("javadoc-fingerprint");
-        when(localStoreService.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.of(oldMarker));
+        when(fileMarkerStore.readFileIngestionRecord(expectedJavadocUrl)).thenReturn(Optional.of(priorIngestionRecord));
         when(hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
         when(chunkProcessingService.processAndStoreChunksForce(
                         anyString(), eq(expectedJavadocUrl), eq(JAVA_API_CLASS_NAME), anyString()))
                 .thenReturn(forcedChunkingOutcome);
 
         LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService, localStoreService, hybridVectorService, ingestedFilePruneService);
+                chunkProcessingService,
+                localStoreService,
+                fileMarkerStore,
+                hybridVectorService,
+                ingestedFilePruneService);
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, localJavadocFile);
 
         assertTrue(processingOutcome.processed());
-        verify(ingestedFilePruneService).pruneCollectionFileStrict("java-api-docs", expectedJavadocUrl, oldMarker);
+        verify(ingestedFilePruneService)
+                .pruneCollectionFileStrict("java-api-docs", expectedJavadocUrl, priorIngestionRecord);
         verify(chunkProcessingService)
                 .processAndStoreChunksForce(anyString(), eq(expectedJavadocUrl), eq(JAVA_API_CLASS_NAME), anyString());
         verify(chunkProcessingService, never())
                 .processAndStoreChunks(anyString(), anyString(), anyString(), anyString());
-        ArgumentCaptor<LocalStoreService.FileIngestionRecord> updatedMarkerCaptor =
-                ArgumentCaptor.forClass(LocalStoreService.FileIngestionRecord.class);
-        verify(localStoreService).markFileIngested(eq(expectedJavadocUrl), updatedMarkerCaptor.capture());
+        ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(fileMarkerStore).markFileIngested(eq(expectedJavadocUrl), updatedMarkerCaptor.capture());
         assertFalse(updatedMarkerCaptor.getValue().extractionSemanticsVersion().isBlank());
+        assertEquals("java-api-docs", updatedMarkerCaptor.getValue().collectionName());
     }
 
     @Test
@@ -165,16 +183,18 @@ class LocalDocsFileIngestionProcessorTest {
         Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
 
         String expectedDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
-        String contentOnlyFingerprint = "documentation-fingerprint";
-        LocalStoreService.FileIngestionRecord contentOnlyMarker = new LocalStoreService.FileIngestionRecord(
+        String contentOnlyIngestionFingerprint = "documentation-fingerprint";
+        FileIngestionRecord contentOnlyMarker = new FileIngestionRecord(
                 Files.size(documentationFile),
                 Files.getLastModifiedTime(documentationFile).toMillis(),
-                contentOnlyFingerprint,
+                contentOnlyIngestionFingerprint,
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                "prior-documentation",
                 List.of("old-documentation-hash"));
 
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
         HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
         Document indexedDocument = new Document("documentation-point", "Documentation body", new HashMap<>());
@@ -182,8 +202,7 @@ class LocalDocsFileIngestionProcessorTest {
                 new ChunkProcessingService.ChunkProcessingOutcome(
                         List.of(indexedDocument), List.of("current-documentation-hash"), 1, 0);
 
-        when(localStoreService.computeFileContentFingerprint(documentationFile)).thenReturn(contentOnlyFingerprint);
-        when(localStoreService.readFileIngestionRecord(expectedDocumentationUrl))
+        when(fileMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
                 .thenReturn(Optional.of(contentOnlyMarker));
         when(hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
         when(chunkProcessingService.processAndStoreChunksForce(
@@ -191,27 +210,102 @@ class LocalDocsFileIngestionProcessorTest {
                 .thenReturn(forcedChunkingOutcome);
 
         LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
-                chunkProcessingService, localStoreService, hybridVectorService, ingestedFilePruneService);
+                chunkProcessingService,
+                localStoreService,
+                fileMarkerStore,
+                hybridVectorService,
+                ingestedFilePruneService);
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
 
         assertTrue(processingOutcome.processed());
         verify(ingestedFilePruneService)
-                .pruneCollectionFileStrict("documentation", expectedDocumentationUrl, contentOnlyMarker);
+                .pruneCollectionFileStrict("prior-documentation", expectedDocumentationUrl, contentOnlyMarker);
         verify(chunkProcessingService)
                 .processAndStoreChunksForce(anyString(), eq(expectedDocumentationUrl), anyString(), anyString());
-        ArgumentCaptor<LocalStoreService.FileIngestionRecord> updatedMarkerCaptor =
-                ArgumentCaptor.forClass(LocalStoreService.FileIngestionRecord.class);
-        verify(localStoreService).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
-        assertNotEquals(contentOnlyFingerprint, updatedMarkerCaptor.getValue().contentFingerprint());
+        ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(fileMarkerStore).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        assertNotEquals(
+                contentOnlyIngestionFingerprint, updatedMarkerCaptor.getValue().ingestionFingerprint());
         assertEquals(
                 contentOnlyMarker.extractionSemanticsVersion(),
                 updatedMarkerCaptor.getValue().extractionSemanticsVersion());
+        assertEquals("documentation", updatedMarkerCaptor.getValue().collectionName());
+    }
+
+    @Test
+    void shouldPruneEveryGovernedCollectionForLegacyMarkerWithoutCollectionIdentity(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path documentationFile =
+                localDocsRoot.resolve(documentationSource.relativeMirrorPath()).resolve("index.html");
+        Files.createDirectories(Objects.requireNonNull(documentationFile.getParent(), "documentationFile parent"));
+        Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        String expectedDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
+        FileIngestionRecord legacyIngestionRecord = new FileIngestionRecord(
+                Files.size(documentationFile),
+                Files.getLastModifiedTime(documentationFile).toMillis(),
+                "legacy-fingerprint",
+                LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                "",
+                List.of("legacy-documentation-hash"));
+
+        ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
+        LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        for (QdrantCollectionKind governedCollectionKind : QdrantCollectionKind.values()) {
+            when(hybridVectorService.resolveCollectionName(governedCollectionKind))
+                    .thenReturn(testCollectionName(governedCollectionKind));
+        }
+        Document indexedDocument = new Document("documentation-point", "Documentation body", new HashMap<>());
+        ChunkProcessingService.ChunkProcessingOutcome forcedChunkingOutcome =
+                new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(indexedDocument), List.of("current-documentation-hash"), 1, 0);
+        when(fileMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
+                .thenReturn(Optional.of(legacyIngestionRecord));
+        when(chunkProcessingService.processAndStoreChunksForce(
+                        anyString(), eq(expectedDocumentationUrl), anyString(), anyString()))
+                .thenReturn(forcedChunkingOutcome);
+
+        LocalDocsFileIngestionProcessor ingestionProcessor = createIngestionProcessor(
+                chunkProcessingService,
+                localStoreService,
+                fileMarkerStore,
+                hybridVectorService,
+                ingestedFilePruneService);
+
+        LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
+
+        assertTrue(processingOutcome.processed());
+        List<String> governedCollectionNames = Arrays.stream(QdrantCollectionKind.values())
+                .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
+                .toList();
+        verify(ingestedFilePruneService)
+                .pruneCollectionsFileStrict(governedCollectionNames, expectedDocumentationUrl, legacyIngestionRecord);
+        ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
+        verify(fileMarkerStore).markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        IngestionProvenanceDeriver.IngestionProvenance ingestionProvenance =
+                new IngestionProvenanceDeriver().derive(localDocsRoot, documentationFile, expectedDocumentationUrl);
+        QdrantCollectionKind routedCollectionKind = new QdrantCollectionRouter()
+                .route(
+                        ingestionProvenance.docSet(),
+                        ingestionProvenance.docPath(),
+                        ingestionProvenance.docType(),
+                        expectedDocumentationUrl);
+        assertEquals(
+                testCollectionName(routedCollectionKind),
+                updatedMarkerCaptor.getValue().collectionName());
     }
 
     private static LocalDocsFileIngestionProcessor createIngestionProcessor(
             ChunkProcessingService chunkProcessingService,
             LocalStoreService localStoreService,
+            FileIngestionMarkerStore fileMarkerStore,
             HybridVectorService hybridVectorService,
             IngestedFilePruneService ingestedFilePruneService) {
         return new LocalDocsFileIngestionProcessor(
@@ -227,11 +321,16 @@ class LocalDocsFileIngestionProcessorTest {
                         chunkProcessingService,
                         new ContentHasher(),
                         localStoreService,
+                        fileMarkerStore,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),
                 new IngestionProvenanceDeriver(),
                 new LocalIngestionFailureFactory(),
                 ingestedFilePruneService);
+    }
+
+    private static String testCollectionName(QdrantCollectionKind collectionKind) {
+        return collectionKind.name().toLowerCase(Locale.ROOT) + "-collection";
     }
 
     private static String javaApiHtml() {

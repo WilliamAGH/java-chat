@@ -3,7 +3,9 @@ package com.williamcallahan.javachat.service.ingestion;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 
@@ -205,7 +207,7 @@ public class IngestionProvenanceDeriver {
      */
     public record IngestionProvenance(
             String docSet, String docPath, String sourceName, String sourceKind, String docVersion, String docType) {
-        private static final String FINGERPRINT_FIELD_SEPARATOR = "\u001f";
+        private static final String ENCODED_FINGERPRINT_FIELD_SEPARATOR = ".";
 
         public IngestionProvenance {
             docSet = sanitize(docSet);
@@ -225,14 +227,19 @@ public class IngestionProvenanceDeriver {
         public String fingerprintInput(String fileContentFingerprint) {
             Objects.requireNonNull(fileContentFingerprint, "fileContentFingerprint");
             return String.join(
-                    FINGERPRINT_FIELD_SEPARATOR,
-                    fileContentFingerprint,
-                    docSet,
-                    docPath,
-                    sourceName,
-                    sourceKind,
-                    docVersion,
-                    docType);
+                    ENCODED_FINGERPRINT_FIELD_SEPARATOR,
+                    encodeFingerprintField(fileContentFingerprint),
+                    encodeFingerprintField(docSet),
+                    encodeFingerprintField(docPath),
+                    encodeFingerprintField(sourceName),
+                    encodeFingerprintField(sourceKind),
+                    encodeFingerprintField(docVersion),
+                    encodeFingerprintField(docType));
+        }
+
+        private static String encodeFingerprintField(String fingerprintField) {
+            byte[] fingerprintFieldBytes = fingerprintField.getBytes(StandardCharsets.UTF_8);
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(fingerprintFieldBytes);
         }
     }
 }

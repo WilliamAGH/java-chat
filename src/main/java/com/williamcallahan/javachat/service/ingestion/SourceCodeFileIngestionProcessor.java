@@ -5,8 +5,7 @@ import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.SourceFileLanguage;
 import com.williamcallahan.javachat.domain.ingestion.SourceFileProcessingResult;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
-import com.williamcallahan.javachat.service.HybridVectorService;
-import com.williamcallahan.javachat.service.LocalStoreService;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -45,9 +44,7 @@ public class SourceCodeFileIngestionProcessor {
     private static final char CARRIAGE_RETURN_CHARACTER = '\r';
     private static final char TAB_CHARACTER = '\t';
 
-    private final ChunkProcessingService chunkProcessingService;
-    private final HybridVectorService hybridVectorService;
-    private final LocalStoreService localStoreService;
+    private final IngestionStorageServices storage;
     private final ProgressTracker progressTracker;
     private final IngestedFilePruneService ingestedFilePruneService;
 
@@ -55,21 +52,15 @@ public class SourceCodeFileIngestionProcessor {
      * Creates a source-code ingestion processor with required storage dependencies.
      */
     public SourceCodeFileIngestionProcessor(
-            ChunkProcessingService chunkProcessingService,
-            HybridVectorService hybridVectorService,
-            LocalStoreService localStoreService,
+            IngestionStorageServices storage,
             ProgressTracker progressTracker,
             IngestedFilePruneService ingestedFilePruneService) {
-        this.chunkProcessingService = Objects.requireNonNull(chunkProcessingService, "chunkProcessingService");
-        this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
-        this.localStoreService = Objects.requireNonNull(localStoreService, "localStoreService");
+        this.storage = Objects.requireNonNull(storage, "storage");
         this.progressTracker = Objects.requireNonNull(progressTracker, "progressTracker");
         this.ingestedFilePruneService = Objects.requireNonNull(ingestedFilePruneService, "ingestedFilePruneService");
     }
 
-    /**
-     * Holds immutable file context values derived after validation.
-     */
+    /** Holds immutable file context values derived after validation. */
     private record ValidatedFileContext(
             String fileName,
             long fileSizeBytes,
@@ -79,9 +70,7 @@ public class SourceCodeFileIngestionProcessor {
             String sourceLanguage,
             String documentType) {}
 
-    /**
-     * Holds UTF-8 file text and its deterministic content fingerprint.
-     */
+    /** Holds UTF-8 file text and its deterministic content fingerprint. */
     private record ReadableFileContent(String text, String contentFingerprint) {
         private ReadableFileContent {
             Objects.requireNonNull(text, "text");
@@ -102,6 +91,11 @@ public class SourceCodeFileIngestionProcessor {
         Objects.requireNonNull(sourceFilePath, "sourceFilePath");
         Objects.requireNonNull(repositoryMetadata, "repositoryMetadata");
         Objects.requireNonNull(collectionName, "collectionName");
+        String canonicalCollectionName = repositoryMetadata.collectionName();
+        if (!canonicalCollectionName.equals(collectionName)) {
+            throw new IllegalArgumentException(
+                    "collectionName must match repositoryMetadata.collectionName: " + canonicalCollectionName);
+        }
 
         String relativePath =
                 repositoryRoot.relativize(sourceFilePath).toString().replace('\\', '/');
@@ -121,13 +115,23 @@ public class SourceCodeFileIngestionProcessor {
         }
         ReadableFileContent fileContent = readableContent.get();
 
-        LocalStoreService.FileIngestionRecord previousFileRecord = localStoreService
+        FileIngestionRecord previousFileRecord = storage.fileMarkers()
                 .readFileIngestionRecord(fileContext.sourceUrl())
                 .orElse(null);
+        try {
+            previousFileRecord = persistCanonicalMarkerCollectionIdentity(
+                    previousFileRecord, fileContext.sourceUrl(), canonicalCollectionName);
+        } catch (IOException markerMigrationException) {
+            return new SourceFileProcessingResult(
+                    LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
+                            sourceFilePath.toString(), "marker-migration", markerMigrationException.getMessage())),
+                    fileUrl);
+        }
 
-        boolean unchangedByFingerprint = isUnchangedByFingerprint(previousFileRecord, fileContext, fileContent);
+        boolean unchangedByFingerprint =
+                isUnchangedByFingerprint(previousFileRecord, fileContext, fileContent, canonicalCollectionName);
         boolean hasSufficientPointCoverage = unchangedByFingerprint
-                && hasSufficientStoredPointCoverage(previousFileRecord, collectionName, fileContext);
+                && hasSufficientStoredPointCoverage(previousFileRecord, canonicalCollectionName, fileContext);
         if (hasSufficientPointCoverage) {
             log.debug("Skipping unchanged file (already ingested): {}", fileContext.relativePath());
             return new SourceFileProcessingResult(LocalDocsFileOutcome.skippedFile(), fileUrl);
@@ -142,7 +146,7 @@ public class SourceCodeFileIngestionProcessor {
         if (requiresFullReindex) {
             try {
                 ingestedFilePruneService.pruneCollectionFileStrict(
-                        collectionName, fileContext.sourceUrl(), previousFileRecord);
+                        previousFileRecord.collectionName(), fileContext.sourceUrl(), previousFileRecord);
             } catch (IOException pruneException) {
                 return new SourceFileProcessingResult(
                         LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
@@ -156,10 +160,25 @@ public class SourceCodeFileIngestionProcessor {
                 fileContext,
                 fileContent,
                 repositoryMetadata,
-                collectionName,
+                canonicalCollectionName,
                 requiresFullReindex,
                 fileStartMillis);
         return new SourceFileProcessingResult(chunkOutcome, fileUrl);
+    }
+
+    private FileIngestionRecord persistCanonicalMarkerCollectionIdentity(
+            FileIngestionRecord previousFileRecord, String sourceUrl, String canonicalCollectionName)
+            throws IOException {
+        if (previousFileRecord == null || previousFileRecord.hasCollectionIdentity()) {
+            return previousFileRecord;
+        }
+        FileIngestionRecord canonicalFileRecord = previousFileRecord.bindCollectionIdentity(canonicalCollectionName);
+        storage.fileMarkers().markFileIngested(sourceUrl, canonicalFileRecord);
+        log.info(
+                "Persisted canonical repository collection identity '{}' for file marker: {}",
+                canonicalCollectionName,
+                sourceUrl);
+        return canonicalFileRecord;
     }
 
     private Optional<LocalDocsFileOutcome> validateFileAttributes(Path sourceFilePath) {
@@ -229,7 +248,7 @@ public class SourceCodeFileIngestionProcessor {
         }
 
         try {
-            String contentFingerprint = localStoreService.computeFileContentFingerprint(sourceFilePath);
+            String contentFingerprint = storage.hasher().sha256(sourceFilePath);
             return Optional.of(new ReadableFileContent(fileText, contentFingerprint));
         } catch (IOException fingerprintException) {
             throw new IllegalStateException(
@@ -264,22 +283,22 @@ public class SourceCodeFileIngestionProcessor {
     }
 
     private boolean isUnchangedByFingerprint(
-            LocalStoreService.FileIngestionRecord previousFileRecord,
+            FileIngestionRecord previousFileRecord,
             ValidatedFileContext fileContext,
-            ReadableFileContent fileContent) {
+            ReadableFileContent fileContent,
+            String collectionName) {
         if (previousFileRecord == null) {
             return false;
         }
         return previousFileRecord.fileSizeBytes() == fileContext.fileSizeBytes()
                 && previousFileRecord.lastModifiedMillis() == fileContext.lastModifiedMillis()
-                && fileContent.contentFingerprint().equals(previousFileRecord.contentFingerprint());
+                && fileContent.contentFingerprint().equals(previousFileRecord.ingestionFingerprint())
+                && collectionName.equals(previousFileRecord.collectionName());
     }
 
     private boolean hasSufficientStoredPointCoverage(
-            LocalStoreService.FileIngestionRecord previousFileRecord,
-            String collectionName,
-            ValidatedFileContext fileContext) {
-        long storedPointCount = hybridVectorService.countPointsForUrl(collectionName, fileContext.sourceUrl());
+            FileIngestionRecord previousFileRecord, String collectionName, ValidatedFileContext fileContext) {
+        long storedPointCount = storage.hybridVector().countPointsForUrl(collectionName, fileContext.sourceUrl());
         int expectedChunkCount = 0;
         if (previousFileRecord != null && previousFileRecord.chunkHashes() != null) {
             expectedChunkCount = previousFileRecord.chunkHashes().size();
@@ -302,10 +321,12 @@ public class SourceCodeFileIngestionProcessor {
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
         try {
             chunkingOutcome = forceChunking
-                    ? chunkProcessingService.processAndStoreChunksForce(
-                            fileContent.text(), fileContext.sourceUrl(), fileContext.fileName(), packageName)
-                    : chunkProcessingService.processAndStoreChunks(
-                            fileContent.text(), fileContext.sourceUrl(), fileContext.fileName(), packageName);
+                    ? storage.chunks()
+                            .processAndStoreChunksForce(
+                                    fileContent.text(), fileContext.sourceUrl(), fileContext.fileName(), packageName)
+                    : storage.chunks()
+                            .processAndStoreChunks(
+                                    fileContent.text(), fileContext.sourceUrl(), fileContext.fileName(), packageName);
         } catch (IOException chunkingException) {
             return LocalDocsFileOutcome.failedFile(
                     new IngestionLocalFailure(sourceFilePath.toString(), "chunking", chunkingException.getMessage()));
@@ -313,7 +334,8 @@ public class SourceCodeFileIngestionProcessor {
 
         List<Document> indexedDocuments = chunkingOutcome.documents();
         if (indexedDocuments.isEmpty()) {
-            return resolveEmptyChunkOutcome(chunkingOutcome, fileContext, fileContent.contentFingerprint());
+            return resolveEmptyChunkOutcome(
+                    chunkingOutcome, fileContext, fileContent.contentFingerprint(), collectionName);
         }
 
         enrichMetadata(
@@ -322,18 +344,14 @@ public class SourceCodeFileIngestionProcessor {
                 fileContext.relativePath(),
                 fileContext.sourceLanguage(),
                 fileContext.documentType());
-        hybridVectorService.upsertToCollection(collectionName, indexedDocuments);
+        storage.hybridVector().upsertToCollection(collectionName, indexedDocuments);
 
         logProcessingComplete(
                 indexedDocuments.size(), chunkingOutcome.totalChunks(), fileContext.relativePath(), fileStartMillis);
 
         markDocumentsIngested(indexedDocuments);
         markFileIngested(
-                fileContext.sourceUrl(),
-                fileContext.fileSizeBytes(),
-                fileContext.lastModifiedMillis(),
-                fileContent.contentFingerprint(),
-                chunkingOutcome.allChunkHashes());
+                fileContext, fileContent.contentFingerprint(), collectionName, chunkingOutcome.allChunkHashes());
 
         return LocalDocsFileOutcome.processedFile();
     }
@@ -341,15 +359,11 @@ public class SourceCodeFileIngestionProcessor {
     private LocalDocsFileOutcome resolveEmptyChunkOutcome(
             ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome,
             ValidatedFileContext fileContext,
-            String contentFingerprint) {
+            String ingestionFingerprint,
+            String collectionName) {
         if (chunkingOutcome.skippedAllChunks()) {
             log.debug("All chunks already ingested: {}", fileContext.relativePath());
-            markFileIngested(
-                    fileContext.sourceUrl(),
-                    fileContext.fileSizeBytes(),
-                    fileContext.lastModifiedMillis(),
-                    contentFingerprint,
-                    chunkingOutcome.allChunkHashes());
+            markFileIngested(fileContext, ingestionFingerprint, collectionName, chunkingOutcome.allChunkHashes());
             return LocalDocsFileOutcome.skippedFile();
         }
         if (chunkingOutcome.generatedNoChunks()) {
@@ -463,7 +477,7 @@ public class SourceCodeFileIngestionProcessor {
                         "Document missing required 'hash' metadata after chunking pipeline; url=" + sourceUrl);
             }
             try {
-                localStoreService.markHashIngested(hashMetadata.toString());
+                storage.localStore().markHashIngested(hashMetadata.toString(), "", "");
             } catch (IOException markerException) {
                 throw new IllegalStateException("Failed to mark hash as ingested: " + hashMetadata, markerException);
             }
@@ -471,20 +485,28 @@ public class SourceCodeFileIngestionProcessor {
     }
 
     private void markFileIngested(
-            String sourceUrl,
-            long fileSizeBytes,
-            long lastModifiedMillis,
-            String contentFingerprint,
+            ValidatedFileContext fileContext,
+            String ingestionFingerprint,
+            String collectionName,
             List<String> chunkHashes) {
-        Objects.requireNonNull(sourceUrl, "sourceUrl");
-        if (sourceUrl.isBlank()) {
+        Objects.requireNonNull(fileContext, "fileContext");
+        if (fileContext.sourceUrl().isBlank()) {
             throw new IllegalArgumentException("sourceUrl must not be blank for file ingestion marker");
         }
         try {
-            localStoreService.markFileIngested(
-                    sourceUrl, fileSizeBytes, lastModifiedMillis, contentFingerprint, chunkHashes);
+            storage.fileMarkers()
+                    .markFileIngested(
+                            fileContext.sourceUrl(),
+                            new FileIngestionRecord(
+                                    fileContext.fileSizeBytes(),
+                                    fileContext.lastModifiedMillis(),
+                                    ingestionFingerprint,
+                                    "",
+                                    collectionName,
+                                    chunkHashes));
         } catch (IOException markerException) {
-            throw new IllegalStateException("Failed to mark file as ingested: " + sourceUrl, markerException);
+            throw new IllegalStateException(
+                    "Failed to mark file as ingested: " + fileContext.sourceUrl(), markerException);
         }
     }
 }
