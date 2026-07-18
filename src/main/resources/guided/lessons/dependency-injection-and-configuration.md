@@ -1,212 +1,420 @@
-Dependency injection makes a class state what it needs instead of constructing those collaborators itself. Configuration binding makes runtime choices explicit, typed, and validated instead of scattering string lookups throughout the code. In Spring Boot 4.1.0, constructor injection and ConfigurationProperties work together especially well.
+# Dependency Injection and Configuration
 
-## Make dependencies visible
+A Spring Boot application is an object graph: services, repositories, and helpers that call one another. The value of the framework is that you describe *what* each object needs and let the container assemble the graph for you. This lesson shows how to compose that graph with **constructor injection** and how to bind external settings into a typed, validated **ConfigurationProperties** record. You will build one small application slice and two independently runnable tests, all on Spring Boot 4.1.0 and Java 25.
 
-A class that creates its own clock, HTTP client, repository, or configuration object hides a decision from the caller and makes testing harder. Constructor injection puts the dependency graph in the type's public construction contract.
+## What you will build
 
-This small service needs a clock and a typed configuration object. Spring supplies both when it creates the service; a unit test can supply controlled alternatives.
+A tiny "notice board" service that stamps a message with the current time and the configured board name. It has three moving parts:
 
-~~~java
-package com.example.study;
+- A `NoticeBoardService` that receives its collaborators through a constructor.
+- A `Clock` declared as a **bean** at the composition boundary, so time is a supplied dependency rather than a hidden global call.
+- A `NoticeBoardProperties` record bound from `application.properties` and checked with Jakarta Bean **validation** at startup.
 
-import java.time.Clock;
-import java.time.Instant;
-import org.springframework.stereotype.Service;
+## Key terms before we start
 
-/** Calculates a reminder time from the configured lead time. */
-@Service
-public class StudyReminderService {
-    private final Clock studyClock;
-    private final StudyReminderProperties reminderProperties;
+**Dependency injection** is the practice of giving an object its collaborators from the outside instead of letting it construct or look them up itself. The object declares what it needs; something else (here, the Spring container) supplies it.
 
-    /**
-     * Creates the service with the clock and reminder policy owned by the application runtime.
-     */
-    public StudyReminderService(
-            Clock studyClock,
-            StudyReminderProperties reminderProperties) {
-        this.studyClock = studyClock;
-        this.reminderProperties = reminderProperties;
-    }
+A **bean** is simply an object whose lifecycle the Spring container manages. The container creates it, wires its dependencies, and hands it to whoever asks. Beans come from two sources in this lesson: component scanning (a class annotated with a stereotype such as `@Service`) and explicit `@Bean` factory methods inside a `@Configuration` class.
 
-    /** Schedules a reminder for a class that begins at or after current instant. */
-    public StudyReminder nextReminderFor(Instant classStartsAt) {
-        if (classStartsAt.isBefore(studyClock.instant())) {
-            throw new IllegalArgumentException("A class cannot start in the past.");
-        }
-        return new StudyReminder(
-                classStartsAt.minus(reminderProperties.leadTime()),
-                reminderProperties.courseName());
+The **composition boundary** (sometimes called the composition root) is the place where you decide which concrete implementations to use and assemble them. `@Configuration` classes and their `@Bean` methods are that boundary. Keeping wiring decisions there means the rest of your code depends only on abstractions.
+
+## Project layout
+
+```
+notice-board/
+  settings.gradle.kts
+  build.gradle.kts
+  src/
+    main/
+      java/com/example/notice/NoticeBoardApplication.java
+      java/com/example/notice/NoticeBoardService.java
+      java/com/example/notice/Notice.java
+      java/com/example/notice/config/NoticeBoardProperties.java
+      java/com/example/notice/config/TimeConfiguration.java
+      resources/application.properties
+    test/
+      java/com/example/notice/NoticeBoardServiceTest.java
+      java/com/example/notice/config/NoticeBoardPropertiesTest.java
+```
+
+## Build configuration
+
+`settings.gradle.kts`:
+
+```kotlin
+rootProject.name = "notice-board"
+```
+
+`build.gradle.kts`:
+
+```kotlin
+plugins {
+    java
+    id("org.springframework.boot") version "4.1.0"
+}
+
+group = "com.example"
+version = "0.0.1-SNAPSHOT"
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
-~~~
 
-~~~java
-package com.example.study;
-
-import java.time.Instant;
-
-/** Carries the time and course name a reminder must present. */
-public record StudyReminder(Instant scheduledAt, String courseName) {
+repositories {
+    mavenCentral()
 }
-~~~
 
-Spring recognizes a single constructor without requiring an Autowired annotation. Use that direct form. Field injection hides required collaborators, prevents immutable fields, and complicates a plain unit test.
+dependencies {
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
 
-## Bind related settings as one type
+    implementation("org.springframework.boot:spring-boot-starter")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
 
-Use ConfigurationProperties for a cohesive group of settings. It provides typed binding, relaxed property names, and configuration metadata support that a collection of Value annotations does not.
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+}
 
-~~~java
-package com.example.study;
+tasks.withType<Test> {
+    useJUnitPlatform()
+}
+```
 
-import java.time.Duration;
+What each piece contributes:
+
+- The `platform(...)` line imports the Spring Boot 4.1.0 bill of materials, so every Spring Boot artifact below can be declared without a version. This keeps all modules aligned on one release.
+- `spring-boot-starter` brings the core container, auto-configuration, and logging. It is the non-web foundation this slice runs on. We are deliberately not pulling in an umbrella web starter, because this application has no web layer.
+- `spring-boot-starter-validation` adds the Jakarta Bean Validation API and a validation provider. Without it, the constraint annotations on our properties record would compile but never be enforced.
+- `spring-boot-starter-test` provides JUnit Jupiter, AssertJ, and Spring Boot's test-context support, including the `ApplicationContextRunner` we use to verify configuration binding. This non-web application does not need MockMvc or the Web MVC test starter.
+
+Auto-configuration's job here is narrow but important: given the validation provider on the classpath, Spring Boot wires the infrastructure that binds properties to the record and validates it. Your application code still owns the service logic, the property definitions, and the choice of `Clock`. Nothing about your domain is guessed for you.
+
+## The typed configuration properties record
+
+`src/main/java/com/example/notice/config/NoticeBoardProperties.java`:
+
+```java
+package com.example.notice.config;
+
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
-/** Holds the reminder settings supplied outside the compiled application. */
-@ConfigurationProperties(prefix = "study.reminder")
-public record StudyReminderProperties(
-        String courseName,
-        Duration leadTime) {
-    public StudyReminderProperties {
-        if (courseName == null || courseName.isBlank()) {
-            throw new IllegalArgumentException("Reminder course name is required.");
-        }
-        if (leadTime == null || leadTime.isNegative()) {
-            throw new IllegalArgumentException("Reminder lead time cannot be null or negative.");
-        }
+@Validated
+@ConfigurationProperties(prefix = "notice-board")
+public record NoticeBoardProperties(@NotBlank String displayName) {
+}
+```
+
+`@ConfigurationProperties(prefix = "notice-board")` declares that every key starting with `notice-board.` maps onto a component of this record. Because the type is a record, Spring binds through its canonical constructor: it reads `notice-board.display-name` from the environment and passes it as a constructor argument. The record is immutable, which is exactly what you want for configuration that should not change after startup.
+
+The **validation** annotations describe what "valid configuration" means:
+
+- `@NotBlank` on `displayName` rejects a missing or empty value.
+
+`@Validated` on the type is what turns the constraints on. When Spring binds a `@Validated` `@ConfigurationProperties` type and a validation provider is present, it runs the constraints and refuses to produce an invalid bean.
+
+Notice what this record does *not* contain: no methods that publish notices, no formatting logic, no time lookups. It is a pure, typed holder of settings. This makes runtime configuration explicit. Anyone reading the record can see, by name and type, every setting the application expects.
+
+## The non-secret property values
+
+`src/main/resources/application.properties`:
+
+```properties
+notice-board.display-name=Operations Desk
+```
+
+This display name is an ordinary operational setting, not a secret, so it is safe to commit. Secret values such as API tokens, passwords, or connection strings do not belong in this file. Supply those from the environment at runtime so they never live in source control.
+
+## Registering the properties with a scan
+
+`src/main/java/com/example/notice/NoticeBoardApplication.java`:
+
+```java
+package com.example.notice;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.context.annotation.Bean;
+
+@SpringBootApplication
+@ConfigurationPropertiesScan
+public class NoticeBoardApplication {
+
+    private static final Logger log = LoggerFactory.getLogger(NoticeBoardApplication.class);
+
+    public static void main(String[] args) {
+        SpringApplication.run(NoticeBoardApplication.class, args);
+    }
+
+    @Bean
+    CommandLineRunner demo(NoticeBoardService service) {
+        return args -> {
+            Notice notice = service.publish("System maintenance at noon");
+            log.info("Published notice on {} at {}: {}",
+                    notice.board(), notice.publishedAt(), notice.message());
+        };
     }
 }
-~~~
+```
 
-Keep the one root-package `StudyApplication` configuration class from Spring Boot Fundamentals. Add `@ConfigurationPropertiesScan` to that class so Spring creates the configuration-properties bean. The compact constructor is the one runtime validation owner: it protects both bound configuration and direct construction without duplicating Bean Validation constraints.
+A `@ConfigurationProperties` record is not automatically a bean. Something must register it. `@ConfigurationPropertiesScan` tells Spring Boot to scan this class's package and its subpackages for `@ConfigurationProperties` types and register each as a bean. That is how `NoticeBoardProperties` becomes available for injection, without listing it anywhere.
 
-The non-secret application settings can then live in application.properties:
+The `CommandLineRunner` bean here exists only to give the application observable behavior when you run it. It receives the fully wired `NoticeBoardService` through its factory-method parameter (another form of injection) and prints one notice.
 
-~~~properties
-study.reminder.course-name=Java foundations
-study.reminder.lead-time=PT15M
-~~~
+## The Clock bean at the composition boundary
 
-The property prefix belongs in lower-case kebab case. Spring Boot's relaxed binding maps that file form to the record accessors. Its environment-variable form removes dashes, replaces dots with underscores, and uses upper case, so the course-name setting maps to STUDY_REMINDER_COURSENAME.
+`src/main/java/com/example/notice/config/TimeConfiguration.java`:
 
-Do not put credentials, tokens, or private connection strings in a tracked application-properties file. Supply secrets through the deployment environment or a secret-management mechanism, then bind only the settings the application actually owns.
-
-`Instant.isBefore` rejects only an instant that is strictly earlier than the injected clock. A class beginning at or after current instant is valid; equality is not in the past.
-
-## Register infrastructure at the composition boundary
-
-Use a Configuration class for infrastructure wiring that is truly application-wide. This clock bean makes time a dependency rather than a hidden static call.
-
-~~~java
-package com.example.study;
+```java
+package com.example.notice.config;
 
 import java.time.Clock;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Supplies the clock shared by time-dependent application services. */
 @Configuration
 public class TimeConfiguration {
 
-    /** Uses UTC so persisted and displayed timestamps have one application baseline. */
     @Bean
-    public Clock studyClock() {
+    Clock systemClock() {
         return Clock.systemUTC();
     }
 }
-~~~
+```
 
-Do not put business rules into configuration classes. A configuration class composes objects; the service remains responsible for calculating the reminder.
+`Clock` is a Java abstraction for reading the current time. If the service called `Instant.now()` directly, its output would depend on an untestable global, and every test would have to accept whatever "now" happened to be. Instead we declare one `Clock` bean here, at the composition boundary, and inject it everywhere time is needed. Only this `@Bean` method decides the concrete choice, `Clock.systemUTC()`. The rest of the code depends on the abstraction. In tests you supply a fixed clock and get deterministic results.
 
-## Test behavior without a framework context
+Declaring the `Clock` is a wiring decision, so it belongs in a configuration class. Publishing a notice is behavior, so it does not.
 
-The service's calculation is ordinary Java. Test it without starting Spring, using a fixed clock and an explicit configuration record.
+## The constructor-injected service
 
-~~~java
-package com.example.study;
+`src/main/java/com/example/notice/Notice.java`:
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+```java
+package com.example.notice;
+
+import java.time.Instant;
+
+public record Notice(String board, String message, Instant publishedAt) {
+}
+```
+
+`src/main/java/com/example/notice/NoticeBoardService.java`:
+
+```java
+package com.example.notice;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import org.junit.jupiter.api.Test;
 
-class StudyReminderServiceTest {
-    private static final Instant CLASS_START = Instant.parse("2026-07-17T10:00:00Z");
+import org.springframework.stereotype.Service;
 
-    @Test
-    void shouldScheduleReminderBeforeClassStart() {
-        Clock fixedClock = Clock.fixed(
-                Instant.parse("2026-07-17T09:00:00Z"),
-                ZoneOffset.UTC);
-        StudyReminderProperties reminderProperties =
-                new StudyReminderProperties("Java foundations", Duration.ofMinutes(15));
-        StudyReminderService reminderService =
-                new StudyReminderService(fixedClock, reminderProperties);
+import com.example.notice.config.NoticeBoardProperties;
 
-        StudyReminder reminder = reminderService.nextReminderFor(CLASS_START);
+@Service
+public class NoticeBoardService {
 
-        assertEquals(
-                Instant.parse("2026-07-17T09:45:00Z"),
-                reminder.scheduledAt());
-        assertEquals("Java foundations", reminder.courseName());
+    private final NoticeBoardProperties properties;
+    private final Clock clock;
+
+    public NoticeBoardService(NoticeBoardProperties properties, Clock clock) {
+        this.properties = properties;
+        this.clock = clock;
     }
 
-    @Test
-    void shouldAllowClassStartAtCurrentInstant() {
-        Instant currentInstant = Instant.parse("2026-07-17T09:00:00Z");
-        Clock fixedClock = Clock.fixed(currentInstant, ZoneOffset.UTC);
-        StudyReminderProperties reminderProperties =
-                new StudyReminderProperties("Java foundations", Duration.ofMinutes(15));
-        StudyReminderService reminderService =
-                new StudyReminderService(fixedClock, reminderProperties);
-
-        assertDoesNotThrow(() -> reminderService.nextReminderFor(currentInstant));
-    }
-
-    @Test
-    void shouldAllowZeroLeadTime() {
-        assertDoesNotThrow(() -> new StudyReminderProperties("Java foundations", Duration.ZERO));
-    }
-
-    @Test
-    void shouldRejectMissingCourseNameOrInvalidLeadTime() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new StudyReminderProperties(" ", Duration.ofMinutes(15)));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new StudyReminderProperties("Java foundations", null));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new StudyReminderProperties("Java foundations", Duration.ofSeconds(-1)));
+    public Notice publish(String message) {
+        Instant publishedAt = clock.instant();
+        return new Notice(properties.displayName(), message, publishedAt);
     }
 }
-~~~
+```
 
-Use a Spring test only when the behavior under test depends on binding, bean selection, serialization, a database, or another framework boundary.
+`@Service` marks this class as a component to be found by scanning and managed as a bean. Its two collaborators, the properties holder and the clock, arrive through the **constructor**. Both fields are `final`, so an instance is fully formed and immutable once built.
 
-## Avoid two common configuration mistakes
+There is no `@Autowired` on the constructor, and none is needed. When a class has exactly one constructor, Spring has no ambiguity about how to build it, so it uses that constructor automatically. You only add `@Autowired` when there is more than one constructor and you must point Spring at the right one.
 
-- Do not use configuration as a service locator. Inject the small typed properties type a class needs; do not inject the entire Environment and look up arbitrary strings.
-- Do not give a business setting a fake default merely to make startup pass. If the application cannot safely operate without a setting, validate it and fail clearly during startup.
+Contrast this with field injection, where each dependency is a bare field annotated for injection. Field injection hides dependencies: they do not appear in any constructor, so a reader of the public API cannot see what the class needs, the fields cannot be `final`, and the object can be instantiated in an invalid, half-null state. Constructor injection makes every dependency visible, enforces immutability, and lets you build the object in a plain unit test without starting Spring at all, which is exactly what the first test below does.
 
-Profiles select configuration for a deployment mode. They do not themselves create a separate database, message broker, or security boundary. Verify the resolved connection targets before treating a profile as environmental isolation.
+## Running the application
 
-## Practice prompts
+```sh
+./gradlew bootRun
+```
 
-1. Add a positive-number constraint to a configured maximum study-session duration.
-2. Write a context test that proves invalid reminder settings fail configuration binding.
-3. Replace a direct call to the system clock in a small class with a constructor-injected Clock, then write a deterministic unit test.
+Expected output (abbreviated; the banner and startup lines are trimmed, and the timestamp reflects the actual current instant because we use the system clock):
 
-## Sources
+```
+ :: Spring Boot ::                (v4.1.0)
 
-- [Spring Boot 4.1 externalized configuration](https://docs.spring.io/spring-boot/reference/features/external-config.html)
-- [ConfigurationProperties API](https://docs.spring.io/spring-boot/api/java/org/springframework/boot/context/properties/ConfigurationProperties.html)
-- [ConfigurationPropertiesScan API](https://docs.spring.io/spring-boot/api/java/org/springframework/boot/context/properties/ConfigurationPropertiesScan.html)
-- [Spring Boot beans and dependency injection](https://docs.spring.io/spring-boot/reference/using/spring-beans-and-dependency-injection.html)
+... INFO ... c.example.notice.NoticeBoardApplication : Starting NoticeBoardApplication using Java 25
+... INFO ... c.example.notice.NoticeBoardApplication : Started NoticeBoardApplication in 1.2 seconds
+... INFO ... c.example.notice.NoticeBoardApplication : Published notice on Operations Desk at 2026-07-18T13:45:12.487Z: System maintenance at noon
+```
+
+The board name came from `application.properties` through the bound record, the timestamp came from the injected `Clock`, and the message came from the runner. No object reached out for a collaborator; each received what it needed.
+
+## What happens when required configuration is invalid
+
+Because the record is validated at startup, invalid required configuration stops the application immediately rather than causing a confusing failure later. Remove or blank out `notice-board.display-name` and start again. Binding produces a `null` display name, `@NotBlank` rejects it, and the context refuses to start. Spring Boot prints a failure report shaped like this (exact wording may vary):
+
+```
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Binding to target NoticeBoardProperties failed:
+
+    Property: notice-board.displayName
+    Value: null
+    Reason: must not be blank
+
+Action:
+
+Update your application's configuration.
+```
+
+This is a feature, not a nuisance. A missing operational setting is a deployment mistake, and catching it at the boundary during startup is far cheaper than discovering it when the first request arrives.
+
+## Test 1: a deterministic plain Java service test
+
+Because the service uses constructor injection, you can test it as an ordinary Java object with no Spring context.
+
+`src/test/java/com/example/notice/NoticeBoardServiceTest.java`:
+
+```java
+package com.example.notice;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
+import org.junit.jupiter.api.Test;
+
+import com.example.notice.config.NoticeBoardProperties;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class NoticeBoardServiceTest {
+
+    @Test
+    void publishesNoticeStampedWithTheInjectedClock() {
+        Instant fixedMoment = Instant.parse("2026-07-18T09:30:00Z");
+        Clock fixedClock = Clock.fixed(fixedMoment, ZoneOffset.UTC);
+        NoticeBoardProperties properties = new NoticeBoardProperties("Operations Desk");
+
+        NoticeBoardService service = new NoticeBoardService(properties, fixedClock);
+
+        Notice notice = service.publish("System maintenance at noon");
+
+        assertThat(notice.board()).isEqualTo("Operations Desk");
+        assertThat(notice.message()).isEqualTo("System maintenance at noon");
+        assertThat(notice.publishedAt()).isEqualTo(fixedMoment);
+    }
+}
+```
+
+The fixed clock makes the timestamp assertion exact and repeatable. This is the payoff of injecting `Clock` at the boundary rather than calling `Instant.now()` inside the service. Run just this class:
+
+```sh
+./gradlew test --tests "com.example.notice.NoticeBoardServiceTest"
+```
+
+Expected:
+
+```
+BUILD SUCCESSFUL
+```
+
+## Test 2: a focused Spring test for configuration binding
+
+The second test loads a minimal Spring context to prove that binding and validation behave as designed. `ApplicationContextRunner` starts a small context with only the beans you register, which keeps the test fast and targeted.
+
+`src/test/java/com/example/notice/config/NoticeBoardPropertiesTest.java`:
+
+```java
+package com.example.notice.config;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class NoticeBoardPropertiesTest {
+
+    private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withUserConfiguration(EnablePropertiesConfig.class);
+
+    @Test
+    void bindsValidPropertiesFromTheEnvironment() {
+        runner.withPropertyValues("notice-board.display-name=Operations Desk")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(NoticeBoardProperties.class);
+                    NoticeBoardProperties properties = context.getBean(NoticeBoardProperties.class);
+                    assertThat(properties.displayName()).isEqualTo("Operations Desk");
+                });
+    }
+
+    @Test
+    void failsToStartWhenRequiredPropertyIsMissing() {
+        runner.run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).isNotNull();
+        });
+    }
+
+    @Configuration
+    @EnableConfigurationProperties(NoticeBoardProperties.class)
+    static class EnablePropertiesConfig {
+    }
+}
+```
+
+The nested `EnablePropertiesConfig` uses `@EnableConfigurationProperties(NoticeBoardProperties.class)` to register exactly one properties bean. This is the focused counterpart to `@ConfigurationPropertiesScan`: the scan discovers types across packages for the running application, while `@EnableConfigurationProperties` names a single type, which is ideal in a test that should stay small.
+
+The first method feeds a valid value and confirms the record binds correctly. The second method omits `notice-board.display-name`; `@NotBlank` fails during binding, so the context fails to start and `getStartupFailure()` is non-null. That is the same behavior your deployment would see, verified in a test.
+
+Run the whole suite:
+
+```sh
+./gradlew test
+```
+
+Expected:
+
+```
+BUILD SUCCESSFUL
+```
+
+## Why typed properties are not a service locator
+
+A service locator is an object you ask, at runtime, to hand you dependencies, for example a registry you query by type. It hides what a class needs, because the needs are discovered through lookups scattered in the code rather than declared up front.
+
+`NoticeBoardProperties` is the opposite. It is a plain, immutable value object with named, typed fields, injected through the constructor like any other dependency. You never call it to look up a collaborator; it only holds bound configuration values, and it is validated once at startup. The dependency is declared, visible, and typed, which is the entire point of preferring injection over lookup.
+
+Keep this discipline throughout: configuration classes and properties records declare beans and hold values. Business decisions, such as what a published notice looks like, live in services. Mixing behavior into configuration reintroduces the hidden coupling that dependency injection exists to remove.
+
+## Common misconceptions
+
+- "A constructor needs `@Autowired` for injection to work." Not when there is exactly one constructor. Spring uses the single constructor automatically. You only need the annotation to disambiguate among multiple constructors. Adding it to a lone constructor is redundant.
+- "Field injection is just a shorter way to do the same thing." It changes the design for the worse. Field injection hides a class's dependencies from its public API, prevents `final` fields, and allows objects to exist in a partially initialized state. Constructor injection makes dependencies explicit and lets you unit-test the class without Spring, as the first test demonstrates.
+- "Validation on configuration is optional polish." Without validation, a missing or malformed required setting fails somewhere deep in the application, often long after startup. `@Validated` with Bean Validation constraints turns invalid required configuration into an immediate, clearly reported startup failure at the boundary, which is where a deployment mistake is cheapest to catch.
+
+## Exercises
+
+1. Add a required constraint to `NoticeBoardProperties`: introduce a new component `@Size(max = 40) String category` and a matching `notice-board.category` key. Confirm the application starts with a valid value, then set the value to a 41-character string and observe the startup failure. Completion criterion: the failure report names `notice-board.category` and its constraint reason, and the application starts once the value fits.
+2. Write a second plain Java test for `NoticeBoardService` using a different fixed `Clock` instant and a different `displayName`. Completion criterion: the new test asserts an exact `publishedAt` and `board` and passes when run with `./gradlew test --tests "com.example.notice.NoticeBoardServiceTest"`, proving the service reads both injected dependencies.
+3. Add a binding test to `NoticeBoardPropertiesTest` that supplies a whitespace-only `notice-board.display-name` and assert the context fails to start. Completion criterion: the new test passes, showing that `@NotBlank` rejects text without a visible board name.
+
+## Recap
+
+Dependency injection means an object declares its collaborators and the container supplies them. You expressed those needs through a single constructor, so no injection annotation was required, the fields could be `final`, and the service was testable as ordinary Java. You declared the `Clock` as a bean at the composition boundary, keeping the concrete choice in one place and making time a controllable dependency. You bound external settings into an immutable `@ConfigurationProperties` record, registered it with `@ConfigurationPropertiesScan`, and guarded it with Jakarta Bean Validation so invalid required configuration stops the application at startup with a clear report. Configuration held values and wiring; the service held behavior. That separation, plus explicit constructor injection, is what keeps a Spring Boot application easy to read, test, and safely configure.
