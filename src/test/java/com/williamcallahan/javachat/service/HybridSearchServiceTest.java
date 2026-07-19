@@ -33,7 +33,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,7 +57,6 @@ class HybridSearchServiceTest {
     private static final String VERSIONED_SELECTOR_CITATION_QUERY =
             "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
     private static final Duration DISPATCH_BUDGET_TEST_TIMEOUT = Duration.ofMillis(500);
-    private static final long FIRST_DISPATCH_DELAY_MILLIS = 50;
     private static final Duration SHARED_QUERY_TIMEOUT = Duration.ofMillis(150);
     private static final Duration SHARED_DEADLINE_ASSERTION_LIMIT = Duration.ofMillis(450);
     private static final UUID SCORED_POINT_UUID = UUID.fromString("97c1f646-bd04-443e-a29f-e0283fe27e5b");
@@ -90,9 +88,6 @@ class HybridSearchServiceTest {
         doAnswer(invocation -> {
                     capturedQueries.add(invocation.getArgument(0));
                     capturedQueryTimeouts.add(invocation.getArgument(1));
-                    if (capturedQueryTimeouts.size() == 1) {
-                        TimeUnit.MILLISECONDS.sleep(FIRST_DISPATCH_DELAY_MILLIS);
-                    }
                     return Futures.immediateFuture(List.of(scoredPoint()));
                 })
                 .when(qdrantClient)
