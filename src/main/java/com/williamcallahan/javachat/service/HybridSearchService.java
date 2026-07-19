@@ -14,6 +14,7 @@ import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
 import io.qdrant.client.grpc.Points.Rrf;
 import io.qdrant.client.grpc.Points.ScoredPoint;
+import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.WithPayloadSelector;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,13 +34,14 @@ import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
 /**
- * Executes hybrid search across all Qdrant collections and sparse-only official citation search.
+ * Executes hybrid search across all Qdrant collections and official citation search.
  *
  * <p>For each collection, a Qdrant Query API request is issued with two prefetch stages
  * (dense nearest-neighbor and sparse BM25-style lexical search) fused via reciprocal rank
  * fusion (RRF). Queries are fanned out to all configured collections in parallel and results
- * are deduplicated by point UUID before returning top-K. Citation discovery sends one direct sparse
- * query only to the canonical documentation collection.</p>
+ * are deduplicated by point UUID before returning top-K. Citation discovery sends one request only
+ * to the canonical documentation collection: exact Javadoc overloads use a filtered payload scroll,
+ * while ordinary questions use sparse retrieval.</p>
  *
  * <p>Verified API contract (Step 0): this adapter uses direct {@code io.qdrant:client} 1.16.2
  * primitives rather than Spring AI VectorStore abstractions. Hybrid behavior depends on
@@ -158,15 +160,17 @@ public class HybridSearchService {
     }
 
     /**
-     * Searches the canonical documentation collection for citation candidates using sparse lexical retrieval only.
+     * Searches the canonical documentation collection for citation candidates.
      *
-     * <p>This operation does not create a dense embedding, issue prefetch queries, perform RRF fusion,
-     * or include dynamically discovered GitHub collections.</p>
+     * <p>An unambiguous Javadoc overload signature uses its exact persisted payload filter directly,
+     * because signature tokens need not have a useful sparse score. Other questions use sparse
+     * lexical retrieval. Neither path creates a dense embedding, performs RRF fusion, or includes
+     * dynamically discovered GitHub collections.</p>
      *
      * @param query citation-discovery query text
      * @param topK maximum number of citation candidates to return
      * @param retrievalConstraint official documentation metadata constraint
-     * @return sparse search outcome containing documents and optional non-fatal notices
+     * @return citation search outcome containing documents
      */
     public SearchOutcome searchDocumentationCitationsOutcome(
             String query, int topK, RetrievalConstraint retrievalConstraint) {
@@ -176,6 +180,18 @@ public class HybridSearchService {
             return new SearchOutcome(List.of(), List.of());
         }
 
+        Optional<JavaApiMethodSelector> exactOverloadSelector =
+                JavaApiMethodSelector.uniqueExactOverloadFromQuery(query);
+        Optional<Filter> retrievalFilter =
+                queryEncoding.constraintBuilder().buildCitationFilter(retrievalConstraint, query);
+        HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
+        String documentationCollectionName =
+                appProperties.getQdrant().getCollections().getDocs();
+        if (exactOverloadSelector.isPresent()) {
+            return searchExactDocumentationCitation(
+                    documentationCollectionName, retrievalFilter.orElseThrow(), topK, queryConfig);
+        }
+
         String expandedCitationQuery = JavaApiMethodSelector.expandForSparseCitationQuery(query);
         LexicalSparseVectorEncoder.SparseVector sparseVector =
                 queryEncoding.sparseVectorEncoder().encode(expandedCitationQuery);
@@ -183,11 +199,7 @@ public class HybridSearchService {
             return new SearchOutcome(List.of(), List.of());
         }
 
-        Optional<Filter> retrievalFilter = queryEncoding.constraintBuilder().buildFilter(retrievalConstraint);
         EncodedCitationQuery encodedCitationQuery = new EncodedCitationQuery(sparseVector, retrievalFilter);
-        HybridQueryConfig queryConfig = HybridQueryConfig.fromProperties(appProperties);
-        String documentationCollectionName =
-                appProperties.getQdrant().getCollections().getDocs();
         long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
         QueryPoints queryRequest = buildDocumentationCitationQueryRequest(
                 documentationCollectionName, encodedCitationQuery, queryConfig, topK);
@@ -198,6 +210,27 @@ public class HybridSearchService {
         CollectionQueryDispatch queryDispatch = new CollectionQueryDispatch(
                 documentationQueryByCollection, queryConfig.queryTimeout(), queryDeadlineNanos);
         return collectSearchOutcome(queryDispatch, topK, queryConfig, CollectionFailurePolicy.STRICT);
+    }
+
+    private SearchOutcome searchExactDocumentationCitation(
+            String documentationCollectionName,
+            Filter exactCitationFilter,
+            int citationCandidateLimit,
+            HybridQueryConfig queryConfig) {
+        ScrollPoints scrollRequest = ScrollPoints.newBuilder()
+                .setCollectionName(documentationCollectionName)
+                .setFilter(exactCitationFilter)
+                .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
+                .setLimit(citationCandidateLimit)
+                .build();
+        long queryDeadlineNanos = queryDeadlineNanos(queryConfig.queryTimeout());
+        CompletableFuture<List<ScoredPoint>> documentationScrollFuture =
+                dispatchScrollBeforeDeadline(scrollRequest, queryDeadlineNanos);
+        CollectionQueryDispatch queryDispatch = new CollectionQueryDispatch(
+                Map.of(documentationCollectionName, documentationScrollFuture),
+                queryConfig.queryTimeout(),
+                queryDeadlineNanos);
+        return collectSearchOutcome(queryDispatch, citationCandidateLimit, queryConfig, CollectionFailurePolicy.STRICT);
     }
 
     private SearchOutcome collectSearchOutcome(
@@ -244,6 +277,28 @@ public class HybridSearchService {
                     qdrantClient.queryAsync(queryRequest, remainingQueryDuration));
         } catch (RuntimeException queryDispatchFailure) {
             return CompletableFuture.failedFuture(queryDispatchFailure);
+        }
+    }
+
+    private CompletableFuture<List<ScoredPoint>> dispatchScrollBeforeDeadline(
+            ScrollPoints scrollRequest, long queryDeadlineNanos) {
+        long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
+        if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
+            return new CompletableFuture<>();
+        }
+        Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
+        try {
+            return QdrantListenableFutureBridge.toCompletableFuture(
+                            qdrantClient.scrollAsync(scrollRequest, remainingQueryDuration))
+                    .thenApply(scrollResponse -> scrollResponse.getResultList().stream()
+                            .map(retrievedPoint -> ScoredPoint.newBuilder()
+                                    .setId(retrievedPoint.getId())
+                                    .setScore(1.0f)
+                                    .putAllPayload(retrievedPoint.getPayloadMap())
+                                    .build())
+                            .toList());
+        } catch (RuntimeException scrollDispatchFailure) {
+            return CompletableFuture.failedFuture(scrollDispatchFailure);
         }
     }
 

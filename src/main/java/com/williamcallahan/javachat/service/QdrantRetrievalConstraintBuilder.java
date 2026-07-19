@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import static io.qdrant.client.ConditionFactory.matchKeyword;
 import static io.qdrant.client.ConditionFactory.matchKeywords;
 
+import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import io.qdrant.client.grpc.Common.Filter;
 import java.util.Objects;
 import java.util.Optional;
@@ -27,6 +28,26 @@ public class QdrantRetrievalConstraintBuilder {
      * @return optional Qdrant filter when at least one constraint is present
      */
     public Optional<Filter> buildFilter(RetrievalConstraint retrievalConstraint) {
+        return buildFilter(retrievalConstraint, "");
+    }
+
+    /**
+     * Builds an official-citation filter that can require one exact Javadoc member.
+     *
+     * <p>Primary hybrid retrieval does not use this method because a capitalized project type can
+     * resemble a Java API selector. Exact Javadoc keys are safe only inside the dedicated official
+     * documentation citation search.</p>
+     *
+     * @param retrievalConstraint official-documentation retrieval constraint
+     * @param citationQuery learner query that may contain one exact Java method signature
+     * @return optional Qdrant filter when at least one constraint is present
+     */
+    public Optional<Filter> buildCitationFilter(RetrievalConstraint retrievalConstraint, String citationQuery) {
+        Objects.requireNonNull(citationQuery, "citationQuery");
+        return buildFilter(retrievalConstraint, citationQuery);
+    }
+
+    private Optional<Filter> buildFilter(RetrievalConstraint retrievalConstraint, String exactCitationQuery) {
         Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
 
         Filter.Builder filterBuilder = Filter.newBuilder();
@@ -58,6 +79,22 @@ public class QdrantRetrievalConstraintBuilder {
         if (!retrievalConstraint.docSet().isEmpty()) {
             filterBuilder.addMust(matchKeywords(QdrantPayloadFieldSchema.DOC_SET_FIELD, retrievalConstraint.docSet()));
             mustConditionCount++;
+        }
+
+        Optional<JavaApiMethodSelector> exactOverloadSelector =
+                JavaApiMethodSelector.uniqueExactOverloadFromQuery(exactCitationQuery);
+        if (exactOverloadSelector.isPresent()) {
+            JavaApiMethodSelector selector = exactOverloadSelector.get();
+            filterBuilder.addMust(
+                    matchKeyword(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, selector.typePageFileName()));
+            filterBuilder.addMust(matchKeyword(
+                    QdrantPayloadFieldSchema.ANCHOR_FIELD,
+                    selector.exactOverloadAnchor().orElseThrow()));
+            mustConditionCount += 2;
+            if (!selector.packageName().isBlank()) {
+                filterBuilder.addMust(matchKeyword(QdrantPayloadFieldSchema.PACKAGE_FIELD, selector.packageName()));
+                mustConditionCount++;
+            }
         }
 
         if (mustConditionCount == 0) {

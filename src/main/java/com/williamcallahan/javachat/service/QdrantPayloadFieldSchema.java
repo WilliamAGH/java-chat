@@ -30,6 +30,9 @@ public final class QdrantPayloadFieldSchema {
     /** Payload metadata key for an exact member anchor within a canonical Javadoc page. */
     public static final String ANCHOR_FIELD = "anchor";
 
+    /** Payload metadata key for the terminal Javadoc type HTML page. */
+    public static final String JAVA_API_TYPE_PAGE_FIELD = "javaApiTypePage";
+
     /** Payload metadata key for the deterministic document content hash. */
     public static final String HASH_FIELD = "hash";
 
@@ -96,6 +99,7 @@ public final class QdrantPayloadFieldSchema {
             TITLE_FIELD,
             PACKAGE_FIELD,
             ANCHOR_FIELD,
+            JAVA_API_TYPE_PAGE_FIELD,
             HASH_FIELD,
             DOC_SET_FIELD,
             DOC_PATH_FIELD,

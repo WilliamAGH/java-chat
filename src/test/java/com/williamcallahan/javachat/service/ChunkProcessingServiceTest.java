@@ -137,6 +137,11 @@ class ChunkProcessingServiceTest {
                         .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.ANCHOR_FIELD))
                         .toList());
         assertEquals(
+                List.of("Stream.html", "Stream.html"),
+                processingOutcome.documents().subList(1, 3).stream()
+                        .map(document -> document.getMetadata().get(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD))
+                        .toList());
+        assertEquals(
                 contentHasher.generateChunkHash(JAVA_API_PAGE_URL, 0, OVERVIEW_CHUNK_TEXT),
                 processingOutcome.allChunkHashes().getFirst());
         assertNotEquals(

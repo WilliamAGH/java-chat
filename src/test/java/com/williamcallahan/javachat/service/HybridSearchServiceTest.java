@@ -27,7 +27,10 @@ import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Points.PrefetchQuery;
 import io.qdrant.client.grpc.Points.QueryPoints;
+import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScoredPoint;
+import io.qdrant.client.grpc.Points.ScrollPoints;
+import io.qdrant.client.grpc.Points.ScrollResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,8 +57,10 @@ class HybridSearchServiceTest {
             DocsSourceRegistry.officialDocumentationSourceIdentities();
     private static final String HYBRID_QUERY = "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " streams";
     private static final String CITATION_QUERY = "Java records";
+    private static final String EXACT_JAVA_API_QUERY = "What does List.of(E, E) return?";
+    private static final String RUNTIME_VALUE_JAVA_API_QUERY = "What does List.of(firstValue, secondValue) return?";
     private static final String VERSIONED_SELECTOR_CITATION_QUERY =
-            "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of";
+            "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of(E, E)";
     private static final Duration DISPATCH_BUDGET_TEST_TIMEOUT = Duration.ofMillis(500);
     private static final Duration SHARED_QUERY_TIMEOUT = Duration.ofMillis(150);
     private static final Duration SHARED_DEADLINE_ASSERTION_LIMIT = Duration.ofMillis(450);
@@ -117,6 +122,31 @@ class HybridSearchServiceTest {
     }
 
     @Test
+    void primaryHybridSearchDoesNotTreatProjectTypeSyntaxAsAnOfficialJavadocConstraint() {
+        when(embeddingClient.embed(EXACT_JAVA_API_QUERY, LlmGatewayTier.LIVE))
+                .thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(sparseEncoder.encode(EXACT_JAVA_API_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
+        List<QueryPoints> capturedQueries = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedQueries.add(invocation.getArgument(0));
+                    return Futures.immediateFuture(List.of());
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        buildSearchService().searchOutcome(EXACT_JAVA_API_QUERY, 5, RetrievalConstraint.none());
+
+        assertEquals(4, capturedQueries.size());
+        for (QueryPoints capturedQuery : capturedQueries) {
+            assertFalse(capturedQuery.hasFilter());
+            for (PrefetchQuery prefetchQuery : capturedQuery.getPrefetchList()) {
+                assertFalse(prefetchQuery.hasFilter());
+            }
+        }
+    }
+
+    @Test
     void citationSearchUsesOnlyTheSparseOfficialDocumentationRequestAndDurationOverload() {
         appProperties.getQdrant().setSparseVectorName("bm25");
         when(sparseEncoder.encode(CITATION_QUERY))
@@ -175,29 +205,92 @@ class HybridSearchServiceTest {
     }
 
     @Test
-    void citationSearchExpandsSelectorsWithoutDroppingItsExactVersionFilter() {
-        when(sparseEncoder.encode(VERSIONED_SELECTOR_CITATION_QUERY + " List"))
+    void exactCitationSearchScrollsByPayloadFilterWithoutSparseScoring() {
+        List<ScrollPoints> capturedScrolls = new ArrayList<>();
+        List<Duration> capturedScrollTimeouts = new ArrayList<>();
+        doAnswer(invocation -> {
+                    capturedScrolls.add(invocation.getArgument(0));
+                    capturedScrollTimeouts.add(invocation.getArgument(1));
+                    return Futures.immediateFuture(ScrollResponse.newBuilder()
+                            .addResult(retrievedPoint())
+                            .build());
+                })
+                .when(qdrantClient)
+                .scrollAsync(notNull(), notNull());
+
+        HybridSearchService hybridSearchService = buildSearchService();
+        HybridSearchService.SearchOutcome exactCitationOutcome =
+                hybridSearchService.searchDocumentationCitationsOutcome(
+                        VERSIONED_SELECTOR_CITATION_QUERY,
+                        3,
+                        RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+
+        assertEquals(1, capturedScrolls.size());
+        assertEquals(1, capturedScrollTimeouts.size());
+        ScrollPoints exactCitationScroll = capturedScrolls.getFirst();
+        assertEquals(appProperties.getQdrant().getCollections().getDocs(), exactCitationScroll.getCollectionName());
+        assertEquals(3, exactCitationScroll.getLimit());
+        assertTrue(exactCitationScroll.getWithPayload().getEnable());
+        assertTrue(exactCitationScroll.hasFilter());
+        String versionFilter = exactCitationScroll.getFilter().toString();
+        assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
+        assertTrue(versionFilter.contains(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+        assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD));
+        assertTrue(versionFilter.contains("List.html"));
+        assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.ANCHOR_FIELD));
+        assertTrue(versionFilter.contains("of(E,E)"));
+        assertEquals(1, exactCitationOutcome.documents().size());
+        assertEquals(
+                appProperties.getQdrant().getCollections().getDocs(),
+                exactCitationOutcome.documents().getFirst().getMetadata().get("collection"));
+        verifyNoInteractions(sparseEncoder);
+        verifyNoInteractions(embeddingClient);
+        verify(qdrantClient, never()).queryAsync(notNull(), notNull());
+    }
+
+    @Test
+    void runtimeValueCitationQueryRemainsSparse() {
+        when(sparseEncoder.encode(RUNTIME_VALUE_JAVA_API_QUERY + " List"))
                 .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(2L, 7L), List.of(3.0f, 1.0f)));
         List<QueryPoints> capturedQueries = new ArrayList<>();
         doAnswer(invocation -> {
                     capturedQueries.add(invocation.getArgument(0));
-                    return Futures.immediateFuture(List.of());
+                    return Futures.immediateFuture(List.of(scoredPoint()));
                 })
                 .when(qdrantClient)
                 .queryAsync(notNull(), notNull());
 
-        HybridSearchService hybridSearchService = buildSearchService();
-        hybridSearchService.searchDocumentationCitationsOutcome(
-                VERSIONED_SELECTOR_CITATION_QUERY,
-                3,
-                RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+        HybridSearchService.SearchOutcome citationOutcome = buildSearchService()
+                .searchDocumentationCitationsOutcome(RUNTIME_VALUE_JAVA_API_QUERY, 3, RetrievalConstraint.none());
 
         assertEquals(1, capturedQueries.size());
-        assertTrue(capturedQueries.getFirst().hasFilter());
-        String versionFilter = capturedQueries.getFirst().getFilter().toString();
-        assertTrue(versionFilter.contains(QdrantPayloadFieldSchema.DOC_VERSION_FIELD));
-        assertTrue(versionFilter.contains(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
-        verify(sparseEncoder).encode(VERSIONED_SELECTOR_CITATION_QUERY + " List");
+        assertTrue(capturedQueries.getFirst().getQuery().getNearest().hasSparse());
+        assertEquals(1, citationOutcome.documents().size());
+        verify(sparseEncoder).encode(RUNTIME_VALUE_JAVA_API_QUERY + " List");
+        verify(qdrantClient, never()).scrollAsync(notNull(), notNull());
+        verifyNoInteractions(embeddingClient);
+    }
+
+    @Test
+    void exactCitationSearchFailsStrictlyWhenFilteredScrollFails() {
+        appProperties.getQdrant().setFailOnPartialSearchError(false);
+        doAnswer(invocation -> Futures.immediateFailedFuture(new RuntimeException("documentation unavailable")))
+                .when(qdrantClient)
+                .scrollAsync(notNull(), notNull());
+
+        HybridSearchPartialFailureException citationSearchFailure;
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(HYBRID_SEARCH_LOGGER)) {
+            citationSearchFailure = assertThrows(HybridSearchPartialFailureException.class, () -> buildSearchService()
+                    .searchDocumentationCitationsOutcome(EXACT_JAVA_API_QUERY, 3, RetrievalConstraint.none()));
+
+            assertEquals(1, expectedLogEvents.events().size());
+            assertEquals(
+                    CITATION_COLLECTION_FAILURE_WARNING,
+                    expectedLogEvents.events().getFirst().getFormattedMessage());
+        }
+
+        assertEquals(1, citationSearchFailure.collectionFailures().size());
+        verifyNoInteractions(sparseEncoder);
         verifyNoInteractions(embeddingClient);
     }
 
@@ -390,6 +483,20 @@ class HybridSearchServiceTest {
                         QdrantPayloadFieldSchema.URL_FIELD,
                         io.qdrant.client.ValueFactory.value("https://docs.example.com/java/streams"))
                 .putPayload(QdrantPayloadFieldSchema.TITLE_FIELD, io.qdrant.client.ValueFactory.value("Streams"))
+                .build();
+    }
+
+    private static RetrievedPoint retrievedPoint() {
+        return RetrievedPoint.newBuilder()
+                .setId(io.qdrant.client.PointIdFactory.id(SCORED_POINT_UUID))
+                .putPayload(
+                        QdrantPayloadFieldSchema.DOC_CONTENT_FIELD,
+                        io.qdrant.client.ValueFactory.value("List.of overload documentation"))
+                .putPayload(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        io.qdrant.client.ValueFactory.value(
+                                "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html#of(E,E)"))
+                .putPayload(QdrantPayloadFieldSchema.TITLE_FIELD, io.qdrant.client.ValueFactory.value("List.of"))
                 .build();
     }
 }

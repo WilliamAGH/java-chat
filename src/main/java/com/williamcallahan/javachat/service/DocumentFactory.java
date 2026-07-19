@@ -1,9 +1,11 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -66,8 +68,29 @@ public class DocumentFactory {
         if (metadata.javadocMemberAnchor != null) {
             document.getMetadata()
                     .put(QdrantPayloadFieldSchema.ANCHOR_FIELD, metadata.javadocMemberAnchor.domIdentifier());
+            terminalHtmlPage(metadata.sourceUrl()).ifPresent(terminalTypePage -> document.getMetadata()
+                    .put(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, terminalTypePage));
         }
         return document;
+    }
+
+    private static Optional<String> terminalHtmlPage(String sourceUrl) {
+        URI sourceUri;
+        try {
+            sourceUri = URI.create(sourceUrl);
+        } catch (IllegalArgumentException invalidSourceUrl) {
+            return Optional.empty();
+        }
+        String sourcePath = sourceUri.getPath();
+        if (sourcePath == null || sourcePath.isBlank()) {
+            return Optional.empty();
+        }
+        int terminalPathSeparatorIndex = sourcePath.lastIndexOf('/');
+        String terminalPage = sourcePath.substring(terminalPathSeparatorIndex + 1);
+        if (!terminalPage.endsWith(".html") || terminalPage.length() == ".html".length()) {
+            return Optional.empty();
+        }
+        return Optional.of(terminalPage);
     }
 
     /**

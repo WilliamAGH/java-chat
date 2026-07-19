@@ -4,7 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.ExpectedCount.manyTimes;
 import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.ExpectedCount.times;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.anything;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -14,9 +18,11 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.service.EmbeddingClient;
+import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +42,7 @@ class QdrantIndexInitializerTest {
     private static final int MISMATCHED_COLLECTION_DIMENSIONS = 768;
     private static final String QDRANT_REST_BASE_URL = "http://qdrant.test:6333";
     private static final String QDRANT_DOCKER_REST_BASE_URL = "http://qdrant.test:8087";
+    private static final String QDRANT_SCHEMA_TYPE_KEYWORD = "keyword";
 
     private final Logger initializerLogger = (Logger) LoggerFactory.getLogger(QdrantIndexInitializer.class);
     private ExpectedLogEvents initializerLogEvents;
@@ -220,14 +227,48 @@ class QdrantIndexInitializerTest {
         initializerHarness.qdrantServer().verify();
     }
 
+    @Test
+    void createsExactJavaApiLookupPayloadIndexesWithFilterCompatibleTypes() {
+        InitializerHarness initializerHarness = newInitializer(false, true, true);
+
+        expectPayloadIndex(initializerHarness, QdrantPayloadFieldSchema.PACKAGE_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
+        expectPayloadIndex(initializerHarness, QdrantPayloadFieldSchema.ANCHOR_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
+        expectPayloadIndex(
+                initializerHarness, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
+        initializerHarness
+                .qdrantServer()
+                .expect(manyTimes(), anything())
+                .andRespond(withSuccess(collectionMetadataJson(EMBEDDING_DIMENSIONS), MediaType.APPLICATION_JSON));
+
+        initializerHarness.initializer().ensureCollectionsAndIndexes();
+
+        assertEquals(
+                Status.UP,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        initializerHarness.qdrantServer().verify();
+    }
+
     private InitializerHarness newInitializer(boolean ensureCollections) {
         return newInitializer(ensureCollections, 6333);
     }
 
     private InitializerHarness newInitializer(boolean ensureCollections, int configuredPort) {
+        return newInitializer(ensureCollections, configuredPort, false, false);
+    }
+
+    private InitializerHarness newInitializer(
+            boolean ensureCollections, boolean ensurePayloadIndexes, boolean ignoreExpectationOrder) {
+        return newInitializer(ensureCollections, 6333, ensurePayloadIndexes, ignoreExpectationOrder);
+    }
+
+    private InitializerHarness newInitializer(
+            boolean ensureCollections,
+            int configuredPort,
+            boolean ensurePayloadIndexes,
+            boolean ignoreExpectationOrder) {
         AppProperties appProperties = new AppProperties();
         appProperties.getQdrant().setEnsureCollections(ensureCollections);
-        appProperties.getQdrant().setEnsurePayloadIndexes(false);
+        appProperties.getQdrant().setEnsurePayloadIndexes(ensurePayloadIndexes);
         EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
         when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
         AtomicReference<RestTemplate> initializedRestTemplate = new AtomicReference<>();
@@ -239,12 +280,25 @@ class QdrantIndexInitializerTest {
                 restTemplateBuilder,
                 embeddingClient,
                 new ObjectMapper());
-        MockRestServiceServer qdrantServer =
-                MockRestServiceServer.bindTo(initializedRestTemplate.get()).build();
+        MockRestServiceServer.MockRestServiceServerBuilder qdrantServerBuilder =
+                MockRestServiceServer.bindTo(initializedRestTemplate.get());
+        MockRestServiceServer qdrantServer = ignoreExpectationOrder
+                ? qdrantServerBuilder.ignoreExpectOrder(true).build()
+                : qdrantServerBuilder.build();
         return new InitializerHarness(
                 initializer,
                 qdrantServer,
                 appProperties.getQdrant().getCollections().all());
+    }
+
+    private void expectPayloadIndex(InitializerHarness initializerHarness, String fieldName, String fieldSchemaType) {
+        initializerHarness
+                .qdrantServer()
+                .expect(times(initializerHarness.collectionName().size()), requestTo(Matchers.containsString("/index")))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(jsonPath("$.field_name").value(fieldName))
+                .andExpect(jsonPath("$.field_schema.type").value(fieldSchemaType))
+                .andRespond(withSuccess());
     }
 
     private String collectionUrl(String collectionName) {

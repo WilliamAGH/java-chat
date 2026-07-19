@@ -444,6 +444,20 @@ public class RetrievalService {
         return new CitationOutcome(citations, failedConversionCount);
     }
 
+    /**
+     * Converts prompt-context documents with exact Java overload selection when canonical metadata permits it.
+     *
+     * <p>Ordinary, runtime-value, incomplete, and multi-selector queries preserve the supplied
+     * context order. Sole exact syntax retains only canonical matching metadata; without it, no
+     * citation is emitted. Every emitted source therefore remains grounded in the model prompt.</p>
+     */
+    public CitationOutcome toCitationsForQuery(String query, List<Document> promptDocuments) {
+        if (query == null || promptDocuments == null || promptDocuments.isEmpty()) {
+            return toCitations(promptDocuments);
+        }
+        return toCitations(CitationCandidateRanker.selectPromptContextForCitationQuery(query, promptDocuments));
+    }
+
     private static String fragmentlessCitationSourceUrl(String citationUrl) {
         int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
         return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);

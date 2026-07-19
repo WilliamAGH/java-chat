@@ -19,7 +19,7 @@ public class ChunkProcessingService {
     private static final int DEFAULT_CHUNK_SIZE = 900;
     private static final int DEFAULT_CHUNK_OVERLAP = 150;
     private static final int PDF_PAGE_CHUNK_OVERLAP = 0;
-    private static final String JAVADOC_MEMBER_CHUNK_HASH_VERSION = "java-api-member-chunk-v1";
+    private static final String JAVADOC_MEMBER_CHUNK_HASH_VERSION = "java-api-member-chunk-v2";
     private static final char JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR = '\u0000';
 
     private final Chunker chunker;

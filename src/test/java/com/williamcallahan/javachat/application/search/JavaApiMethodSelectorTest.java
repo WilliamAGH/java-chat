@@ -15,10 +15,14 @@ class JavaApiMethodSelectorTest {
 
         JavaApiMethodSelector selector =
                 JavaApiMethodSelector.fromQuery(citationQuery).orElseThrow();
+        JavaApiMethodSelector exactSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+                .orElseThrow();
 
         assertEquals("", selector.packageName());
         assertEquals("List", selector.typePageName());
         assertEquals("of", selector.methodName());
+        assertTrue(selector.exactOverloadAnchor().isEmpty());
+        assertEquals("of()", exactSelector.exactOverloadAnchor().orElseThrow());
         assertEquals("List.html", selector.typePageFileName());
         assertEquals("List", selector.sparseQueryTerms());
         assertEquals(citationQuery + " List", JavaApiMethodSelector.expandForSparseCitationQuery(citationQuery));
@@ -32,7 +36,42 @@ class JavaApiMethodSelectorTest {
         assertEquals("", selector.packageName());
         assertEquals("Stream", selector.typePageName());
         assertEquals("map", selector.methodName());
+        assertTrue(selector.exactOverloadAnchor().isEmpty());
         assertEquals("Stream", selector.sparseQueryTerms());
+    }
+
+    @Test
+    void normalizesAnUnambiguousSignatureIntoTheSourceAnchorLookupKey() {
+        JavaApiMethodSelector listSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "What does List.of(E, E) return?")
+                .orElseThrow();
+        JavaApiMethodSelector stringSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "What does String.valueOf(char[]) return?")
+                .orElseThrow();
+        JavaApiMethodSelector varargsSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "What does List.of(E...) return?")
+                .orElseThrow();
+
+        assertEquals("of(E,E)", listSelector.exactOverloadAnchor().orElseThrow());
+        assertEquals("valueOf(char[])", stringSelector.exactOverloadAnchor().orElseThrow());
+        assertEquals("of(E...)", varargsSelector.exactOverloadAnchor().orElseThrow());
+    }
+
+    @Test
+    void keepsFirstSelectorRelevanceButWithholdsExactKeysForAmbiguousQueries() {
+        JavaApiMethodSelector firstSelector = JavaApiMethodSelector.fromQuery("Compare List.of(E, E) with Set.of(E, E)")
+                .orElseThrow();
+
+        assertEquals("List", firstSelector.typePageName());
+        assertTrue(firstSelector.exactOverloadAnchor().isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of(firstValue, secondValue)")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Compare List.of(E, E) with Set.of(E, E)")
+                .isEmpty());
+        assertTrue(
+                JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of(E,").isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of(List<E>)")
+                .isEmpty());
     }
 
     @Test

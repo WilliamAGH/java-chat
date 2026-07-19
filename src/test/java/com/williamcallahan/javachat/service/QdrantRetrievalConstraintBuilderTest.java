@@ -55,6 +55,37 @@ class QdrantRetrievalConstraintBuilderTest {
     }
 
     @Test
+    void constrainsOneExactJavaApiOverloadUsingItsAuthoritativeAnchor() {
+        Optional<Filter> optionalFilter =
+                builder.buildCitationFilter(RetrievalConstraint.none(), "What does java.util.List.of(E, E) do?");
+
+        assertTrue(optionalFilter.isPresent());
+        Filter qdrantFilter = optionalFilter.get();
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html");
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.ANCHOR_FIELD, "of(E,E)");
+        assertKeywordCondition(qdrantFilter, QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util");
+    }
+
+    @Test
+    void leavesUnparenthesizedJavaApiMethodAsARelevanceSignal() {
+        Optional<Filter> optionalFilter =
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain List.of in Java");
+
+        assertTrue(optionalFilter.isEmpty());
+    }
+
+    @Test
+    void leavesRuntimeArgumentsAndMultipleSelectorsUnconstrained() {
+        Optional<Filter> runtimeArguments =
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Explain List.of(first, second)");
+        Optional<Filter> comparison =
+                builder.buildCitationFilter(RetrievalConstraint.none(), "Compare List.of(E, E) with Set.of(E, E)");
+
+        assertTrue(runtimeArguments.isEmpty());
+        assertTrue(comparison.isEmpty());
+    }
+
+    @Test
     void rejectsEmptyOfficialDocSetConstraint() {
         assertThrows(IllegalArgumentException.class, () -> RetrievalConstraint.forOfficialDocSets(List.of()));
     }
@@ -67,5 +98,14 @@ class QdrantRetrievalConstraintBuilderTest {
         String documentType = DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE;
         String sourceName = UNCONSTRAINED_SOURCE_NAME;
         return new RetrievalConstraint(documentVersion, sourceKind, documentType, sourceName, allowedDocumentationSets);
+    }
+
+    private static void assertKeywordCondition(Filter qdrantFilter, String fieldName, String expectedKeyword) {
+        Condition keywordCondition = qdrantFilter.getMustList().stream()
+                .filter(mustCondition ->
+                        fieldName.equals(mustCondition.getField().getKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(expectedKeyword, keywordCondition.getField().getMatch().getKeyword());
     }
 }

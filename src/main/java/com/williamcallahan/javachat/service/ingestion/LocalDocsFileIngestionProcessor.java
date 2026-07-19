@@ -41,7 +41,7 @@ public class LocalDocsFileIngestionProcessor {
     private static final Logger INDEXING_LOG = LoggerFactory.getLogger("INDEXING");
 
     private static final String FILE_URL_PREFIX = "file://";
-    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v3";
+    static final String LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION = "utf8-document-extraction-provenance-v4";
 
     private final FileContentServices fileContentServices;
     private final IngestionStorageServices storage;

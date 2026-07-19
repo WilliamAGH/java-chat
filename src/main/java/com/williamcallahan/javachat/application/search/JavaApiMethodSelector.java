@@ -14,25 +14,39 @@ import java.util.Set;
  * Javadoc page filename {@code List.html}. Sparse citation retrieval uses its expanded terms to
  * bridge punctuation tokenization, while citation ranking uses the same selector to recognize the
  * matching Javadoc type page. A qualified selector also owns its package path so {@code
- * java.util.Date.toString} cannot match {@code java.sql.Date}.</p>
- *
- * @param packageName optional declaring package name, or empty for an unqualified selector
- * @param typePageName Javadoc type page name without the {@code .html} suffix
- * @param methodName Java method name named by the query
+ * java.util.Date.toString} cannot match {@code java.sql.Date}. A selector exposes an exact source
+ * anchor only when the learner supplied one unambiguous Java type signature.</p>
  */
-public record JavaApiMethodSelector(String packageName, String typePageName, String methodName) {
+public final class JavaApiMethodSelector {
 
     private static final String JAVADOC_PAGE_SUFFIX = ".html";
     private static final int MINIMUM_TYPE_METHOD_SEGMENT_COUNT = 2;
     private static final Set<String> NON_METHOD_TERMINALS = Set.of("class", "super", "this", "java", "html");
+    private final String packageName;
+    private final String typePageName;
+    private final String methodName;
+    private final JavaInvocationSignature invocationSignature;
 
     /**
-     * Enforces a concrete Java API type and method spelling.
+     * Creates a selector without an exact invocation signature.
+     *
+     * <p>Direct construction names a method independently of a learner query, so it must not imply
+     * an overload choice.</p>
+     *
+     * @param packageName optional declaring package name, or empty for an unqualified selector
+     * @param typePageName Javadoc type page name without the {@code .html} suffix
+     * @param methodName Java method name
      */
-    public JavaApiMethodSelector {
-        packageName = packageName == null ? "" : packageName.trim();
-        typePageName = requireNonBlank(typePageName, "typePageName");
-        methodName = requireNonBlank(methodName, "methodName");
+    public JavaApiMethodSelector(String packageName, String typePageName, String methodName) {
+        this(packageName, typePageName, methodName, JavaInvocationSignature.unavailable());
+    }
+
+    private JavaApiMethodSelector(
+            String packageName, String typePageName, String methodName, JavaInvocationSignature invocationSignature) {
+        this.packageName = packageName == null ? "" : packageName.trim();
+        this.typePageName = requireNonBlank(typePageName, "typePageName");
+        this.methodName = requireNonBlank(methodName, "methodName");
+        this.invocationSignature = Objects.requireNonNull(invocationSignature, "invocationSignature");
     }
 
     /**
@@ -40,29 +54,58 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      *
      * <p>Invocation parentheses are optional because learners commonly ask both {@code List.of()}
      * and {@code Explain Stream.map}. Fully qualified type names and Javadoc nested-type page names
-     * are retained without re-parsing them elsewhere.</p>
+     * are retained without re-parsing them elsewhere. This relevance-only selector never exposes an
+     * overload anchor; use {@link #uniqueExactOverloadFromQuery(String)} for that stricter path.</p>
      *
      * @param query learner query text
      * @return first explicit Java API method selector, or empty when the query names none
      */
     public static Optional<JavaApiMethodSelector> fromQuery(String query) {
-        if (query == null || query.isBlank()) {
+        return selectorOccurrences(query).stream()
+                .map(SelectorOccurrence::selector)
+                .findFirst();
+    }
+
+    /**
+     * Extracts an exact overload selector only when one selector has an unambiguous type signature.
+     *
+     * <p>Comparisons and value-expression invocations retain broad relevance ordering because this
+     * method refuses to infer a Javadoc anchor from either form.</p>
+     *
+     * @param query learner query text
+     * @return sole selector with an exact source-anchor lookup key, or empty when none is safe
+     */
+    public static Optional<JavaApiMethodSelector> uniqueExactOverloadFromQuery(String query) {
+        List<SelectorOccurrence> selectorOccurrences = selectorOccurrences(query);
+        if (selectorOccurrences.size() != 1) {
             return Optional.empty();
         }
+        SelectorOccurrence selectorOccurrence = selectorOccurrences.getFirst();
+        JavaInvocationSignature invocationSignature =
+                JavaInvocationSignature.afterMethodName(query, selectorOccurrence.methodEndIndex());
+        JavaApiMethodSelector exactSelector =
+                selectorOccurrence.selector().withInvocationSignature(invocationSignature);
+        return exactSelector.exactOverloadAnchor().isPresent() ? Optional.of(exactSelector) : Optional.empty();
+    }
 
+    private static List<SelectorOccurrence> selectorOccurrences(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+
+        List<SelectorOccurrence> selectorOccurrences = new ArrayList<>();
         int queryLength = query.length();
         for (int queryIndex = 0; queryIndex < queryLength; queryIndex++) {
             if (!isIdentifierStartAt(query, queryIndex) || hasIdentifierPrefix(query, queryIndex)) {
                 continue;
             }
             ParsedQualifiedName parsedQualifiedName = parseQualifiedName(query, queryIndex);
-            Optional<JavaApiMethodSelector> candidateSelector = fromQualifiedName(parsedQualifiedName.segments());
-            if (candidateSelector.isPresent()) {
-                return candidateSelector;
-            }
+            fromQualifiedName(parsedQualifiedName.segments())
+                    .ifPresent(selector ->
+                            selectorOccurrences.add(new SelectorOccurrence(selector, parsedQualifiedName.endIndex())));
             queryIndex = parsedQualifiedName.endIndex() - 1;
         }
-        return Optional.empty();
+        return List.copyOf(selectorOccurrences);
     }
 
     /**
@@ -81,6 +124,33 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
         return fromQuery(citationQuery)
                 .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
                 .orElse(citationQuery);
+    }
+
+    /**
+     * Returns the optional declaring package named by the learner.
+     *
+     * @return package name, or an empty string for an unqualified selector
+     */
+    public String packageName() {
+        return packageName;
+    }
+
+    /**
+     * Returns the Javadoc type-page name without its filename suffix.
+     *
+     * @return declaring type-page name
+     */
+    public String typePageName() {
+        return typePageName;
+    }
+
+    /**
+     * Returns the exact Java method name named by the learner.
+     *
+     * @return method name
+     */
+    public String methodName() {
+        return methodName;
     }
 
     /**
@@ -118,6 +188,19 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      */
     public String sparseQueryTerms() {
         return typePageName;
+    }
+
+    /**
+     * Returns the source-anchor lookup key that the learner wrote without ambiguity.
+     *
+     * @return exact method anchor such as {@code of(E,E)}, or empty when no safe key exists
+     */
+    public Optional<String> exactOverloadAnchor() {
+        return invocationSignature.anchorFor(methodName);
+    }
+
+    private JavaApiMethodSelector withInvocationSignature(JavaInvocationSignature invocationSignature) {
+        return new JavaApiMethodSelector(packageName, typePageName, methodName, invocationSignature);
     }
 
     private Optional<JavaPackageName> expectedPackageName(String candidatePackageName) {
@@ -221,4 +304,6 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
             segments = List.copyOf(segments);
         }
     }
+
+    private record SelectorOccurrence(JavaApiMethodSelector selector, int methodEndIndex) {}
 }

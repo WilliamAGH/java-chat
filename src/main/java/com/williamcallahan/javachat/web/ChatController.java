@@ -146,10 +146,10 @@ public class ChatController extends BaseController {
                                             "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
                                             requestToken);
 
-                                    // Cite the exact official documents supplied to the model so source attribution
-                                    // cannot drift from the answer context. Conversion failures remain observable.
+                                    // Cite only documents supplied to the model. Exact overload queries narrow this
+                                    // same context by authoritative source-anchor metadata before conversion.
                                     RetrievalService.CitationOutcome citationOutcome =
-                                            retrievalService.toCitations(promptOutcome.documents());
+                                            retrievalService.toCitationsForQuery(latest, promptOutcome.documents());
                                     final List<Citation> finalCitations = citationOutcome.citations();
 
                                     // Stream with provider transparency - surfaces which LLM is responding

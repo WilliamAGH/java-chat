@@ -272,6 +272,78 @@ class RetrievalServiceCitationTest {
         assertEquals(1, conversionFailure.failedConversionCount());
     }
 
+    @Test
+    void exactOverloadQueryConvertsOnlyTheMatchingPromptDocument() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+        Document twoArgumentOverload = listOverloadDocument("two-argument", "of(E,E)");
+
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitationsForQuery(
+                        "Explain java.util.List.of(E,E)", List.of(threeArgumentOverload, twoArgumentOverload));
+
+        assertEquals(
+                List.of("of(E,E)"),
+                citationOutcome.citations().stream().map(Citation::getAnchor).toList());
+    }
+
+    @Test
+    void exactOverloadQueryEmitsNothingWhenPromptContextHasOnlyWrongAnchors() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+
+        RetrievalService.CitationOutcome citationOutcome =
+                citationService().toCitationsForQuery("Explain java.util.List.of(E,E)", List.of(threeArgumentOverload));
+
+        assertTrue(citationOutcome.citations().isEmpty());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void exactOverloadQueryEmitsNothingWithoutMatchingJavaApiMetadata() {
+        Document tutorialDocument = Document.builder()
+                .id("list-tutorial")
+                .text("List.of accepts elements")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://example.test/list-tutorial")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome =
+                citationService().toCitationsForQuery("Explain java.util.List.of(E,E)", List.of(tutorialDocument));
+
+        assertTrue(citationOutcome.citations().isEmpty());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void nonexactQueriesPreservePromptDocumentCitationOrder() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+        Document twoArgumentOverload = listOverloadDocument("two-argument", "of(E,E)");
+        List<Document> promptDocuments = List.of(threeArgumentOverload, twoArgumentOverload);
+
+        List<String> ordinaryAnchors =
+                citationService().toCitationsForQuery("Explain immutable lists", promptDocuments).citations().stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+        List<String> runtimeValueAnchors =
+                citationService()
+                        .toCitationsForQuery("Explain List.of(firstValue, secondValue)", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+        List<String> multipleSelectorAnchors =
+                citationService()
+                        .toCitationsForQuery("Compare List.of(E,E) with Set.of(E,E)", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+
+        List<String> expectedAnchors = List.of("of(E,E,E)", "of(E,E)");
+        assertEquals(expectedAnchors, ordinaryAnchors);
+        assertEquals(expectedAnchors, runtimeValueAnchors);
+        assertEquals(expectedAnchors, multipleSelectorAnchors);
+    }
+
     private static RetrievalService citationService() {
         return new RetrievalService(
                 mock(HybridSearchService.class),
@@ -297,6 +369,21 @@ class RetrievalServiceCitationTest {
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl())
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
+                .build();
+    }
+
+    private static Document listOverloadDocument(String documentId, String exactAnchor) {
+        String listJavadocUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/util/List.html";
+        return Document.builder()
+                .id(documentId)
+                .text(exactAnchor)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, listJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html")
                 .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
                 .build();
     }
