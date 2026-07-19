@@ -97,7 +97,8 @@ assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
     false \
     xml-sitemap \
     "https://docs.example.invalid/sitemap.xml" \
-    "https://docs.example.invalid/reference/"
+    "https://docs.example.invalid/reference/" \
+    ""
 
 : > "$DISCOVERED_FETCH_CAPTURE"
 if fetch_source \
@@ -236,7 +237,9 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --seed-discovery-url \
     "https://docs.scala-lang.org/scala3/reference/" \
     --seed-source-prefix \
-    "https://docs.scala-lang.org/scala3/reference/"
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --seed-reject-regex \
+    '/index\.html$'
 
 if ! (
     set --

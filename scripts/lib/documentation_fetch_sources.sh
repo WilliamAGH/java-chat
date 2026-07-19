@@ -212,6 +212,10 @@ fetch_discovered_documentation_seed() {
     local seed_document_type="$8"
     local seed_discovery_url="$9"
     local seed_source_prefix="${10}"
+    local seed_reject_regex="${11:-}"
+    if [ -z "$seed_reject_regex" ]; then
+        seed_reject_regex="$reject_regex"
+    fi
     local discovery_file
     if ! discovery_file="$(mktemp "$target_dir/.documentation-discovery.XXXXXX")"; then
         cd - > /dev/null
@@ -252,7 +256,7 @@ fetch_discovered_documentation_seed() {
         --discovery-url "$seed_discovery_url" \
         --source-prefix "$seed_source_prefix" \
         --canonical-prefix "$canonical_prefix" \
-        --reject-regex "$reject_regex" \
+        --reject-regex "$seed_reject_regex" \
         --output "$generated_seed_file" \
         --mirror-path-output "$mirror_paths_file" \
         --cut-directories "$cut_directories"; then

@@ -266,6 +266,7 @@ fetch_source() {
     local seed_document_type=""
     local seed_discovery_url=""
     local seed_source_prefix=""
+    local seed_reject_regex=""
     local single_page_only="false"
     local superseded_relative_mirror_path=""
 
@@ -288,6 +289,7 @@ fetch_source() {
             --seed-document-type) seed_document_type="$2"; shift 2 ;;
             --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
+            --seed-reject-regex) seed_reject_regex="$2"; shift 2 ;;
             --single-page) single_page_only="true"; shift ;;
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
             *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
@@ -305,6 +307,10 @@ fetch_source() {
     if [ "$single_page_only" = "true" ] \
         && { [ -n "$java_release" ] || [ -n "$seed_discovery_url" ]; }; then
         echo "Single-page documentation cannot use another fetch strategy: $name" >&2
+        return 1
+    fi
+    if [ -n "$seed_reject_regex" ] && [ -z "$seed_discovery_url" ]; then
+        echo "A discovery-only rejection requires structured discovery: $name" >&2
         return 1
     fi
 
@@ -408,7 +414,8 @@ fetch_source() {
             "$partial_mirror_allowed" \
             "$seed_document_type" \
             "$seed_discovery_url" \
-            "$seed_source_prefix" || documentation_fetch_status=$?
+            "$seed_source_prefix" \
+            "$seed_reject_regex" || documentation_fetch_status=$?
     else
         fetch_docs_mirror \
             "$url" \
@@ -469,7 +476,7 @@ fetch_named_official_source() {
     case "$source_identifier" in
         dev-java) "$source_dispatch" fetch_source --url "https://dev.java/learn/" --mirror-path "dev-java" --name "Dev.java Learning" --source-version "stable-current" --identity-regex "Learn Java" --cut-directories 1 --minimum-html-files 40 ;;
         kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin 2.4.10 Documentation" --source-version "2.4.10" --identity-regex "2\\.4\\.10" --required-identity-page "faq.html" --required-identity-text "The currently released version is 2.4.10, published on July 14, 2026." --cut-directories 1 --minimum-html-files 250 --reject-regex "(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\\.html$" --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" ;;
-        scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" ;;
+        scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" --seed-reject-regex "/index\\.html$" ;;
         groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 9 --reject-regex "/(gdk|templating|type-checking-extensions)\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --seed-source-prefix "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
