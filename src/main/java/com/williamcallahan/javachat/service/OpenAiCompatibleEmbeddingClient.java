@@ -26,7 +26,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class);
 
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int READ_TIMEOUT_SECONDS = 60;
+    private static final int LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 60;
+    private static final int BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 600;
     private static final int MAX_ERROR_SNIPPET = 512;
     private static final String OPENAI_API_VERSION_SUFFIX = "/v1";
 
@@ -126,7 +127,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 .inputOfArrayOfStrings(texts)
                 .build();
         RequestOptions requestOptions =
-                RequestOptions.builder().timeout(embeddingTimeout()).build();
+                RequestOptions.builder().timeout(embeddingTimeout(requestTier)).build();
         return execute(clientFor(requestTier), embeddingRequest, requestOptions, texts.size());
     }
 
@@ -178,9 +179,13 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return new EmbeddingServiceUnavailableException(failureMessage, exception);
     }
 
-    private Timeout embeddingTimeout() {
+    private Timeout embeddingTimeout(LlmGatewayTier requestTier) {
         Duration connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS);
-        Duration requestTimeout = Duration.ofSeconds(READ_TIMEOUT_SECONDS);
+        Duration requestTimeout =
+                switch (requestTier) {
+                    case LIVE -> Duration.ofSeconds(LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS);
+                    case BATCH -> Duration.ofSeconds(BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS);
+                };
         return Timeout.builder()
                 .connect(connectTimeout)
                 .request(requestTimeout)

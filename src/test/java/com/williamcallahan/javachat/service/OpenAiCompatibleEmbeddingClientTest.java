@@ -20,6 +20,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -38,6 +39,9 @@ import org.mockito.ArgumentCaptor;
 class OpenAiCompatibleEmbeddingClientTest {
 
     private static final int EXPECTED_EMBEDDING_DIMENSION = 2;
+    private static final Duration EXPECTED_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration EXPECTED_LIVE_EMBEDDING_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration EXPECTED_BATCH_EMBEDDING_TIMEOUT = Duration.ofMinutes(10);
 
     @Test
     void callUsesSdkAndPreservesIndexOrdering() {
@@ -223,12 +227,32 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = new OpenAiCompatibleEmbeddingClient(
                 liveClient, batchClient, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
+            ArgumentCaptor<RequestOptions> liveRequestOptionsCaptor = ArgumentCaptor.forClass(RequestOptions.class);
             clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE);
-            verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
+            verify(liveEmbeddingService).create(any(), liveRequestOptionsCaptor.capture());
             verifyNoInteractions(batchEmbeddingService);
+            assertEquals(
+                    EXPECTED_EMBEDDING_CONNECT_TIMEOUT,
+                    liveRequestOptionsCaptor.getValue().getTimeout().connect());
+            assertEquals(
+                    EXPECTED_LIVE_EMBEDDING_TIMEOUT,
+                    liveRequestOptionsCaptor.getValue().getTimeout().request());
+            assertEquals(
+                    EXPECTED_LIVE_EMBEDDING_TIMEOUT,
+                    liveRequestOptionsCaptor.getValue().getTimeout().read());
 
+            ArgumentCaptor<RequestOptions> batchRequestOptionsCaptor = ArgumentCaptor.forClass(RequestOptions.class);
             clientAdapter.embed(List.of("batch document"), LlmGatewayTier.BATCH);
-            verify(batchEmbeddingService).create(any(), any(RequestOptions.class));
+            verify(batchEmbeddingService).create(any(), batchRequestOptionsCaptor.capture());
+            assertEquals(
+                    EXPECTED_EMBEDDING_CONNECT_TIMEOUT,
+                    batchRequestOptionsCaptor.getValue().getTimeout().connect());
+            assertEquals(
+                    EXPECTED_BATCH_EMBEDDING_TIMEOUT,
+                    batchRequestOptionsCaptor.getValue().getTimeout().request());
+            assertEquals(
+                    EXPECTED_BATCH_EMBEDDING_TIMEOUT,
+                    batchRequestOptionsCaptor.getValue().getTimeout().read());
         }
     }
 
