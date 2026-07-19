@@ -201,44 +201,51 @@ public class IngestedFilePruneService {
                     && parsedChunkFileName.endsWith(PARSED_CHUNK_FILE_EXTENSION);
         })) {
             for (Path parsedChunkPath : parsedChunkDirectoryStream) {
-                Path parsedChunkFileNamePath = parsedChunkPath.getFileName();
-                if (parsedChunkFileNamePath == null) {
-                    continue;
-                }
-                String parsedChunkFileName = parsedChunkFileNamePath.toString();
-                String parsedChunkIdentitySuffix = parsedChunkFileName.substring(parsedChunkPrefix.length());
-                int firstUnderscorePosition = parsedChunkIdentitySuffix.indexOf('_');
-                if (firstUnderscorePosition <= 0) {
-                    continue;
-                }
-                int storedHashStart = firstUnderscorePosition + 1;
-                int storedHashEnd = parsedChunkIdentitySuffix.length() - PARSED_CHUNK_FILE_EXTENSION.length();
-                if (storedHashStart >= storedHashEnd) {
-                    continue;
-                }
-                String chunkIndexToken = parsedChunkIdentitySuffix.substring(0, firstUnderscorePosition);
-                String storedChunkHash = parsedChunkIdentitySuffix.substring(storedHashStart, storedHashEnd);
-                int chunkIndex;
-                try {
-                    chunkIndex = Integer.parseInt(chunkIndexToken);
-                } catch (NumberFormatException malformedChunkIndex) {
-                    continue;
-                }
-                if (isFullCanonicalChunkHash(storedChunkHash)) {
-                    parsedChunkReferences.add(new ParsedChunkReference(parsedChunkPath, storedChunkHash, ""));
-                    continue;
-                }
-                if (isTruncatedChunkHashPrefix(storedChunkHash)) {
-                    String chunkText = Files.readString(parsedChunkPath, StandardCharsets.UTF_8);
-                    String reconstructedChunkHash = contentHasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
-                    String canonicalChunkHash =
-                            reconstructedChunkHash.startsWith(storedChunkHash) ? reconstructedChunkHash : "";
-                    parsedChunkReferences.add(
-                            new ParsedChunkReference(parsedChunkPath, canonicalChunkHash, storedChunkHash));
-                }
+                parsedChunkReferences.add(parseParsedChunkReference(parsedChunkPath, sourceUrl, parsedChunkPrefix));
             }
         }
         return List.copyOf(parsedChunkReferences);
+    }
+
+    private ParsedChunkReference parseParsedChunkReference(
+            Path parsedChunkPath, String sourceUrl, String parsedChunkPrefix) throws IOException {
+        Path parsedChunkFileNamePath = parsedChunkPath.getFileName();
+        if (parsedChunkFileNamePath == null) {
+            return unverifiedParsedChunkReference(parsedChunkPath);
+        }
+        String parsedChunkFileName = parsedChunkFileNamePath.toString();
+        String parsedChunkIdentitySuffix = parsedChunkFileName.substring(parsedChunkPrefix.length());
+        int firstUnderscorePosition = parsedChunkIdentitySuffix.indexOf('_');
+        if (firstUnderscorePosition <= 0) {
+            return unverifiedParsedChunkReference(parsedChunkPath);
+        }
+        int storedHashStart = firstUnderscorePosition + 1;
+        int storedHashEnd = parsedChunkIdentitySuffix.length() - PARSED_CHUNK_FILE_EXTENSION.length();
+        if (storedHashStart >= storedHashEnd) {
+            return unverifiedParsedChunkReference(parsedChunkPath);
+        }
+        String chunkIndexToken = parsedChunkIdentitySuffix.substring(0, firstUnderscorePosition);
+        String storedChunkHash = parsedChunkIdentitySuffix.substring(storedHashStart, storedHashEnd);
+        int chunkIndex;
+        try {
+            chunkIndex = Integer.parseInt(chunkIndexToken);
+        } catch (NumberFormatException malformedChunkIndex) {
+            return unverifiedParsedChunkReference(parsedChunkPath);
+        }
+        if (isFullCanonicalChunkHash(storedChunkHash)) {
+            return new ParsedChunkReference(parsedChunkPath, storedChunkHash, "");
+        }
+        if (!isTruncatedChunkHashPrefix(storedChunkHash)) {
+            return unverifiedParsedChunkReference(parsedChunkPath);
+        }
+        String chunkText = Files.readString(parsedChunkPath, StandardCharsets.UTF_8);
+        String reconstructedChunkHash = contentHasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
+        String canonicalChunkHash = reconstructedChunkHash.startsWith(storedChunkHash) ? reconstructedChunkHash : "";
+        return new ParsedChunkReference(parsedChunkPath, canonicalChunkHash, storedChunkHash);
+    }
+
+    private static ParsedChunkReference unverifiedParsedChunkReference(Path parsedChunkPath) {
+        return new ParsedChunkReference(parsedChunkPath, "", "");
     }
 
     private static Set<String> validatedChunkHashSet(List<String> chunkHashes, String parameterName) {

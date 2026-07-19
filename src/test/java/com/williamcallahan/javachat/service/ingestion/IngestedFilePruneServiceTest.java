@@ -10,6 +10,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.service.ContentHasher;
@@ -180,5 +181,51 @@ class IngestedFilePruneServiceTest {
 
         assertFalse(Files.exists(staleParsedChunk));
         verify(localStoreService).deleteChunkIngestionMarkers(List.of(MARKERLESS_STALE_CHUNK_HASH));
+    }
+
+    @Test
+    void deletesParsedChunkWithMalformedIndexTokenWithoutDeletingAnUnverifiedMarker(@TempDir Path parsedChunkDirectory)
+            throws IOException {
+        assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(
+                parsedChunkDirectory, "source_not-an-index_abcdef123456.txt");
+    }
+
+    @Test
+    void deletesParsedChunkWithUnsupportedHashLengthWithoutDeletingAnUnverifiedMarker(
+            @TempDir Path parsedChunkDirectory) throws IOException {
+        assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(
+                parsedChunkDirectory, "source_0_abcdef1234567.txt");
+    }
+
+    @Test
+    void deletesParsedChunkWithInvalidHexadecimalHashWithoutDeletingAnUnverifiedMarker(
+            @TempDir Path parsedChunkDirectory) throws IOException {
+        assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(parsedChunkDirectory, "source_0_abcdef12345g.txt");
+    }
+
+    @Test
+    void deletesParsedChunkWithoutHashSuffixWithoutDeletingAnUnverifiedMarker(@TempDir Path parsedChunkDirectory)
+            throws IOException {
+        assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(parsedChunkDirectory, "source_0_.txt");
+    }
+
+    private void assertUnverifiedParsedChunkIsDeletedWithoutDeletingItsMarker(
+            Path parsedChunkDirectory, String unverifiedParsedChunkFileName) throws IOException {
+        HybridVectorService hybridVectorService = mock(HybridVectorService.class);
+        LocalStoreService localStoreService = mock(LocalStoreService.class);
+        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
+        ContentHasher contentHasher = mock(ContentHasher.class);
+        IngestedFilePruneService pruneService = new IngestedFilePruneService(
+                hybridVectorService, localStoreService, fileIngestionMarkerStore, contentHasher);
+        Path unverifiedParsedChunk = parsedChunkDirectory.resolve(unverifiedParsedChunkFileName);
+        Files.writeString(unverifiedParsedChunk, "unverified parsed chunk", StandardCharsets.UTF_8);
+        when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
+        when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
+
+        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of(REPLACEMENT_CHUNK_HASH));
+
+        assertFalse(Files.exists(unverifiedParsedChunk));
+        verify(localStoreService, never()).deleteChunkIngestionMarkers(anyList());
+        verifyNoInteractions(contentHasher);
     }
 }
