@@ -45,7 +45,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(
         properties = {
             "management.endpoint.health.probes.enabled=true",
-            "management.endpoint.health.group.readiness.include=readinessState",
+            "management.endpoint.health.group.readiness.include=readinessState,qdrant",
             "management.endpoint.health.group.dependencies.include=qdrant,embeddingModelKeepAlive",
             "spring.ai.vectorstore.qdrant.host=localhost",
             "spring.ai.vectorstore.qdrant.use-tls=false"
@@ -107,10 +107,10 @@ class JavaChatApplicationTests {
     }
 
     @Test
-    void externalDependencyFailuresRemainObservableWithoutBlockingReadiness() throws Exception {
+    void qdrantFailureBlocksReadinessAndAllDependencyFailuresRemainObservable() throws Exception {
         assertEquals(Status.DOWN, embeddingModelKeepAlive.health().getStatus());
         assertEquals(Status.DOWN, qdrantHealthIndicator.health().getStatus());
-        mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+        mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isServiceUnavailable());
         mockMvc.perform(get("/actuator/health/dependencies")).andExpect(status().isServiceUnavailable());
     }
 

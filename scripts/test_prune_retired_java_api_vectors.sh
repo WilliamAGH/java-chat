@@ -245,7 +245,8 @@ if [ "$unknown_java_selection_status" -ne 2 ]; then
 fi
 
 reset_mock_qdrant
-unset QDRANT_COLLECTION_DOCS
+export SPRING_PROFILE=local
+export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-4b-2560-docs
 export MOCK_QDRANT_MODE="success"
 if ! prune_retired_java_api_vectors "kotlin" > /dev/null; then
     fail_retired_java_api_vector_prune_test "non-Java-only prune invocation failed"
@@ -267,6 +268,16 @@ fi
 if [ -e "$MOCK_QDRANT_DIRECTORY/environment-loads" ]; then
     fail_retired_java_api_vector_prune_test "unknown Java API selector loaded the environment"
 fi
+
+reset_mock_qdrant
+export SPRING_PROFILE=dev
+if prune_retired_java_api_vectors "java/java25-complete" > /dev/null 2>&1; then
+    fail_retired_java_api_vector_prune_test "cross-environment docs collection was accepted"
+fi
+if find "$MOCK_QDRANT_DIRECTORY" -maxdepth 1 -name '*target-*' | grep -q .; then
+    fail_retired_java_api_vector_prune_test "cross-environment rejection contacted Qdrant"
+fi
+export SPRING_PROFILE=local
 
 reset_mock_qdrant
 if ! prune_retired_java_api_vectors "java/java25-complete" > /dev/null; then
@@ -308,8 +319,8 @@ if ! jq -s -e '
     fail_retired_java_api_vector_prune_test "prune selected a URL outside its two retired Java API patterns"
 fi
 for qdrant_request_target_file in "$MOCK_QDRANT_DIRECTORY"/*target-*; do
-    if ! grep -q -- '/collections/java-docs/' "$qdrant_request_target_file"; then
-        fail_retired_java_api_vector_prune_test "default docs collection was not java-docs"
+    if ! grep -q -- '/collections/java-chat-local-qwen3-embedding-4b-2560-docs/' "$qdrant_request_target_file"; then
+        fail_retired_java_api_vector_prune_test "prune did not use the active environment/generation docs collection"
     fi
 done
 

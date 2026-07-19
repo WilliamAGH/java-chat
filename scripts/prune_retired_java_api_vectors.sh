@@ -10,7 +10,6 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly RETIRED_JAVA_API_VECTOR_COLLECTION_DEFAULT="java-docs"
 readonly RETIRED_JAVA_API_VECTOR_SCROLL_LIMIT=256
 readonly RETIRED_JAVA_API_VECTOR_DELETE_BATCH_SIZE=100
 readonly RETIRED_JAVA_API_VECTOR_CONNECT_TIMEOUT_SECONDS=5
@@ -311,12 +310,28 @@ prune_retired_java_api_vectors() {
 
     load_env_file
     apply_pipeline_defaults
+    if [ -z "${SPRING_PROFILE:-}" ]; then
+        printf 'SPRING_PROFILE is required for retired Java API vector pruning\n' >&2
+        return 1
+    fi
+    case "$SPRING_PROFILE" in
+        local|dev|prod) ;;
+        *)
+            printf 'SPRING_PROFILE must be exactly local, dev, or prod\n' >&2
+            return 1
+            ;;
+    esac
+    local expected_documentation_collection="java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs"
+    if [ "${QDRANT_COLLECTION_DOCS:-}" != "$expected_documentation_collection" ]; then
+        printf 'QDRANT_COLLECTION_DOCS must match SPRING_PROFILE and the 4B/2560 generation\n' >&2
+        return 1
+    fi
     if ! check_qdrant_connection "echo -e"; then
         printf 'Cannot prune retired Java API vectors without Qdrant connectivity\n' >&2
         return 1
     fi
 
-    local qdrant_collection="${QDRANT_COLLECTION_DOCS:-$RETIRED_JAVA_API_VECTOR_COLLECTION_DEFAULT}"
+    local qdrant_collection="$QDRANT_COLLECTION_DOCS"
     local qdrant_base_url
     qdrant_base_url="$(qdrant_rest_base_url)"
     prune_retired_java_api_vectors_in_collection "$qdrant_base_url" "$qdrant_collection"

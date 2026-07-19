@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * <p>This keeps filter construction in one place so retrieval services apply
  * consistent field names across dense and sparse query stages.</p>
  *
- * <p>Qdrant Java client 1.16.2's {@code ConditionFactory.matchKeywords} encodes one
+ * <p>Qdrant Java client 1.18.3's {@code ConditionFactory.matchKeywords} encodes one
  * {@code Match.keywords} condition that matches any supplied keyword, so docSet alternatives
  * remain one OR group inside the surrounding MUST filter.</p>
  */

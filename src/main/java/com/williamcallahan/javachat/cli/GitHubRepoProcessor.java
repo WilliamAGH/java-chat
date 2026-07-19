@@ -84,12 +84,14 @@ public class GitHubRepoProcessor {
     private static final String ENV_GITHUB_REPO_COMMIT = "GITHUB_REPO_COMMIT";
     private static final String ENV_GITHUB_REPO_LICENSE = "GITHUB_REPO_LICENSE";
     private static final String ENV_GITHUB_REPO_DESCRIPTION = "GITHUB_REPO_DESCRIPTION";
+    private static final String GITHUB_COLLECTION_GENERATION = "qwen3-embedding-4b-2560";
 
     private final SourceCodeFileIngestionProcessor fileProcessor;
     private final HybridVectorService hybridVectorService;
     private final IngestedFilePruneService ingestedFilePruneService;
     private final ProgressTracker progressTracker;
     private final GitHubRepositoryIdentityResolver repositoryIdentityResolver;
+    private final String deploymentProfile;
 
     /**
      * Creates the CLI GitHub repository processor with required dependencies.
@@ -105,13 +107,15 @@ public class GitHubRepoProcessor {
             HybridVectorService hybridVectorService,
             IngestedFilePruneService ingestedFilePruneService,
             ProgressTracker progressTracker,
-            GitHubRepositoryIdentityResolver repositoryIdentityResolver) {
+            GitHubRepositoryIdentityResolver repositoryIdentityResolver,
+            @org.springframework.beans.factory.annotation.Value("${SPRING_PROFILE:prod}") String deploymentProfile) {
         this.fileProcessor = Objects.requireNonNull(fileProcessor, "fileProcessor");
         this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
         this.ingestedFilePruneService = Objects.requireNonNull(ingestedFilePruneService, "ingestedFilePruneService");
         this.progressTracker = Objects.requireNonNull(progressTracker, "progressTracker");
         this.repositoryIdentityResolver =
                 Objects.requireNonNull(repositoryIdentityResolver, "repositoryIdentityResolver");
+        this.deploymentProfile = deploymentProfile;
     }
 
     /**
@@ -293,6 +297,7 @@ public class GitHubRepoProcessor {
                 repositoryIdentityResolver.resolve(owner, repositoryName, repositoryUrl);
 
         String collectionName = requireEnv(ENV_GITHUB_COLLECTION_NAME);
+        requireActiveGitHubCollection(deploymentProfile, collectionName);
 
         return new GitHubRepoMetadata(
                 repoPath,
@@ -302,6 +307,20 @@ public class GitHubRepoProcessor {
                 envOrEmpty(ENV_GITHUB_REPO_COMMIT),
                 envOrEmpty(ENV_GITHUB_REPO_LICENSE),
                 envOrEmpty(ENV_GITHUB_REPO_DESCRIPTION));
+    }
+
+    static void requireActiveGitHubCollection(String deploymentProfile, String collectionName) {
+        if (!"local".equals(deploymentProfile)
+                && !"dev".equals(deploymentProfile)
+                && !"prod".equals(deploymentProfile)) {
+            throw new GitHubRepoProcessingException("SPRING_PROFILE must be exactly local, dev, or prod");
+        }
+        String requiredCollectionPrefix = "github-" + deploymentProfile + "-" + GITHUB_COLLECTION_GENERATION + "-";
+        if (!collectionName.startsWith(requiredCollectionPrefix)
+                || collectionName.length() == requiredCollectionPrefix.length()) {
+            throw new GitHubRepoProcessingException(
+                    "GitHub collection must match SPRING_PROFILE and the 4B/2560 generation");
+        }
     }
 
     private static String requireEnv(String key) {

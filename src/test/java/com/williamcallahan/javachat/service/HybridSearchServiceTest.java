@@ -48,9 +48,9 @@ class HybridSearchServiceTest {
 
     private static final Logger HYBRID_SEARCH_LOGGER = (Logger) LoggerFactory.getLogger(HybridSearchService.class);
     private static final String COLLECTION_FAILURE_WARNING =
-            "[QDRANT] Search failed for collection=java-chat-books (exceptionType=RuntimeException)";
+            "[QDRANT] Search failed for collection=java-chat-prod-qwen3-embedding-4b-2560-books (exceptionType=RuntimeException)";
     private static final String CITATION_COLLECTION_FAILURE_WARNING =
-            "[QDRANT] Search failed for collection=java-docs (exceptionType=RuntimeException)";
+            "[QDRANT] Search failed for collection=java-chat-prod-qwen3-embedding-4b-2560-docs (exceptionType=RuntimeException)";
     private static final DocsSourceRegistry.JavaApiDocumentationSource REPRESENTED_JAVA_API_SOURCE =
             DocsSourceRegistry.javaApiDocumentationSources().getFirst();
     private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =

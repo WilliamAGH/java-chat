@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -39,7 +41,7 @@ import org.springframework.web.client.RestTemplate;
  */
 @org.springframework.context.annotation.Profile("!test")
 @Component
-public class QdrantIndexInitializer {
+public final class QdrantIndexInitializer {
     private static final Logger log = LoggerFactory.getLogger(QdrantIndexInitializer.class);
     private static final int CONNECT_TIMEOUT_SECONDS = 15;
     private static final int READ_TIMEOUT_SECONDS = 30;
@@ -48,6 +50,9 @@ public class QdrantIndexInitializer {
     private static final String SCHEMA_TYPE_INTEGER = "integer";
     private static final String VECTOR_DISTANCE_COSINE = "Cosine";
     private static final String SPARSE_MODIFIER_IDF = "idf";
+    private static final String REQUIRED_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
+    private static final int REQUIRED_EMBEDDING_DIMENSIONS = 2_560;
+    private static final String EMPTY_TEXT = "";
     private static final List<PayloadIndexSpec> REQUIRED_PAYLOAD_INDEXES = List.of(
             new PayloadIndexSpec(QdrantPayloadFieldSchema.URL_FIELD, SCHEMA_TYPE_KEYWORD),
             new PayloadIndexSpec(QdrantPayloadFieldSchema.HASH_FIELD, SCHEMA_TYPE_KEYWORD),
@@ -74,6 +79,7 @@ public class QdrantIndexInitializer {
     private final RestTemplate restTemplate;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
+    private final String deploymentProfile;
     private volatile QdrantInitializationState initializationState = QdrantInitializationState.PENDING;
 
     /** Creates the initializer with strict validation of reachable Qdrant schemas. */
@@ -82,11 +88,13 @@ public class QdrantIndexInitializer {
             AppProperties appProperties,
             RestTemplateBuilder restTemplateBuilder,
             EmbeddingClient embeddingClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @Value("${SPRING_PROFILE:prod}") String deploymentProfile) {
         this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+        this.deploymentProfile = requireDeploymentProfile(deploymentProfile);
         this.restTemplate = restTemplateBuilder
                 .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
                 .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
@@ -95,6 +103,13 @@ public class QdrantIndexInitializer {
                     return execution.execute(request, body);
                 })
                 .build();
+    }
+
+    /** Rejects cross-environment collection routing before command-line runners or web traffic can mutate Qdrant. */
+    @PostConstruct
+    void validateGenerationConfiguration() {
+        validateGenerationCollections(appProperties.getQdrant().getCollections().all());
+        validateEmbeddingGeneration();
     }
 
     /** Ensures configured collections exist and required payload indexes are present at startup. */
@@ -148,8 +163,10 @@ public class QdrantIndexInitializer {
     }
 
     private void initializeCollectionsAndIndexes() {
+        validateEmbeddingGeneration();
         QdrantProperties qdrant = appProperties.getQdrant();
         List<String> collections = qdrant.getCollections().all();
+        validateGenerationCollections(collections);
         String denseVectorName = qdrant.getDenseVectorName();
         String sparseVectorName = qdrant.getSparseVectorName();
         String restBaseUrl = qdrantRestConnection.restBaseUrl();
@@ -164,12 +181,41 @@ public class QdrantIndexInitializer {
 
         validateCollections(collections, denseVectorName, sparseVectorName, restBaseUrl);
 
-        if (!qdrant.isEnsurePayloadIndexes()) {
-            log.info("[QDRANT] Skipping payload index ensure (app.qdrant.ensure-payload-indexes=false)");
-            return;
+        if (qdrant.isEnsurePayloadIndexes()) {
+            ensurePayloadIndexes(collections, restBaseUrl);
+        } else {
+            log.info("[QDRANT] Payload index creation disabled; validating required indexes without mutation");
         }
+        validatePayloadIndexes(collections, restBaseUrl);
+    }
 
-        ensurePayloadIndexes(collections, restBaseUrl);
+    private void validateEmbeddingGeneration() {
+        if (!REQUIRED_EMBEDDING_MODEL.equals(embeddingClient.modelName())
+                || embeddingClient.dimensions() != REQUIRED_EMBEDDING_DIMENSIONS) {
+            throw new IllegalStateException(
+                    "Core Qdrant generation requires qwen/qwen3-embedding-4b with exactly 2560 dimensions");
+        }
+    }
+
+    private void validateGenerationCollections(List<String> collections) {
+        List<String> expectedCollections = List.of(
+                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-books",
+                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-docs",
+                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-articles",
+                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-pdfs");
+        if (!expectedCollections.equals(collections)) {
+            throw new IllegalStateException(
+                    "Core Qdrant collections must match SPRING_PROFILE and the 4B/2560 generation");
+        }
+    }
+
+    private static String requireDeploymentProfile(String deploymentProfile) {
+        if (!"local".equals(deploymentProfile)
+                && !"dev".equals(deploymentProfile)
+                && !"prod".equals(deploymentProfile)) {
+            throw new IllegalStateException("SPRING_PROFILE must be exactly local, dev, or prod");
+        }
+        return deploymentProfile;
     }
 
     private void ensureHybridCollectionsExist(
@@ -270,6 +316,45 @@ public class QdrantIndexInitializer {
                         + sparseVectorName
                         + "'] required for hybrid retrieval.");
             }
+            validateDenseDistance(info, denseVectorName, collection);
+            validateSparseModifier(info, sparseVectorName, collection);
+            if (!info.path("result")
+                    .path("config")
+                    .path("params")
+                    .path("on_disk_payload")
+                    .asBoolean(false)) {
+                throw new IllegalStateException("Qdrant collection '" + collection + "' must store payload on disk.");
+            }
+        }
+    }
+
+    private void validateDenseDistance(JsonNode collectionInfo, String denseVectorName, String collection) {
+        String denseDistance = collectionInfo
+                .path("result")
+                .path("config")
+                .path("params")
+                .path("vectors")
+                .path(denseVectorName)
+                .path("distance")
+                .asText(EMPTY_TEXT);
+        if (!VECTOR_DISTANCE_COSINE.equalsIgnoreCase(denseDistance)) {
+            throw new IllegalStateException("Qdrant collection '" + collection + "' dense vector distance must be "
+                    + VECTOR_DISTANCE_COSINE + " but found '" + denseDistance + "'.");
+        }
+    }
+
+    private void validateSparseModifier(JsonNode collectionInfo, String sparseVectorName, String collection) {
+        String sparseModifier = collectionInfo
+                .path("result")
+                .path("config")
+                .path("params")
+                .path("sparse_vectors")
+                .path(sparseVectorName)
+                .path("modifier")
+                .asText(EMPTY_TEXT);
+        if (!SPARSE_MODIFIER_IDF.equalsIgnoreCase(sparseModifier)) {
+            throw new IllegalStateException("Qdrant collection '" + collection + "' sparse vector modifier must be "
+                    + SPARSE_MODIFIER_IDF + " but found '" + sparseModifier + "'.");
         }
     }
 
@@ -344,17 +429,7 @@ public class QdrantIndexInitializer {
                     createdIndexCount++;
                     continue;
                 }
-                if (!existingType.equals(payloadIndexSpec.schemaType())) {
-                    throw new IllegalStateException("Qdrant payload index type mismatch (collection="
-                            + collection
-                            + ", field="
-                            + payloadIndexSpec.fieldName()
-                            + ", expected="
-                            + payloadIndexSpec.schemaType()
-                            + ", actual="
-                            + existingType
-                            + ")");
-                }
+                validatePayloadIndexType(collection, payloadIndexSpec, existingType);
                 alreadyPresentIndexCount++;
             }
             log.info(
@@ -362,6 +437,40 @@ public class QdrantIndexInitializer {
                     collection,
                     createdIndexCount,
                     alreadyPresentIndexCount);
+        }
+    }
+
+    private void validatePayloadIndexes(List<String> collections, String restBaseUrl) {
+        HttpHeaders headers = jsonHeaders();
+        for (String collection : collections) {
+            Map<String, String> existingPayloadIndexTypes =
+                    readExistingPayloadIndexTypes(restBaseUrl, collection, headers);
+            for (PayloadIndexSpec payloadIndexSpec : REQUIRED_PAYLOAD_INDEXES) {
+                String existingType = existingPayloadIndexTypes.get(payloadIndexSpec.fieldName());
+                if (existingType == null || existingType.isBlank()) {
+                    throw new IllegalStateException("Qdrant required payload index missing (collection="
+                            + collection
+                            + ", field="
+                            + payloadIndexSpec.fieldName()
+                            + ")");
+                }
+                validatePayloadIndexType(collection, payloadIndexSpec, existingType);
+            }
+        }
+    }
+
+    private void validatePayloadIndexType(
+            String collection, PayloadIndexSpec payloadIndexSpec, String existingPayloadIndexType) {
+        if (!existingPayloadIndexType.equals(payloadIndexSpec.schemaType())) {
+            throw new IllegalStateException("Qdrant payload index type mismatch (collection="
+                    + collection
+                    + ", field="
+                    + payloadIndexSpec.fieldName()
+                    + ", expected="
+                    + payloadIndexSpec.schemaType()
+                    + ", actual="
+                    + existingPayloadIndexType
+                    + ")");
         }
     }
 

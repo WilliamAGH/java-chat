@@ -21,6 +21,7 @@ import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.QdrantPayloadFieldSchema;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
@@ -38,7 +39,7 @@ import org.springframework.web.client.RestTemplate;
 
 /** Verifies that Qdrant initialization separates confirmed absence from transport unavailability. */
 class QdrantIndexInitializerTest {
-    private static final int EMBEDDING_DIMENSIONS = 1_536;
+    private static final int EMBEDDING_DIMENSIONS = 2_560;
     private static final int MISMATCHED_COLLECTION_DIMENSIONS = 768;
     private static final String QDRANT_REST_BASE_URL = "http://qdrant.test:6333";
     private static final String QDRANT_DOCKER_REST_BASE_URL = "http://qdrant.test:8087";
@@ -83,6 +84,36 @@ class QdrantIndexInitializerTest {
                         .getDetails()
                         .get("initialization"));
         assertEquals(1, eventCount(Level.WARN, "Collection initialization deferred"));
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void profileMismatchedCollectionFailsBeforeQdrantMutation() {
+        InitializerHarness initializerHarness = newInitializer(true);
+        QdrantCollectionNames mismatchedCollectionNames =
+                initializerHarness.appProperties().getQdrant().getCollections();
+        mismatchedCollectionNames.setDocs("java-chat-dev-qwen3-embedding-4b-2560-docs");
+        initializerHarness.appProperties().getQdrant().setCollections(mismatchedCollectionNames);
+
+        assertThrows(IllegalStateException.class, initializerHarness.initializer()::validateGenerationConfiguration);
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void embeddingModelMismatchFailsBeforeQdrantMutation() {
+        InitializerHarness initializerHarness = newInitializer(true);
+        when(initializerHarness.embeddingClient().modelName()).thenReturn("qwen/qwen3-embedding-8b");
+
+        assertThrows(IllegalStateException.class, initializerHarness.initializer()::validateGenerationConfiguration);
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void embeddingDimensionMismatchFailsBeforeQdrantMutation() {
+        InitializerHarness initializerHarness = newInitializer(true);
+        when(initializerHarness.embeddingClient().dimensions()).thenReturn(MISMATCHED_COLLECTION_DIMENSIONS);
+
+        assertThrows(IllegalStateException.class, initializerHarness.initializer()::validateGenerationConfiguration);
         initializerHarness.qdrantServer().verify();
     }
 
@@ -153,7 +184,18 @@ class QdrantIndexInitializerTest {
                     .qdrantServer()
                     .expect(once(), requestTo(collectionUrl))
                     .andExpect(method(HttpMethod.PUT))
+                    .andExpect(jsonPath("$.vectors.dense.size").value(EMBEDDING_DIMENSIONS))
+                    .andExpect(jsonPath("$.vectors.dense.distance").value("Cosine"))
+                    .andExpect(jsonPath("$.sparse_vectors.bm25.modifier").value("idf"))
+                    .andExpect(jsonPath("$.on_disk_payload").value(true))
                     .andRespond(withSuccess());
+        }
+        for (String collectionName : collectionNames) {
+            expectCollectionGet(
+                    initializerHarness,
+                    QDRANT_DOCKER_REST_BASE_URL,
+                    collectionName,
+                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
         }
         for (String collectionName : collectionNames) {
             expectCollectionGet(
@@ -182,6 +224,13 @@ class QdrantIndexInitializerTest {
                 .andRespond(ignoredRequest -> {
                     throw new ResourceAccessException("Qdrant temporarily unavailable for test");
                 });
+        for (String configuredCollection : collectionName) {
+            expectCollectionGet(
+                    initializerHarness,
+                    QDRANT_REST_BASE_URL,
+                    configuredCollection,
+                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
+        }
         for (String configuredCollection : collectionName) {
             expectCollectionGet(
                     initializerHarness,
@@ -230,20 +279,53 @@ class QdrantIndexInitializerTest {
     @Test
     void createsExactJavaApiLookupPayloadIndexesWithFilterCompatibleTypes() {
         InitializerHarness initializerHarness = newInitializer(false, true, true);
+        AtomicInteger collectionReadCount = new AtomicInteger();
+        int readsBeforePostCreationValidation =
+                initializerHarness.collectionName().size() * 2;
 
         expectPayloadIndex(initializerHarness, QdrantPayloadFieldSchema.PACKAGE_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
         expectPayloadIndex(initializerHarness, QdrantPayloadFieldSchema.ANCHOR_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
         expectPayloadIndex(
                 initializerHarness, QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, QDRANT_SCHEMA_TYPE_KEYWORD);
-        initializerHarness
-                .qdrantServer()
-                .expect(manyTimes(), anything())
-                .andRespond(withSuccess(collectionMetadataJson(EMBEDDING_DIMENSIONS), MediaType.APPLICATION_JSON));
+        initializerHarness.qdrantServer().expect(manyTimes(), anything()).andRespond(request -> {
+            if (request.getMethod().equals(HttpMethod.GET)) {
+                String collectionMetadata = collectionReadCount.incrementAndGet() <= readsBeforePostCreationValidation
+                        ? collectionMetadataJsonWithoutPayloadIndexes(EMBEDDING_DIMENSIONS)
+                        : collectionMetadataJson(EMBEDDING_DIMENSIONS);
+                return withSuccess(collectionMetadata, MediaType.APPLICATION_JSON)
+                        .createResponse(request);
+            }
+            return withSuccess().createResponse(request);
+        });
 
         initializerHarness.initializer().ensureCollectionsAndIndexes();
 
         assertEquals(
                 Status.UP,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void disabledPayloadIndexCreationStillRejectsMissingRequiredIndexes() {
+        InitializerHarness initializerHarness = newInitializer(false);
+        for (String collectionName : initializerHarness.collectionName()) {
+            expectCollectionGet(
+                    initializerHarness,
+                    QDRANT_REST_BASE_URL,
+                    collectionName,
+                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
+        }
+        expectCollectionGet(
+                initializerHarness,
+                QDRANT_REST_BASE_URL,
+                initializerHarness.collectionName().getFirst(),
+                collectionMetadataJsonWithoutPayloadIndexes(EMBEDDING_DIMENSIONS));
+
+        assertThrows(IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
+
+        assertEquals(
+                Status.DOWN,
                 initializerHarness.initializer().initializationHealth().getStatus());
         initializerHarness.qdrantServer().verify();
     }
@@ -270,6 +352,7 @@ class QdrantIndexInitializerTest {
         appProperties.getQdrant().setEnsureCollections(ensureCollections);
         appProperties.getQdrant().setEnsurePayloadIndexes(ensurePayloadIndexes);
         EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
+        when(embeddingClient.modelName()).thenReturn("qwen/qwen3-embedding-4b");
         when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
         AtomicReference<RestTemplate> initializedRestTemplate = new AtomicReference<>();
         RestTemplateBuilder restTemplateBuilder =
@@ -279,7 +362,8 @@ class QdrantIndexInitializerTest {
                 appProperties,
                 restTemplateBuilder,
                 embeddingClient,
-                new ObjectMapper());
+                new ObjectMapper(),
+                "prod");
         MockRestServiceServer.MockRestServiceServerBuilder qdrantServerBuilder =
                 MockRestServiceServer.bindTo(initializedRestTemplate.get());
         MockRestServiceServer qdrantServer = ignoreExpectationOrder
@@ -288,6 +372,8 @@ class QdrantIndexInitializerTest {
         return new InitializerHarness(
                 initializer,
                 qdrantServer,
+                appProperties,
+                embeddingClient,
                 appProperties.getQdrant().getCollections().all());
     }
 
@@ -324,14 +410,52 @@ class QdrantIndexInitializerTest {
                   "result": {
                     "config": {
                       "params": {
-                        "vectors": {"dense": {"size": %d}},
-                        "sparse_vectors": {"bm25": {}}
+                        "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},
+                        "sparse_vectors": {"bm25": {"modifier": "Idf"}},
+                        "on_disk_payload": true
+                      }
+                    },
+                    "payload_schema": {
+                      "url": {"data_type": "keyword"},
+                      "hash": {"data_type": "keyword"},
+                      "chunkIndex": {"data_type": "integer"},
+                      "package": {"data_type": "keyword"},
+                      "anchor": {"data_type": "keyword"},
+                      "javaApiTypePage": {"data_type": "keyword"},
+                      "docSet": {"data_type": "keyword"},
+                      "docPath": {"data_type": "keyword"},
+                      "sourceName": {"data_type": "keyword"},
+                      "sourceKind": {"data_type": "keyword"},
+                      "docVersion": {"data_type": "keyword"},
+                      "docType": {"data_type": "keyword"},
+                      "repoUrl": {"data_type": "keyword"},
+                      "repoOwner": {"data_type": "keyword"},
+                      "repoName": {"data_type": "keyword"},
+                      "repoKey": {"data_type": "keyword"},
+                      "repoBranch": {"data_type": "keyword"},
+                      "commitHash": {"data_type": "keyword"},
+                      "license": {"data_type": "keyword"}
+                    }
+                  }
+                }
+                """.replace("${DENSE_VECTOR_DIMENSIONS}", Integer.toString(denseVectorDimensions));
+    }
+
+    private String collectionMetadataJsonWithoutPayloadIndexes(int denseVectorDimensions) {
+        return """
+                {
+                  "result": {
+                    "config": {
+                      "params": {
+                        "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},
+                        "sparse_vectors": {"bm25": {"modifier": "Idf"}},
+                        "on_disk_payload": true
                       }
                     },
                     "payload_schema": {}
                   }
                 }
-                """.formatted(denseVectorDimensions);
+                """.replace("${DENSE_VECTOR_DIMENSIONS}", Integer.toString(denseVectorDimensions));
     }
 
     private long eventCount(Level level, String messageFragment) {
@@ -342,5 +466,9 @@ class QdrantIndexInitializerTest {
     }
 
     private record InitializerHarness(
-            QdrantIndexInitializer initializer, MockRestServiceServer qdrantServer, List<String> collectionName) {}
+            QdrantIndexInitializer initializer,
+            MockRestServiceServer qdrantServer,
+            AppProperties appProperties,
+            EmbeddingClient embeddingClient,
+            List<String> collectionName) {}
 }

@@ -43,7 +43,7 @@ import org.springframework.stereotype.Service;
  * to the canonical documentation collection: exact Javadoc overloads use a filtered payload scroll,
  * while ordinary questions use sparse retrieval.</p>
  *
- * <p>Verified API contract (Step 0): this adapter uses direct {@code io.qdrant:client} 1.16.2
+ * <p>Verified API contract (Step 0): this adapter uses direct {@code io.qdrant:client} 1.18.3
  * primitives rather than Spring AI VectorStore abstractions. Hybrid behavior depends on
  * {@code QueryPoints.prefetch + QueryFactory.rrf(...)}, sparse query vectors are encoded with
  * {@code VectorInputFactory.vectorInput(values, indices)}, and {@code using} names must match
