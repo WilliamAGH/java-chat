@@ -6,17 +6,42 @@ documentation_fetch_staging_root() {
 
 create_documentation_fetch_staging_directory() {
     local relative_mirror_path="$1"
+    local documentation_source_identity="$2"
     local staging_root
     staging_root="$(documentation_fetch_staging_root)"
-    if ! mkdir -p "$staging_root"; then
+    local target_parent="$DOCS_ROOT/$(dirname "$relative_mirror_path")"
+    if ! mkdir -p "$staging_root" "$target_parent"; then
         return 1
     fi
 
     local mirror_basename
     mirror_basename="$(basename "$relative_mirror_path")"
-    local staging_directory
-    if ! staging_directory="$(mktemp -d "$staging_root/${mirror_basename}.replacement.XXXXXX")" \
-        || [[ "$staging_directory" != "$staging_root/"* ]]; then
+    local source_identity_hash
+    source_identity_hash="$(printf '%s' "$documentation_source_identity" | shasum -a 256 | awk '{print $1}')"
+    if [ -z "$source_identity_hash" ]; then
+        return 1
+    fi
+    local staging_directory="$staging_root/${mirror_basename}.${source_identity_hash}.partial"
+    if [ -d "$staging_directory" ]; then
+        if find "$staging_directory" -type l -print -quit | grep -q . \
+            || find "$staging_directory" -type f \( -name '._*' -o -name '*.tmp' -o -name '*.part' -o -name '*\?*' -o -iname '*%3f*' \) -print -quit | grep -q .; then
+            quarantine_path "$staging_directory" "$mirror_basename malformed staging" >&2
+        else
+            log "${BLUE}ℹ Resuming source-matched staging mirror: $staging_directory${NC}" >&2
+            printf '%s\n' "$staging_directory"
+            return 0
+        fi
+    fi
+    if ! mkdir "$staging_directory" || [[ "$staging_directory" != "$staging_root/"* ]]; then
+        return 1
+    fi
+
+    local staging_device
+    local target_device
+    staging_device="$(df -P "$staging_directory" | awk 'NR == 2 {print $1}')"
+    target_device="$(df -P "$target_parent" | awk 'NR == 2 {print $1}')"
+    if [ -z "$staging_device" ] || [ "$staging_device" != "$target_device" ]; then
+        quarantine_path "$staging_directory" "$mirror_basename cross-filesystem staging" >&2
         return 1
     fi
     printf '%s\n' "$staging_directory"
@@ -43,29 +68,44 @@ restore_retired_documentation_mirror() {
     fi
 }
 
-# Publishes one fully validated rolling mirror. Existing active and segment-adjacent
-# lifecycle roots move together into one quarantine transaction before the staged
-# directory is renamed onto the canonical path.
+atomic_exchange_documentation_directories() {
+    local first_directory="$1"
+    local second_directory="$2"
+    python3 "$SCRIPT_DIR/atomic_exchange_directories.py" "$first_directory" "$second_directory"
+}
+
+# Publishes one fully validated rolling mirror. An existing active root is exchanged
+# atomically with the staged root so the canonical path is never absent. Retired state
+# then moves to quarantine while rollback remains possible.
 publish_staged_documentation_mirror() {
     local staging_directory="$1"
     local relative_mirror_path="$2"
     local superseded_relative_mirror_path="$3"
     local documentation_source_name="$4"
     local target_directory="$DOCS_ROOT/$relative_mirror_path"
-    local superseded_mirror_path="$DOCS_ROOT/$superseded_relative_mirror_path"
+    local superseded_mirror_path=""
+    if [ -n "$superseded_relative_mirror_path" ]; then
+        superseded_mirror_path="$DOCS_ROOT/$superseded_relative_mirror_path"
+    fi
     local quarantine_directory=""
     local retired_target_path=""
     local retired_superseded_path=""
-    local target_retired="false"
     local superseded_root_retired="false"
     local rollback_failed="false"
+    local target_exchanged="false"
+    local publication_failed="false"
+    local superseded_root_is_target_child="false"
+    case "$superseded_relative_mirror_path" in
+        "$relative_mirror_path"/*) superseded_root_is_target_child="true" ;;
+    esac
 
     if [ ! -d "$staging_directory" ]; then
         log "${RED}✗ Validated staging mirror is missing for $documentation_source_name${NC}"
         return 1
     fi
 
-    if [ -e "$target_directory" ] || [ -e "$superseded_mirror_path" ]; then
+    if [ -e "$target_directory" ] \
+        || { [ -n "$superseded_mirror_path" ] && [ -e "$superseded_mirror_path" ]; }; then
         if ! quarantine_directory="$(create_documentation_quarantine_directory \
             "$(basename "$relative_mirror_path")" \
             "replaced")"; then
@@ -74,38 +114,43 @@ publish_staged_documentation_mirror() {
         fi
     fi
 
-    if [ -e "$target_directory" ]; then
-        retired_target_path="$quarantine_directory/$relative_mirror_path"
-        if ! mkdir -p "$(dirname "$retired_target_path")" \
-            || ! mv "$target_directory" "$retired_target_path"; then
-            log "${RED}✗ Could not retire the prior active mirror for $documentation_source_name${NC}"
-            return 1
-        fi
-        target_retired="true"
-    fi
-
-    # A strict child lifecycle root moved with target_directory. A segment-adjacent
-    # lifecycle root remains at its original path and must join the same transaction.
-    if [ -e "$superseded_mirror_path" ]; then
+    if [ "$superseded_root_is_target_child" != "true" ] \
+        && [ -n "$superseded_mirror_path" ] && [ -e "$superseded_mirror_path" ]; then
         retired_superseded_path="$quarantine_directory/$superseded_relative_mirror_path"
         if ! mkdir -p "$(dirname "$retired_superseded_path")" \
             || ! mv "$superseded_mirror_path" "$retired_superseded_path"; then
-            if [ "$target_retired" = "true" ]; then
-                if ! restore_retired_documentation_mirror \
-                    "$retired_target_path" \
-                    "$target_directory" \
-                    "$documentation_source_name"; then
-                    rollback_failed="true"
-                fi
-            fi
             log "${RED}✗ Could not retire the superseded mirror for $documentation_source_name${NC}"
             return 1
         fi
         superseded_root_retired="true"
     fi
 
-    if ! mkdir -p "$(dirname "$target_directory")" \
+    if [ -e "$target_directory" ]; then
+        retired_target_path="$quarantine_directory/$relative_mirror_path"
+        if ! atomic_exchange_documentation_directories "$staging_directory" "$target_directory"; then
+            if [ "$superseded_root_retired" = "true" ]; then
+                if ! restore_retired_documentation_mirror \
+                    "$retired_superseded_path" "$superseded_mirror_path" "$documentation_source_name"; then
+                    log "${RED}✗ Replacement publication rollback was incomplete for $documentation_source_name${NC}"
+                fi
+            fi
+            log "${RED}✗ Could not atomically publish the validated mirror for $documentation_source_name${NC}"
+            return 1
+        fi
+        target_exchanged="true"
+        if ! mkdir -p "$(dirname "$retired_target_path")" \
+            || ! mv "$staging_directory" "$retired_target_path"; then
+            publication_failed="true"
+            if ! atomic_exchange_documentation_directories "$staging_directory" "$target_directory"; then
+                rollback_failed="true"
+            fi
+        fi
+    elif ! mkdir -p "$(dirname "$target_directory")" \
         || ! mv "$staging_directory" "$target_directory"; then
+        publication_failed="true"
+    fi
+
+    if [ "$publication_failed" = "true" ]; then
         if [ "$superseded_root_retired" = "true" ]; then
             if ! restore_retired_documentation_mirror \
                 "$retired_superseded_path" \
@@ -114,18 +159,15 @@ publish_staged_documentation_mirror() {
                 rollback_failed="true"
             fi
         fi
-        if [ "$target_retired" = "true" ]; then
-            if ! restore_retired_documentation_mirror \
-                "$retired_target_path" \
-                "$target_directory" \
-                "$documentation_source_name"; then
-                rollback_failed="true"
-            fi
-        fi
         if [ "$rollback_failed" = "true" ]; then
             log "${RED}✗ Replacement publication rollback was incomplete for $documentation_source_name${NC}"
         fi
         log "${RED}✗ Could not publish the validated mirror for $documentation_source_name${NC}"
+        return 1
+    fi
+
+    if [ "$target_exchanged" = "true" ] && [ -e "$staging_directory" ]; then
+        log "${RED}✗ Prior active mirror remained outside quarantine for $documentation_source_name${NC}"
         return 1
     fi
 

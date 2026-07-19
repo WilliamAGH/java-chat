@@ -15,8 +15,9 @@ import java.util.stream.Stream;
  *
  * @param displayName user-facing name for logs
  * @param relativePath relative path under the docs root
+ * @param indexedDocSet exact Qdrant payload value required after ingestion
  */
-record DocumentationSet(String displayName, String relativePath) {
+record DocumentationSet(String displayName, String relativePath, String indexedDocSet) {
 
     private static final Set<String> OFFICIAL_RELATIVE_MIRROR_PATHS = Stream.concat(
                     DocsSourceRegistry.javaApiDocumentationSources().stream()
@@ -24,6 +25,12 @@ record DocumentationSet(String displayName, String relativePath) {
                     DocsSourceRegistry.documentationSources().stream()
                             .map(documentationSource -> documentationSource.relativeMirrorPath()))
             .collect(Collectors.toUnmodifiableSet());
+
+    DocumentationSet {
+        if (indexedDocSet == null || indexedDocSet.isBlank()) {
+            throw new IllegalArgumentException("indexedDocSet must not be blank");
+        }
+    }
 
     String primarySelector() {
         if (isOfficialDocumentationSet()) {

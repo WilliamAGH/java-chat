@@ -17,12 +17,10 @@ validate_fetch_result() {
     local name="$3"
     local minimum_html_files="$4"
     local partial_mirror_allowed="$5"
-    local recursive_server_errors_allowed="${6:-false}"
     local fetched_html_count
     fetched_html_count="$(count_html_files "$target_dir")"
 
-    if [ "$wget_exit_code" -ne 0 ] \
-        && { [ "$recursive_server_errors_allowed" != "true" ] || [ "$wget_exit_code" -ne 8 ]; }; then
+    if [ "$wget_exit_code" -ne 0 ]; then
         log "${RED}✗ Failed to fetch $name (exit code: $wget_exit_code)${NC}"
         return 1
     fi
@@ -31,10 +29,6 @@ validate_fetch_result() {
         return 1
     fi
     if [ "$minimum_html_files" -gt 0 ] && [ "$fetched_html_count" -lt "$minimum_html_files" ]; then
-        if [ "$partial_mirror_allowed" = "true" ]; then
-            log "${YELLOW}⚠ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $minimum_html_files+); keeping partial mirror for incremental reruns${NC}"
-            return "$DOCUMENTATION_FETCH_PARTIAL_STATUS"
-        fi
         log "${RED}✗ $name mirror is still incomplete after fetch: $fetched_html_count HTML files (expected $minimum_html_files+)${NC}"
         return 1
     fi
@@ -81,7 +75,7 @@ fetch_java_api_javadoc_seed() {
         return 1
     fi
     validate_fetch_result \
-        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" false
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
 }
 
 # Removes artifacts that GNU Wget writes outside the generic HTML mirror contract.
@@ -110,6 +104,7 @@ fetch_docs_mirror() {
         --convert-links
         --adjust-extension
         --no-parent
+        --max-redirect=0
         --no-host-directories
         --cut-dirs="$cut_dirs"
         --reject="index.html?*,css,js,mjs,png,jpg,jpeg,gif,svg,webp,ico,woff,woff2,ttf,eot,map,pdf,zip,gz,tgz,tar,jar"
@@ -135,7 +130,7 @@ fetch_docs_mirror() {
     cd - > /dev/null
     local validation_status
     if validate_fetch_result \
-        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" true; then
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"; then
         validation_status=0
     else
         validation_status="$?"
@@ -263,5 +258,5 @@ fetch_discovered_documentation_seed() {
     fi
     rm -f "$mirror_paths_file"
     validate_fetch_result \
-        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed" false
+        "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
 }

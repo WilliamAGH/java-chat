@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,7 +85,6 @@ public final class DocsSourceRegistry {
     private static final String SPRING_AI_BASE_SETTING = "SPRING_AI_BASE";
     private static final String SPRING_FRAMEWORK_API_BASE_SETTING = "SPRING_FRAMEWORK_API_BASE";
     private static final String SPRING_AI_API_STABLE_BASE_SETTING = "SPRING_AI_API_STABLE_BASE";
-    private static final String SPRING_AI_API_2_BASE_SETTING = "SPRING_AI_API_2_BASE";
 
     private static final String DEFAULT_ORACLE_JAVASE_BASE = "https://www.oracle.com/java/technologies/javase/";
     private static final String DEFAULT_IBM_ARTICLES_BASE = "https://developer.ibm.com/articles/";
@@ -93,9 +93,7 @@ public final class DocsSourceRegistry {
     private static final String DEFAULT_SPRING_AI_BASE = "https://docs.spring.io/spring-ai/";
     private static final String DEFAULT_SPRING_FRAMEWORK_API_BASE =
             "https://docs.spring.io/spring-framework/docs/current/javadoc-api/";
-    private static final String DEFAULT_SPRING_AI_API_STABLE_BASE =
-            "https://docs.spring.io/spring-ai/docs/current/api/";
-    private static final String DEFAULT_SPRING_AI_API_2_BASE = "https://docs.spring.io/spring-ai/docs/2.0.x/api/";
+    private static final String DEFAULT_SPRING_AI_API_STABLE_BASE = "https://docs.spring.io/spring-ai/docs/1.1.2/api/";
 
     /** Provenance type stored for Java API documentation. */
     public static final String JAVA_API_DOCUMENT_TYPE = "api-docs";
@@ -113,8 +111,6 @@ public final class DocsSourceRegistry {
             resolveRuntimeBaseUrl(SPRING_FRAMEWORK_API_BASE_SETTING, DEFAULT_SPRING_FRAMEWORK_API_BASE);
     public static final String SPRING_AI_API_STABLE_BASE =
             resolveRuntimeBaseUrl(SPRING_AI_API_STABLE_BASE_SETTING, DEFAULT_SPRING_AI_API_STABLE_BASE);
-    public static final String SPRING_AI_API_2_BASE =
-            resolveRuntimeBaseUrl(SPRING_AI_API_2_BASE_SETTING, DEFAULT_SPRING_AI_API_2_BASE);
 
     private static final List<JavaApiDocumentationSource> JAVA_API_DOCUMENTATION_SOURCES = List.of(
             new JavaApiDocumentationSource(
@@ -143,7 +139,7 @@ public final class DocsSourceRegistry {
                     "kotlin",
                     "official",
                     "language-reference",
-                    ""),
+                    "2.4.10"),
             new DocumentationSource(
                     "https://docs.scala-lang.org/scala3/reference/",
                     "scala",
@@ -183,7 +179,63 @@ public final class DocsSourceRegistry {
                     "quarkus",
                     "official",
                     "framework-guide",
-                    ""));
+                    ""),
+            new DocumentationSource(
+                    SPRING_AI_BASE + "reference/1.1/",
+                    "spring-ai-reference",
+                    "Spring AI Stable Reference",
+                    "spring-ai-reference",
+                    "official",
+                    "framework-reference",
+                    "1.1.8"),
+            new DocumentationSource(
+                    SPRING_AI_API_STABLE_BASE,
+                    "spring-ai-api-stable",
+                    "Spring AI Stable API",
+                    "spring-ai-api-stable",
+                    "official",
+                    "api-docs",
+                    "1.1.2"),
+            new DocumentationSource(
+                    "https://docs.spring.io/spring-framework/reference/",
+                    "spring-framework-reference",
+                    "Spring Framework Reference",
+                    "spring-framework-reference",
+                    "official",
+                    "framework-reference",
+                    ""),
+            new DocumentationSource(
+                    SPRING_FRAMEWORK_API_BASE,
+                    "spring-framework-api",
+                    "Spring Framework Javadocs",
+                    "spring-framework-api",
+                    "official",
+                    "api-docs",
+                    ""),
+            new DocumentationSource(
+                    ORACLE_JAVASE_BASE,
+                    "oracle/javase",
+                    "Java 25 Release Notes Issues",
+                    "oracle/javase",
+                    "official",
+                    "release-notes",
+                    "25"),
+            new DocumentationSource(
+                    IBM_ARTICLES_BASE,
+                    "ibm/articles",
+                    "IBM Java 25 Overview",
+                    "ibm/articles",
+                    "vendor",
+                    "article",
+                    "25"),
+            new DocumentationSource(
+                    JETBRAINS_IDEA_2025_09_BASE,
+                    "jetbrains/idea/2025/09",
+                    "JetBrains Java 25 Article",
+                    "jetbrains/idea/2025/09",
+                    "vendor",
+                    "article",
+                    "25"));
 
     private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES = Stream.concat(
                     DOCUMENTATION_SOURCES.stream()
@@ -306,18 +358,51 @@ public final class DocsSourceRegistry {
                     LOCAL_DOCS_ROOT + documentationSource.relativeMirrorPath() + "/",
                     documentationSource.citationBaseUrl());
         }
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-framework/", SPRING_FRAMEWORK_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-framework-complete/", SPRING_FRAMEWORK_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-complete/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-reference/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-reference-2/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-api-stable/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "spring-ai-api-2/", SPRING_AI_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "oracle/javase/", ORACLE_JAVASE_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "ibm/articles/", IBM_ARTICLES_BASE);
-        prefixLookup.put(LOCAL_DOCS_ROOT + "jetbrains/idea/2025/09/", JETBRAINS_IDEA_2025_09_BASE);
         return Map.copyOf(prefixLookup);
+    }
+
+    /** Resolves a file beneath a selected mirror root without assuming a literal host path. */
+    public static Optional<String> resolveMirroredPath(Path mirrorRoot, Path documentFile) {
+        if (mirrorRoot == null || documentFile == null) {
+            return Optional.empty();
+        }
+        Path absoluteMirrorRoot = mirrorRoot.toAbsolutePath().normalize();
+        Path absoluteDocumentFile = documentFile.toAbsolutePath().normalize();
+        if (!absoluteDocumentFile.startsWith(absoluteMirrorRoot)) {
+            return Optional.empty();
+        }
+        Path documentFileName = absoluteDocumentFile.getFileName();
+        if (documentFileName != null
+                && pathEndsWith(
+                        absoluteMirrorRoot.toString().replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR), "books")
+                && AsciiTextNormalizer.toLowerAscii(documentFileName.toString()).endsWith(PDF_EXTENSION)) {
+            return Optional.of(PUBLIC_PDFS_BASE + documentFileName);
+        }
+        Optional<String> embeddedRemoteUrl = reconstructFromEmbeddedHost(absoluteDocumentFile.toString());
+        if (embeddedRemoteUrl.isPresent()) {
+            return embeddedRemoteUrl;
+        }
+        String normalizedRoot = absoluteMirrorRoot.toString().replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+        String relativeDocumentPath = absoluteMirrorRoot
+                .relativize(absoluteDocumentFile)
+                .toString()
+                .replace(WINDOWS_PATH_SEPARATOR, UNIX_PATH_SEPARATOR);
+        Optional<String> javaApiUrl = JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(source -> pathEndsWith(normalizedRoot, source.relativeMirrorPath()))
+                .findFirst()
+                .flatMap(source -> joinBaseAndRel(source.remoteBaseUrl(), relativeDocumentPath));
+        if (javaApiUrl.isPresent()) {
+            return javaApiUrl;
+        }
+        return DOCUMENTATION_SOURCES.stream()
+                .filter(source -> pathEndsWith(normalizedRoot, source.relativeMirrorPath()))
+                .findFirst()
+                .flatMap(source -> joinBaseAndRel(source.citationBaseUrl(), relativeDocumentPath));
+    }
+
+    private static boolean pathEndsWith(String normalizedRoot, String relativeMirrorPath) {
+        return normalizedRoot.equals(relativeMirrorPath)
+                || normalizedRoot.endsWith(PATH_SEPARATOR_TEXT + relativeMirrorPath);
     }
 
     private static Optional<String> reconstructFromEmbeddedHost(String localPath) {

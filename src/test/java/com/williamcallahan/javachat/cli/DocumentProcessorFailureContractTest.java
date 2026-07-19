@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,8 +31,8 @@ import org.slf4j.LoggerFactory;
 class DocumentProcessorFailureContractTest {
     private static final String DOCUMENT_PROCESSING_COMPLETE = "DOCUMENT PROCESSING COMPLETE";
     private static final String DOCUMENT_PROCESSING_FAILED = "DOCUMENT PROCESSING FAILED";
-    private static final String TOTAL_PROCESSED_TWO_DOCUMENTS = "Total new documents processed: 2";
-    private static final String TOTAL_DUPLICATES_ONE_DOCUMENT = "Total duplicates skipped: 1";
+    private static final String TOTAL_PROCESSED_ONE_DOCUMENT = "Total new documents processed: 1";
+    private static final String TOTAL_DUPLICATES_ZERO_DOCUMENTS = "Total duplicates skipped: 0";
     private static final String TOTAL_FAILED_ONE_SET = "Documentation sets FAILED: 1";
     private static final String FAILURE_PHASE = "synthetic-ingestion";
     private static final String SENSITIVE_FAILURE_DETAILS = "api-key=synthetic-private-value";
@@ -83,8 +84,12 @@ class DocumentProcessorFailureContractTest {
                         successfulDocumentationDirectory.getFileName(), "successfulDocumentationDirectory file name")
                 .toString();
         List<DocumentationSet> documentationSets = List.of(
-                new DocumentationSet("Failed documentation set", failedDocumentationDirectoryName),
-                new DocumentationSet("Successful documentation set", successfulDocumentationDirectoryName));
+                new DocumentationSet(
+                        "Failed documentation set", failedDocumentationDirectoryName, failedDocumentationDirectoryName),
+                new DocumentationSet(
+                        "Successful documentation set",
+                        successfulDocumentationDirectoryName,
+                        successfulDocumentationDirectoryName));
 
         DocumentProcessor.DocumentProcessingException thrown = assertThrows(
                 DocumentProcessor.DocumentProcessingException.class,
@@ -92,11 +97,11 @@ class DocumentProcessorFailureContractTest {
 
         assertEquals("Document processing completed with 1 failed documentation set(s)", thrown.getMessage());
         verify(ingestionService).ingestLocalDirectory(failedDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT);
-        verify(ingestionService)
+        verify(ingestionService, never())
                 .ingestLocalDirectory(successfulDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT);
         assertTrue(containsLogMessage(DOCUMENT_PROCESSING_FAILED));
-        assertTrue(containsLogMessage(TOTAL_PROCESSED_TWO_DOCUMENTS));
-        assertTrue(containsLogMessage(TOTAL_DUPLICATES_ONE_DOCUMENT));
+        assertTrue(containsLogMessage(TOTAL_PROCESSED_ONE_DOCUMENT));
+        assertTrue(containsLogMessage(TOTAL_DUPLICATES_ZERO_DOCUMENTS));
         assertTrue(containsLogMessage(TOTAL_FAILED_ONE_SET));
         assertTrue(containsLogMessage(
                 "File failed (phase=" + FAILURE_PHASE + "): " + failedDocument + "??" + FORGED_LOG_LINE));

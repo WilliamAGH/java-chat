@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Verifies JVM citation and provenance source behavior.
@@ -16,7 +18,6 @@ class DocsSourceRegistryTest {
     private static final String ORACLE_JAVASE_BASE_SETTING = "ORACLE_JAVASE_BASE";
     private static final String TEST_ORACLE_JAVASE_BASE = "https://citations.example.test/java/";
     private static final String DEFAULT_TEST_BASE_URL = "https://fallback.example.test/";
-    private static final String LEGACY_SPRING_FRAMEWORK_LOCAL_URL_PREFIX = "file:///data/docs/spring-framework/";
     private static final String EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX = "file:///var/cache/docs.spring.io/";
     private static final String SPRING_DOCS_URL_PREFIX = "https://docs.spring.io/";
 
@@ -59,7 +60,9 @@ class DocsSourceRegistryTest {
     @Test
     void returnsImmutableOfficialSourceIdentities() {
         List<String> expectedSourceIdentities = Stream.concat(
-                        DocsSourceRegistry.documentationSources().stream().map(DocumentationSource::docSet),
+                        DocsSourceRegistry.documentationSources().stream()
+                                .filter(documentationSource -> "official".equals(documentationSource.sourceKind()))
+                                .map(DocumentationSource::docSet),
                         DocsSourceRegistry.javaApiDocumentationSources().stream()
                                 .map(JavaApiDocumentationSource::relativeMirrorPath))
                 .toList();
@@ -123,26 +126,49 @@ class DocsSourceRegistryTest {
     }
 
     @Test
-    void mapsLegacySpringFrameworkLocalJavadocLayouts() {
+    void resolvesCanonicalCitationFromArbitraryDocumentationRoot(@TempDir Path temporaryDirectory) {
+        DocumentationSource documentationSource = DocsSourceRegistry.documentationSources().stream()
+                .filter(source -> "spring-ai-reference".equals(source.relativeMirrorPath()))
+                .findFirst()
+                .orElseThrow();
+        Path arbitraryMirrorRoot =
+                temporaryDirectory.resolve("java-chat-corpus").resolve(documentationSource.relativeMirrorPath());
+        Path arbitraryDocumentFile = arbitraryMirrorRoot.resolve("api/chat-client.html");
+
         assertEquals(
-                configuredSpringFrameworkCitationUrl(
-                        "docs/current/javadoc-api/org/springframework/context/ApplicationContext.html"),
-                DocsSourceRegistry.normalizeDocUrl(LEGACY_SPRING_FRAMEWORK_LOCAL_URL_PREFIX
-                        + "docs/current/api/current/javadoc-api/org/springframework/context/ApplicationContext.html"));
+                documentationSource.citationBaseUrl() + "api/chat-client.html",
+                DocsSourceRegistry.resolveMirroredPath(arbitraryMirrorRoot, arbitraryDocumentFile)
+                        .orElseThrow());
+    }
+
+    @Test
+    void mapsSplitSpringFrameworkApiMirrorWithoutAggregateAlias() {
         assertEquals(
-                configuredSpringFrameworkCitationUrl(
-                        "docs/current/javadoc-api/org/springframework/context/ApplicationContext.html"),
-                DocsSourceRegistry.normalizeDocUrl(LEGACY_SPRING_FRAMEWORK_LOCAL_URL_PREFIX
-                        + "api/current/javadoc-api/org/springframework/context/ApplicationContext.html"));
+                DocsSourceRegistry.SPRING_FRAMEWORK_API_BASE + "org/springframework/context/ApplicationContext.html",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/spring-framework-api/org/springframework/context/ApplicationContext.html"));
         assertEquals(
-                configuredSpringFrameworkCitationUrl(
-                        "docs/current/javadoc-api/org/springframework/context/ApplicationContext.html"),
-                DocsSourceRegistry.normalizeDocUrl(LEGACY_SPRING_FRAMEWORK_LOCAL_URL_PREFIX
-                        + "docs/current/javadoc-api/java/org/springframework/context/ApplicationContext.html"));
+                "(local file path redacted)",
+                DocsSourceRegistry.normalizeDocUrl(
+                        "file:///data/docs/spring-framework-complete/org/springframework/context/ApplicationContext.html"));
+    }
+
+    @Test
+    void resolvesFlatSplitSpringFrameworkMirrorPathsWithoutDuplicatingRemoteRoots(@TempDir Path temporaryDirectory) {
+        Path frameworkReferenceRoot = temporaryDirectory.resolve("spring-framework-reference");
+        Path frameworkApiRoot = temporaryDirectory.resolve("spring-framework-api");
+
         assertEquals(
-                configuredSpringFrameworkCitationUrl("javadoc-api/org/springframework/context/ApplicationContext.html"),
-                DocsSourceRegistry.normalizeDocUrl(LEGACY_SPRING_FRAMEWORK_LOCAL_URL_PREFIX
-                        + "javadoc-api/java/org/springframework/context/ApplicationContext.html"));
+                "https://docs.spring.io/spring-framework/reference/web/webflux.html",
+                DocsSourceRegistry.resolveMirroredPath(
+                                frameworkReferenceRoot, frameworkReferenceRoot.resolve("web/webflux.html"))
+                        .orElseThrow());
+        assertEquals(
+                DocsSourceRegistry.SPRING_FRAMEWORK_API_BASE + "org/springframework/context/ApplicationContext.html",
+                DocsSourceRegistry.resolveMirroredPath(
+                                frameworkApiRoot,
+                                frameworkApiRoot.resolve("org/springframework/context/ApplicationContext.html"))
+                        .orElseThrow());
     }
 
     @Test
@@ -203,13 +229,6 @@ class DocsSourceRegistryTest {
                 SPRING_DOCS_URL_PREFIX + "spring-boot/docs/current/api/org/springframework/boot/SpringApplication.html",
                 DocsSourceRegistry.normalizeDocUrl(EMBEDDED_SPRING_DOCS_LOCAL_URL_PREFIX
                         + "spring-boot/docs/current/api/java/org/springframework/boot/SpringApplication.html"));
-    }
-
-    private static String configuredSpringFrameworkCitationUrl(String relativeCitationPath) {
-        String configuredBaseUrl = DocsSourceRegistry.SPRING_FRAMEWORK_BASE;
-        return configuredBaseUrl.endsWith("/")
-                ? configuredBaseUrl + relativeCitationPath
-                : configuredBaseUrl + "/" + relativeCitationPath;
     }
 
     private static void withSystemProperty(String settingKey, String configuredBaseUrl, Runnable testAssertion) {

@@ -37,6 +37,48 @@ class DocumentationLinkParser(html.parser.HTMLParser):
                 self.discovered_urls.append(attribute_text)
 
 
+class DocumentationIdentityParser(html.parser.HTMLParser):
+    """Collects visible text and declared documentation versions for publication checks."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.declared_versions: list[str] = []
+        self.visible_text_segments: list[str] = []
+        self.hidden_element_depth = 0
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.casefold()
+        if normalized_tag in ("script", "style"):
+            self.hidden_element_depth += 1
+        if normalized_tag != "meta":
+            return
+        normalized_attributes = {
+            attribute_name.casefold(): attribute_text
+            for attribute_name, attribute_text in attributes
+            if attribute_text is not None
+        }
+        if normalized_attributes.get("name", "").casefold() == "version":
+            metadata_version = normalized_attributes.get("content")
+            if metadata_version:
+                self.declared_versions.append(metadata_version.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in ("script", "style") and self.hidden_element_depth > 0:
+            self.hidden_element_depth -= 1
+
+    def handle_data(self, text: str) -> None:
+        if self.hidden_element_depth == 0 and text.strip():
+            self.visible_text_segments.append(text.strip())
+
+
+def read_documentation_identity(documentation_page: pathlib.Path) -> DocumentationIdentityParser:
+    """Parses one documentation page for structured publication identity signals."""
+    identity_parser = DocumentationIdentityParser()
+    identity_parser.feed(documentation_page.read_text(encoding="utf-8"))
+    identity_parser.close()
+    return identity_parser
+
+
 class SitemapDoctypeRejectingTreeBuilder(element_tree.TreeBuilder):
     """Rejects sitemap document types before declared entities can enter a parsed tree."""
 
@@ -300,6 +342,53 @@ def project_mirror_paths_file_command(command_arguments: list[str]) -> int:
     return 0
 
 
+def validate_published_identity_command(command_arguments: list[str]) -> int:
+    """Rejects a staged mirror unless its structured identity matches the pinned release."""
+    identity_parser = argparse.ArgumentParser()
+    identity_parser.add_argument("--root", required=True, type=pathlib.Path)
+    identity_parser.add_argument("--required-page", type=pathlib.PurePosixPath)
+    identity_parser.add_argument("--required-text")
+    identity_parser.add_argument("--expected-meta-version")
+    identity_arguments = identity_parser.parse_args(command_arguments)
+    documentation_root = identity_arguments.root.resolve(strict=True)
+    if not documentation_root.is_dir():
+        raise ValueError(f"Documentation identity root is not a directory: {documentation_root}")
+
+    if (identity_arguments.required_page is None) != (identity_arguments.required_text is None):
+        raise ValueError("--required-page and --required-text must be supplied together")
+    if identity_arguments.required_page is not None:
+        required_page_parts = identity_arguments.required_page.parts
+        if (
+            identity_arguments.required_page.is_absolute()
+            or not required_page_parts
+            or any(page_part in ("", ".", "..") for page_part in required_page_parts)
+        ):
+            raise ValueError("--required-page must be a safe relative path")
+        required_page = (documentation_root / pathlib.Path(*required_page_parts)).resolve(strict=True)
+        if not required_page.is_relative_to(documentation_root) or not required_page.is_file():
+            raise ValueError(f"Required identity page is outside the documentation root: {required_page}")
+        required_identity = read_documentation_identity(required_page)
+        normalized_visible_text = " ".join(" ".join(required_identity.visible_text_segments).split())
+        if identity_arguments.required_text not in normalized_visible_text:
+            raise ValueError(
+                f"Required publication identity text is absent from {identity_arguments.required_page}"
+            )
+
+    if identity_arguments.expected_meta_version is not None:
+        declared_versions: set[str] = set()
+        for documentation_page in sorted(documentation_root.rglob("*.htm*")):
+            if documentation_page.is_file():
+                declared_versions.update(
+                    read_documentation_identity(documentation_page).declared_versions
+                )
+        if declared_versions != {identity_arguments.expected_meta_version}:
+            raise ValueError(
+                "Documentation version metadata must contain only "
+                f"{identity_arguments.expected_meta_version}; found {sorted(declared_versions)}"
+            )
+    return 0
+
+
 def main() -> int:
     if sys.argv[1:2] == ["--validate-remote-url"]:
         return validate_remote_url_command(sys.argv[2:])
@@ -307,6 +396,8 @@ def main() -> int:
         return project_mirror_path_command(sys.argv[2:])
     if sys.argv[1:2] == ["--project-mirror-paths-file"]:
         return project_mirror_paths_file_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--validate-published-identity"]:
+        return validate_published_identity_command(sys.argv[2:])
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--document-type", required=True, choices=SUPPORTED_SEED_DOCUMENT_TYPES)
     argument_parser.add_argument("--input", required=True, type=pathlib.Path)

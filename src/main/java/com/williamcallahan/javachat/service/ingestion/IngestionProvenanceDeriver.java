@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 
 /**
@@ -17,8 +19,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class IngestionProvenanceDeriver {
-    private static final String DEFAULT_DOCS_ROOT = "data/docs";
-
     /**
      * Builds provenance tokens for a local file.
      *
@@ -31,18 +31,19 @@ public class IngestionProvenanceDeriver {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(file, "file");
 
-        Path baseDocsDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
         Path absoluteRoot = root.toAbsolutePath().normalize();
         Path absoluteFile = file.toAbsolutePath().normalize();
-        String relativeMirrorPath = absoluteRoot.startsWith(baseDocsDir)
-                ? baseDocsDir.relativize(absoluteRoot).toString().replace('\\', '/')
-                : "";
         String docPath = absoluteFile.startsWith(absoluteRoot)
-                ? absoluteRoot.relativize(absoluteFile).toString()
+                ? absoluteRoot.relativize(absoluteFile).toString().replace('\\', '/')
                 : "";
-        String relativeDocumentPath = absoluteFile.startsWith(baseDocsDir)
-                ? baseDocsDir.relativize(absoluteFile).toString().replace('\\', '/')
-                : "";
+        String selectedMirrorPath = knownMirrorPath(absoluteRoot).orElse("");
+        String selectedRootSuffix = pathWithinKnownMirror(absoluteRoot, selectedMirrorPath);
+        String relativeDocumentPath = selectedMirrorPath.isBlank()
+                ? docPath
+                : Stream.of(selectedMirrorPath, selectedRootSuffix, docPath)
+                        .filter(pathSegment -> !pathSegment.isBlank())
+                        .collect(java.util.stream.Collectors.joining("/"));
+        String relativeMirrorPath = selectedMirrorPath.isBlank() ? selectedRootName(absoluteRoot) : selectedMirrorPath;
 
         return DocsSourceRegistry.javaApiDocumentationSourceForRelativeDocumentPath(relativeDocumentPath)
                 .map(javaApiDocumentationSource -> javaApiSourceProvenance(
@@ -55,6 +56,37 @@ public class IngestionProvenanceDeriver {
                                 documentPathWithinSource(
                                         relativeDocumentPath, documentationSource.relativeMirrorPath()))))
                 .orElseGet(() -> legacyProvenance(relativeMirrorPath, docPath, url));
+    }
+
+    private static Optional<String> knownMirrorPath(Path absoluteRoot) {
+        String normalizedRoot = absoluteRoot.toString().replace('\\', '/');
+        return Stream.concat(
+                        DocsSourceRegistry.javaApiDocumentationSources().stream()
+                                .map(JavaApiDocumentationSource::relativeMirrorPath),
+                        DocsSourceRegistry.documentationSources().stream().map(DocumentationSource::relativeMirrorPath))
+                .filter(relativeMirrorPath -> normalizedRoot.equals(relativeMirrorPath)
+                        || normalizedRoot.endsWith("/" + relativeMirrorPath)
+                        || normalizedRoot.contains("/" + relativeMirrorPath + "/"))
+                .max(java.util.Comparator.comparingInt(String::length));
+    }
+
+    private static String pathWithinKnownMirror(Path absoluteRoot, String selectedMirrorPath) {
+        if (selectedMirrorPath.isBlank()) {
+            return "";
+        }
+        String normalizedRoot = absoluteRoot.toString().replace('\\', '/');
+        String mirrorMarker = "/" + selectedMirrorPath;
+        int mirrorStart = normalizedRoot.lastIndexOf(mirrorMarker);
+        if (mirrorStart < 0) {
+            return "";
+        }
+        int suffixStart = mirrorStart + mirrorMarker.length();
+        return suffixStart >= normalizedRoot.length() ? "" : normalizedRoot.substring(suffixStart + 1);
+    }
+
+    private static String selectedRootName(Path absoluteRoot) {
+        Path rootName = absoluteRoot.getFileName();
+        return rootName == null ? "" : rootName.toString();
     }
 
     private static String documentPathWithinSource(String relativeDocumentPath, String relativeMirrorPath) {

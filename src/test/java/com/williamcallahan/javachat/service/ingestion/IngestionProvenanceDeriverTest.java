@@ -81,6 +81,20 @@ class IngestionProvenanceDeriverTest {
     }
 
     @Test
+    void usesSelectedBoundaryRootForUnregisteredDocumentationSets() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path selectedBooksRoot =
+                Path.of("arbitrary", "mirror", "books").toAbsolutePath().normalize();
+        Path selectedBook = selectedBooksRoot.resolve("ThinkJava.pdf");
+
+        IngestionProvenance provenance =
+                provenanceDeriver.derive(selectedBooksRoot, selectedBook, "https://javachat.ai/pdfs/ThinkJava.pdf");
+
+        assertEquals("books", provenance.docSet());
+        assertEquals("ThinkJava.pdf", provenance.docPath());
+    }
+
+    @Test
     void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
         String representedJavaRelease =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst().javaRelease();

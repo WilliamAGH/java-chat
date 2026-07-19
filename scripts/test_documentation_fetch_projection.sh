@@ -61,6 +61,12 @@ log() {
 
 fetch_discovered_documentation_seed() {
     printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
+    local captured_target_directory="$2"
+    local generated_page_number
+    for generated_page_number in 1 2 3 4 5 6 7; do
+        printf '<html>Example Reference stable</html>\n' > "$captured_target_directory/page-$generated_page_number.html"
+    done
+    cd - > /dev/null
 }
 
 if ! (
@@ -68,10 +74,11 @@ if ! (
         --url "https://docs.example.invalid/reference/" \
         --mirror-path "example/reference" \
         --name "Example Reference" \
+        --source-version "stable" \
+        --identity-regex "Example Reference stable" \
         --cut-directories 3 \
         --minimum-html-files 7 \
         --reject-regex "/archive" \
-        --allow-partial \
         --seed-document-type xml-sitemap \
         --seed-discovery-url "https://docs.example.invalid/sitemap.xml" \
         --seed-source-prefix "https://docs.example.invalid/reference/"
@@ -81,12 +88,12 @@ fi
 
 assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
     "https://docs.example.invalid/reference/" \
-    "$TEST_DOCS_ROOT/example/reference" \
+    "$(dirname "$TEST_DOCS_ROOT")/.documentation-fetch-staging/reference.$(printf '%s' 'https://docs.example.invalid/reference/|stable|example/reference' | shasum -a 256 | awk '{print $1}').partial" \
     "Example Reference" \
     3 \
     7 \
     "/archive" \
-    true \
+    false \
     xml-sitemap \
     "https://docs.example.invalid/sitemap.xml" \
     "https://docs.example.invalid/reference/"
@@ -95,6 +102,7 @@ assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
 if fetch_source \
     --url "https://docs.example.invalid/reference/" \
     --mirror-path "example/reference" \
+    --source-version "stable" \
     --cut-directories 3 \
     --minimum-html-files 7 > /dev/null 2>&1; then
     fail_documentation_fetch_test "fetch options without a name were accepted"
@@ -105,6 +113,7 @@ if fetch_source \
     --url "https://docs.example.invalid/reference/" \
     --mirror-path "example/reference" \
     --name "Example Reference" \
+    --source-version "stable" \
     --cut-directories 3 \
     --minimum-html-files 7 \
     --unknown-option > /dev/null 2>&1; then
@@ -128,7 +137,15 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     --mirror-path \
     kotlin \
     --name \
-    "Kotlin Documentation" \
+    "Kotlin 2.4.10 Documentation" \
+    --source-version \
+    "2.4.10" \
+    --identity-regex \
+    "2\\.4\\.10" \
+    --required-identity-page \
+    "faq.html" \
+    --required-identity-text \
+    "The currently released version is 2.4.10, published on July 14, 2026." \
     --cut-directories \
     1 \
     --minimum-html-files \
@@ -138,9 +155,7 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     --seed-discovery-url \
     "https://kotlinlang.org/sitemap.xml" \
     --seed-source-prefix \
-    "https://kotlinlang.org/docs/" \
-    --superseded-mirror-path \
-    "kotlin/2.4.10"
+    "https://kotlinlang.org/docs/"
 
 assert_rejected_selector() {
     local documentation_source_selector="$1"
@@ -156,39 +171,145 @@ assert_rejected_selector "kotlin,kotlin"
 assert_rejected_selector "kotlin,,java/java25-complete"
 
 if ! (
-    SPRING_AI_REFERENCE_BASE="https://override.example.invalid/spring-ai/reference/"
     set --
     # shellcheck source=fetch_all_docs.sh
     source "$FETCH_SCRIPT"
     log() {
         :
     }
-    LEGACY_SOURCE_CALL_COUNT=0
+    SOURCE_CALL_COUNT=0
     record_documentation_fetch() {
-        LEGACY_SOURCE_CALL_COUNT=$((LEGACY_SOURCE_CALL_COUNT + 1))
-        if [ "$LEGACY_SOURCE_CALL_COUNT" -eq 1 ]; then
+        SOURCE_CALL_COUNT=$((SOURCE_CALL_COUNT + 1))
+        if [ "$SOURCE_CALL_COUNT" -eq 1 ]; then
             printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
         fi
     }
-    fetch_legacy_sources
+    fetch_named_official_source spring-ai-reference
 ); then
-    fail_documentation_fetch_test "legacy source URL override did not complete"
+    fail_documentation_fetch_test "canonical source dispatch did not complete"
 fi
 
 assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     fetch_source \
     --url \
-    "https://override.example.invalid/spring-ai/reference/" \
+    "https://docs.spring.io/spring-ai/reference/1.1/" \
     --mirror-path \
     "spring-ai-reference" \
     --name \
-    "Spring AI Reference (stable)" \
+    "Spring AI Reference (stable 1.1)" \
+    --source-version \
+    "1.1.8" \
+    --identity-regex \
+    '<meta name="version" content="1\.1\.8"' \
+    --forbidden-identity-regex \
+    '<meta name="version" content="(2\.|[^"]*SNAPSHOT)|data-version="(2\.|[^"]*SNAPSHOT)' \
+    --expected-meta-version \
+    "1.1.8" \
     --cut-directories \
-    1 \
+    3 \
     --minimum-html-files \
     80 \
     --reject-regex \
-    "/spring-ai/reference/[0-9]|/spring-ai/reference/[^/]*SNAPSHOT"
+    'SNAPSHOT|/spring-ai/reference/(2\.|next/)' \
+    --superseded-mirror-path \
+    "spring-ai-complete"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    SOURCE_CALL_COUNT=0
+    record_documentation_fetch() {
+        SOURCE_CALL_COUNT=$((SOURCE_CALL_COUNT + 1))
+        if [ "$SOURCE_CALL_COUNT" -eq 1 ]; then
+            printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+        fi
+    }
+    fetch_named_official_source spring-ai-api-stable
+); then
+    fail_documentation_fetch_test "canonical Spring AI API dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.spring.io/spring-ai/docs/1.1.2/api/" \
+    --mirror-path \
+    "spring-ai-api-stable" \
+    --name \
+    "Spring AI API 1.1.2" \
+    --source-version \
+    "1.1.2" \
+    --identity-regex \
+    'Spring AI Parent 1\.1\.2 API' \
+    --forbidden-identity-regex \
+    'Spring AI Parent (2\.[^ ]*|[^ ]*SNAPSHOT) API' \
+    --cut-directories \
+    4 \
+    --minimum-html-files \
+    200 \
+    --reject-regex \
+    'SNAPSHOT|/spring-ai/docs/2\.'
+
+SPRING_AI_MIXED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-mixed-stage"
+mkdir -p "$SPRING_AI_MIXED_STAGE"
+printf '<html><meta name="version" content="1.1.8"></html>\n' > "$SPRING_AI_MIXED_STAGE/stable.html"
+printf '<html><meta name="version" content="2.0.0"></html>\n' > "$SPRING_AI_MIXED_STAGE/prohibited.html"
+if validate_staged_documentation_mirror \
+    "$SPRING_AI_MIXED_STAGE" \
+    "Spring AI mixed-version fixture" \
+    2 \
+    '<meta name="version" content="1\.1\.8"' \
+    '<meta name="version" content="(2\.|[^\"]*SNAPSHOT)'; then
+    fail_documentation_fetch_test "mixed Spring AI stable and prohibited identities were accepted"
+fi
+
+KOTLIN_PINNED_STAGE="$TEST_WORK_DIRECTORY/kotlin-pinned-stage"
+mkdir -p "$KOTLIN_PINNED_STAGE"
+printf '<html><body><p>The currently released version is 2.4.10, published on July 14, 2026.</p></body></html>\n' \
+    > "$KOTLIN_PINNED_STAGE/faq.html"
+if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$KOTLIN_PINNED_STAGE" \
+    --required-page "faq.html" \
+    --required-text "The currently released version is 2.4.10, published on July 14, 2026."; then
+    fail_documentation_fetch_test "exact Kotlin 2.4.10 publication identity was rejected"
+fi
+printf '<html><body><p>The currently released version is 2.4.20, published later.</p></body></html>\n' \
+    > "$KOTLIN_PINNED_STAGE/faq.html"
+if python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$KOTLIN_PINNED_STAGE" \
+    --required-page "faq.html" \
+    --required-text "The currently released version is 2.4.10, published on July 14, 2026." \
+    > /dev/null 2>&1; then
+    fail_documentation_fetch_test "a newer rolling Kotlin publication was accepted as 2.4.10"
+fi
+
+SPRING_AI_PINNED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-pinned-stage"
+mkdir -p "$SPRING_AI_PINNED_STAGE"
+printf '<html><head><meta name="version" content="1.1.8"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/index.html"
+printf '<html><head><meta name="version" content="1.1.8"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/section.html"
+if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$SPRING_AI_PINNED_STAGE" \
+    --expected-meta-version "1.1.8"; then
+    fail_documentation_fetch_test "homogeneous Spring AI 1.1.8 metadata was rejected"
+fi
+printf '<html><head><meta name="version" content="1.1.9"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/section.html"
+if python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$SPRING_AI_PINNED_STAGE" \
+    --expected-meta-version "1.1.8" \
+    > /dev/null 2>&1; then
+    fail_documentation_fetch_test "mixed Spring AI 1.1.x metadata was accepted"
+fi
 
 if ! (
     set --
@@ -302,35 +423,34 @@ if ! (
     DOCS_ROOT="$TEST_WORK_DIRECTORY/staged-publication/data/docs"
     LOG_FILE="$TEST_WORK_DIRECTORY/staged-publication.log"
     STAGED_PUBLICATION_DIRECTORY="$TEST_WORK_DIRECTORY/staged-publication/replacement"
-    STAGED_PUBLICATION_DISCARD="$TEST_WORK_DIRECTORY/staged-publication/discarded"
     log() {
         :
     }
     create_documentation_fetch_staging_directory() {
         mkdir -p "$STAGED_PUBLICATION_DIRECTORY"
+        printf '<html>Rolling Reference stable</html>\n' > "$STAGED_PUBLICATION_DIRECTORY/index.html"
         printf '%s\n' "$STAGED_PUBLICATION_DIRECTORY"
     }
     fetch_docs_mirror() {
-        :
+        cd - > /dev/null
     }
     publish_staged_documentation_mirror() {
         return 71
-    }
-    discard_documentation_fetch_staging_directory() {
-        printf 'discarded\n' > "$STAGED_PUBLICATION_DISCARD"
     }
     if fetch_source \
         --url "https://docs.example.invalid/reference/" \
         --mirror-path "rolling-reference" \
         --name "Rolling Reference" \
+        --source-version "stable" \
+        --identity-regex "Rolling Reference stable" \
         --cut-directories 0 \
         --minimum-html-files 1 \
         --superseded-mirror-path "rolling-reference/1.0" > /dev/null; then
         exit 1
     fi
-    [ -s "$STAGED_PUBLICATION_DISCARD" ]
+    [ -d "$STAGED_PUBLICATION_DIRECTORY" ]
 ); then
     fail_documentation_fetch_test "staged publication failure was not propagated"
 fi
 
-printf 'PASS: explicit fetch options, source selection, Java seed safety, and URL overrides are behaviorally wired.\n'
+printf 'PASS: explicit fetch options, pinned source selection, version rejection, and Java seed safety are wired.\n'
