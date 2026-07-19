@@ -134,16 +134,18 @@ check_qdrant_connection() {
     return 0
 }
 
-# Loads environment, validates required variables, and checks Qdrant/embedding connectivity.
-# Exits with error if any prerequisite fails.
+# Loads environment and validates required variables before any network preflight.
 #
 # Arguments: required environment variable names to validate
-initialize_pipeline() {
+prepare_pipeline_environment() {
     load_env_file
     apply_pipeline_defaults
     validate_required_vars "$@"
     echo ""
+}
 
+# Checks Qdrant and embedding connectivity after caller-owned configuration validation.
+verify_pipeline_connections() {
     if ! check_qdrant_connection "echo -e"; then
         echo -e "${RED}Cannot proceed without Qdrant connectivity${NC}"
         exit 1
@@ -153,6 +155,12 @@ initialize_pipeline() {
         echo -e "${RED}Embedding provider check failed${NC}"
         exit 1
     fi
+}
+
+# Loads configuration and checks connectivity for callers with no additional local contract.
+initialize_pipeline() {
+    prepare_pipeline_environment "$@"
+    verify_pipeline_connections
 }
 
 # Builds the application using gradlew buildForScripts.
@@ -391,6 +399,33 @@ collection_point_count() {
         2>/dev/null || echo "unknown"
 }
 
+validate_qwen_generation_collection_state() {
+    local collection_name="$1"
+    local collection_state="$2"
+    if ! echo "$collection_state" | jq -e '
+        .result.config.params.vectors.dense.size == 2560
+        and .result.config.params.vectors.dense.distance == "Cosine"
+        and .result.config.params.sparse_vectors.bm25.modifier == "Idf"
+        and .result.config.params.on_disk_payload == true
+    ' >/dev/null 2>&1; then
+        echo -e "${RED}Collection '$collection_name' must use dense=2560/Cosine, bm25=Idf, and on-disk payloads${NC}" >&2
+        return 1
+    fi
+}
+
+require_qwen_generation_collection_schema() {
+    local collection_name="$1"
+    local qdrant_base_url="$2"
+    local collection_state
+    collection_state="$(qdrant_curl -s \
+        "$qdrant_base_url/collections/$collection_name" 2>/dev/null || echo "")"
+    if [ -z "$collection_state" ]; then
+        echo -e "${RED}Failed to read collection '$collection_name'${NC}" >&2
+        return 1
+    fi
+    validate_qwen_generation_collection_state "$collection_name" "$collection_state"
+}
+
 # Creates a Qdrant collection by cloning vector config from a reference collection.
 create_collection_from_reference() {
     local collection_name="$1"
@@ -401,6 +436,9 @@ create_collection_from_reference() {
         "$qdrant_base_url/collections/$reference_collection" 2>/dev/null || echo "")"
     if [ -z "$reference_collection_state" ]; then
         echo -e "${RED}Failed to read reference collection '$reference_collection'${NC}"
+        exit 1
+    fi
+    if ! validate_qwen_generation_collection_state "$reference_collection" "$reference_collection_state"; then
         exit 1
     fi
     local vectors_config
