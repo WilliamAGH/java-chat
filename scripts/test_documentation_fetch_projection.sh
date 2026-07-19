@@ -11,6 +11,7 @@ TEST_WORK_DIRECTORY="$(mktemp -d)"
 TEST_DOCS_ROOT="$TEST_WORK_DIRECTORY/docs"
 DISCOVERED_FETCH_CAPTURE="$TEST_WORK_DIRECTORY/discovered-fetch"
 SELECTED_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/selected-source"
+ALL_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/all-source"
 ENVIRONMENT_OVERRIDE_CAPTURE="$TEST_WORK_DIRECTORY/environment-override"
 mkdir -p "$TEST_DOCS_ROOT"
 trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
@@ -157,6 +158,31 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     --seed-source-prefix \
     "https://kotlinlang.org/docs/"
 
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_DOCS_ROOT"
+    LOG_FILE="$TEST_WORK_DIRECTORY/all-source.log"
+    log() {
+        :
+    }
+    fetch_all_official_sources() {
+        printf '%s\n' "canonical-full" > "$ALL_SOURCE_CAPTURE"
+    }
+    fetch_quick_sources() {
+        printf '%s\n' "quick" > "$ALL_SOURCE_CAPTURE"
+        return 1
+    }
+    run_documentation_fetch --doc-sets=all > /dev/null
+); then
+    fail_documentation_fetch_test "all selector did not route to canonical full sources"
+fi
+
+if [ "$(< "$ALL_SOURCE_CAPTURE")" != "canonical-full" ]; then
+    fail_documentation_fetch_test "all selector included quick documentation mirrors"
+fi
+
 assert_rejected_selector() {
     local documentation_source_selector="$1"
     : > "$SELECTED_SOURCE_CAPTURE"
@@ -169,6 +195,7 @@ assert_rejected_selector() {
 assert_rejected_selector "kotlin,unknown-source"
 assert_rejected_selector "kotlin,kotlin"
 assert_rejected_selector "kotlin,,java/java25-complete"
+assert_rejected_selector "all,kotlin"
 
 if ! (
     set --

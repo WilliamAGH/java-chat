@@ -482,6 +482,14 @@ fetch_selected_official_sources() {
         echo "Documentation source selector contains a blank identifier" >&2
         return 1
     fi
+    if [ "$requested_source_selector" = "all" ]; then
+        fetch_all_official_sources
+        return
+    fi
+    if [[ ",$requested_source_selector," == *,all,* ]]; then
+        echo "Documentation source selector 'all' cannot be combined with named identifiers" >&2
+        return 1
+    fi
     local -a requested_source_identifiers=()
     local IFS=','
     read -r -a requested_source_identifiers <<< "$requested_source_selector"
