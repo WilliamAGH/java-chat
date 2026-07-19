@@ -9,7 +9,7 @@ spring-ai = "1.1.2"
 spring-dotenv = "5.1.0"
 
 # AI/ML
-openai = "4.16.0"
+openai = "4.43.0"
 
 # Processing libraries
 jsoup = "1.22.1"
@@ -23,11 +23,11 @@ fastutil = "8.5.18"
 caffeine = "3.2.3"
 
 # Qdrant
-qdrant-client = "1.16.2"
+qdrant-client = "1.18.3"
 guava = "33.5.0-android"
 
 # gRPC/Networking
-grpc = "1.78.0"
+grpc = "1.82.2"
 
 # Code quality plugins
 spotbugs-plugin = "6.4.8"
