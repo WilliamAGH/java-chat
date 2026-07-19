@@ -89,7 +89,7 @@ fi
 
 assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
     "https://docs.example.invalid/reference/" \
-    "$(dirname "$TEST_DOCS_ROOT")/.documentation-fetch-staging/reference.$(printf '%s' 'https://docs.example.invalid/reference/|stable|example/reference' | shasum -a 256 | awk '{print $1}').partial" \
+    "$(dirname "$TEST_DOCS_ROOT")/.documentation-fetch-staging/reference.599af15c691cb0976ef8042aaaf54bb39c76fed2c030db21d93b263113606c4c.partial" \
     "Example Reference" \
     3 \
     7 \

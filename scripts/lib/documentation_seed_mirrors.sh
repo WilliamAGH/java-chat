@@ -17,7 +17,8 @@ create_documentation_fetch_staging_directory() {
     local mirror_basename
     mirror_basename="$(basename "$relative_mirror_path")"
     local source_identity_hash
-    source_identity_hash="$(printf '%s' "$documentation_source_identity" | shasum -a 256 | awk '{print $1}')"
+    source_identity_hash="$(printf '%s' "$documentation_source_identity" \
+        | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
     if [ -z "$source_identity_hash" ]; then
         return 1
     fi
