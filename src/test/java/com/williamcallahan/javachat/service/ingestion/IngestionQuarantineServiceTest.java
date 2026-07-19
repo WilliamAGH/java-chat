@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,15 +24,28 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 /** Verifies rejected documents are copied safely without mutating their canonical source mirror. */
 class IngestionQuarantineServiceTest {
+    private static final String CLI_PROFILE = "cli";
     private static final String MALFORMED_UTF_8_DOCUMENT_HEX = "c328ff00fe";
     private static final String MALFORMED_UTF_8_DOCUMENT_SHA_256 =
             "2a7a4b5f058fd584512e1d10961a1dec97666d702a61a33c9472231d366f4ed0";
     private static final String QUARANTINE_DIRECTORY_NAME = ".quarantine";
     private static final Pattern CONTENT_ADDRESSED_STREAMS_DOCUMENT = Pattern.compile("streams\\.[0-9a-f]{64}\\.html");
     private static final Pattern CONTENT_ADDRESSED_LANDING_DOCUMENT = Pattern.compile("landing\\.[0-9a-f]{64}\\.html");
+
+    @Test
+    void springCliProfileConstructsServiceWithContentHasher() {
+        try (AnnotationConfigApplicationContext applicationContext = new AnnotationConfigApplicationContext()) {
+            applicationContext.getEnvironment().setActiveProfiles(CLI_PROFILE);
+            applicationContext.register(ContentHasher.class, IngestionQuarantineService.class);
+            applicationContext.refresh();
+
+            assertNotNull(applicationContext.getBean(IngestionQuarantineService.class));
+        }
+    }
 
     @Test
     void copiesDocumentInsideDocumentationRootToSiblingQuarantineWithRelativePath(@TempDir Path temporaryDirectory)

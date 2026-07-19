@@ -9,6 +9,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -29,6 +30,7 @@ public class IngestionQuarantineService {
     /**
      * Uses the canonical documentation root so inspection copies remain outside recursive ingestion.
      */
+    @Autowired
     public IngestionQuarantineService(ContentHasher contentHasher) {
         this(Path.of(DEFAULT_DOCUMENTATION_ROOT), contentHasher);
     }
