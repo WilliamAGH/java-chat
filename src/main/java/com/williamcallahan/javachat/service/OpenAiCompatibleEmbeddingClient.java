@@ -277,7 +277,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             throw new EmbeddingServiceUnavailableException(
-                    "Interrupted while waiting for a gateway embedding request permit", interruptedException);
+                    "Interrupted during gateway embedding request admission or completion", interruptedException);
         } catch (OpenAIServiceException exception) {
             throw wrapServiceError(exception);
         } catch (OpenAIRetryableException exception) {
