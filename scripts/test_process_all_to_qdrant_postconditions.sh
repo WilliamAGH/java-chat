@@ -64,7 +64,7 @@ export QDRANT_COLLECTION_PDFS=java-chat-local-qwen3-embedding-4b-2560-pdfs
 
 SUCCESS_LOG="$POSTCONDITION_TEST_WORK_DIRECTORY/success.log"
 printf '%s\n' \
-    'Qdrant postcondition required for docSet: kotlin' \
+    'Qdrant postcondition required for docSet: kotlin   ' \
     'Qdrant postcondition required for docSet: java/java25-complete' \
     > "$SUCCESS_LOG"
 POSTCONDITION_TEST_MODE=success verify_doc_set_postconditions "$SUCCESS_LOG"

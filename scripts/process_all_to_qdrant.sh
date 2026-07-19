@@ -72,7 +72,10 @@ verify_doc_set_postconditions() {
             return 1
         fi
         log "${GREEN}Verified exact docSet postcondition: $documentation_set ($exact_doc_set_point_count points)${NC}"
-    done < <(sed -n 's/^.*Qdrant postcondition required for docSet: //p' "$processing_log")
+    done < <(
+        sed -n 's/^.*Qdrant postcondition required for docSet: //p' "$processing_log" \
+            | sed 's/[[:space:]]*$//'
+    )
     if [ "$verified_doc_set_count" -le 0 ]; then
         echo "Document processor emitted no docSet postconditions" >&2
         return 1
