@@ -210,6 +210,44 @@ if ! (
     record_documentation_fetch() {
         printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
     }
+    fetch_named_official_source scala
+); then
+    fail_documentation_fetch_test "canonical Scala documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --mirror-path \
+    scala \
+    --name \
+    "Scala 3 Documentation" \
+    --source-version \
+    "3-stable" \
+    --identity-regex \
+    "Scala 3" \
+    --cut-directories \
+    2 \
+    --minimum-html-files \
+    300 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --seed-source-prefix \
+    "https://docs.scala-lang.org/scala3/reference/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
     fetch_named_official_source quarkus
 ); then
     fail_documentation_fetch_test "canonical Quarkus guides dispatch did not complete"
