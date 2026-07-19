@@ -225,6 +225,7 @@ class ChatControllerStreamingFailureTest {
                 new AppProperties());
         CountDownLatch retrievalStarted = new CountDownLatch(1);
         CountDownLatch releaseRetrieval = new CountDownLatch(1);
+        CountDownLatch retrievalFinished = new CountDownLatch(1);
         CountDownLatch preparationStatusObserved = new CountDownLatch(1);
         AtomicReference<ServerSentEvent<String>> firstStreamEvent = new AtomicReference<>();
         AtomicReference<Throwable> streamFailure = new AtomicReference<>();
@@ -233,10 +234,14 @@ class ChatControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
             retrievalStarted.countDown();
-            assertTrue(
-                    releaseRetrieval.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
-                    "test should release blocked retrieval");
-            return List.of();
+            try {
+                assertTrue(
+                        releaseRetrieval.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                        "test should release blocked retrieval");
+                return List.of();
+            } finally {
+                retrievalFinished.countDown();
+            }
         });
         when(chatService.buildStructuredPromptWithContextOutcome(
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
@@ -278,6 +283,9 @@ class ChatControllerStreamingFailureTest {
             assertNull(streamFailure.get());
         } finally {
             releaseRetrieval.countDown();
+            assertTrue(
+                    retrievalFinished.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "blocked retrieval should finish before stream cancellation");
             Disposable streamSubscription = activeSubscription.get();
             if (streamSubscription != null) {
                 streamSubscription.dispose();
