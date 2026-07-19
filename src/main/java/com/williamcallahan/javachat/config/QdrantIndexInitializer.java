@@ -149,83 +149,60 @@ public class QdrantIndexInitializer {
         List<String> collections = qdrant.getCollections().all();
         String denseVectorName = qdrant.getDenseVectorName();
         String sparseVectorName = qdrant.getSparseVectorName();
-        Map<String, String> collectionBaseUrls = new LinkedHashMap<>();
+        String restBaseUrl = qdrantRestConnection.restBaseUrl();
 
         if (collections.isEmpty()) {
             throw new IllegalStateException("app.qdrant.collections must not be empty");
         }
 
         if (qdrant.isEnsureCollections()) {
-            ensureHybridCollectionsExist(collections, denseVectorName, sparseVectorName, collectionBaseUrls);
+            ensureHybridCollectionsExist(collections, denseVectorName, sparseVectorName, restBaseUrl);
         }
 
-        validateCollections(collections, denseVectorName, sparseVectorName, collectionBaseUrls);
+        validateCollections(collections, denseVectorName, sparseVectorName, restBaseUrl);
 
         if (!qdrant.isEnsurePayloadIndexes()) {
             log.info("[QDRANT] Skipping payload index ensure (app.qdrant.ensure-payload-indexes=false)");
             return;
         }
 
-        ensurePayloadIndexes(collections, collectionBaseUrls);
+        ensurePayloadIndexes(collections, restBaseUrl);
     }
 
     private void ensureHybridCollectionsExist(
-            List<String> collections,
-            String denseVectorName,
-            String sparseVectorName,
-            Map<String, String> collectionBaseUrls) {
+            List<String> collections, String denseVectorName, String sparseVectorName, String restBaseUrl) {
         int dimensions = embeddingClient.dimensions();
         HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
             if (collection == null || collection.isBlank()) {
                 throw new IllegalStateException("Qdrant collection name must not be blank");
             }
-            CollectionEndpoint endpoint = discoverCollectionEndpoint(collection, headers);
-            if (!endpoint.exists()) {
+            CollectionRestTarget target = new CollectionRestTarget(restBaseUrl, collection, headers);
+            if (!collectionExists(target)) {
                 createHybridCollection(
-                        new CollectionRestTarget(endpoint.baseUrl(), collection, headers),
-                        new HybridCollectionSchema(denseVectorName, sparseVectorName, dimensions));
+                        target, new HybridCollectionSchema(denseVectorName, sparseVectorName, dimensions));
             }
-            collectionBaseUrls.put(collection, endpoint.baseUrl());
         }
     }
 
-    private CollectionEndpoint discoverCollectionEndpoint(String collection, HttpHeaders headers) {
-        List<String> candidateBaseUrls = qdrantRestConnection.candidateRestBaseUrls();
-        String createBaseUrl = candidateBaseUrls.getFirst();
-        RuntimeException fatalFailure = null;
-        QdrantUnavailableException unavailableFailure = null;
-        for (String baseUrl : candidateBaseUrls) {
-            try {
-                restTemplate.exchange(
-                        baseUrl + "/collections/" + collection,
-                        HttpMethod.GET,
-                        new HttpEntity<>(headers),
-                        String.class);
-                log.info("[QDRANT] Collection present (collection={}, base={})", collection, baseUrl);
-                return new CollectionEndpoint(baseUrl, true);
-            } catch (HttpClientErrorException.NotFound notFoundException) {
-                log.debug("[QDRANT] Collection missing on candidate (collection={}, base={})", collection, baseUrl);
-            } catch (RestClientResponseException responseException) {
-                RuntimeException failure =
-                        classifyHttpFailure("look up Qdrant collection '" + collection + "'", responseException);
-                if (failure instanceof QdrantUnavailableException unavailable) {
-                    unavailableFailure = unavailable;
-                } else {
-                    fatalFailure = failure;
-                }
-            } catch (ResourceAccessException transportException) {
-                unavailableFailure = unavailable("look up Qdrant collection '" + collection + "'", transportException);
-            }
+    private boolean collectionExists(CollectionRestTarget target) {
+        String collection = target.collection();
+        try {
+            restTemplate.exchange(
+                    target.baseUrl() + "/collections/" + collection,
+                    HttpMethod.GET,
+                    new HttpEntity<>(target.headers()),
+                    String.class);
+            log.info("[QDRANT] Collection present (collection={}, base={})", collection, target.baseUrl());
+            return true;
+        } catch (HttpClientErrorException.NotFound notFoundException) {
+            log.debug("[QDRANT] Collection missing (collection={}, base={})", collection, target.baseUrl());
+            return false;
+        } catch (RestClientResponseException responseException) {
+            throw classifyHttpFailure("look up Qdrant collection '" + collection + "'", responseException);
+        } catch (ResourceAccessException transportException) {
+            throw unavailable("look up Qdrant collection '" + collection + "'", transportException);
         }
-        if (fatalFailure != null) {
-            throw fatalFailure;
-        }
-        if (unavailableFailure != null) {
-            throw unavailableFailure;
-        }
-        log.debug("[QDRANT] Collection missing on every candidate (collection={})", collection);
-        return new CollectionEndpoint(createBaseUrl, false);
     }
 
     private void createHybridCollection(CollectionRestTarget target, HybridCollectionSchema schema) {
@@ -262,10 +239,7 @@ public class QdrantIndexInitializer {
     }
 
     private void validateCollections(
-            List<String> collections,
-            String denseVectorName,
-            String sparseVectorName,
-            Map<String, String> collectionBaseUrls) {
+            List<String> collections, String denseVectorName, String sparseVectorName, String restBaseUrl) {
         int expectedDimensions = embeddingClient.dimensions();
         if (expectedDimensions <= 0) {
             throw new IllegalStateException("Embedding model dimensions must be positive");
@@ -275,16 +249,7 @@ public class QdrantIndexInitializer {
         }
         HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
-            String baseUrl = collectionBaseUrls.get(collection);
-            if (baseUrl == null) {
-                CollectionEndpoint endpoint = discoverCollectionEndpoint(collection, headers);
-                if (!endpoint.exists()) {
-                    throw new IllegalStateException("Qdrant collection '" + collection + "' does not exist");
-                }
-                baseUrl = endpoint.baseUrl();
-                collectionBaseUrls.put(collection, baseUrl);
-            }
-            JsonNode info = fetchCollectionInfo(baseUrl, collection, headers);
+            JsonNode info = fetchCollectionInfo(restBaseUrl, collection, headers);
             int actualDimensions = extractDenseVectorDimensions(info, denseVectorName);
             if (actualDimensions != expectedDimensions) {
                 throw new IllegalStateException("Qdrant collection dimension mismatch for '"
@@ -361,12 +326,12 @@ public class QdrantIndexInitializer {
         return sparseVectors.isObject() && sparseVectors.has(sparseVectorName);
     }
 
-    private void ensurePayloadIndexes(List<String> collections, Map<String, String> collectionBaseUrls) {
+    private void ensurePayloadIndexes(List<String> collections, String restBaseUrl) {
         HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
-            String baseUrl = Objects.requireNonNull(collectionBaseUrls.get(collection), "collectionBaseUrl");
-            CollectionRestTarget target = new CollectionRestTarget(baseUrl, collection, headers);
-            Map<String, String> existingPayloadIndexTypes = readExistingPayloadIndexTypes(baseUrl, collection, headers);
+            CollectionRestTarget target = new CollectionRestTarget(restBaseUrl, collection, headers);
+            Map<String, String> existingPayloadIndexTypes =
+                    readExistingPayloadIndexTypes(restBaseUrl, collection, headers);
             int createdIndexCount = 0;
             int alreadyPresentIndexCount = 0;
             for (PayloadIndexSpec payloadIndexSpec : REQUIRED_PAYLOAD_INDEXES) {
@@ -477,8 +442,6 @@ public class QdrantIndexInitializer {
             @JsonProperty("field_schema") Map<String, String> fieldSchema) {}
 
     private record PayloadIndexSpec(String fieldName, String schemaType) {}
-
-    private record CollectionEndpoint(String baseUrl, boolean exists) {}
 
     private record CollectionRestTarget(String baseUrl, String collection, HttpHeaders headers) {}
 

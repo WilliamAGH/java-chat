@@ -1,9 +1,9 @@
 services:
   qdrant:
-    # Pin to v1.13.0 to match io.qdrant:client:1.13.0 from Spring AI 1.1.2 BOM
-    # Upgrading requires Spring AI BOM update to avoid gRPC protocol mismatches
+    # Pin to v1.16.2 to match the direct io.qdrant:client:1.16.2 dependency.
+    # Parameterized RRF queries require the matching v1.16 protobuf fields.
     # Use GitHub Container Registry to avoid Docker Hub rate limits (per DK1)
-    image: ghcr.io/qdrant/qdrant/qdrant:v1.13.0
+    image: ghcr.io/qdrant/qdrant/qdrant:v1.16.2
     container_name: qdrant
     ports:
       - "8087:6333"  # REST (mapped into allowed range)
@@ -14,4 +14,3 @@ services:
 
 volumes:
   qdrant_storage:
-

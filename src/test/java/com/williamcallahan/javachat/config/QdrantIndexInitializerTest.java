@@ -35,7 +35,7 @@ class QdrantIndexInitializerTest {
     private static final int EMBEDDING_DIMENSIONS = 1_536;
     private static final int MISMATCHED_COLLECTION_DIMENSIONS = 768;
     private static final String QDRANT_REST_BASE_URL = "http://qdrant.test:6333";
-    private static final String QDRANT_FALLBACK_BASE_URL = "http://qdrant.test:7444";
+    private static final String QDRANT_DOCKER_REST_BASE_URL = "http://qdrant.test:8087";
 
     private final Logger initializerLogger = (Logger) LoggerFactory.getLogger(QdrantIndexInitializer.class);
     private ExpectedLogEvents initializerLogEvents;
@@ -80,7 +80,7 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void defaultRestNotFoundCreatesWithoutProbingConfiguredGrpcPort() {
+    void unavailableCreationDefersAtConfiguredRestEndpoint() {
         InitializerHarness initializerHarness = newInitializer(true, 6334);
         String firstCollectionUrl =
                 collectionUrl(initializerHarness.collectionName().get(0));
@@ -131,61 +131,28 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void mixedMissingAndTransportFailureDoesNotCreateCollection() {
-        InitializerHarness initializerHarness = newInitializer(true, 7444);
-        String collectionName = initializerHarness.collectionName().get(0);
-        initializerHarness
-                .qdrantServer()
-                .expect(once(), requestTo(collectionUrl(collectionName)))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        initializerHarness
-                .qdrantServer()
-                .expect(once(), requestTo(collectionUrl(QDRANT_FALLBACK_BASE_URL, collectionName)))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(ignoredRequest -> {
-                    throw new ResourceAccessException("fallback transport unavailable for test");
-                });
+    void dockerGrpcPortCreatesAndValidatesMissingCollectionsAtMappedRestEndpoint() {
+        InitializerHarness initializerHarness = newInitializer(true, 8086);
+        List<String> collectionNames = initializerHarness.collectionName();
 
-        initializerHarness.initializer().ensureCollectionsAndIndexes();
-
-        assertEquals(
-                Status.DOWN,
-                initializerHarness.initializer().initializationHealth().getStatus());
-        initializerHarness.qdrantServer().verify();
-    }
-
-    @Test
-    void fallbackCandidateSuccessWinsAndValidationUsesThatBase() {
-        InitializerHarness initializerHarness = newInitializer(true, 7444);
-        List<String> collectionName = initializerHarness.collectionName();
-        initializerHarness
-                .qdrantServer()
-                .expect(once(), requestTo(collectionUrl(collectionName.get(0))))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
-        initializerHarness
-                .qdrantServer()
-                .expect(once(), requestTo(collectionUrl(QDRANT_FALLBACK_BASE_URL, collectionName.get(0))))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess(collectionMetadataJson(EMBEDDING_DIMENSIONS), MediaType.APPLICATION_JSON));
-        for (int collectionIndex = 1; collectionIndex < collectionName.size(); collectionIndex++) {
-            expectCollectionGet(
-                    initializerHarness,
-                    QDRANT_REST_BASE_URL,
-                    collectionName.get(collectionIndex),
-                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
+        for (String collectionName : collectionNames) {
+            String collectionUrl = collectionUrl(QDRANT_DOCKER_REST_BASE_URL, collectionName);
+            initializerHarness
+                    .qdrantServer()
+                    .expect(once(), requestTo(collectionUrl))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withStatus(HttpStatus.NOT_FOUND));
+            initializerHarness
+                    .qdrantServer()
+                    .expect(once(), requestTo(collectionUrl))
+                    .andExpect(method(HttpMethod.PUT))
+                    .andRespond(withSuccess());
         }
-        expectCollectionGet(
-                initializerHarness,
-                QDRANT_FALLBACK_BASE_URL,
-                collectionName.get(0),
-                collectionMetadataJson(EMBEDDING_DIMENSIONS));
-        for (int collectionIndex = 1; collectionIndex < collectionName.size(); collectionIndex++) {
+        for (String collectionName : collectionNames) {
             expectCollectionGet(
                     initializerHarness,
-                    QDRANT_REST_BASE_URL,
-                    collectionName.get(collectionIndex),
+                    QDRANT_DOCKER_REST_BASE_URL,
+                    collectionName,
                     collectionMetadataJson(EMBEDDING_DIMENSIONS));
         }
 
@@ -214,11 +181,6 @@ class QdrantIndexInitializerTest {
                     QDRANT_REST_BASE_URL,
                     configuredCollection,
                     collectionMetadataJson(EMBEDDING_DIMENSIONS));
-            expectCollectionGet(
-                    initializerHarness,
-                    QDRANT_REST_BASE_URL,
-                    configuredCollection,
-                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
         }
 
         initializerHarness.initializer().ensureCollectionsAndIndexes();
@@ -242,16 +204,6 @@ class QdrantIndexInitializerTest {
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(
                         collectionMetadataJson(MISMATCHED_COLLECTION_DIMENSIONS), MediaType.APPLICATION_JSON));
-        initializerHarness
-                .qdrantServer()
-                .expect(
-                        once(),
-                        requestTo(collectionUrl(
-                                initializerHarness.collectionName().get(0))))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess(
-                        collectionMetadataJson(MISMATCHED_COLLECTION_DIMENSIONS), MediaType.APPLICATION_JSON));
-
         assertThrows(IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
 
         assertEquals(
