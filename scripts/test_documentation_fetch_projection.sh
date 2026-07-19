@@ -151,12 +151,94 @@ assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
     1 \
     --minimum-html-files \
     250 \
+    --reject-regex \
+    '(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
     --seed-document-type \
     xml-sitemap \
     --seed-discovery-url \
     "https://kotlinlang.org/sitemap.xml" \
     --seed-source-prefix \
     "https://kotlinlang.org/docs/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source groovy
+); then
+    fail_documentation_fetch_test "canonical Groovy documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    --mirror-path \
+    "groovy/5.0.7" \
+    --name \
+    "Groovy 5.0.7 Documentation" \
+    --source-version \
+    "5.0.7" \
+    --identity-regex \
+    'Groovy.*5\.0\.7|5\.0\.7.*Groovy' \
+    --cut-directories \
+    4 \
+    --minimum-html-files \
+    9 \
+    --reject-regex \
+    '/(gdk|templating|type-checking-extensions)\.html$' \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    --seed-source-prefix \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source quarkus
+); then
+    fail_documentation_fetch_test "canonical Quarkus guides dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://quarkus.io/guides/" \
+    --mirror-path \
+    quarkus \
+    --name \
+    "Quarkus Guides" \
+    --source-version \
+    "stable-current" \
+    --identity-regex \
+    Quarkus \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    200 \
+    --reject-regex \
+    '%7[BbDd]' \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://quarkus.io/guides/" \
+    --seed-source-prefix \
+    "https://quarkus.io/guides/"
 
 if ! (
     set --
@@ -277,9 +359,117 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --cut-directories \
     4 \
     --minimum-html-files \
-    200 \
+    4000 \
     --reject-regex \
     'SNAPSHOT|/spring-ai/docs/2\.'
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source java/java25-complete
+); then
+    fail_documentation_fetch_test "canonical Java 25 API dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --java-release \
+    25 \
+    --url \
+    "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+    --mirror-path \
+    "java/java25-complete" \
+    --name \
+    "Java 25 Complete API" \
+    --source-version \
+    "25-ga" \
+    --identity-regex \
+    'Overview \(Java SE 25 &amp; JDK 25\)' \
+    --required-identity-page \
+    "api/index.html" \
+    --required-identity-text \
+    "Overview (Java SE 25 & JDK 25)" \
+    --cut-directories \
+    5 \
+    --minimum-html-files \
+    5000
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source jetbrains-java25-article
+); then
+    fail_documentation_fetch_test "governed JetBrains article dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/" \
+    --mirror-path \
+    "jetbrains/idea/2025/09" \
+    --name \
+    "JetBrains Java 25 Blog" \
+    --source-version \
+    "25-ga" \
+    --identity-regex \
+    'Java.*25|25.*Java' \
+    --cut-directories \
+    3 \
+    --minimum-html-files \
+    1 \
+    --single-page
+
+SINGLE_PAGE_STAGE="$TEST_WORK_DIRECTORY/single-page-stage"
+mkdir -p "$SINGLE_PAGE_STAGE"
+printf '<html><body>stale recursive page</body></html>\n' > "$SINGLE_PAGE_STAGE/unrelated.html"
+LOG_FILE="$TEST_WORK_DIRECTORY/single-page.log"
+wget() {
+    local wget_argument
+    local output_document=""
+    for wget_argument in "$@"; do
+        case "$wget_argument" in
+            --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+        esac
+    done
+    if [ -z "$output_document" ]; then
+        return 1
+    fi
+    printf '<html><body>Java 25</body></html>\n' > "$output_document"
+}
+if ! (
+    cd "$TEST_WORK_DIRECTORY"
+    fetch_single_documentation_page \
+        "https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/" \
+        "$SINGLE_PAGE_STAGE" \
+        "JetBrains Java 25 Blog" \
+        3 \
+        1 \
+        false
+); then
+    fail_documentation_fetch_test "governed single-page fetch did not complete"
+fi
+unset -f wget
+if [ ! -f "$SINGLE_PAGE_STAGE/java-25-lts-and-intellij-idea/index.html" ]; then
+    fail_documentation_fetch_test "governed single-page fetch used the wrong projected path"
+fi
+if [ -f "$SINGLE_PAGE_STAGE/unrelated.html" ]; then
+    fail_documentation_fetch_test "governed single-page fetch retained an unrelated resumed page"
+fi
 
 SPRING_AI_MIXED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-mixed-stage"
 mkdir -p "$SPRING_AI_MIXED_STAGE"

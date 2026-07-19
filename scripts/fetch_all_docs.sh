@@ -266,6 +266,7 @@ fetch_source() {
     local seed_document_type=""
     local seed_discovery_url=""
     local seed_source_prefix=""
+    local single_page_only="false"
     local superseded_relative_mirror_path=""
 
     while [ "$#" -gt 0 ]; do
@@ -287,6 +288,7 @@ fetch_source() {
             --seed-document-type) seed_document_type="$2"; shift 2 ;;
             --seed-discovery-url) seed_discovery_url="$2"; shift 2 ;;
             --seed-source-prefix) seed_source_prefix="$2"; shift 2 ;;
+            --single-page) single_page_only="true"; shift ;;
             --superseded-mirror-path) superseded_relative_mirror_path="$2"; shift 2 ;;
             *) echo "Unknown documentation fetch option: $1" >&2; return 1 ;;
         esac
@@ -298,6 +300,11 @@ fetch_source() {
     fi
     if [ "$partial_mirror_allowed" = "true" ]; then
         echo "Partial documentation mirrors are prohibited: $name" >&2
+        return 1
+    fi
+    if [ "$single_page_only" = "true" ] \
+        && { [ -n "$java_release" ] || [ -n "$seed_discovery_url" ]; }; then
+        echo "Single-page documentation cannot use another fetch strategy: $name" >&2
         return 1
     fi
 
@@ -352,7 +359,15 @@ fetch_source() {
 
     # ── Dispatch to strategy ──
     local documentation_fetch_status=0
-    if [ -n "$java_release" ]; then
+    if [ "$single_page_only" = "true" ]; then
+        fetch_single_documentation_page \
+            "$url" \
+            "$fetch_target_directory" \
+            "$name" \
+            "$cut_dirs" \
+            "$min_files" \
+            "$partial_mirror_allowed" || documentation_fetch_status=$?
+    elif [ -n "$java_release" ]; then
         local java_api_fetch_required="true"
         if ! generate_java_api_javadoc_seed "$url" "$fetch_target_directory" \
             || ! reconcile_java_api_seed_mirror "$url" "$fetch_target_directory" "$name" "$cut_dirs"; then
@@ -453,22 +468,22 @@ fetch_named_official_source() {
     local source_dispatch="${2:-record_documentation_fetch}"
     case "$source_identifier" in
         dev-java) "$source_dispatch" fetch_source --url "https://dev.java/learn/" --mirror-path "dev-java" --name "Dev.java Learning" --source-version "stable-current" --identity-regex "Learn Java" --cut-directories 1 --minimum-html-files 40 ;;
-        kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin 2.4.10 Documentation" --source-version "2.4.10" --identity-regex "2\\.4\\.10" --required-identity-page "faq.html" --required-identity-text "The currently released version is 2.4.10, published on July 14, 2026." --cut-directories 1 --minimum-html-files 250 --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" ;;
-        scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 200 ;;
-        groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 15 ;;
+        kotlin) "$source_dispatch" fetch_source --url "https://kotlinlang.org/docs/" --mirror-path "kotlin" --name "Kotlin 2.4.10 Documentation" --source-version "2.4.10" --identity-regex "2\\.4\\.10" --required-identity-page "faq.html" --required-identity-text "The currently released version is 2.4.10, published on July 14, 2026." --cut-directories 1 --minimum-html-files 250 --reject-regex "(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\\.html$" --seed-document-type xml-sitemap --seed-discovery-url "https://kotlinlang.org/sitemap.xml" --seed-source-prefix "https://kotlinlang.org/docs/" ;;
+        scala) "$source_dispatch" fetch_source --url "https://docs.scala-lang.org/scala3/reference/" --mirror-path "scala" --name "Scala 3 Documentation" --source-version "3-stable" --identity-regex "Scala 3" --cut-directories 2 --minimum-html-files 300 --reject-regex "/index\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.scala-lang.org/scala3/reference/" --seed-source-prefix "https://docs.scala-lang.org/scala3/reference/" ;;
+        groovy) "$source_dispatch" fetch_source --url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --mirror-path "groovy/5.0.7" --name "Groovy 5.0.7 Documentation" --source-version "5.0.7" --identity-regex "Groovy.*5\\.0\\.7|5\\.0\\.7.*Groovy" --cut-directories 4 --minimum-html-files 9 --reject-regex "/(gdk|templating|type-checking-extensions)\\.html$" --seed-document-type html-links --seed-discovery-url "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" --seed-source-prefix "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" ;;
         clojure) "$source_dispatch" fetch_source --url "https://clojure.org/guides/" --mirror-path "clojure" --name "Clojure Guides" --source-version "stable-current" --identity-regex "Clojure" --cut-directories 1 --minimum-html-files 20 --reject-regex "/guides/guides$" --seed-document-type xml-sitemap --seed-discovery-url "https://clojure.org/sitemap.xml" --seed-source-prefix "https://clojure.org/guides/" ;;
         spring-boot) "$source_dispatch" fetch_source --url "https://docs.spring.io/spring-boot/reference/" --mirror-path "spring-boot" --name "Spring Boot Reference" --source-version "stable-current" --identity-regex "Spring Boot" --cut-directories 2 --minimum-html-files 89 --seed-document-type html-links --seed-discovery-url "https://docs.spring.io/spring-boot/reference/index.html" --seed-source-prefix "https://docs.spring.io/spring-boot/reference/" ;;
-        quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" ;;
-        java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Java Platform, Standard Edition 21" --cut-directories 5 --minimum-html-files 5000 ;;
-        java/java24-complete) "$source_dispatch" fetch_source --java-release 24 --url "https://docs.oracle.com/en/java/javase/24/docs/api/" --mirror-path "java/java24-complete" --name "Java 24 Complete API" --source-version "24-ga" --identity-regex "Java Platform, Standard Edition 24" --cut-directories 5 --minimum-html-files 5000 ;;
-        java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --source-version "25-ga" --identity-regex "Java Platform, Standard Edition 25" --cut-directories 5 --minimum-html-files 5000 ;;
+        quarkus) "$source_dispatch" fetch_source --url "https://quarkus.io/guides/" --mirror-path "quarkus" --name "Quarkus Guides" --source-version "stable-current" --identity-regex "Quarkus" --cut-directories 1 --minimum-html-files 200 --reject-regex "%7[BbDd]" --seed-document-type html-links --seed-discovery-url "https://quarkus.io/guides/" --seed-source-prefix "https://quarkus.io/guides/" ;;
+        java/java21-complete) "$source_dispatch" fetch_source --java-release 21 --url "https://docs.oracle.com/en/java/javase/21/docs/api/" --mirror-path "java/java21-complete" --name "Java 21 Complete API" --source-version "21-ga" --identity-regex "Overview \\(Java SE 21 &amp; JDK 21\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 21 & JDK 21)" --cut-directories 5 --minimum-html-files 5000 ;;
+        java/java24-complete) "$source_dispatch" fetch_source --java-release 24 --url "https://docs.oracle.com/en/java/javase/24/docs/api/" --mirror-path "java/java24-complete" --name "Java 24 Complete API" --source-version "24-ga" --identity-regex "Overview \\(Java SE 24 &amp; JDK 24\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 24 & JDK 24)" --cut-directories 5 --minimum-html-files 5000 ;;
+        java/java25-complete) "$source_dispatch" fetch_source --java-release 25 --url "https://docs.oracle.com/en/java/javase/25/docs/api/" --mirror-path "java/java25-complete" --name "Java 25 Complete API" --source-version "25-ga" --identity-regex "Overview \\(Java SE 25 &amp; JDK 25\\)" --required-identity-page "api/index.html" --required-identity-text "Overview (Java SE 25 & JDK 25)" --cut-directories 5 --minimum-html-files 5000 ;;
         spring-ai-reference) "$source_dispatch" fetch_source --url "$SPRING_AI_REFERENCE_BASE" --mirror-path "spring-ai-reference" --name "Spring AI Reference (stable 1.1)" --source-version "1.1.8" --identity-regex "<meta name=\"version\" content=\"1\\.1\\.8\"" --forbidden-identity-regex "<meta name=\"version\" content=\"(2\\.|[^\"]*SNAPSHOT)|data-version=\"(2\\.|[^\"]*SNAPSHOT)" --expected-meta-version "1.1.8" --cut-directories 3 --minimum-html-files 80 --reject-regex "SNAPSHOT|/spring-ai/reference/(2\\.|next/)" --superseded-mirror-path "spring-ai-complete" ;;
-        spring-ai-api-stable) "$source_dispatch" fetch_source --url "$SPRING_AI_API_STABLE_BASE" --mirror-path "spring-ai-api-stable" --name "Spring AI API 1.1.2" --source-version "1.1.2" --identity-regex "Spring AI Parent 1\\.1\\.2 API" --forbidden-identity-regex "Spring AI Parent (2\\.[^ ]*|[^ ]*SNAPSHOT) API" --cut-directories 4 --minimum-html-files 200 --reject-regex "SNAPSHOT|/spring-ai/docs/2\\." ;;
-        spring-framework-reference) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework-reference" --name "Spring Framework Reference (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 2 --minimum-html-files 3000 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT" --superseded-mirror-path "spring-framework-complete" ;;
+        spring-ai-api-stable) "$source_dispatch" fetch_source --url "$SPRING_AI_API_STABLE_BASE" --mirror-path "spring-ai-api-stable" --name "Spring AI API 1.1.2" --source-version "1.1.2" --identity-regex "Spring AI Parent 1\\.1\\.2 API" --forbidden-identity-regex "Spring AI Parent (2\\.[^ ]*|[^ ]*SNAPSHOT) API" --cut-directories 4 --minimum-html-files 4000 --reject-regex "SNAPSHOT|/spring-ai/docs/2\\." ;;
+        spring-framework-reference) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_REFERENCE_BASE" --mirror-path "spring-framework-reference" --name "Spring Framework Reference (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 2 --minimum-html-files 450 --reject-regex "/spring-framework/reference/[0-9]|/spring-framework/reference/[^/]*SNAPSHOT" --seed-document-type xml-sitemap --seed-discovery-url "https://docs.spring.io/spring-framework/reference/sitemap.xml" --seed-source-prefix "$SPRING_FRAMEWORK_REFERENCE_BASE" --superseded-mirror-path "spring-framework-complete" ;;
         spring-framework-api) "$source_dispatch" fetch_source --url "$SPRING_FRAMEWORK_API_BASE" --mirror-path "spring-framework-api" --name "Spring Framework Javadoc (current)" --source-version "stable-current" --identity-regex "Spring Framework" --cut-directories 4 --minimum-html-files 7000 ;;
         oracle-java25-release-notes) "$source_dispatch" fetch_source --url "$JAVA25_RELEASE_NOTES_ISSUES_URL" --mirror-path "oracle/javase" --name "Java 25 Release Notes Issues" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 3 --minimum-html-files 1 ;;
         ibm-java25-overview) "$source_dispatch" fetch_source --url "$IBM_JAVA25_ARTICLE_URL" --mirror-path "ibm/articles" --name "IBM Java 25 Overview" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 1 --minimum-html-files 1 ;;
-        jetbrains-java25-article) "$source_dispatch" fetch_source --url "$JETBRAINS_JAVA25_BLOG_URL" --mirror-path "jetbrains/idea/2025/09" --name "JetBrains Java 25 Blog" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 3 --minimum-html-files 1 ;;
+        jetbrains-java25-article) "$source_dispatch" fetch_source --url "$JETBRAINS_JAVA25_BLOG_URL" --mirror-path "jetbrains/idea/2025/09" --name "JetBrains Java 25 Blog" --source-version "25-ga" --identity-regex "Java.*25|25.*Java" --cut-directories 3 --minimum-html-files 1 --single-page ;;
         *) echo "Unknown documentation source identifier: $source_identifier" >&2; return 1 ;;
     esac
 }
