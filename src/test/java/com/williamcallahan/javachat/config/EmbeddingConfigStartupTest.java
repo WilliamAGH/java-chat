@@ -20,6 +20,10 @@ class EmbeddingConfigStartupTest {
     private static final String TEST_API_KEY = "test-embedding-api-key";
     private static final String TEST_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
     private static final int TEST_EMBEDDING_DIMENSIONS = 2_560;
+    private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 4;
+    private static final int TEST_BATCH_MAX_CONCURRENT_REQUESTS = 1;
+    private static final double TEST_LIVE_REQUESTS_PER_SECOND = 3.0;
+    private static final double TEST_BATCH_REQUESTS_PER_SECOND = 1.0;
 
     @Test
     void sharedGatewayCredentialUsesEmbeddingOwnedApplicationProperties() {
@@ -36,6 +40,17 @@ class EmbeddingConfigStartupTest {
             assertEquals(TEST_EMBEDDING_MODEL, appProperties.getEmbeddings().getModel());
             assertEquals(
                     TEST_EMBEDDING_DIMENSIONS, appProperties.getEmbeddings().getDimensions());
+            assertEquals(
+                    TEST_LIVE_MAX_CONCURRENT_REQUESTS,
+                    appProperties.getEmbeddings().getLiveMaxConcurrentRequests());
+            assertEquals(
+                    TEST_BATCH_MAX_CONCURRENT_REQUESTS,
+                    appProperties.getEmbeddings().getBatchMaxConcurrentRequests());
+            assertEquals(
+                    TEST_LIVE_REQUESTS_PER_SECOND, appProperties.getEmbeddings().getLiveRequestsPerSecond());
+            assertEquals(
+                    TEST_BATCH_REQUESTS_PER_SECOND,
+                    appProperties.getEmbeddings().getBatchRequestsPerSecond());
             assertEquals(TEST_EMBEDDING_MODEL, embeddingClient.modelName());
         }
     }

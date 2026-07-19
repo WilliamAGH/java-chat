@@ -295,9 +295,17 @@ public class AppProperties {
     /** Embedding vector configuration. */
     public static class Embeddings {
         private static final String MODEL_KEY = "app.embeddings.model";
+        private static final String LIVE_MAX_CONCURRENT_REQUESTS_KEY = "app.embeddings.live-max-concurrent-requests";
+        private static final String BATCH_MAX_CONCURRENT_REQUESTS_KEY = "app.embeddings.batch-max-concurrent-requests";
+        private static final String LIVE_REQUESTS_PER_SECOND_KEY = "app.embeddings.live-requests-per-second";
+        private static final String BATCH_REQUESTS_PER_SECOND_KEY = "app.embeddings.batch-requests-per-second";
 
         private int dimensions = 2_560;
         private String model = "qwen/qwen3-embedding-4b";
+        private int liveMaxConcurrentRequests = 4;
+        private int batchMaxConcurrentRequests = 1;
+        private double liveRequestsPerSecond = 3.0;
+        private double batchRequestsPerSecond = 1.0;
 
         public int getDimensions() {
             return dimensions;
@@ -317,6 +325,46 @@ public class AppProperties {
             this.model = model;
         }
 
+        /** Returns the per-JVM request concurrency reserved for user-facing retrieval embeddings. */
+        public int getLiveMaxConcurrentRequests() {
+            return liveMaxConcurrentRequests;
+        }
+
+        /** Sets the per-JVM request concurrency reserved for user-facing retrieval embeddings. */
+        public void setLiveMaxConcurrentRequests(int liveMaxConcurrentRequests) {
+            this.liveMaxConcurrentRequests = liveMaxConcurrentRequests;
+        }
+
+        /** Returns the per-JVM request concurrency allowed for ingestion and probe embeddings. */
+        public int getBatchMaxConcurrentRequests() {
+            return batchMaxConcurrentRequests;
+        }
+
+        /** Sets the per-JVM request concurrency allowed for ingestion and probe embeddings. */
+        public void setBatchMaxConcurrentRequests(int batchMaxConcurrentRequests) {
+            this.batchMaxConcurrentRequests = batchMaxConcurrentRequests;
+        }
+
+        /** Returns the maximum user-facing embedding request launch rate per JVM. */
+        public double getLiveRequestsPerSecond() {
+            return liveRequestsPerSecond;
+        }
+
+        /** Sets the maximum user-facing embedding request launch rate per JVM. */
+        public void setLiveRequestsPerSecond(double liveRequestsPerSecond) {
+            this.liveRequestsPerSecond = liveRequestsPerSecond;
+        }
+
+        /** Returns the maximum ingestion and probe embedding request launch rate per JVM. */
+        public double getBatchRequestsPerSecond() {
+            return batchRequestsPerSecond;
+        }
+
+        /** Sets the maximum ingestion and probe embedding request launch rate per JVM. */
+        public void setBatchRequestsPerSecond(double batchRequestsPerSecond) {
+            this.batchRequestsPerSecond = batchRequestsPerSecond;
+        }
+
         Embeddings validateConfiguration() {
             if (dimensions <= 0) {
                 throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
@@ -324,7 +372,24 @@ public class AppProperties {
             if (model == null || model.isBlank()) {
                 throw new IllegalArgumentException(MODEL_KEY + " must not be blank");
             }
+            if (liveMaxConcurrentRequests <= 0) {
+                throw new IllegalArgumentException(
+                        LIVE_MAX_CONCURRENT_REQUESTS_KEY + " must be positive, got: " + liveMaxConcurrentRequests);
+            }
+            if (batchMaxConcurrentRequests <= 0) {
+                throw new IllegalArgumentException(
+                        BATCH_MAX_CONCURRENT_REQUESTS_KEY + " must be positive, got: " + batchMaxConcurrentRequests);
+            }
+            validateRequestRate(LIVE_REQUESTS_PER_SECOND_KEY, liveRequestsPerSecond);
+            validateRequestRate(BATCH_REQUESTS_PER_SECOND_KEY, batchRequestsPerSecond);
             return this;
+        }
+
+        private static void validateRequestRate(String propertyKey, double requestsPerSecond) {
+            if (!Double.isFinite(requestsPerSecond) || requestsPerSecond <= 0.0) {
+                throw new IllegalArgumentException(
+                        propertyKey + " must be finite and positive, got: " + requestsPerSecond);
+            }
         }
     }
 

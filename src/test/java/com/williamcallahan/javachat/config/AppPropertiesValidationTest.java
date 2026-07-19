@@ -122,6 +122,38 @@ class AppPropertiesValidationTest {
         assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
     }
 
+    @Test
+    void rejectsNonPositiveLiveEmbeddingConcurrency() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setLiveMaxConcurrentRequests(0);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonPositiveBatchEmbeddingConcurrency() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setBatchMaxConcurrentRequests(0);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonFiniteLiveEmbeddingRequestRate() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setLiveRequestsPerSecond(Double.NaN);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonPositiveBatchEmbeddingRequestRate() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setBatchRequestsPerSecond(0.0);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
     private static AppProperties validAppProperties() {
         AppProperties appProperties = new AppProperties();
         AppProperties.Llm llmProperties = appProperties.getLlm();

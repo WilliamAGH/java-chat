@@ -24,6 +24,9 @@ class OpenAiCompatibleEmbeddingClientWireTest {
     private static final String TEST_API_KEY = "wire-test-api-key";
     private static final int EMBEDDING_DIMENSIONS = 2_560;
     private static final int BATCH_INPUT_COUNT = 32;
+    private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 4;
+    private static final int TEST_BATCH_MAX_CONCURRENT_REQUESTS = 1;
+    private static final double TEST_UNTHROTTLED_REQUESTS_PER_SECOND = 1_000.0;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -37,7 +40,15 @@ class OpenAiCompatibleEmbeddingClientWireTest {
         String gatewayBaseUrl =
                 "http://127.0.0.1:" + embeddingServer.getAddress().getPort() + "/v1";
         try (OpenAiCompatibleEmbeddingClient embeddingClient = OpenAiCompatibleEmbeddingClient.create(
-                gatewayBaseUrl, TEST_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS)) {
+                gatewayBaseUrl,
+                TEST_API_KEY,
+                new OpenAiCompatibleEmbeddingClient.GatewaySettings(
+                        EMBEDDING_MODEL,
+                        EMBEDDING_DIMENSIONS,
+                        OpenAiCompatibleEmbeddingClient.RequestLimits.live(
+                                TEST_LIVE_MAX_CONCURRENT_REQUESTS, TEST_UNTHROTTLED_REQUESTS_PER_SECOND),
+                        OpenAiCompatibleEmbeddingClient.RequestLimits.batch(
+                                TEST_BATCH_MAX_CONCURRENT_REQUESTS, TEST_UNTHROTTLED_REQUESTS_PER_SECOND)))) {
             List<float[]> liveEmbeddings = embeddingClient.embed(List.of("user retrieval"), LlmGatewayTier.LIVE);
             List<String> batchInputs = new ArrayList<>();
             for (int inputIndex = 0; inputIndex < BATCH_INPUT_COUNT; inputIndex++) {

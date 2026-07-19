@@ -82,6 +82,14 @@ public class EmbeddingConfig {
         }
         log.info("[EMBEDDING] Using shared OpenAI-compatible gateway");
         return OpenAiCompatibleEmbeddingClient.create(
-                trimmedOpenAiBaseUrl, trimmedOpenAiApiKey, embeddings.getModel(), embeddings.getDimensions());
+                trimmedOpenAiBaseUrl,
+                trimmedOpenAiApiKey,
+                new OpenAiCompatibleEmbeddingClient.GatewaySettings(
+                        embeddings.getModel(),
+                        embeddings.getDimensions(),
+                        OpenAiCompatibleEmbeddingClient.RequestLimits.live(
+                                embeddings.getLiveMaxConcurrentRequests(), embeddings.getLiveRequestsPerSecond()),
+                        OpenAiCompatibleEmbeddingClient.RequestLimits.batch(
+                                embeddings.getBatchMaxConcurrentRequests(), embeddings.getBatchRequestsPerSecond())));
     }
 }

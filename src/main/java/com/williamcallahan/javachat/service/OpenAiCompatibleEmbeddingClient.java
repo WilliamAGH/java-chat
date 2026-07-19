@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.google.common.util.concurrent.RateLimiter;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.RequestOptions;
@@ -12,6 +13,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,52 +39,116 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private final String modelName;
     private final int dimensionsHint;
     private final boolean closeBatchEmbeddingClient;
+    private final Semaphore liveRequestPermits;
+    private final Semaphore batchRequestPermits;
+    private final RateLimiter liveRequestRateLimiter;
+    private final RateLimiter batchRequestRateLimiter;
+    private final Duration liveRequestTimeout;
+    private final Duration batchRequestTimeout;
     private final AtomicInteger activeForegroundEmbeddingCount = new AtomicInteger();
+
+    /**
+     * Defines the gateway-owned embedding model shape and per-JVM request admission limits.
+     *
+     * @param modelName embedding model alias exposed by the gateway
+     * @param dimensions exact dense-vector dimensions
+     * @param liveRequestLimits user-facing request admission limits
+     * @param batchRequestLimits ingestion, probe, and warm-up request admission limits
+     */
+    public record GatewaySettings(
+            String modelName, int dimensions, RequestLimits liveRequestLimits, RequestLimits batchRequestLimits) {
+        /** Validates the gateway settings before any SDK clients are constructed. */
+        public GatewaySettings {
+            modelName = requireConfiguredModel(modelName);
+            validateDimensions(dimensions);
+            liveRequestLimits = Objects.requireNonNull(liveRequestLimits, "liveRequestLimits");
+            batchRequestLimits = Objects.requireNonNull(batchRequestLimits, "batchRequestLimits");
+        }
+    }
+
+    /**
+     * Defines one tier's per-JVM concurrency, launch rate, and whole-request deadline.
+     *
+     * @param maxConcurrentRequests maximum in-flight requests
+     * @param requestsPerSecond maximum request launch rate
+     * @param totalTimeout whole-operation timeout including local admission and the HTTP call
+     */
+    public record RequestLimits(int maxConcurrentRequests, double requestsPerSecond, Duration totalTimeout) {
+        /** Validates request limits before they become active. */
+        public RequestLimits {
+            validateRequestConcurrency(maxConcurrentRequests);
+            validateRequestRate(requestsPerSecond);
+            if (totalTimeout == null || totalTimeout.isZero() || totalTimeout.isNegative()) {
+                throw new IllegalArgumentException("Embedding request timeout must be positive");
+            }
+        }
+
+        /** Creates user-facing request limits with the production retrieval timeout. */
+        public static RequestLimits live(int maxConcurrentRequests, double requestsPerSecond) {
+            return new RequestLimits(
+                    maxConcurrentRequests,
+                    requestsPerSecond,
+                    Duration.ofSeconds(LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS));
+        }
+
+        /** Creates ingestion and probe limits with the batch-capacity timeout. */
+        public static RequestLimits batch(int maxConcurrentRequests, double requestsPerSecond) {
+            return new RequestLimits(
+                    maxConcurrentRequests,
+                    requestsPerSecond,
+                    Duration.ofSeconds(BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS));
+        }
+    }
 
     /**
      * Creates an OpenAI-compatible embedding client backed by a remote REST API endpoint.
      *
      * @param baseUrl base URL for the embedding API
      * @param apiKey API key for the embedding provider
-     * @param modelName model identifier for embeddings
-     * @param dimensionsHint expected embedding dimensions (used as a hint)
+     * @param gatewaySettings embedding model shape and per-tier request admission limits
      * @return embedding client configured for the remote endpoint
      */
     public static OpenAiCompatibleEmbeddingClient create(
-            String baseUrl, String apiKey, String modelName, int dimensionsHint) {
-        validateDimensions(dimensionsHint);
+            String baseUrl, String apiKey, GatewaySettings gatewaySettings) {
+        GatewaySettings requiredGatewaySettings = Objects.requireNonNull(gatewaySettings, "gatewaySettings");
         String configuredApiKey = requireConfiguredApiKey(apiKey);
         String configuredBaseUrl = requireVersionedBaseUrl(baseUrl);
         OpenAIClient liveEmbeddingClient = createTieredClient(configuredApiKey, configuredBaseUrl, LlmGatewayTier.LIVE);
         OpenAIClient batchEmbeddingClient =
                 createTieredClient(configuredApiKey, configuredBaseUrl, LlmGatewayTier.BATCH);
-        return new OpenAiCompatibleEmbeddingClient(
-                liveEmbeddingClient, batchEmbeddingClient, requireConfiguredModel(modelName), dimensionsHint);
+        return new OpenAiCompatibleEmbeddingClient(liveEmbeddingClient, batchEmbeddingClient, requiredGatewaySettings);
     }
 
-    static OpenAiCompatibleEmbeddingClient create(OpenAIClient client, String modelName, int dimensionsHint) {
-        validateDimensions(dimensionsHint);
+    static OpenAiCompatibleEmbeddingClient create(OpenAIClient client, GatewaySettings gatewaySettings) {
         OpenAIClient embeddingClient = Objects.requireNonNull(client, "client");
         return new OpenAiCompatibleEmbeddingClient(
-                embeddingClient, embeddingClient, requireConfiguredModel(modelName), dimensionsHint, false);
+                embeddingClient, embeddingClient, Objects.requireNonNull(gatewaySettings, "gatewaySettings"), false);
     }
 
     OpenAiCompatibleEmbeddingClient(
-            OpenAIClient liveEmbeddingClient, OpenAIClient batchEmbeddingClient, String modelName, int dimensionsHint) {
-        this(liveEmbeddingClient, batchEmbeddingClient, modelName, dimensionsHint, true);
+            OpenAIClient liveEmbeddingClient, OpenAIClient batchEmbeddingClient, GatewaySettings gatewaySettings) {
+        this(liveEmbeddingClient, batchEmbeddingClient, gatewaySettings, true);
     }
 
     private OpenAiCompatibleEmbeddingClient(
             OpenAIClient liveEmbeddingClient,
             OpenAIClient batchEmbeddingClient,
-            String modelName,
-            int dimensionsHint,
+            GatewaySettings gatewaySettings,
             boolean closeBatchEmbeddingClient) {
         this.liveEmbeddingClient = Objects.requireNonNull(liveEmbeddingClient, "liveEmbeddingClient");
         this.batchEmbeddingClient = Objects.requireNonNull(batchEmbeddingClient, "batchEmbeddingClient");
-        this.modelName = modelName;
-        this.dimensionsHint = dimensionsHint;
+        GatewaySettings requiredGatewaySettings = Objects.requireNonNull(gatewaySettings, "gatewaySettings");
+        this.modelName = requiredGatewaySettings.modelName();
+        this.dimensionsHint = requiredGatewaySettings.dimensions();
         this.closeBatchEmbeddingClient = closeBatchEmbeddingClient;
+        RequestLimits liveLimits = requiredGatewaySettings.liveRequestLimits();
+        RequestLimits batchLimits = requiredGatewaySettings.batchRequestLimits();
+        this.liveRequestPermits = new Semaphore(liveLimits.maxConcurrentRequests(), true);
+        this.batchRequestPermits = new Semaphore(batchLimits.maxConcurrentRequests(), true);
+        this.liveRequestRateLimiter = RateLimiter.create(liveLimits.requestsPerSecond());
+        this.batchRequestRateLimiter = RateLimiter.create(batchLimits.requestsPerSecond());
+        this.liveRequestTimeout = liveLimits.totalTimeout();
+        this.batchRequestTimeout = batchLimits.totalTimeout();
     }
 
     @Override
@@ -103,8 +170,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
      *
      * <p>The OpenAI Java SDK's blocking embedding API does not expose a cancellation handle.
      * Therefore a foreground request that arrives after this check cannot preempt an already
-     * admitted probe. Batch clients perform one attempt, which bounds that unavoidable race
-     * without delaying a foreground request behind an application-level lock.</p>
+     * admitted probe. Each admitted embedding request performs one SDK attempt, which keeps request
+     * rate admission exact and bounds that unavoidable race without mixing live and batch limits.</p>
      *
      * @throws EmbeddingProbeDeferredException when foreground embedding work is already active
      */
@@ -126,9 +193,35 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 .model(modelName)
                 .inputOfArrayOfStrings(texts)
                 .build();
-        RequestOptions requestOptions =
-                RequestOptions.builder().timeout(embeddingTimeout(requestTier)).build();
-        return execute(clientFor(requestTier), embeddingRequest, requestOptions, texts.size());
+        Semaphore requestPermits = requestPermitsFor(requestTier);
+        long requestDeadlineNanos =
+                System.nanoTime() + requestTimeoutFor(requestTier).toNanos();
+        boolean requestPermitAcquired = false;
+        try {
+            if (!requestPermits.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
+                throw new EmbeddingServiceUnavailableException(
+                        "Gateway embedding request concurrency limit exceeded the request deadline");
+            }
+            requestPermitAcquired = true;
+            Duration rateLimitBudget = remainingRequestDuration(requestDeadlineNanos);
+            if (!requestRateLimiterFor(requestTier).tryAcquire(rateLimitBudget)) {
+                throw new EmbeddingServiceUnavailableException(
+                        "Gateway embedding request rate limit exceeded the request deadline");
+            }
+            Duration transportBudget = remainingRequestDuration(requestDeadlineNanos);
+            RequestOptions requestOptions = RequestOptions.builder()
+                    .timeout(embeddingTimeout(transportBudget))
+                    .build();
+            return execute(clientFor(requestTier), embeddingRequest, requestOptions, texts.size());
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new EmbeddingServiceUnavailableException(
+                    "Interrupted while waiting for a gateway embedding request permit", interruptedException);
+        } finally {
+            if (requestPermitAcquired) {
+                requestPermits.release();
+            }
+        }
     }
 
     private List<float[]> execute(
@@ -179,17 +272,14 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return new EmbeddingServiceUnavailableException(failureMessage, exception);
     }
 
-    private Timeout embeddingTimeout(LlmGatewayTier requestTier) {
-        Duration connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS);
-        Duration requestTimeout =
-                switch (requestTier) {
-                    case LIVE -> Duration.ofSeconds(LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS);
-                    case BATCH -> Duration.ofSeconds(BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS);
-                };
+    private Timeout embeddingTimeout(Duration transportBudget) {
+        Duration connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS).compareTo(transportBudget) <= 0
+                ? Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS)
+                : transportBudget;
         return Timeout.builder()
                 .connect(connectTimeout)
-                .request(requestTimeout)
-                .read(requestTimeout)
+                .request(transportBudget)
+                .read(transportBudget)
                 .build();
     }
 
@@ -338,6 +428,32 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return modelName;
     }
 
+    private static void validateRequestConcurrency(int maxConcurrentRequests) {
+        if (maxConcurrentRequests <= 0) {
+            throw new IllegalArgumentException(
+                    "Embedding request concurrency must be positive, got: " + maxConcurrentRequests);
+        }
+    }
+
+    private static void validateRequestRate(double requestsPerSecond) {
+        if (!Double.isFinite(requestsPerSecond) || requestsPerSecond <= 0.0) {
+            throw new IllegalArgumentException(
+                    "Embedding request rate must be finite and positive, got: " + requestsPerSecond);
+        }
+    }
+
+    private static long remainingRequestNanos(long requestDeadlineNanos) {
+        long remainingNanos = requestDeadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) {
+            throw new EmbeddingServiceUnavailableException("Gateway embedding request deadline elapsed locally");
+        }
+        return remainingNanos;
+    }
+
+    private static Duration remainingRequestDuration(long requestDeadlineNanos) {
+        return Duration.ofNanos(remainingRequestNanos(requestDeadlineNanos));
+    }
+
     private static String requireVersionedBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalStateException("OpenAI gateway base URL is not configured");
@@ -353,10 +469,8 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         OpenAIOkHttpClient.Builder clientBuilder = OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
-                .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier.requestHeader());
-        if (requestTier == LlmGatewayTier.BATCH) {
-            clientBuilder.maxRetries(0);
-        }
+                .putHeader(LlmGatewayTier.REQUEST_TIER_HEADER, requestTier.requestHeader())
+                .maxRetries(0);
         return clientBuilder.build();
     }
 
@@ -364,6 +478,27 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return switch (requestTier) {
             case LIVE -> liveEmbeddingClient;
             case BATCH -> batchEmbeddingClient;
+        };
+    }
+
+    private Semaphore requestPermitsFor(LlmGatewayTier requestTier) {
+        return switch (requestTier) {
+            case LIVE -> liveRequestPermits;
+            case BATCH -> batchRequestPermits;
+        };
+    }
+
+    private RateLimiter requestRateLimiterFor(LlmGatewayTier requestTier) {
+        return switch (requestTier) {
+            case LIVE -> liveRequestRateLimiter;
+            case BATCH -> batchRequestRateLimiter;
+        };
+    }
+
+    private Duration requestTimeoutFor(LlmGatewayTier requestTier) {
+        return switch (requestTier) {
+            case LIVE -> liveRequestTimeout;
+            case BATCH -> batchRequestTimeout;
         };
     }
 
