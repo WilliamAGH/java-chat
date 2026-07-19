@@ -3,7 +3,8 @@
 Command reference for documentation scraping, embedding, and ingestion into Qdrant.
 
 Incremental runs are the default — unchanged content is skipped via SHA-256 hash markers.
-"Full" runs require clearing local state and, optionally, resetting Qdrant collections.
+"Full" runs publish into fresh environment- and generation-specific collections and state roots. Existing
+collections and state remain read-only for rollback; never clear or rewrite them to change vector dimensions.
 
 ---
 
@@ -12,8 +13,8 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 | What | Incremental | Full |
 |---|---|---|
 | **Scrape** (mirror HTML) | `make fetch-all` | `make fetch-force` |
-| **Ingest** (chunk → embed → upload) | `make process-all` | Clear state, then `make process-all` ([details](#full-re-ingest)) |
-| **Both** | `make full-pipeline` | `make fetch-force`, then clear state, then `make process-all` |
+| **Ingest** (chunk → embed → upload) | `make process-all` | Configure fresh generation collections/state, then `make process-all` ([details](#full-re-ingest)) |
+| **Both** | `make full-pipeline` | Configure fresh generation collections/state, then `make fetch-force` and `make process-all` |
 | **Ingest subset** | Set `DOCS_SETS` to a mirror path, then run `make process-doc-sets` | — |
 | **Ingest GitHub repo** | `REPO_URL=https://github.com/owner/repo make process-github-repo` | — |
 
@@ -21,7 +22,7 @@ Incremental runs are the default — unchanged content is skipped via SHA-256 ha
 
 ## Scrape (fetch HTML mirrors)
 
-The scrape phase mirrors upstream documentation into `data/docs/` using `wget`.
+The scrape phase mirrors upstream documentation into the configured `DOCS_DIR` (default `data/docs/`) using `wget`.
 
 ### Source ownership
 
@@ -67,11 +68,12 @@ source dispatch is the owner of accepted identifiers.
 
 ### What "incremental" means for scraping
 
-- `wget --mirror --timestamping` skips files that haven't changed on the server.
-- Sources with fewer HTML files than their configured minimum are quarantined and re-fetched when `allowPartial=false`.
-- Sources with `allowPartial=true` retain nonempty, below-minimum mirrors for incremental reruns, but the fetch exits nonzero until they reach the configured minimum. Consequently, `make full-pipeline` stops before Qdrant ingestion while any retained mirror remains partial.
+- Each source fetches into a source/version-specific sibling staging root on the same filesystem as `DOCS_DIR`.
+- Only a staging root with the same source identity and passing integrity checks is resumed; malformed or stale attempts are quarantined.
+- Publication requires a successful fetch, the source-specific HTML minimum, the expected stable-version identity, and clean paths with no preview, temporary, malformed, query-duplicate, or non-content files.
+- A validated stage atomically replaces its canonical root. The previous canonical root is preserved until replacement succeeds, and quarantine data remains available through downstream verification.
+- No partial mirror is published as a successful canonical source.
 - Java API sources use a deterministic Python seed generator (`scripts/oracle_javadoc_seed.py`) to avoid incomplete recursive crawls.
-- Structured non-Java seed sources accept only an exact current seed mirror; an old aggregate HTML count cannot satisfy completeness.
 
 ---
 
@@ -110,8 +112,8 @@ REPO_PATH=/absolute/path/to/repository make process-github-repo
 # GitHub URL (auto clone/pull cache)
 REPO_URL=https://github.com/owner/repository make process-github-repo
 
-# Batch sync existing github-* collections by remote HEAD
-SYNC_EXISTING=1 make process-github-repo
+# Sync repositories represented by the exact active github-${SPRING_PROFILE}-qwen3-embedding-4b-2560- prefix
+SPRING_PROFILE=local SYNC_EXISTING=1 make process-github-repo
 ```
 
 Advanced option:
@@ -131,27 +133,31 @@ Limit ingestion to specific doc sets by path. Non-Java sets also accept short ID
 ```bash
 DOCS_SETS=java/java25-complete make process-doc-sets
 
-# Legacy non-Java example
-./scripts/process_all_to_qdrant.sh --doc-sets=spring-framework-complete
+# Canonical Spring roots remain separate
+./scripts/process_all_to_qdrant.sh --doc-sets=spring-framework-reference,spring-framework-api
 ```
 
-Common legacy non-Java doc sets are:
+Canonical framework doc sets include:
 
 | ID | Content |
 |---|---|
-| `spring-framework-complete` | Spring Framework reference + Javadoc |
-| `spring-ai-complete` | Spring AI reference + API (stable + 2.0) |
+| `spring-framework-reference` | Spring Framework reference |
+| `spring-framework-api` | Spring Framework Javadocs |
+| `spring-ai-reference` | Spring AI stable reference |
+| `spring-ai-api-stable` | Spring AI stable API |
 | `books` | PDF books |
+
+`DOCS_SETS=all` selects every canonical full source. Quick Spring mirrors are explicitly opt-in and cannot be combined with canonical full sources. A selected source that is missing, unreadable, or empty fails the CLI.
 
 ### What "incremental" means for ingestion
 
-- Per-chunk SHA-256 hash markers in `data/index/` track what has been processed.
+- Per-chunk SHA-256 hash markers in the configured generation-specific index root track what has been processed.
 - A file is skipped only when its file-level marker has the same size, mtime, content SHA-256,
   extractor-semantics version, and provenance-aware ingestion fingerprint as the current ingestion contract.
-- File-level markers (`data/index/file_*.marker`) include those values plus the ingested chunk hashes.
+- File-level markers (`DOCS_INDEX_DIR/file_*.marker`) include those values plus the ingested chunk hashes.
   A source-content, provenance, or extractor-semantics change triggers strict stale-vector and parsed-chunk
-  pruning before re-chunking and upserting to Qdrant. Older markers missing a current contract field are
-  reindexed once.
+  same-collection replacement after the complete successor has been embedded and upserted. A marker owned by
+  another or unknown collection generation fails closed and cannot delete or overwrite prior-generation state.
 
 ---
 
@@ -163,14 +169,14 @@ Ingestion writes to four Qdrant collections, each containing **dense vectors** (
 
 | Collection | Default name | Content |
 |---|---|---|
-| Books | `java-chat-books` | PDF books |
-| Docs | `java-docs` | Java API, Spring reference/API, Oracle Javase |
-| Articles | `java-articles` | IBM articles, JetBrains blog posts |
-| PDFs | `java-pdfs` | Non-book PDFs (reserved) |
+| Books | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` | PDF books |
+| Docs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` | Java API, Spring reference/API, Oracle Javase |
+| Articles | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` | IBM articles, JetBrains blog posts |
+| PDFs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` | Non-book PDFs (reserved) |
 
 Each collection has two named vector spaces:
 
-- **`dense`** — 4096-dimensional embeddings from the configured embedding provider (default: Qwen3 8B)
+- **`dense`** — 2,560-dimensional Qwen3-Embedding-4B vectors
 - **`bm25`** — sparse lexical vectors computed via Lucene `StandardAnalyzer` tokenization and hashed term-frequency values, with Qdrant IDF modifier
 
 ### How retrieval works
@@ -193,30 +199,36 @@ See [configuration.md](configuration.md#qdrant) for the full list of Qdrant envi
 
 ## Full re-ingest
 
-There is no single "force" flag for ingestion. A full re-ingest requires clearing local state:
+There is no in-place generation conversion. A full re-ingest creates new environment/generation collection names and uses the matching new state roots:
 
 1. Stop the app and any running ingestion processes.
 
-2. Clear local deduplication state so all content is re-chunked and re-embedded:
+2. Configure fresh state roots, for example local:
 
 ```bash
-rm -rf data/index data/parsed
+export DOCS_SNAPSHOT_DIR="$PWD/data/qwen3-embedding-4b-2560/local/snapshots"
+export DOCS_PARSED_DIR="$PWD/data/qwen3-embedding-4b-2560/local/parsed"
+export DOCS_INDEX_DIR="$PWD/data/qwen3-embedding-4b-2560/local/index"
+export QDRANT_COLLECTION_BOOKS=java-chat-local-qwen3-embedding-4b-2560-books
+export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-4b-2560-docs
+export QDRANT_COLLECTION_ARTICLES=java-chat-local-qwen3-embedding-4b-2560-articles
+export QDRANT_COLLECTION_PDFS=java-chat-local-qwen3-embedding-4b-2560-pdfs
 ```
 
-3. Optionally, delete Qdrant collections to start clean (they are auto-created on next startup):
-
-```bash
-# Local Qdrant example (REST port 8087)
-for coll in java-chat-books java-docs java-articles java-pdfs; do
-  curl -X DELETE "http://localhost:8087/collections/$coll"
-done
-```
+3. Start the generation-specific Qdrant 1.18.3 Compose project. Preserve old collections and state read-only for rollback.
 
 4. Re-run ingestion:
 
 ```bash
+export SPRING_PROFILE=local
+export DOCS_DIR=/absolute/path/to/documentation-mirror
 make process-all
 ```
+
+Before launching the non-web CLI, `process_all_to_qdrant.sh` requires an exact `SPRING_PROFILE` of `local`,
+`dev`, or `prod`, a readable `DOCS_DIR`, and writable `DOCS_SNAPSHOT_DIR`, `DOCS_PARSED_DIR`, and
+`DOCS_INDEX_DIR`. It exports `DOCS_DIR` to the child process and preserves
+`spring.main.web-application-type=none`.
 
 ---
 
@@ -242,13 +254,18 @@ The ingestion scripts use Gradle to build a runnable JAR:
 ./gradlew buildForScripts
 ```
 
-To run the CLI directly:
+To run the CLI directly, load the same guarded environment contract used by the scripts:
 
 ```bash
 app_jar=$(ls -1 build/libs/*.jar | grep -v -- "-plain.jar" | head -1)
+set -a
+source .env
+set +a
 
 # With doc set filtering
-DOCS_SETS=spring-framework-complete java -Dspring.profiles.active=cli -jar "$app_jar"
+DOCS_DIR=/absolute/path/to/docs DOCS_SETS=spring-framework-reference \
+  java -Dspring.profiles.active=cli -jar "$app_jar" \
+  --spring.main.web-application-type=none --server.port=0
 ```
 
 The docs root defaults to `data/docs` unless `DOCS_DIR` is set.

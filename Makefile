@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo update-github-repos full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test test-shell test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -19,9 +19,21 @@ build: ## Build the project (skip tests)
 build-with-lock: frontend-build-with-lock
 	$(GRADLEW) build -x test
 
-test: ## Run tests (loads .env if present)
+test: test-shell ## Run tests (loads .env if present)
 	@$(call load_env); \
 	  $(LOCKED_GRADLEW) test
+
+test-shell: ## Run deterministic ingestion and fetch shell contract tests
+	bash scripts/test_documentation_fetch_projection.sh
+	bash scripts/test_documentation_fetch_publication.sh
+	bash scripts/test_embedding_preflight.sh
+	bash scripts/test_github_sync_failure_contract.sh
+	bash scripts/test_process_all_to_qdrant_environment.sh
+	bash scripts/test_process_all_to_qdrant_postconditions.sh
+	bash scripts/test_prune_retired_java_api_vectors.sh
+
+test-qdrant-integration: ## Run synthetic hybrid-contract checks against local Qdrant 1.18.3
+	bash scripts/test_qdrant_1_18_integration.sh
 
 lint: lint-ast lint-frontend ## Run static analysis (Java + Frontend)
 	$(LOCKED_GRADLEW) spotbugsMain spotbugsTest pmdMain pmdTest
@@ -139,9 +151,6 @@ process-github-repo: ## Ingest GitHub repo by local path or URL, or sync existin
 		exit 1; \
 	fi
 	./scripts/process_github_repo.sh
-
-update-github-repos: ## Check all GitHub repo collections for updates and re-ingest changed ones
-	./scripts/update_all_github_repos.sh
 
 full-pipeline: ## Complete pipeline: fetch docs, then process into Qdrant
 	@echo "Starting full documentation pipeline..."

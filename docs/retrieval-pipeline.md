@@ -76,7 +76,7 @@ Each query is encoded into two vectors:
 
 | Vector | Named vector | Model | Dimensions | Source |
 |---|---|---|---|---|
-| Dense | `dense` | Qwen3-embedding-8B | 4096 | `EmbeddingClient.embed()` |
+| Dense | `dense` | Qwen3-Embedding-4B | 2560 | `EmbeddingClient.embed()` |
 | Sparse | `bm25` | Murmur3 feature-hashed TF | variable | `LexicalSparseVectorEncoder.encode()` |
 
 ### Sparse vector encoding
@@ -125,10 +125,10 @@ When `app.qdrant.fail-on-partial-search-error=true` (default), any collection qu
 
 | Collection | Default name | Property |
 |---|---|---|
-| Books | `java-chat-books` | `app.qdrant.collections.books` |
-| Docs | `java-docs` | `app.qdrant.collections.docs` |
-| Articles | `java-articles` | `app.qdrant.collections.articles` |
-| PDFs | `java-pdfs` | `app.qdrant.collections.pdfs` |
+| Books | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` | `app.qdrant.collections.books` |
+| Docs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` | `app.qdrant.collections.docs` |
+| Articles | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` | `app.qdrant.collections.articles` |
+| PDFs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` | `app.qdrant.collections.pdfs` |
 
 ### Metadata extraction
 
@@ -170,7 +170,7 @@ Each document is presented as `[index] title | url` followed by the first 500 ch
 
 ### LLM call
 
-- Model: same provider as chat (OpenAI/GitHub Models)
+- Model: the configured chat provider and chat model
 - Temperature: `0.0` (deterministic)
 - Timeout: configurable via `app.rag.reranker-timeout` (default 30s)
 - Response format: `{"order": [0, 3, 1, 2, ...]}` (0-based indices)
@@ -198,6 +198,10 @@ where `docsHash` is `Integer.toHexString()` of concatenated document URLs (or te
 ### No fallback
 
 On any failure (timeout, parse error, LLM unavailable), `RerankerService` throws `RerankingFailureException`. There is no fallback to original ordering.
+
+Chat and embeddings share `OPENAI_BASE_URL` and `OPENAI_API_KEY`, but embedding model selection is independent
+of `OPENAI_MODEL`: retrieval always embeds with `qwen/qwen3-embedding-4b`. User-facing retrieval sends
+`X-Tier: production-z`; ingestion, probes, and warmups send `X-Tier: batch`.
 
 ---
 
@@ -282,10 +286,10 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 
 | Property | Default |
 |---|---|
-| `app.qdrant.collections.books` | `java-chat-books` |
-| `app.qdrant.collections.docs` | `java-docs` |
-| `app.qdrant.collections.articles` | `java-articles` |
-| `app.qdrant.collections.pdfs` | `java-pdfs` |
+| `app.qdrant.collections.books` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` |
+| `app.qdrant.collections.docs` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` |
+| `app.qdrant.collections.articles` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` |
+| `app.qdrant.collections.pdfs` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` |
 
 All four must be non-blank and distinct (validated on startup).
 
@@ -305,6 +309,7 @@ All four must be non-blank and distinct (validated on startup).
 
 | Property | Default | Description |
 |---|---|---|
-| `app.embeddings.dimensions` | `4096` (application and code defaults) | Must match the active embedding model output size |
+| `app.embeddings.model` | `qwen/qwen3-embedding-4b` | Embedding-owned gateway model; independent from `OPENAI_MODEL` |
+| `app.embeddings.dimensions` | `2560` (application and code defaults) | Must match the active embedding model output size |
 
-For embedding provider selection (local vs. remote vs. OpenAI), see [configuration.md#embeddings](configuration.md#embeddings).
+For the shared gateway and explicit local development mode, see [configuration.md#embeddings](configuration.md#embeddings).

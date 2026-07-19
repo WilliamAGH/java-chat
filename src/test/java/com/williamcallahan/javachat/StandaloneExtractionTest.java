@@ -42,8 +42,6 @@ public class StandaloneExtractionTest {
                 .map(documentationSource -> new ExtractionSource(
                         documentationSource.relativeMirrorPath(), documentationSource.displayName()))
                 .toList());
-        extractionSources.add(new ExtractionSource("spring-framework-complete", "Spring Framework"));
-
         System.out.println("\n========================================");
         System.out.println("HTML EXTRACTION QUALITY CONTROL TEST");
         System.out.println("========================================\n");

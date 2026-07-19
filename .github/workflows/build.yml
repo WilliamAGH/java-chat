@@ -75,7 +75,7 @@ jobs:
         run: ./scripts/with_build_state_lock.sh ./gradlew --version
       
       - name: Run tests
-        run: ./gradlew test --no-daemon
+        run: make test
       
       - name: Build application
         run: ./gradlew build -x test --no-daemon

@@ -7,7 +7,7 @@ Java Chat supports GitHub source-code ingestion into dedicated hybrid Qdrant col
 - Use one canonical repository identity for all ingestion entrypoints.
 - Prevent local-path and URL ingestion from creating duplicate variants of the same repo.
 - Reindex only changed files on reruns.
-- Provide batch sync for all existing `github-*` collections.
+- Sync only collections under the exact active environment/generation prefix.
 
 ## Canonical repository identity
 
@@ -16,7 +16,7 @@ The canonical owner for repository identity and collection-name validation is
 `require_canonical_collection_name`.
 
 Every ingestion entrypoint asks that owner to validate the repository before processing. The result
-is one collection for each GitHub repository: local-clone, URL, and batch-sync ingestion reject a
+is one environment- and generation-specific collection for each GitHub repository: local-clone, URL, and sync ingestion reject a
 collection name that does not match the source repository. Ingested content retains the repository
 metadata required for incremental synchronization.
 
@@ -70,15 +70,16 @@ SYNC_EXISTING=1 make process-github-repo
 
 Batch sync flow:
 
-1. Discover all Qdrant collections prefixed with `github-`.
-2. Read the source repository and indexed revision from each collection's payload metadata.
-3. Verify collection identity through `require_canonical_collection_name`.
-4. Resolve the source repository's remote HEAD commit.
-5. Reingest only collections whose source has changed.
+1. Require `SPRING_PROFILE` to be exactly `local`, `dev`, or `prod`.
+2. Discover only Qdrant collections prefixed with `github-${SPRING_PROFILE}-qwen3-embedding-4b-2560-`.
+3. Read the source repository and indexed revision from each collection's payload metadata.
+4. Verify collection identity through `require_canonical_collection_name`.
+5. Resolve the source repository's remote HEAD commit.
+6. Reingest only collections whose source has changed.
 
 ## Incremental update behavior
 
-Per file, ingestion stores marker metadata in `data/index/file_*.marker`:
+Per file, ingestion stores marker metadata in the active generation's configured index root:
 
 - file size
 - mtime
@@ -88,32 +89,20 @@ Per file, ingestion stores marker metadata in `data/index/file_*.marker`:
 On rerun:
 
 - unchanged file + sufficient Qdrant points: skipped
-- changed file: strict prune and reindex
+- changed file: embed and upsert the complete replacement, then remove stale same-collection point IDs and local chunks
+- marker from another or unknown collection generation: fail without vector, marker, or parsed-state mutation
 
-Strict prune removes:
-
-- stale points for that file URL in the target collection
-- old chunk hash markers
-- old parsed chunk text files
-- old file marker
-
-Then the file is chunked and upserted again.
+An embedding or upsert failure leaves the prior complete page and its marker intact. The active marker is replaced only after the replacement and local cleanup succeed.
 
 ## Failure diagnostics and retry behavior
 
 - GitHub ingestion fails fast when embedding or vector writes fail.
-- Preflight now validates remote embedding payload quality before ingestion starts:
-  - plain text probe
-  - code-like multiline probe
-  - probe failures include explicit endpoint/model context and payload anomaly details
-  - plain-text failures stop immediately
-  - code-like failures stop by default; set `EMBEDDING_CODE_PROBE_MODE=warn` to continue explicitly
+- Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 32 before ingestion starts.
 - When null/invalid vectors are detected, diagnostics now state likely causes explicitly:
   - wrong endpoint (must resolve to `/v1/embeddings`)
   - non-embedding model
   - provider payload bug
-- Remote embedding calls use exponential backoff retries for transient HTTP errors (for example `429`, `5xx`, and provider-side `400: null` gateway responses).
-- Remote embedding response-shape failures that are typically transient (for example null/missing embedding entries) also retry with exponential backoff before failing terminally.
+- Batch ingestion requests perform one provider attempt so a failed batch cannot silently become partial success.
 - On terminal failure, `scripts/process_github_repo.sh` prints a failure summary extracted from `process_github_repo.log`, including:
   - failure source classification (`AI Embedding API`, `Qdrant API`, `GitHub API`, or `Application/Unknown`),
   - explicit rate-limit diagnosis (`No rate limit detected` or detected API + evidence),
@@ -124,11 +113,11 @@ Then the file is chunked and upserted again.
 
 ## Collection and payload indexes
 
-The canonical GitHub payload-index inventory is owned by
+GitHub payload-index behavior is owned by
 [`scripts/lib/github_identity.sh`](../scripts/lib/github_identity.sh), specifically
-`ensure_github_payload_indexes`. The pipeline creates a missing collection from the reference
-schema and asks that owner to ensure the canonical indexes before ingestion. This keeps GitHub
-collections consistently queryable while centralizing future index changes.
+`ensure_github_payload_indexes`. A missing collection clones only the active environment's
+`QDRANT_COLLECTION_DOCS` schema. Both existing and newly cloned collections must validate as named
+`dense` 2,560/Cosine plus `bm25`/IDF with on-disk payloads before ingestion.
 
 ## Environment variables
 
@@ -139,6 +128,10 @@ Common optional variables for GitHub ingestion:
 - `REPO_CACHE_DIR`
 - `REPO_CACHE_PATH` (single-repo URL mode only)
 - `SYNC_EXISTING`
-- `QDRANT_REFERENCE_COLLECTION` (default `java-docs`)
+- `SPRING_PROFILE` (exactly `local`, `dev`, or `prod`)
+- `QDRANT_COLLECTION_DOCS` (active environment/generation schema source)
+- `DOCS_SNAPSHOT_DIR` (matching environment/generation snapshot state root)
+- `DOCS_PARSED_DIR` (matching environment/generation parsed state root)
+- `DOCS_INDEX_DIR` (matching environment/generation marker state root)
 
 Qdrant connectivity and embedding provider variables follow the existing pipeline conventions in `docs/configuration.md`.
