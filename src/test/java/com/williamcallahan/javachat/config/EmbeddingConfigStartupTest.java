@@ -1,9 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient;
@@ -14,46 +12,45 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.core.env.Environment;
 
 /**
  * Verifies deployment-shaped embedding provider configuration during startup.
  */
 class EmbeddingConfigStartupTest {
     private static final String TEST_API_KEY = "test-embedding-api-key";
-    private static final String TEST_OPENAI_EMBEDDING_MODEL = "provider/test-openai-embedding-model";
+    private static final String TEST_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
+    private static final int TEST_EMBEDDING_DIMENSIONS = 2_560;
 
     @Test
-    void remoteCredentialUsesCanonicalApplicationProperties() {
-        try (ConfigurableApplicationContext applicationContext =
-                runApplication("--REMOTE_EMBEDDING_API_KEY=" + TEST_API_KEY, "--OPENAI_API_KEY=")) {
+    void sharedGatewayCredentialUsesEmbeddingOwnedApplicationProperties() {
+        try (ConfigurableApplicationContext applicationContext = runApplication(
+                "--OPENAI_API_KEY=" + TEST_API_KEY,
+                "--OPENAI_BASE_URL=https://gateway.example/v1",
+                "--OPENAI_MODEL=chat-only-model",
+                "--app.embeddings.model=" + TEST_EMBEDDING_MODEL,
+                "--app.embeddings.dimensions=" + TEST_EMBEDDING_DIMENSIONS)) {
             EmbeddingClient embeddingClient = applicationContext.getBean(EmbeddingClient.class);
             AppProperties appProperties = applicationContext.getBean(AppProperties.class);
-            Environment applicationEnvironment = applicationContext.getEnvironment();
-            RemoteEmbedding remoteEmbedding = appProperties.getRemoteEmbedding();
 
             assertInstanceOf(OpenAiCompatibleEmbeddingClient.class, embeddingClient);
+            assertEquals(TEST_EMBEDDING_MODEL, appProperties.getEmbeddings().getModel());
             assertEquals(
-                    applicationEnvironment.getRequiredProperty("app.remote-embedding.server-url"),
-                    remoteEmbedding.getServerUrl());
-            assertEquals(
-                    applicationEnvironment.getRequiredProperty("app.remote-embedding.model"),
-                    remoteEmbedding.getModel());
-            assertEquals(remoteEmbedding.getModel(), embeddingClient.modelName());
-            assertFalse(remoteEmbedding.getServerUrl().isBlank());
-            assertTrue(remoteEmbedding.getModel().contains("/"));
+                    TEST_EMBEDDING_DIMENSIONS, appProperties.getEmbeddings().getDimensions());
+            assertEquals(TEST_EMBEDDING_MODEL, embeddingClient.modelName());
         }
     }
 
     @Test
-    void canonicalRemoteEndpointDoesNotOverrideExplicitOpenAiCredential() {
+    void openAiChatModelDoesNotOverrideEmbeddingModel() {
         try (ConfigurableApplicationContext applicationContext = runApplication(
-                "--REMOTE_EMBEDDING_API_KEY=",
                 "--OPENAI_API_KEY=" + TEST_API_KEY,
-                "--app.embeddings.open-ai-model=" + TEST_OPENAI_EMBEDDING_MODEL)) {
+                "--OPENAI_BASE_URL=https://gateway.example/v1",
+                "--OPENAI_MODEL=chat-only-model",
+                "--app.embeddings.model=" + TEST_EMBEDDING_MODEL)) {
             EmbeddingClient embeddingClient = applicationContext.getBean(EmbeddingClient.class);
 
             assertInstanceOf(OpenAiCompatibleEmbeddingClient.class, embeddingClient);
+            assertEquals(TEST_EMBEDDING_MODEL, embeddingClient.modelName());
         }
     }
 

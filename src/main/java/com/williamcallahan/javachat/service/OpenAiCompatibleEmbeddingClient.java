@@ -8,11 +8,9 @@ import com.openai.errors.OpenAIRetryableException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.EmbeddingCreateParams;
-import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -30,6 +28,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int READ_TIMEOUT_SECONDS = 60;
     private static final int MAX_ERROR_SNIPPET = 512;
+    private static final String OPENAI_API_VERSION_SUFFIX = "/v1";
 
     private final OpenAIClient liveEmbeddingClient;
     private final OpenAIClient batchEmbeddingClient;
@@ -51,10 +50,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             String baseUrl, String apiKey, String modelName, int dimensionsHint) {
         validateDimensions(dimensionsHint);
         String configuredApiKey = requireConfiguredApiKey(apiKey);
-        String normalizedBaseUrl = normalizeSdkBaseUrl(baseUrl);
-        OpenAIClient liveEmbeddingClient = createTieredClient(configuredApiKey, normalizedBaseUrl, LlmGatewayTier.LIVE);
+        String configuredBaseUrl = requireVersionedBaseUrl(baseUrl);
+        OpenAIClient liveEmbeddingClient = createTieredClient(configuredApiKey, configuredBaseUrl, LlmGatewayTier.LIVE);
         OpenAIClient batchEmbeddingClient =
-                createTieredClient(configuredApiKey, normalizedBaseUrl, LlmGatewayTier.BATCH);
+                createTieredClient(configuredApiKey, configuredBaseUrl, LlmGatewayTier.BATCH);
         return new OpenAiCompatibleEmbeddingClient(
                 liveEmbeddingClient, batchEmbeddingClient, requireConfiguredModel(modelName), dimensionsHint);
     }
@@ -122,12 +121,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     }
 
     private List<float[]> createEmbeddings(List<String> texts, LlmGatewayTier requestTier) {
-        EmbeddingCreateParams.Builder embeddingRequestBuilder =
-                EmbeddingCreateParams.builder().model(modelName).inputOfArrayOfStrings(texts);
-        if (supportsDimensionOverride(modelName)) {
-            embeddingRequestBuilder.dimensions((long) dimensionsHint);
-        }
-        EmbeddingCreateParams embeddingRequest = embeddingRequestBuilder.build();
+        EmbeddingCreateParams embeddingRequest = EmbeddingCreateParams.builder()
+                .model(modelName)
+                .inputOfArrayOfStrings(texts)
+                .build();
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(embeddingTimeout()).build();
         return execute(clientFor(requestTier), embeddingRequest, requestOptions, texts.size());
@@ -196,11 +193,13 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             throw new EmbeddingServiceUnavailableException("Remote embedding response was null");
         }
         List<com.openai.models.embeddings.Embedding> embeddingEntries = response.data();
-        if (embeddingEntries.isEmpty()) {
-            throw new EmbeddingServiceUnavailableException("Remote embedding response missing embedding entries");
+        if (embeddingEntries.size() != expectedCount) {
+            throw new EmbeddingServiceUnavailableException("Remote embedding response count mismatch: expected "
+                    + expectedCount + " but received " + embeddingEntries.size());
         }
 
         float[][] embeddingsByIndex = new float[expectedCount][];
+        boolean[] populatedEmbeddingIndexes = new boolean[expectedCount];
 
         for (int itemIndex = 0; itemIndex < embeddingEntries.size(); itemIndex++) {
             com.openai.models.embeddings.Embedding embeddingEntry = embeddingEntries.get(itemIndex);
@@ -208,11 +207,13 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                 throw new EmbeddingServiceUnavailableException(
                         "Remote embedding response contained null entry at index " + itemIndex);
             }
-            int targetIndex = safeEmbeddingIndex(itemIndex, embeddingEntry, expectedCount);
-            if (targetIndex < 0 || targetIndex >= expectedCount) {
-                continue;
+            int targetIndex = requiredEmbeddingIndex(itemIndex, embeddingEntry, expectedCount);
+            if (populatedEmbeddingIndexes[targetIndex]) {
+                throw new EmbeddingServiceUnavailableException(
+                        "Remote embedding response duplicated index " + targetIndex);
             }
             embeddingsByIndex[targetIndex] = toFloatVector(embeddingEntry.embedding());
+            populatedEmbeddingIndexes[targetIndex] = true;
         }
 
         List<float[]> orderedEmbeddings = new ArrayList<>(expectedCount);
@@ -227,18 +228,22 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return List.copyOf(orderedEmbeddings);
     }
 
-    private int safeEmbeddingIndex(
-            int fallbackIndex, com.openai.models.embeddings.Embedding embedding, int expectedCount) {
-        long responseIndex =
-                embedding._index().asNumber().map(Number::longValue).orElse((long) fallbackIndex);
+    private int requiredEmbeddingIndex(
+            int responsePosition, com.openai.models.embeddings.Embedding embedding, int expectedCount) {
+        long responseIndex = embedding
+                ._index()
+                .asNumber()
+                .map(Number::longValue)
+                .orElseThrow(() -> new EmbeddingServiceUnavailableException(
+                        "Remote embedding response omitted index at position " + responsePosition));
         if (responseIndex < 0 || responseIndex > Integer.MAX_VALUE) {
-            log.debug("[EMBEDDING] Ignoring out-of-range embedding index={}", responseIndex);
-            return -1;
+            throw new EmbeddingServiceUnavailableException(
+                    "Remote embedding response contained out-of-range index " + responseIndex);
         }
         int index = (int) responseIndex;
         if (index >= expectedCount) {
-            log.debug("[EMBEDDING] Ignoring embedding index={} (expectedCount={})", index, expectedCount);
-            return -1;
+            throw new EmbeddingServiceUnavailableException(
+                    "Remote embedding response index " + index + " exceeded expected response count " + expectedCount);
         }
         return index;
     }
@@ -249,14 +254,6 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     @Override
     public int dimensions() {
         return dimensionsHint;
-    }
-
-    private static boolean supportsDimensionOverride(String embeddingModelName) {
-        if (embeddingModelName == null || embeddingModelName.isBlank()) {
-            return false;
-        }
-        String normalizedModelName = embeddingModelName.trim().toLowerCase(Locale.ROOT);
-        return normalizedModelName.startsWith("text-embedding-3");
     }
 
     private float[] toFloatVector(List<Float> embeddingEntries) {
@@ -336,8 +333,15 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         return modelName;
     }
 
-    private static String normalizeSdkBaseUrl(String baseUrl) {
-        return OpenAiSdkUrlNormalizer.normalize(baseUrl);
+    private static String requireVersionedBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalStateException("OpenAI gateway base URL is not configured");
+        }
+        String configuredBaseUrl = baseUrl.trim();
+        if (!configuredBaseUrl.endsWith(OPENAI_API_VERSION_SUFFIX)) {
+            throw new IllegalStateException("OpenAI gateway base URL must end with " + OPENAI_API_VERSION_SUFFIX);
+        }
+        return configuredBaseUrl;
     }
 
     private static OpenAIClient createTieredClient(String apiKey, String baseUrl, LlmGatewayTier requestTier) {

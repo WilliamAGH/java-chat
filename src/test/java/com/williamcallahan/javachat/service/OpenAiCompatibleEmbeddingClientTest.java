@@ -47,7 +47,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -66,7 +66,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                client, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             List<float[]> vectors = clientAdapter.embed(List.of("a", "b"), LlmGatewayTier.LIVE);
 
             assertEquals(2, vectors.size());
@@ -87,7 +87,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -101,7 +101,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                client, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             EmbeddingServiceUnavailableException thrownException = assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("a"), LlmGatewayTier.LIVE));
@@ -118,7 +118,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse malformedResponse = CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -132,7 +132,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(malformedResponse);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                client, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> clientAdapter.embed(List.of("single"), LlmGatewayTier.LIVE));
@@ -141,34 +141,30 @@ class OpenAiCompatibleEmbeddingClientTest {
     }
 
     @Test
-    void embed_includesDimensionsForTextEmbedding3Models() {
+    void throwsWhenEmbeddingResponseOmitsIndex() {
         OpenAIClient client = mock(OpenAIClient.class);
         EmbeddingService embeddingService = mock(EmbeddingService.class);
         when(client.embeddings()).thenReturn(embeddingService);
-
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-3-small")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
                         .build())
                 .data(List.of(com.openai.models.embeddings.Embedding.builder()
-                        .index(0L)
-                        .embedding(List.of(0.4f, 0.6f))
+                        .index(com.openai.core.JsonField.ofNullable(null))
+                        .embedding(List.of(0.1f, 0.2f))
                         .build()))
                 .build();
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                client, "text-embedding-3-small", EXPECTED_EMBEDDING_DIMENSION)) {
-            clientAdapter.embed(List.of("dimension check"), LlmGatewayTier.LIVE);
+                client, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
+            EmbeddingServiceUnavailableException thrownException = assertThrows(
+                    EmbeddingServiceUnavailableException.class,
+                    () -> clientAdapter.embed(List.of("missing index"), LlmGatewayTier.LIVE));
 
-            ArgumentCaptor<EmbeddingCreateParams> requestCaptor = ArgumentCaptor.forClass(EmbeddingCreateParams.class);
-            verify(embeddingService).create(requestCaptor.capture(), any(RequestOptions.class));
-            assertTrue(requestCaptor.getValue().dimensions().isPresent());
-            assertEquals(
-                    EXPECTED_EMBEDDING_DIMENSION,
-                    requestCaptor.getValue().dimensions().get().intValue());
+            assertTrue(thrownException.getMessage().contains("omitted index"));
         }
     }
 
@@ -179,7 +175,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(client.embeddings()).thenReturn(embeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -192,7 +188,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(embeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
-                client, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                client, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             clientAdapter.embed(List.of("dimension check"), LlmGatewayTier.LIVE);
 
             ArgumentCaptor<EmbeddingCreateParams> requestCaptor = ArgumentCaptor.forClass(EmbeddingCreateParams.class);
@@ -212,7 +208,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(batchClient.embeddings()).thenReturn(batchEmbeddingService);
 
         CreateEmbeddingResponse response = CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)
@@ -226,7 +222,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         when(batchEmbeddingService.create(any(), any(RequestOptions.class))).thenReturn(response);
 
         try (OpenAiCompatibleEmbeddingClient clientAdapter = new OpenAiCompatibleEmbeddingClient(
-                liveClient, batchClient, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                liveClient, batchClient, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE);
             verify(liveEmbeddingService).create(any(), any(RequestOptions.class));
             verifyNoInteractions(batchEmbeddingService);
@@ -256,7 +252,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
                 OpenAiCompatibleEmbeddingClient clientAdapter = new OpenAiCompatibleEmbeddingClient(
-                        liveClient, batchClient, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                        liveClient, batchClient, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             Future<List<float[]>> foregroundEmbedding =
                     executor.submit(() -> clientAdapter.embed(List.of("live query"), LlmGatewayTier.LIVE));
             try {
@@ -293,7 +289,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
                 OpenAiCompatibleEmbeddingClient clientAdapter = new OpenAiCompatibleEmbeddingClient(
-                        liveClient, batchClient, "text-embedding-qwen3-embedding-8b", EXPECTED_EMBEDDING_DIMENSION)) {
+                        liveClient, batchClient, "qwen/qwen3-embedding-4b", EXPECTED_EMBEDDING_DIMENSION)) {
             Future<?> admittedProbe = executor.submit(clientAdapter::warmUp);
             try {
                 assertTrue(probeStarted.await(5, TimeUnit.SECONDS));
@@ -324,7 +320,7 @@ class OpenAiCompatibleEmbeddingClientTest {
         try (OpenAiCompatibleEmbeddingClient clientAdapter = OpenAiCompatibleEmbeddingClient.create(
                 "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
                 "test-key",
-                "text-embedding-qwen3-embedding-8b",
+                "qwen/qwen3-embedding-4b",
                 EXPECTED_EMBEDDING_DIMENSION)) {
             assertThrows(
                     EmbeddingServiceUnavailableException.class,
@@ -343,7 +339,7 @@ class OpenAiCompatibleEmbeddingClientTest {
 
     private static CreateEmbeddingResponse successfulResponse() {
         return CreateEmbeddingResponse.builder()
-                .model("text-embedding-qwen3-embedding-8b")
+                .model("qwen/qwen3-embedding-4b")
                 .usage(CreateEmbeddingResponse.Usage.builder()
                         .promptTokens(1L)
                         .totalTokens(1L)

@@ -42,13 +42,13 @@ class EmbeddingProviderFailureTest {
     }
 
     @Test
-    void remoteEmbeddingHttpErrorsSurfaceStatusCodes() throws IOException {
+    void gatewayEmbeddingHttpErrorsSurfaceStatusCodes() throws IOException {
         ExecutorService serverExecutor = Executors.newSingleThreadExecutor();
         HttpServer httpServer = startServer(serverExecutor, new RemoteFailureRoutes());
-        String baseUrl = baseUrl(httpServer);
+        String baseUrl = baseUrl(httpServer) + "/v1";
 
         try (OpenAiCompatibleEmbeddingClient remoteClient =
-                OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", "text-embedding-qwen3-embedding-8b", 8)) {
+                OpenAiCompatibleEmbeddingClient.create(baseUrl, "test-key", "qwen/qwen3-embedding-4b", 2_560)) {
             EmbeddingServiceUnavailableException thrown = assertThrows(
                     EmbeddingServiceUnavailableException.class,
                     () -> remoteClient.embed(List.of("hello"), LlmGatewayTier.LIVE));

@@ -11,9 +11,8 @@ import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import java.util.Arrays;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,9 +31,9 @@ public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
     private static final String REASONING_EFFORT_PROPERTY = "app.llm.reasoning-effort";
-    private static final String KNOWN_OPENAI_REASONING_EFFORTS = Arrays.stream(ReasoningEffort.Known.values())
-            .map(knownReasoningEffort -> AsciiTextNormalizer.toLowerAscii(knownReasoningEffort.name()))
-            .collect(Collectors.joining(", "));
+    private static final Set<String> SUPPORTED_REASONING_EFFORTS =
+            Set.of("none", "minimal", "low", "medium", "high", "xhigh");
+    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, minimal, low, medium, high, xhigh";
 
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
@@ -282,20 +281,29 @@ public final class OpenAiRequestFactory {
             return Optional.empty();
         }
 
-        ReasoningEffort configuredReasoningEffort =
-                ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+        String normalizedReasoningEffort = AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim());
+        ReasoningEffort configuredReasoningEffort = ReasoningEffort.of(normalizedReasoningEffort);
         try {
             configuredReasoningEffort.known();
         } catch (OpenAIInvalidDataException e) {
-            throw new IllegalArgumentException(
-                    "Invalid "
-                            + REASONING_EFFORT_PROPERTY
-                            + " value '"
-                            + reasoningEffortSetting
-                            + "'. Valid values: "
-                            + KNOWN_OPENAI_REASONING_EFFORTS,
-                    e);
+            throw invalidReasoningEffort(reasoningEffortSetting, e);
+        }
+        if (!SUPPORTED_REASONING_EFFORTS.contains(normalizedReasoningEffort)) {
+            throw invalidReasoningEffort(reasoningEffortSetting, null);
         }
         return Optional.of(configuredReasoningEffort);
+    }
+
+    private static IllegalArgumentException invalidReasoningEffort(
+            String reasoningEffortSetting, RuntimeException invalidSdkReasoningEffort) {
+        String configurationMessage = "Invalid "
+                + REASONING_EFFORT_PROPERTY
+                + " value '"
+                + reasoningEffortSetting
+                + "'. Valid values: "
+                + SUPPORTED_REASONING_EFFORT_DESCRIPTION;
+        return invalidSdkReasoningEffort == null
+                ? new IllegalArgumentException(configurationMessage)
+                : new IllegalArgumentException(configurationMessage, invalidSdkReasoningEffort);
     }
 }

@@ -24,7 +24,6 @@ public class AppProperties {
     private static final String NULL_SECT_FMT = "Configuration section %s must not be null.";
     private static final String RAG_KEY = "app.rag";
     private static final String LOCAL_EMBED_KEY = "app.local-embedding";
-    private static final String REMOTE_EMB_KEY = "app.remote-embedding";
     private static final String DOCS_KEY = "app.docs";
     private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
@@ -44,7 +43,6 @@ public class AppProperties {
 
     private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
-    private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private DocumentationConfig docs = new DocumentationConfig();
     private Diagnostics diagnostics = new Diagnostics();
     private QdrantProperties qdrant = new QdrantProperties();
@@ -68,7 +66,6 @@ public class AppProperties {
     void validateConfiguration() {
         requireConfiguredSection(rag, RAG_KEY).validateConfiguration();
         requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY).validateConfiguration();
-        requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
         requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
@@ -179,14 +176,6 @@ public class AppProperties {
 
     public void setLocalEmbedding(LocalEmbedding localEmbedding) {
         this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY);
-    }
-
-    public RemoteEmbedding getRemoteEmbedding() {
-        return remoteEmbedding;
-    }
-
-    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) {
-        this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY);
     }
 
     public DocumentationConfig getDocs() {
@@ -305,12 +294,10 @@ public class AppProperties {
 
     /** Embedding vector configuration. */
     public static class Embeddings {
-        private static final String OPENAI_BASE_URL_KEY = "app.embeddings.open-ai-base-url";
-        private static final String OPENAI_MODEL_KEY = "app.embeddings.open-ai-model";
+        private static final String MODEL_KEY = "app.embeddings.model";
 
-        private int dimensions = 4096;
-        private String openAiBaseUrl;
-        private String openAiModel;
+        private int dimensions = 2_560;
+        private String model = "qwen/qwen3-embedding-4b";
 
         public int getDimensions() {
             return dimensions;
@@ -320,47 +307,22 @@ public class AppProperties {
             this.dimensions = dimensions;
         }
 
-        /**
-         * Returns the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
-         */
-        public String getOpenAiBaseUrl() {
-            return openAiBaseUrl;
+        /** Returns the embedding model owned independently from the chat model. */
+        public String getModel() {
+            return model;
         }
 
-        /**
-         * Sets the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
-         *
-         * @param openAiBaseUrl configured endpoint base URL
-         */
-        public void setOpenAiBaseUrl(String openAiBaseUrl) {
-            this.openAiBaseUrl = openAiBaseUrl;
-        }
-
-        /**
-         * Returns the explicit OpenAI embedding model selected for this deployment.
-         */
-        public String getOpenAiModel() {
-            return openAiModel;
-        }
-
-        /**
-         * Sets the explicit OpenAI embedding model selected for this deployment.
-         *
-         * @param openAiModel embedding model identifier, blank when OpenAI embeddings are not selected
-         */
-        public void setOpenAiModel(String openAiModel) {
-            this.openAiModel = openAiModel;
+        /** Sets the embedding model owned independently from the chat model. */
+        public void setModel(String model) {
+            this.model = model;
         }
 
         Embeddings validateConfiguration() {
             if (dimensions <= 0) {
                 throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
             }
-            if (openAiBaseUrl == null || openAiBaseUrl.isBlank()) {
-                throw new IllegalArgumentException(OPENAI_BASE_URL_KEY + " must not be blank");
-            }
-            if (openAiModel == null) {
-                throw new IllegalArgumentException(OPENAI_MODEL_KEY + " must not be null");
+            if (model == null || model.isBlank()) {
+                throw new IllegalArgumentException(MODEL_KEY + " must not be blank");
             }
             return this;
         }
