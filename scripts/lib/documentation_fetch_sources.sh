@@ -133,18 +133,6 @@ fetch_java_api_javadoc_seed() {
         "$wget_exit_code" "$target_dir" "$name" "$minimum_html_files" "$partial_mirror_allowed"
 }
 
-# Removes artifacts that GNU Wget writes outside the generic HTML mirror contract.
-# Generic recursive roots have no governed hidden seed marker, so only HTML files remain.
-remove_generic_mirror_non_html_artifacts() {
-    local target_dir="$1"
-    local non_html_file
-    while IFS= read -r -d '' non_html_file; do
-        if ! rm -f -- "$non_html_file"; then
-            return 1
-        fi
-    done < <(find "$target_dir" -type f ! \( -name "*.html" -o -name "*.htm" \) -print0)
-}
-
 # Fetches generic HTML documentation recursively, retaining extensionless pages without binary requisites.
 fetch_docs_mirror() {
     local url="$1"
@@ -190,12 +178,6 @@ fetch_docs_mirror() {
         validation_status=0
     else
         validation_status="$?"
-    fi
-    if { [ "$validation_status" -eq 0 ] \
-            || [ "$validation_status" -eq "$DOCUMENTATION_FETCH_PARTIAL_STATUS" ]; } \
-        && ! remove_generic_mirror_non_html_artifacts "$target_dir"; then
-        log "${RED}✗ Could not remove non-HTML fetch artifacts for $name${NC}"
-        return 1
     fi
     return "$validation_status"
 }

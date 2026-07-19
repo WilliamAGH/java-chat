@@ -185,6 +185,98 @@ quarantine_versioned_reference_subdirs() {
     shopt -u nullglob
 }
 
+# Restores every tracked quarantine move after a non-content cleanup failure.
+rollback_staged_non_html_quarantine() {
+    local staging_directory="$1"
+    local quarantine_directory="$2"
+    local moved_paths_file="$3"
+    local rollback_failed="false"
+    local relative_non_html_path
+    while IFS= read -r -d '' relative_non_html_path; do
+        local quarantine_file="$quarantine_directory/$relative_non_html_path"
+        local restored_file="$staging_directory/$relative_non_html_path"
+        if [ ! -e "$quarantine_file" ]; then
+            continue
+        fi
+        if ! mkdir -p "$(dirname "$restored_file")" \
+            || ! mv "$quarantine_file" "$restored_file"; then
+            rollback_failed="true"
+        fi
+    done < "$moved_paths_file"
+    [ "$rollback_failed" = "false" ]
+}
+
+# Keeps published mirrors content-only while preserving fetch artifacts outside the ingestion root.
+quarantine_staged_non_html_files() {
+    local staging_directory="$1"
+    local documentation_source_name="$2"
+    local staging_parent_directory
+    staging_parent_directory="$(dirname "$staging_directory")"
+    local non_html_paths_file
+    if ! non_html_paths_file="$(mktemp "$staging_parent_directory/.non-content-paths.XXXXXX")" \
+        || ! find "$staging_directory" -type f ! \( -name "*.html" -o -name "*.htm" \) \
+            -print0 > "$non_html_paths_file"; then
+        rm -f "${non_html_paths_file:-}"
+        log "${RED}✗ Could not inventory non-content files for $documentation_source_name${NC}"
+        return 1
+    fi
+    if [ ! -s "$non_html_paths_file" ]; then
+        rm -f "$non_html_paths_file"
+        return 0
+    fi
+
+    local staging_basename
+    staging_basename="$(basename "$staging_directory")"
+    local quarantine_directory
+    if ! quarantine_directory="$(create_documentation_quarantine_directory \
+        "$staging_basename" "non-content")"; then
+        rm -f "$non_html_paths_file"
+        log "${RED}✗ Could not create non-content quarantine for $documentation_source_name${NC}"
+        return 1
+    fi
+    local moved_paths_file
+    if ! moved_paths_file="$(mktemp "$staging_parent_directory/.moved-non-content-paths.XXXXXX")"; then
+        rm -f "$non_html_paths_file"
+        log "${RED}✗ Could not track non-content quarantine moves for $documentation_source_name${NC}"
+        return 1
+    fi
+
+    local non_html_file
+    while IFS= read -r -d '' non_html_file; do
+        local relative_non_html_path="${non_html_file#"$staging_directory"/}"
+        local quarantine_file="$quarantine_directory/$relative_non_html_path"
+        if ! printf '%s\0' "$relative_non_html_path" >> "$moved_paths_file" \
+            || ! mkdir -p "$(dirname "$quarantine_file")" \
+            || ! mv "$non_html_file" "$quarantine_file"; then
+            if ! rollback_staged_non_html_quarantine \
+                "$staging_directory" "$quarantine_directory" "$moved_paths_file"; then
+                log "${RED}✗ Non-content quarantine rollback was incomplete for $documentation_source_name${NC}"
+            fi
+            rm -f "$non_html_paths_file" "$moved_paths_file"
+            log "${RED}✗ Could not quarantine non-content file for $documentation_source_name: $relative_non_html_path${NC}"
+            return 1
+        fi
+    done < "$non_html_paths_file"
+
+    local remaining_non_html_paths_file
+    if ! remaining_non_html_paths_file="$(mktemp "$staging_parent_directory/.remaining-non-content-paths.XXXXXX")" \
+        || ! find "$staging_directory" -type f ! \( -name "*.html" -o -name "*.htm" \) \
+            -print0 > "$remaining_non_html_paths_file" \
+        || [ -s "$remaining_non_html_paths_file" ]; then
+        if ! rollback_staged_non_html_quarantine \
+            "$staging_directory" "$quarantine_directory" "$moved_paths_file"; then
+            log "${RED}✗ Non-content quarantine rollback was incomplete for $documentation_source_name${NC}"
+        fi
+        rm -f "$non_html_paths_file" "$moved_paths_file" "${remaining_non_html_paths_file:-}"
+        log "${RED}✗ Non-content quarantine postcondition failed for $documentation_source_name${NC}"
+        return 1
+    fi
+    local quarantined_file_count
+    quarantined_file_count="$(tr -cd '\0' < "$moved_paths_file" | wc -c | tr -d ' ')"
+    rm -f "$non_html_paths_file" "$moved_paths_file" "$remaining_non_html_paths_file"
+    log "${YELLOW}⚠ Quarantined $quarantined_file_count non-content file(s) for $documentation_source_name -> $quarantine_directory${NC}"
+}
+
 validate_staged_documentation_mirror() {
     local staging_directory="$1"
     local documentation_source_name="$2"
@@ -430,6 +522,10 @@ fetch_source() {
     if [ "$documentation_fetch_status" -ne 0 ]; then
         log "${YELLOW}⚠ Preserving source-matched staging for a verified resume: $staging_directory${NC}"
         return "$documentation_fetch_status"
+    fi
+
+    if ! quarantine_staged_non_html_files "$staging_directory" "$name"; then
+        return 1
     fi
 
     if ! validate_staged_documentation_mirror \

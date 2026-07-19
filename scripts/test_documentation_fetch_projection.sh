@@ -67,6 +67,7 @@ fetch_discovered_documentation_seed() {
     for generated_page_number in 1 2 3 4 5 6 7; do
         printf '<html>Example Reference stable</html>\n' > "$captured_target_directory/page-$generated_page_number.html"
     done
+    printf 'User-agent: *\n' > "$captured_target_directory/robots.txt"
     cd - > /dev/null
 }
 
@@ -99,6 +100,34 @@ assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
     "https://docs.example.invalid/sitemap.xml" \
     "https://docs.example.invalid/reference/" \
     ""
+
+if [ -f "$TEST_DOCS_ROOT/example/reference/robots.txt" ]; then
+    fail_documentation_fetch_test "published documentation retained a non-content fetch artifact"
+fi
+if ! find "$(dirname "$TEST_DOCS_ROOT")/.quarantine" -type f -name robots.txt -print -quit | grep -q .; then
+    fail_documentation_fetch_test "non-content fetch artifact was not preserved in quarantine"
+fi
+
+QUARANTINE_FAILURE_STAGE="$TEST_WORK_DIRECTORY/quarantine-failure-stage"
+mkdir -p "$QUARANTINE_FAILURE_STAGE"
+printf 'first\n' > "$QUARANTINE_FAILURE_STAGE/first.txt"
+printf 'second\n' > "$QUARANTINE_FAILURE_STAGE/second.txt"
+MOVE_CALL_COUNT=0
+mv() {
+    MOVE_CALL_COUNT=$((MOVE_CALL_COUNT + 1))
+    if [ "$MOVE_CALL_COUNT" -eq 2 ]; then
+        return 1
+    fi
+    command mv "$@"
+}
+if quarantine_staged_non_html_files "$QUARANTINE_FAILURE_STAGE" "Quarantine Failure Test"; then
+    fail_documentation_fetch_test "partial non-content quarantine was accepted"
+fi
+unset -f mv
+if [ ! -f "$QUARANTINE_FAILURE_STAGE/first.txt" ] \
+    || [ ! -f "$QUARANTINE_FAILURE_STAGE/second.txt" ]; then
+    fail_documentation_fetch_test "failed non-content quarantine did not restore the complete staging tree"
+fi
 
 : > "$DISCOVERED_FETCH_CAPTURE"
 if fetch_source \
