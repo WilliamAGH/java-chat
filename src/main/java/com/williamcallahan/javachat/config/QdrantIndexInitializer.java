@@ -510,7 +510,7 @@ public final class QdrantIndexInitializer {
         String collection = target.collection();
         String fieldName = indexSpec.fieldName();
         PayloadIndexRequest indexRequest = new PayloadIndexRequest(fieldName, Map.of("type", indexSpec.schemaType()));
-        String indexUrl = target.baseUrl() + "/collections/" + collection + "/index";
+        String indexUrl = target.baseUrl() + "/collections/" + collection + "/index?wait=true";
         String operation = "ensure Qdrant payload index '%s' for collection '%s'".formatted(fieldName, collection);
         try {
             restTemplate.exchange(

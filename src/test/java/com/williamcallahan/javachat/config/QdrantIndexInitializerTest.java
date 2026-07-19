@@ -380,7 +380,9 @@ class QdrantIndexInitializerTest {
     private void expectPayloadIndex(InitializerHarness initializerHarness, String fieldName, String fieldSchemaType) {
         initializerHarness
                 .qdrantServer()
-                .expect(times(initializerHarness.collectionName().size()), requestTo(Matchers.containsString("/index")))
+                .expect(
+                        times(initializerHarness.collectionName().size()),
+                        requestTo(Matchers.endsWith("/index?wait=true")))
                 .andExpect(method(HttpMethod.PUT))
                 .andExpect(jsonPath("$.field_name").value(fieldName))
                 .andExpect(jsonPath("$.field_schema.type").value(fieldSchemaType))
