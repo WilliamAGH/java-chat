@@ -55,6 +55,32 @@ class IngestionProvenanceDeriverTest {
     }
 
     @Test
+    void usesCanonicalJavaApiProvenanceWhenIngestionStartsBelowMirrorRoot() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
+
+        for (DocsSourceRegistry.JavaApiDocumentationSource javaApiDocumentationSource :
+                DocsSourceRegistry.javaApiDocumentationSources()) {
+            Path targetedIngestionRoot = documentationRoot
+                    .resolve(javaApiDocumentationSource.relativeMirrorPath())
+                    .resolve("api/java.base/java/util");
+            Path javaApiDocument = targetedIngestionRoot.resolve("List.html");
+
+            IngestionProvenance provenance = provenanceDeriver.derive(
+                    targetedIngestionRoot,
+                    javaApiDocument,
+                    javaApiDocumentationSource.remoteBaseUrl() + "java.base/java/util/List.html");
+
+            assertEquals(javaApiDocumentationSource.relativeMirrorPath(), provenance.docSet());
+            assertEquals("api/java.base/java/util/List.html", provenance.docPath());
+            assertEquals("oracle", provenance.sourceName());
+            assertEquals("official", provenance.sourceKind());
+            assertEquals(javaApiDocumentationSource.javaRelease(), provenance.docVersion());
+            assertEquals(DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE, provenance.docType());
+        }
+    }
+
+    @Test
     void canonicalFingerprintEncodingSeparatesControlCharactersFromFieldBoundaries() {
         String representedJavaRelease =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst().javaRelease();

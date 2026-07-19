@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.ingestion;
 
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.DocumentationSource;
+import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -43,19 +44,37 @@ public class IngestionProvenanceDeriver {
                 ? baseDocsDir.relativize(absoluteFile).toString().replace('\\', '/')
                 : "";
 
-        return DocsSourceRegistry.documentationSourceForRelativeDocumentPath(relativeDocumentPath)
-                .map(documentationSource -> officialSourceProvenance(
-                        documentationSource, documentPathWithinSource(relativeDocumentPath, documentationSource)))
+        return DocsSourceRegistry.javaApiDocumentationSourceForRelativeDocumentPath(relativeDocumentPath)
+                .map(javaApiDocumentationSource -> javaApiSourceProvenance(
+                        javaApiDocumentationSource,
+                        documentPathWithinSource(
+                                relativeDocumentPath, javaApiDocumentationSource.relativeMirrorPath())))
+                .or(() -> DocsSourceRegistry.documentationSourceForRelativeDocumentPath(relativeDocumentPath)
+                        .map(documentationSource -> officialSourceProvenance(
+                                documentationSource,
+                                documentPathWithinSource(
+                                        relativeDocumentPath, documentationSource.relativeMirrorPath()))))
                 .orElseGet(() -> legacyProvenance(relativeMirrorPath, docPath, url));
     }
 
-    private static String documentPathWithinSource(
-            String relativeDocumentPath, DocumentationSource documentationSource) {
-        String relativeMirrorPath = documentationSource.relativeMirrorPath();
+    private static String documentPathWithinSource(String relativeDocumentPath, String relativeMirrorPath) {
         if (relativeDocumentPath.equals(relativeMirrorPath)) {
             return "";
         }
         return relativeDocumentPath.substring(relativeMirrorPath.length() + 1);
+    }
+
+    private static IngestionProvenance javaApiSourceProvenance(
+            JavaApiDocumentationSource javaApiDocumentationSource, String documentPath) {
+        String sourceName = deriveSourceName(
+                javaApiDocumentationSource.relativeMirrorPath(), javaApiDocumentationSource.remoteBaseUrl());
+        return new IngestionProvenance(
+                javaApiDocumentationSource.relativeMirrorPath(),
+                documentPath,
+                sourceName,
+                deriveSourceKind(sourceName),
+                javaApiDocumentationSource.javaRelease(),
+                DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
     }
 
     private static IngestionProvenance officialSourceProvenance(

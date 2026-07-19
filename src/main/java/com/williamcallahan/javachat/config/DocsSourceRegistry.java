@@ -269,6 +269,21 @@ public final class DocsSourceRegistry {
                         documentationSource.relativeMirrorPath().length()));
     }
 
+    /** Finds the Java API mirror root containing a relative document path. */
+    public static Optional<JavaApiDocumentationSource> javaApiDocumentationSourceForRelativeDocumentPath(
+            String relativeDocumentPath) {
+        if (relativeDocumentPath == null || relativeDocumentPath.isBlank()) {
+            return Optional.empty();
+        }
+        String normalizedDocumentPath = relativeDocumentPath.replace('\\', '/');
+        return JAVA_API_DOCUMENTATION_SOURCES.stream()
+                .filter(javaApiDocumentationSource -> normalizedDocumentPath.equals(
+                                javaApiDocumentationSource.relativeMirrorPath())
+                        || normalizedDocumentPath.startsWith(javaApiDocumentationSource.relativeMirrorPath() + "/"))
+                .max(Comparator.comparingInt(javaApiDocumentationSource ->
+                        javaApiDocumentationSource.relativeMirrorPath().length()));
+    }
+
     /** Resolves a citation base by preferring a JVM property, then process environment, then built-in default. */
     static String resolveRuntimeBaseUrl(String settingKey, String defaultBaseUrl) {
         String systemPropertyBaseUrl = System.getProperty(settingKey);
