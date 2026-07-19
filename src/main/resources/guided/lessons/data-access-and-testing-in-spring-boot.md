@@ -1,5 +1,3 @@
-# Data Access and Testing in Spring Boot
-
 Data access is the part of your application that reads and writes relational tables. In Spring Boot 4.1.0 it is easy to make this code work; it is harder to keep it *disciplined*. This lesson focuses on two disciplines that pay off as an application grows: keeping transaction boundaries clear, and choosing focused, realistic tests instead of one slow test that tries to prove everything.
 
 You will build one small application (a book catalog) and one focused, independently runnable test. Along the way you will see where a transaction belongs, why controllers should not talk to repositories, and when a fast in-memory test is enough versus when you need the real database engine.

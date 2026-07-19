@@ -1,5 +1,3 @@
-# Spring Boot Fundamentals
-
 Spring Boot is a framework layered on top of the Spring ecosystem that helps you turn a plain Java project into a runnable, self-contained web service with very little ceremony. Instead of wiring servlets, JSON converters, and an embedded server by hand, you declare a small number of dependencies and a few beans, and Spring Boot assembles the rest at startup based on what it finds.
 
 This lesson builds one small HTTP service so you can see the four ideas that make Spring Boot work in practice: starters (how you pull in a curated set of dependencies), auto-configuration (how Spring Boot wires beans from the classpath), the application (the class and package that anchor everything), and configuration (how runtime values become explicit). We use Spring Boot 4.1.0 and Java 25 throughout, and we deliberately keep the scope to a single web layer: no database, no security, no reactive stack, and no second web framework.

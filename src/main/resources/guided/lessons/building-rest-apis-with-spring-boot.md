@@ -1,5 +1,3 @@
-# Building REST APIs with Spring Boot
-
 A REST API exposes your application's capabilities as *resources* that clients act on with plain HTTP. REST (Representational State Transfer) is an architectural style: each resource has a stable URL, and clients use HTTP verbs (GET, POST, PUT, DELETE) plus status codes and headers to read and change that resource's state. This lesson builds one focused slice of such an API in Spring Boot 4.1.0 on Java 25: a single POST endpoint that registers a book in a catalog, validates its input, returns `201 Created` with a `Location` header, and reports failures with explicit, structured error bodies.
 
 You will design explicit request and response contracts as Java records, wire a use-case collaborator through constructor injection, validate input with Jakarta Bean Validation, and translate one expected failure into a `ProblemDetail`. You will then verify the endpoint with a focused MVC test that never starts a real server.

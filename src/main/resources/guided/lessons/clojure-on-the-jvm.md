@@ -1,5 +1,3 @@
-# Clojure on the JVM
-
 Clojure is a Lisp dialect that compiles to Java Virtual Machine bytecode. You already know how to write Java classes, call methods, and use collections. This lesson shows how Clojure builds on that same platform with a different core idea: values are immutable, functions transform data into new data, and Java classes are available through explicit interoperation.
 
 By the end you will have a small project that runs three programs: one that derives a new value from an immutable map, one that maps over a sequence lazily, and one that calls a JDK class directly.

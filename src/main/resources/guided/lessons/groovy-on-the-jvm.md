@@ -1,5 +1,3 @@
-# Groovy on the JVM
-
 Groovy is a programming language that compiles to Java bytecode and runs on the same Java Virtual Machine (JVM) you already use for Java. Because the compiled output is ordinary bytecode, Groovy code can create Java objects, call Java methods, and use any Java library on the classpath without a bridge or wrapper. What Groovy adds is a more compact, script-friendly syntax and the option of resolving method calls at runtime instead of at compile time.
 
 This lesson assumes you already write small Java programs and use Gradle at a basic level. You will build one Gradle project that contains a Groovy **script** and a statically checked Groovy class, run both, and see exactly where Groovy syntax ends and plain Java begins.

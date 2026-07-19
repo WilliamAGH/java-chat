@@ -51,9 +51,13 @@ class GuidedLessonCuratedContentTest {
         assertUniqueLessonSlugs(curatedResourceSlugs, "curated lesson classpath resources");
         assertEquals(Set.copyOf(tocLessonSlugs), Set.copyOf(curatedResourceSlugs));
         for (String curatedLessonSlug : curatedResourceSlugs) {
+            String curatedLessonMarkdown = readCuratedLessonMarkdown(curatedLessonSlug);
             assertFalse(
-                    readCuratedLessonMarkdown(curatedLessonSlug).isBlank(),
+                    curatedLessonMarkdown.isBlank(),
                     () -> "Curated lesson markdown must not be blank: " + curatedLessonSlug);
+            assertFalse(
+                    curatedLessonMarkdown.startsWith("# "),
+                    () -> "GuidedLessonHeader owns the sole level-one heading for: " + curatedLessonSlug);
         }
     }
 

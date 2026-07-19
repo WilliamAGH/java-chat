@@ -1,5 +1,3 @@
-# Choosing a JVM Language
-
 You already write Java 25. That is an asset, not a limitation. Every language in this lesson runs on the same Java Virtual Machine, calls the same Java libraries, and produces the same kind of bytecode. So the question is never "which JVM language is best?" It is "which language, under my team's constraints, gives me the most valuable properties for the least ongoing cost?" This lesson gives you a repeatable, evidence-based way to answer that, comparing Java, Kotlin 2.4.10, Scala 3.8.4, Groovy 5.0.7, and Clojure 1.12.5.
 
 Throughout, treat each comparison as a conditional tradeoff, not a ranking. A property that helps one team on one deployment target can cost another team elsewhere.

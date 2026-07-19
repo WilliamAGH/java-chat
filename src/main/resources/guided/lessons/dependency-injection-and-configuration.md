@@ -1,5 +1,3 @@
-# Dependency Injection and Configuration
-
 A Spring Boot application is an object graph: services, repositories, and helpers that call one another. The value of the framework is that you describe *what* each object needs and let the container assemble the graph for you. This lesson shows how to compose that graph with **constructor injection** and how to bind external settings into a typed, validated **ConfigurationProperties** record. You will build one small application slice and two independently runnable tests, all on Spring Boot 4.1.0 and Java 25.
 
 ## What you will build

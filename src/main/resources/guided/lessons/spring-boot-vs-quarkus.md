@@ -1,5 +1,3 @@
-# Spring Boot vs. Quarkus
-
 This lesson is a practical comparison of two JVM application frameworks: Spring Boot 4.1.0 and Quarkus 3.37.3, both targeting Java 25. The goal is not to crown a universal winner. It is to give you a repeatable way to choose between them under real constraints: your application shape, your team's skills, your deployment target, and your migration budget.
 
 You will build one small application in each framework. Both expose the same JSON contract, so the differences you see come from the framework models, not from a difference in features. You will then measure startup and (for Quarkus) a native build on the real service, and you will reason through when each choice is defensible.

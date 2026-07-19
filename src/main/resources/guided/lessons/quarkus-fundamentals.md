@@ -1,5 +1,3 @@
-# Quarkus Fundamentals
-
 Quarkus is a Java framework designed to make Jakarta-based applications productive to develop and efficient to deploy. In this lesson you build one small but complete Quarkus 3.37.3 application on Java 25. It exposes a JSON REST endpoint, keeps its logic in a CDI bean, reads typed configuration, and is tested against the running application. Along the way you will see how a native image fits in as a deployment choice you evaluate and verify, not one you assume.
 
 By the end you will be able to name and separate four concerns that beginners often blur together:
