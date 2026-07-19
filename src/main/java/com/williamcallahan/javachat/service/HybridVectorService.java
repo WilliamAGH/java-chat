@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
  * gRPC upsert containing named vectors for both the configured dense and sparse vector names.</p>
  *
  * <p>Verified API contract (Step 0): this adapter writes directly through {@code io.qdrant:client}
- * 1.16.2 and relies on named vectors ({@code VectorsFactory.namedVectors}) where dense/sparse
+ * 1.18.3 and relies on named vectors ({@code VectorsFactory.namedVectors}) where dense/sparse
  * names must exactly match collection schema keys provisioned at startup.</p>
  */
 @Service
@@ -120,6 +120,23 @@ public class HybridVectorService {
     public void replaceUrlDocuments(
             QdrantCollectionKind collectionKind, String sourceUrl, List<Document> replacementDocuments) {
         Objects.requireNonNull(collectionKind, NULL_MESSAGE_COLLECTION_KIND);
+        String collectionName =
+                Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
+        replaceUrlDocuments(collectionName, sourceUrl, replacementDocuments);
+    }
+
+    /**
+     * Replaces every point for one URL in a dynamically named collection without deleting the prior page first.
+     *
+     * @param collectionName target Qdrant collection name
+     * @param sourceUrl URL whose indexed page is being replaced
+     * @param replacementDocuments complete replacement document set with stable UUID identities
+     */
+    public void replaceUrlDocuments(String collectionName, String sourceUrl, List<Document> replacementDocuments) {
+        Objects.requireNonNull(collectionName, NULL_MESSAGE_COLLECTION_NAME);
+        if (collectionName.isBlank()) {
+            throw new IllegalArgumentException("collectionName must not be blank");
+        }
         String requiredSourceUrl = Objects.requireNonNull(sourceUrl, "sourceUrl");
         if (requiredSourceUrl.isBlank()) {
             throw new IllegalArgumentException("sourceUrl must not be blank");
@@ -131,8 +148,6 @@ public class HybridVectorService {
         }
         requireReplacementSourceUrl(requiredSourceUrl, requiredReplacementDocuments);
 
-        String collectionName =
-                Objects.requireNonNull(resolveCollectionName(collectionKind), NULL_MESSAGE_COLLECTION_NAME);
         Set<PointId> replacementPointIds = replacementPointIds(requiredReplacementDocuments);
         Set<PointId> priorPointIds = scrollPointIdsForUrl(collectionName, requiredSourceUrl);
 

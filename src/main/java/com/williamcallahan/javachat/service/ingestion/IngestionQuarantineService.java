@@ -10,6 +10,7 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,7 +20,6 @@ import org.springframework.stereotype.Service;
 public class IngestionQuarantineService {
     private static final Logger log = LoggerFactory.getLogger(IngestionQuarantineService.class);
 
-    private static final String DEFAULT_DOCUMENTATION_ROOT = "data/docs";
     private static final String QUARANTINE_DIRECTORY_NAME = ".quarantine";
     private static final String TEMPORARY_INSPECTION_FILE_PREFIX = ".inspection-copy-";
     private static final String TEMPORARY_INSPECTION_FILE_SUFFIX = ".tmp";
@@ -31,8 +31,9 @@ public class IngestionQuarantineService {
      * Uses the canonical documentation root so inspection copies remain outside recursive ingestion.
      */
     @Autowired
-    public IngestionQuarantineService(ContentHasher contentHasher) {
-        this(Path.of(DEFAULT_DOCUMENTATION_ROOT), contentHasher);
+    public IngestionQuarantineService(
+            @Value("${DOCS_DIR:data/docs}") String documentationRoot, ContentHasher contentHasher) {
+        this(Path.of(documentationRoot), contentHasher);
     }
 
     IngestionQuarantineService(Path documentationRoot, ContentHasher contentHasher) {

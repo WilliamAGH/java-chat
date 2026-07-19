@@ -31,14 +31,19 @@ class LocalStoreServiceTest {
     Path tempDir;
 
     private LocalStoreService localStoreService;
+    private Path parsedDirectory;
+    private Path indexDirectory;
 
     @BeforeEach
     void setUp() {
-        String snapshotDir = tempDir.resolve("snapshots").toString();
-        String parsedDir = tempDir.resolve("parsed").toString();
-        String indexDir = tempDir.resolve("index").toString();
-        ProgressTracker progressTracker = new ProgressTracker(parsedDir, indexDir);
-        localStoreService = new LocalStoreService(snapshotDir, parsedDir, indexDir, progressTracker);
+        Path generationStateDirectory = tempDir.resolve("qwen3-embedding-4b-2560/local");
+        String snapshotDir = generationStateDirectory.resolve("snapshots").toString();
+        parsedDirectory = generationStateDirectory.resolve("parsed");
+        indexDirectory = generationStateDirectory.resolve("index");
+        String parsedDir = parsedDirectory.toString();
+        String indexDir = indexDirectory.toString();
+        ProgressTracker progressTracker = new ProgressTracker(parsedDir, indexDir, "local");
+        localStoreService = new LocalStoreService(snapshotDir, parsedDir, indexDir, "local", progressTracker);
         localStoreService.createStoreDirectories();
     }
 
@@ -92,7 +97,7 @@ class LocalStoreServiceTest {
 
     @Test
     void hasHashMetadataChanged_throwsOnCorruptedBase64Marker() throws IOException {
-        Path markerPath = tempDir.resolve("index").resolve(SAMPLE_HASH);
+        Path markerPath = indexDirectory.resolve(SAMPLE_HASH);
         String corruptedPayload = "1\ntitleB64=!!!not-valid-base64!!!\npackageB64=alsoBroken\n";
         Files.writeString(markerPath, corruptedPayload, StandardCharsets.UTF_8);
 
@@ -144,9 +149,55 @@ class LocalStoreServiceTest {
 
         localStoreService.saveChunkText(sourceUrl, chunkIndex, "anchored member text", CANONICAL_CHUNK_HASH);
 
-        Path parsedChunkPath = tempDir.resolve("parsed")
-                .resolve(localStoreService.toSafeName(sourceUrl) + "_" + chunkIndex + "_" + CANONICAL_CHUNK_HASH
-                        + ".txt");
+        Path parsedChunkPath = parsedDirectory.resolve(
+                localStoreService.toSafeName(sourceUrl) + "_" + chunkIndex + "_" + CANONICAL_CHUNK_HASH + ".txt");
         assertTrue(Files.exists(parsedChunkPath));
+    }
+
+    @Test
+    void createStoreDirectoriesRejectsUnknownDeploymentProfile() {
+        Path generationStateDirectory = tempDir.resolve("qwen3-embedding-4b-2560/staging");
+        LocalStoreService mismatchedStore = new LocalStoreService(
+                generationStateDirectory.resolve("snapshots").toString(),
+                generationStateDirectory.resolve("parsed").toString(),
+                generationStateDirectory.resolve("index").toString(),
+                "staging",
+                null);
+
+        IllegalStateException thrown =
+                assertThrows(IllegalStateException.class, mismatchedStore::createStoreDirectories);
+
+        assertEquals("SPRING_PROFILE must be exactly local, dev, or prod", thrown.getMessage());
+    }
+
+    @Test
+    void createStoreDirectoriesRejectsStateRootFromAnotherEnvironment() {
+        Path developmentStateDirectory = tempDir.resolve("qwen3-embedding-4b-2560/dev");
+        LocalStoreService mismatchedStore = new LocalStoreService(
+                developmentStateDirectory.resolve("snapshots").toString(),
+                developmentStateDirectory.resolve("parsed").toString(),
+                developmentStateDirectory.resolve("index").toString(),
+                "prod",
+                null);
+
+        IllegalStateException thrown =
+                assertThrows(IllegalStateException.class, mismatchedStore::createStoreDirectories);
+
+        assertTrue(thrown.getMessage().contains("qwen3-embedding-4b-2560/prod/snapshots"));
+        assertFalse(Files.exists(developmentStateDirectory));
+    }
+
+    @Test
+    void progressTrackerRejectsStateRootFromAnotherEmbeddingGeneration() {
+        Path retiredGenerationStateDirectory = tempDir.resolve("qwen3-embedding-8b-4096/local");
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> new ProgressTracker(
+                        retiredGenerationStateDirectory.resolve("parsed").toString(),
+                        retiredGenerationStateDirectory.resolve("index").toString(),
+                        "local"));
+
+        assertFalse(Files.exists(retiredGenerationStateDirectory));
     }
 }

@@ -14,6 +14,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -193,6 +194,30 @@ class HybridVectorServiceTest {
         replacementOrder.verify(qdrantClient).deleteAsync(COLLECTION_NAME, List.of(obsoletePointId));
         replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
         verify(qdrantClient, never()).countAsync(eq(COLLECTION_NAME), any(Filter.class), eq(true));
+    }
+
+    @Test
+    void urlReplacementReportsObsoletePointDeletionFailureAfterSuccessfulUpsert() {
+        PointId obsoletePointId = id(UUID.fromString(OBSOLETE_DOCUMENT_ID));
+        when(qdrantClient.scrollAsync(any(ScrollPoints.class)))
+                .thenReturn(Futures.immediateFuture(scrollResponse(DOCUMENT_ID, OBSOLETE_DOCUMENT_ID)));
+        configureReplacementEmbedding();
+        when(qdrantClient.upsertAsync(eq(COLLECTION_NAME), anyList()))
+                .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
+        when(qdrantClient.deleteAsync(eq(COLLECTION_NAME), eq(List.of(obsoletePointId))))
+                .thenReturn(Futures.immediateFailedFuture(new IllegalArgumentException("delete rejected")));
+        Document replacementDocument = replacementDocument(DOCUMENT_ID, DOCUMENT_TEXT, DOCUMENT_URL);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> hybridVectorService.replaceUrlDocuments(
+                        QdrantCollectionKind.DOCS, DOCUMENT_URL, List.of(replacementDocument)));
+
+        InOrder replacementOrder = inOrder(qdrantClient);
+        replacementOrder.verify(qdrantClient).scrollAsync(any(ScrollPoints.class));
+        replacementOrder.verify(qdrantClient).upsertAsync(eq(COLLECTION_NAME), anyList());
+        replacementOrder.verify(qdrantClient).deleteAsync(COLLECTION_NAME, List.of(obsoletePointId));
+        verify(qdrantClient, times(1)).scrollAsync(any(ScrollPoints.class));
     }
 
     @Test

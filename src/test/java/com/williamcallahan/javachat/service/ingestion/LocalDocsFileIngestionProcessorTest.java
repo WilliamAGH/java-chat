@@ -37,7 +37,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -202,8 +201,8 @@ class LocalDocsFileIngestionProcessorTest {
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(indexedDocument)));
         replacementOrder
                 .verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(
-                        List.of(), expectedJavadocUrl, priorIngestionRecord, List.of("current-javadoc-hash"));
+                .pruneObsoleteLocalStateAfterReplacement(
+                        expectedJavadocUrl, priorIngestionRecord, List.of("current-javadoc-hash"));
         ArgumentCaptor<ChunkProcessingService.JavaApiPage> javaApiPageCaptor =
                 ArgumentCaptor.forClass(ChunkProcessingService.JavaApiPage.class);
         verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(javaApiPageCaptor.capture());
@@ -265,12 +264,54 @@ class LocalDocsFileIngestionProcessorTest {
         assertFalse(processingOutcome.processed());
         assertTrue(processingOutcome.failure().isPresent());
         verify(ingestionFixture.ingestedFilePruneService, never())
-                .pruneObsoleteStateAfterReplacement(any(), anyString(), any(), any());
+                .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());
         verify(ingestionFixture.localStoreService, never()).deleteChunkIngestionMarkers(any());
         verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
         verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
         verify(ingestionFixture.fileIngestionMarkerStore, never()).deleteFileIngestionRecord(anyString());
         verify(ingestionFixture.hybridVectorService, never()).deleteByUrl(anyString(), anyString());
+    }
+
+    @Test
+    void shouldNotAdvanceMarkersWhenLocalCleanupFailsAfterReplacement(@TempDir Path temporaryDirectory)
+            throws IOException {
+        JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
+        Path localJavadocFile =
+                writeJavaApiFile(localDocsRoot, javaApiDocumentationSource, JAVA_API_RELATIVE_PATH, javaApiHtml());
+        String expectedJavadocUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_RELATIVE_PATH;
+        FileIngestionRecord priorIngestionRecord = new FileIngestionRecord(
+                Files.size(localJavadocFile),
+                Files.getLastModifiedTime(localJavadocFile).toMillis(),
+                "prior-javadoc-fingerprint",
+                "utf8-document-extraction-provenance-v2",
+                "java-api-docs",
+                List.of("prior-hash"));
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        Document replacementDocument = new Document("replacement-point", "Replacement Javadoc body", new HashMap<>());
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedJavadocUrl))
+                .thenReturn(Optional.of(priorIngestionRecord));
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("java-api-docs");
+        when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
+                .thenReturn(new ChunkProcessingService.ChunkProcessingOutcome(
+                        List.of(replacementDocument), List.of("replacement-hash"), 1, 0));
+        doThrow(new IOException("local cleanup failed"))
+                .when(ingestionFixture.ingestedFilePruneService)
+                .pruneObsoleteLocalStateAfterReplacement(
+                        expectedJavadocUrl, priorIngestionRecord, List.of("replacement-hash"));
+
+        LocalDocsFileOutcome processingOutcome =
+                ingestionFixture.ingestionProcessor().process(localDocsRoot, localJavadocFile);
+
+        assertFalse(processingOutcome.processed());
+        assertEquals("prune-local", processingOutcome.failure().orElseThrow().phase());
+        verify(ingestionFixture.hybridVectorService)
+                .replaceUrlDocuments(
+                        any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(replacementDocument)));
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
+        verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -294,7 +335,8 @@ class LocalDocsFileIngestionProcessorTest {
             when(ingestionFixture.hybridVectorService.resolveCollectionName(governedCollectionKind))
                     .thenReturn(testCollectionName(governedCollectionKind));
         }
-        when(ingestionFixture.hybridVectorService.countPointsForUrl(anyString(), eq(expectedJavadocUrl)))
+        when(ingestionFixture.hybridVectorService.countPointsForUrl(
+                        any(QdrantCollectionKind.class), eq(expectedJavadocUrl)))
                 .thenReturn(1L);
         when(ingestionFixture.chunkProcessingService.processAndStoreJavaApiPageForce(any()))
                 .thenReturn(forcedChunkingOutcome);
@@ -312,24 +354,12 @@ class LocalDocsFileIngestionProcessorTest {
                         ingestionProvenance.docPath(),
                         ingestionProvenance.docType(),
                         expectedJavadocUrl);
-        String routedCollectionName = testCollectionName(routedCollectionKind);
-        List<String> supersededCollectionNames = Arrays.stream(QdrantCollectionKind.values())
-                .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
-                .filter(collectionName -> !collectionName.equals(routedCollectionName))
-                .toList();
         verify(ingestionFixture.hybridVectorService)
                 .replaceUrlDocuments(routedCollectionKind, expectedJavadocUrl, List.of(indexedDocument));
         verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(
-                        eq(supersededCollectionNames),
-                        eq(expectedJavadocUrl),
-                        isNull(),
-                        eq(List.of("current-javadoc-hash")));
-        for (String governedCollectionName : Arrays.stream(QdrantCollectionKind.values())
-                .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
-                .toList()) {
-            verify(ingestionFixture.hybridVectorService).countPointsForUrl(governedCollectionName, expectedJavadocUrl);
-        }
+                .pruneObsoleteLocalStateAfterReplacement(
+                        eq(expectedJavadocUrl), isNull(), eq(List.of("current-javadoc-hash")));
+        verify(ingestionFixture.hybridVectorService).countPointsForUrl(routedCollectionKind, expectedJavadocUrl);
         verify(ingestionFixture.chunkProcessingService).processAndStoreJavaApiPageForce(any());
         verify(ingestionFixture.chunkProcessingService, never()).processAndStoreJavaApiPage(any());
     }
@@ -383,8 +413,8 @@ class LocalDocsFileIngestionProcessorTest {
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(List.of(indexedDocument)));
         verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(
-                        List.of(), expectedJavadocUrl, initialIngestionRecord, List.of("forced-javadoc-hash"));
+                .pruneObsoleteLocalStateAfterReplacement(
+                        expectedJavadocUrl, initialIngestionRecord, List.of("forced-javadoc-hash"));
         verify(ingestionFixture.hybridVectorService)
                 .hasExactPointIdsForUrl(
                         any(QdrantCollectionKind.class), eq(expectedJavadocUrl), eq(revertedPointUuids));
@@ -422,7 +452,7 @@ class LocalDocsFileIngestionProcessorTest {
         verify(ingestionFixture.hybridVectorService)
                 .deleteByUrl(any(QdrantCollectionKind.class), eq(expectedClassUseUrl));
         verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(List.of(), expectedClassUseUrl, staleIngestionRecord, List.of());
+                .pruneObsoleteLocalStateAfterReplacement(expectedClassUseUrl, staleIngestionRecord, List.of());
         ArgumentCaptor<FileIngestionRecord> excludedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
         verify(ingestionFixture.fileIngestionMarkerStore)
                 .markFileIngested(eq(expectedClassUseUrl), excludedMarkerCaptor.capture());
@@ -446,7 +476,7 @@ class LocalDocsFileIngestionProcessorTest {
         assertFalse(repeatedOutcome.processed());
         assertTrue(repeatedOutcome.failure().isEmpty());
         verify(ingestionFixture.ingestedFilePruneService, times(1))
-                .pruneObsoleteStateAfterReplacement(List.of(), expectedClassUseUrl, staleIngestionRecord, List.of());
+                .pruneObsoleteLocalStateAfterReplacement(expectedClassUseUrl, staleIngestionRecord, List.of());
         verify(ingestionFixture.fileIngestionMarkerStore, times(1)).markFileIngested(eq(expectedClassUseUrl), any());
         verify(ingestionFixture.quarantineService, never()).quarantine(any());
     }
@@ -532,7 +562,7 @@ class LocalDocsFileIngestionProcessorTest {
                 Files.getLastModifiedTime(documentationFile).toMillis(),
                 contentOnlyIngestionFingerprint,
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
-                "prior-documentation",
+                "documentation",
                 List.of("old-documentation-hash"));
 
         LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
@@ -557,11 +587,8 @@ class LocalDocsFileIngestionProcessorTest {
                 .replaceUrlDocuments(
                         any(QdrantCollectionKind.class), eq(expectedDocumentationUrl), eq(List.of(indexedDocument)));
         verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(
-                        List.of("prior-documentation"),
-                        expectedDocumentationUrl,
-                        contentOnlyMarker,
-                        List.of("current-documentation-hash"));
+                .pruneObsoleteLocalStateAfterReplacement(
+                        expectedDocumentationUrl, contentOnlyMarker, List.of("current-documentation-hash"));
         verify(ingestionFixture.chunkProcessingService)
                 .processAndStoreChunksForce(anyString(), eq(expectedDocumentationUrl), anyString(), anyString());
         ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
@@ -576,7 +603,7 @@ class LocalDocsFileIngestionProcessorTest {
     }
 
     @Test
-    void shouldPruneEveryGovernedCollectionForLegacyMarkerWithoutCollectionIdentity(@TempDir Path temporaryDirectory)
+    void shouldRejectLegacyMarkerWithoutCollectionIdentityBeforeMutation(@TempDir Path temporaryDirectory)
             throws IOException {
         DocumentationSource documentationSource =
                 DocsSourceRegistry.documentationSources().getFirst();
@@ -614,34 +641,60 @@ class LocalDocsFileIngestionProcessorTest {
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, documentationFile);
 
-        assertTrue(processingOutcome.processed());
-        IngestionProvenanceDeriver.IngestionProvenance ingestionProvenance =
-                new IngestionProvenanceDeriver().derive(localDocsRoot, documentationFile, expectedDocumentationUrl);
-        QdrantCollectionKind routedCollectionKind = new QdrantCollectionRouter()
-                .route(
-                        ingestionProvenance.docSet(),
-                        ingestionProvenance.docPath(),
-                        ingestionProvenance.docType(),
-                        expectedDocumentationUrl);
-        String routedCollectionName = testCollectionName(routedCollectionKind);
-        List<String> supersededCollectionNames = Arrays.stream(QdrantCollectionKind.values())
-                .map(LocalDocsFileIngestionProcessorTest::testCollectionName)
-                .filter(collectionName -> !collectionName.equals(routedCollectionName))
-                .toList();
-        verify(ingestionFixture.hybridVectorService)
-                .replaceUrlDocuments(routedCollectionKind, expectedDocumentationUrl, List.of(indexedDocument));
-        verify(ingestionFixture.ingestedFilePruneService)
-                .pruneObsoleteStateAfterReplacement(
-                        supersededCollectionNames,
-                        expectedDocumentationUrl,
-                        legacyIngestionRecord,
-                        List.of("current-documentation-hash"));
-        ArgumentCaptor<FileIngestionRecord> updatedMarkerCaptor = ArgumentCaptor.forClass(FileIngestionRecord.class);
-        verify(ingestionFixture.fileIngestionMarkerStore)
-                .markFileIngested(eq(expectedDocumentationUrl), updatedMarkerCaptor.capture());
+        assertFalse(processingOutcome.processed());
         assertEquals(
-                testCollectionName(routedCollectionKind),
-                updatedMarkerCaptor.getValue().collectionName());
+                "collection-generation",
+                processingOutcome.failure().orElseThrow().phase());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunksForce(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldRejectDifferentCollectionGenerationBeforeMutation(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("arbitrary-corpus").resolve(documentationSource.relativeMirrorPath());
+        Path documentationFile = selectedDocumentationRoot.resolve("index.html");
+        Files.createDirectories(Objects.requireNonNull(documentationFile.getParent(), "documentationFile parent"));
+        Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        String expectedDocumentationUrl = documentationSource.citationBaseUrl() + "index.html";
+        FileIngestionRecord previousGenerationRecord = new FileIngestionRecord(
+                Files.size(documentationFile),
+                Files.getLastModifiedTime(documentationFile).toMillis(),
+                "previous-generation-fingerprint",
+                LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                "java-chat-local-previous-generation-docs",
+                List.of("previous-generation-hash"));
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        for (QdrantCollectionKind governedCollectionKind : QdrantCollectionKind.values()) {
+            when(ingestionFixture.hybridVectorService.resolveCollectionName(governedCollectionKind))
+                    .thenReturn(testCollectionName(governedCollectionKind));
+        }
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(expectedDocumentationUrl))
+                .thenReturn(Optional.of(previousGenerationRecord));
+
+        LocalDocsFileOutcome processingOutcome =
+                ingestionFixture.ingestionProcessor().process(selectedDocumentationRoot, documentationFile);
+
+        assertFalse(processingOutcome.processed());
+        assertEquals(
+                "collection-generation",
+                processingOutcome.failure().orElseThrow().phase());
+        verify(ingestionFixture.hybridVectorService, never())
+                .replaceUrlDocuments(any(QdrantCollectionKind.class), anyString(), any());
+        verify(ingestionFixture.hybridVectorService, never())
+                .countPointsForUrl(any(QdrantCollectionKind.class), anyString());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never()).markFileIngested(anyString(), any());
+        verify(ingestionFixture.chunkProcessingService, never())
+                .processAndStoreChunksForce(anyString(), anyString(), anyString(), anyString());
     }
 
     /** Owns the collaborator graph shared by local documentation ingestion scenarios. */

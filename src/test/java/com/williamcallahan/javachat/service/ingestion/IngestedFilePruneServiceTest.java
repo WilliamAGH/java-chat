@@ -110,7 +110,7 @@ class IngestedFilePruneServiceTest {
         when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
         when(contentHasher.generateChunkHash(SOURCE_URL, 0, legacyStaleText)).thenReturn(COLLIDING_STALE_CHUNK_HASH);
 
-        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of(REPLACEMENT_CHUNK_HASH));
+        pruneService.pruneObsoleteLocalStateAfterReplacement(SOURCE_URL, null, List.of(REPLACEMENT_CHUNK_HASH));
 
         assertFalse(Files.exists(staleParsedChunk));
         verify(localStoreService).deleteChunkIngestionMarkers(List.of(COLLIDING_STALE_CHUNK_HASH));
@@ -138,7 +138,7 @@ class IngestedFilePruneServiceTest {
         when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
         when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
 
-        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of(legacyReplacementHash));
+        pruneService.pruneObsoleteLocalStateAfterReplacement(SOURCE_URL, null, List.of(legacyReplacementHash));
 
         assertTrue(Files.exists(replacementParsedChunk));
         assertFalse(Files.exists(staleParsedChunk));
@@ -159,7 +159,7 @@ class IngestedFilePruneServiceTest {
         when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
         when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
 
-        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of(ANCHORED_CHUNK_HASH));
+        pruneService.pruneObsoleteLocalStateAfterReplacement(SOURCE_URL, null, List.of(ANCHORED_CHUNK_HASH));
 
         assertTrue(Files.exists(anchoredParsedChunk));
         verify(localStoreService, never()).deleteChunkIngestionMarkers(anyList());
@@ -177,7 +177,7 @@ class IngestedFilePruneServiceTest {
         when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
         when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
 
-        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of());
+        pruneService.pruneObsoleteLocalStateAfterReplacement(SOURCE_URL, null, List.of());
 
         assertFalse(Files.exists(staleParsedChunk));
         verify(localStoreService).deleteChunkIngestionMarkers(List.of(MARKERLESS_STALE_CHUNK_HASH));
@@ -222,7 +222,7 @@ class IngestedFilePruneServiceTest {
         when(localStoreService.getParsedDir()).thenReturn(parsedChunkDirectory);
         when(localStoreService.toSafeName(SOURCE_URL)).thenReturn("source");
 
-        pruneService.pruneObsoleteStateAfterReplacement(List.of(), SOURCE_URL, null, List.of(REPLACEMENT_CHUNK_HASH));
+        pruneService.pruneObsoleteLocalStateAfterReplacement(SOURCE_URL, null, List.of(REPLACEMENT_CHUNK_HASH));
 
         assertFalse(Files.exists(unverifiedParsedChunk));
         verify(localStoreService, never()).deleteChunkIngestionMarkers(anyList());

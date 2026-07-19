@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -91,11 +90,7 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         String fileName = fileNamePath.toString().toLowerCase(Locale.ROOT);
-        String url = mapLocalPathToUrl(file);
-        if (fileName.endsWith(".pdf")) {
-            Optional<String> publicPdfUrl = DocsSourceRegistry.mapBookLocalToPublic(file.toString());
-            url = publicPdfUrl.orElse(url);
-        }
+        String url = mapLocalPathToUrl(root, file);
 
         final long fileSizeBytes;
         final long lastModifiedMillis;
@@ -138,6 +133,10 @@ public class LocalDocsFileIngestionProcessor {
                 collectionKind,
                 collectionName,
                 priorIngestionRecord);
+        Optional<LocalDocsFileOutcome> collectionGenerationFailure = validateCollectionGeneration(markerContext);
+        if (collectionGenerationFailure.isPresent()) {
+            return collectionGenerationFailure.orElseThrow();
+        }
         ReindexDecision markerDecision = inspectExistingMarker(markerContext);
         if (markerDecision.terminalOutcome().isPresent()) {
             return markerDecision.terminalOutcome().orElseThrow();
@@ -217,22 +216,19 @@ public class LocalDocsFileIngestionProcessor {
         }
 
         if (priorIngestionRecord.isEmpty()) {
-            ReindexDecision unmarkedVectorDecision = inspectUnmarkedVectors(file, url);
+            ReindexDecision unmarkedVectorDecision = inspectUnmarkedVectors(file, url, collectionKind);
             if (unmarkedVectorDecision.terminalOutcome().isPresent()) {
                 return unmarkedVectorDecision.terminalOutcome().orElseThrow();
             }
             requiresFullReindex = unmarkedVectorDecision.requiresFullReindex();
         }
 
-        List<String> supersededCollectionNames =
-                requiresFullReindex ? supersededCollectionNames(collectionName, priorIngestionRecord) : List.of();
-
         if (excludedJavaApiPage) {
             try {
                 if (requiresFullReindex) {
                     storage.hybridVector().deleteByUrl(collectionKind, url);
-                    ingestedFilePruneService.pruneObsoleteStateAfterReplacement(
-                            supersededCollectionNames, url, priorIngestionRecord.orElse(null), List.of());
+                    ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
+                            url, priorIngestionRecord.orElse(null), List.of());
                 }
             } catch (IOException pruneException) {
                 return LocalDocsFileOutcome.failedFile(failureFactory.failure(file, "prune-local", pruneException));
@@ -341,7 +337,6 @@ public class LocalDocsFileIngestionProcessor {
                 return processDocuments(new DocumentProcessingRequest(
                         markerContext,
                         true,
-                        supersededCollectionNames(collectionName, priorIngestionRecord),
                         completeDocuments,
                         completeChunkingOutcome.allChunkHashes(),
                         fileStartMillis));
@@ -358,12 +353,7 @@ public class LocalDocsFileIngestionProcessor {
         if (!documents.isEmpty()) {
             applyProvenanceMetadata(documents, provenance);
             return processDocuments(new DocumentProcessingRequest(
-                    markerContext,
-                    requiresFullReindex,
-                    supersededCollectionNames,
-                    documents,
-                    chunkingOutcome.allChunkHashes(),
-                    fileStartMillis));
+                    markerContext, requiresFullReindex, documents, chunkingOutcome.allChunkHashes(), fileStartMillis));
         }
         if (chunkingOutcome.generatedNoChunks()) {
             return LocalDocsFileOutcome.failedFile(
@@ -410,13 +400,9 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private ReindexDecision inspectUnmarkedVectors(Path file, String url) {
+    private ReindexDecision inspectUnmarkedVectors(Path file, String url, QdrantCollectionKind collectionKind) {
         try {
-            List<String> governedCollectionNames = governedCollectionNames();
-            long unmarkedPointCount = 0;
-            for (String governedCollectionName : governedCollectionNames) {
-                unmarkedPointCount += storage.hybridVector().countPointsForUrl(governedCollectionName, url);
-            }
+            long unmarkedPointCount = storage.hybridVector().countPointsForUrl(collectionKind, url);
             if (unmarkedPointCount == 0) {
                 return ReindexDecision.continueWith(false);
             }
@@ -430,31 +416,8 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private List<String> supersededCollectionNames(
-            String currentCollectionName, Optional<FileIngestionRecord> priorIngestionRecord) {
-        Optional<String> priorCollectionName = priorIngestionRecord
-                .filter(FileIngestionRecord::hasCollectionIdentity)
-                .map(FileIngestionRecord::collectionName);
-        if (priorCollectionName.isPresent()) {
-            return priorCollectionName
-                    .filter(collectionName -> !collectionName.equals(currentCollectionName))
-                    .map(List::of)
-                    .orElseGet(List::of);
-        }
-        return governedCollectionNames().stream()
-                .filter(collectionName -> !collectionName.equals(currentCollectionName))
-                .toList();
-    }
-
     private List<String> expectedPointUuids(List<String> chunkHashes) {
         return chunkHashes.stream().map(storage.hasher()::uuidFromHash).toList();
-    }
-
-    private List<String> governedCollectionNames() {
-        return Arrays.stream(QdrantCollectionKind.values())
-                .map(storage.hybridVector()::resolveCollectionName)
-                .distinct()
-                .toList();
     }
 
     private record MarkerContext(
@@ -488,15 +451,12 @@ public class LocalDocsFileIngestionProcessor {
     private record DocumentProcessingRequest(
             MarkerContext markerContext,
             boolean requiresFullReindex,
-            List<String> supersededCollectionNames,
             List<Document> documents,
             List<String> allChunkHashes,
             long fileStartMillis) {
 
         private DocumentProcessingRequest {
             markerContext = Objects.requireNonNull(markerContext, "markerContext");
-            supersededCollectionNames =
-                    List.copyOf(Objects.requireNonNull(supersededCollectionNames, "supersededCollectionNames"));
             documents = List.copyOf(Objects.requireNonNull(documents, "documents"));
             allChunkHashes = List.copyOf(Objects.requireNonNull(allChunkHashes, "allChunkHashes"));
         }
@@ -526,8 +486,7 @@ public class LocalDocsFileIngestionProcessor {
 
         if (processingRequest.requiresFullReindex()) {
             try {
-                ingestedFilePruneService.pruneObsoleteStateAfterReplacement(
-                        processingRequest.supersededCollectionNames(),
+                ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
                         markerContext.url(),
                         markerContext.priorIngestionRecord().orElse(null),
                         processingRequest.allChunkHashes());
@@ -585,6 +544,19 @@ public class LocalDocsFileIngestionProcessor {
                 collectionKind,
                 duration,
                 formattedPercent);
+    }
+
+    private Optional<LocalDocsFileOutcome> validateCollectionGeneration(MarkerContext markerContext) {
+        return markerContext.priorIngestionRecord().flatMap(previousFileRecord -> {
+            if (previousFileRecord.hasCollectionIdentity()
+                    && markerContext.collectionName().equals(previousFileRecord.collectionName())) {
+                return Optional.empty();
+            }
+            return Optional.of(LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
+                    markerContext.file().toString(),
+                    "collection-generation",
+                    "The ingestion state belongs to a different or unknown collection generation")));
+        });
     }
 
     private void markDocumentsIngested(List<Document> documents) {
@@ -653,9 +625,11 @@ public class LocalDocsFileIngestionProcessor {
         }
     }
 
-    private String mapLocalPathToUrl(final Path file) {
+    private String mapLocalPathToUrl(final Path root, final Path file) {
         final String absolutePath = file.toAbsolutePath().toString().replace('\\', '/');
-        return DocsSourceRegistry.resolveLocalPath(absolutePath).orElse(FILE_URL_PREFIX + absolutePath);
+        return DocsSourceRegistry.resolveMirroredPath(root, file)
+                .or(() -> DocsSourceRegistry.resolveLocalPath(absolutePath))
+                .orElse(FILE_URL_PREFIX + absolutePath);
     }
 
     private String provenanceAwareIngestionFingerprint(String fileContentFingerprint, IngestionProvenance provenance) {

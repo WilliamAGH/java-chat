@@ -89,35 +89,21 @@ public class IngestedFilePruneService {
     }
 
     /**
-     * Removes superseded vectors and local chunk state after a complete replacement was stored.
+     * Removes obsolete local chunk state after a complete same-collection replacement was stored.
      *
-     * <p>The current collection is intentionally absent from {@code supersededCollectionNames}; its URL-scoped
-     * replacement is owned by {@link HybridVectorService#replaceUrlDocuments}. The file marker is also retained so
-     * the caller can atomically replace it only after every vector and chunk-state operation succeeds. Marker cleanup
-     * precedes parsed-chunk deletion so a failed cleanup retains the exact stored hash evidence required for retry.</p>
+     * <p>Collection generations own separate state roots. This operation therefore never deletes vectors or file
+     * markers; the caller replaces the current marker only after local chunk cleanup succeeds.</p>
      *
-     * @param supersededCollectionNames prior collections that no longer own the source URL
      * @param sourceUrl authoritative URL key for local state and vectors
      * @param previousFileRecord previous file marker record, or {@code null} when no marker existed
      * @param replacementChunkHashes complete hash inventory for the stored replacement
      * @throws IOException when obsolete parsed chunks or hash markers cannot be deleted
      */
-    public void pruneObsoleteStateAfterReplacement(
-            List<String> supersededCollectionNames,
-            String sourceUrl,
-            FileIngestionRecord previousFileRecord,
-            List<String> replacementChunkHashes)
+    public void pruneObsoleteLocalStateAfterReplacement(
+            String sourceUrl, FileIngestionRecord previousFileRecord, List<String> replacementChunkHashes)
             throws IOException {
-        Objects.requireNonNull(supersededCollectionNames, "supersededCollectionNames");
         Objects.requireNonNull(sourceUrl, "sourceUrl");
         Set<String> replacementHashSet = validatedChunkHashSet(replacementChunkHashes, "replacementChunkHashes");
-
-        for (String supersededCollectionName : supersededCollectionNames) {
-            if (supersededCollectionName == null || supersededCollectionName.isBlank()) {
-                throw new IllegalArgumentException("Superseded collection names must not be blank");
-            }
-            hybridVectorService.deleteByUrl(supersededCollectionName, sourceUrl);
-        }
 
         List<ParsedChunkReference> parsedChunkReferences = readParsedChunkReferences(sourceUrl);
         Set<String> obsoleteChunkHashes = new LinkedHashSet<>();

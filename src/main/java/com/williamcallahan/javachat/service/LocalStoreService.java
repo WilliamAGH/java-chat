@@ -20,6 +20,10 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class LocalStoreService {
+    static final String EMBEDDING_GENERATION_DIRECTORY = "qwen3-embedding-4b-2560";
+    static final String LOCAL_PROFILE = "local";
+    static final String DEVELOPMENT_PROFILE = "dev";
+    static final String PRODUCTION_PROFILE = "prod";
     private static final String SHA_256_ALGORITHM = "SHA-256";
     private static final int SHORT_SHA_BYTES = 6;
     private static final int SAFE_NAME_MAX_LENGTH = 150;
@@ -32,6 +36,7 @@ public class LocalStoreService {
     private final String snapshotDirConfig;
     private final String parsedDirConfig;
     private final String indexDirConfig;
+    private final String deploymentProfile;
     private Path snapshotDir;
     private Path parsedDir;
     private Path indexDir;
@@ -44,10 +49,12 @@ public class LocalStoreService {
             @Value("${app.docs.snapshot-dir}") String snapshotDir,
             @Value("${app.docs.parsed-dir}") String parsedDir,
             @Value("${app.docs.index-dir}") String indexDir,
+            @Value("${SPRING_PROFILE:prod}") String deploymentProfile,
             ProgressTracker progressTracker) {
         this.snapshotDirConfig = snapshotDir;
         this.parsedDirConfig = parsedDir;
         this.indexDirConfig = indexDir;
+        this.deploymentProfile = deploymentProfile;
         this.progressTracker = progressTracker;
     }
 
@@ -60,12 +67,30 @@ public class LocalStoreService {
             this.snapshotDir = Path.of(snapshotDirConfig);
             this.parsedDir = Path.of(parsedDirConfig);
             this.indexDir = Path.of(indexDirConfig);
+            requireGenerationStateDirectory(this.snapshotDir, deploymentProfile, "snapshots");
+            requireGenerationStateDirectory(this.parsedDir, deploymentProfile, "parsed");
+            requireGenerationStateDirectory(this.indexDir, deploymentProfile, "index");
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
         } catch (InvalidPathException | IOException exception) {
             throw new IllegalStateException("Failed to create local store directories", exception);
         }
+    }
+
+    static Path requireGenerationStateDirectory(
+            Path configuredDirectory, String deploymentProfile, String stateDirectoryName) {
+        if (!LOCAL_PROFILE.equals(deploymentProfile)
+                && !DEVELOPMENT_PROFILE.equals(deploymentProfile)
+                && !PRODUCTION_PROFILE.equals(deploymentProfile)) {
+            throw new IllegalStateException("SPRING_PROFILE must be exactly local, dev, or prod");
+        }
+        Path requiredSuffix = Path.of(EMBEDDING_GENERATION_DIRECTORY, deploymentProfile, stateDirectoryName);
+        if (!configuredDirectory.normalize().endsWith(requiredSuffix)) {
+            throw new IllegalStateException("Configured ingestion state directory must end with " + requiredSuffix
+                    + ": " + configuredDirectory);
+        }
+        return configuredDirectory;
     }
 
     /**

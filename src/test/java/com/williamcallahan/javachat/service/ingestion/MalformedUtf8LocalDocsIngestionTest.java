@@ -76,10 +76,11 @@ class MalformedUtf8LocalDocsIngestionTest {
                 0,
                 "prior-ingestion-fingerprint",
                 LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
-                "prior-documentation",
+                "documentation",
                 List.of("prior-document-hash"));
         when(fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
                 .thenReturn(Optional.of(changedPriorIngestionRecord));
+        when(hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
         when(hybridVectorService.countPointsForUrl(anyString(), anyString())).thenReturn(1L);
 
         LocalDocsFileIngestionProcessor ingestionProcessor = new LocalDocsFileIngestionProcessor(

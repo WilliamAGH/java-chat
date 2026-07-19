@@ -163,7 +163,7 @@ class DocsIngestionServiceTest {
                 "Documentation response redirected outside the configured crawl boundary",
                 redirectException.getMessage());
         verify(localStoreService, never()).saveHtml(any(), any());
-        verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+        verify(hybridVectorService, never()).replaceUrlDocuments(any(QdrantCollectionKind.class), any(), any());
     }
 
     @Test
@@ -230,7 +230,7 @@ class DocsIngestionServiceTest {
                             + " bytes",
                     oversizedResponseException.getMessage());
             verify(localStoreService, never()).saveHtml(any(), any());
-            verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+            verify(hybridVectorService, never()).replaceUrlDocuments(any(QdrantCollectionKind.class), any(), any());
         } finally {
             documentationServer.stop(0);
         }
@@ -574,7 +574,7 @@ class DocsIngestionServiceTest {
                         + ordinaryUrl
                         + " must contain non-blank string hash metadata",
                 missingHashException.getMessage());
-        verify(hybridVectorService, never()).replaceUrlDocuments(any(), any(), any());
+        verify(hybridVectorService, never()).replaceUrlDocuments(any(QdrantCollectionKind.class), any(), any());
         verify(localStoreService, never()).markHashIngested(any(), any(), any());
     }
 
