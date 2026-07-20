@@ -53,10 +53,9 @@ public class QdrantRetrievalConstraintBuilder {
         Filter.Builder filterBuilder = Filter.newBuilder();
         int mustConditionCount = 0;
 
-        if (!retrievalConstraint.docVersion().isBlank()) {
-            filterBuilder.addMust(matchKeyword(
-                    QdrantPayloadFieldSchema.DOC_VERSION_FIELD,
-                    Objects.requireNonNull(retrievalConstraint.docVersion())));
+        if (!retrievalConstraint.docVersions().isEmpty()) {
+            filterBuilder.addMust(
+                    matchKeywords(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, retrievalConstraint.docVersions()));
             mustConditionCount++;
         }
         if (!retrievalConstraint.sourceKind().isBlank()) {

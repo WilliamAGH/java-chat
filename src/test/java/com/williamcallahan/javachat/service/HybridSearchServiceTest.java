@@ -100,7 +100,7 @@ class HybridSearchServiceTest {
 
         HybridSearchService hybridSearchService = buildSearchService();
         RetrievalConstraint retrievalConstraint =
-                RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease());
+                RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
 
         hybridSearchService.searchOutcome(HYBRID_QUERY, 5, retrievalConstraint);
 
@@ -223,7 +223,7 @@ class HybridSearchServiceTest {
                 hybridSearchService.searchDocumentationCitationsOutcome(
                         VERSIONED_SELECTOR_CITATION_QUERY,
                         3,
-                        RetrievalConstraint.forDocVersion(REPRESENTED_JAVA_API_SOURCE.javaRelease()));
+                        RetrievalConstraint.forDocVersions(List.of(REPRESENTED_JAVA_API_SOURCE.javaRelease())));
 
         assertEquals(1, capturedScrolls.size());
         assertEquals(1, capturedScrollTimeouts.size());

@@ -5,7 +5,6 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
-import com.williamcallahan.javachat.util.QueryVersionExtractor.VersionFilterPatterns;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -35,6 +34,10 @@ public class RetrievalService {
 
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
+    private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
+                    .toList();
 
     private final HybridSearchService hybridSearchService;
     private final AppProperties appProperties;
@@ -129,14 +132,16 @@ public class RetrievalService {
             return new CitationOutcome(List.of(), 0);
         }
         int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
-        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        RetrievalConstraint combinedRetrievalConstraint = combineWithVersionFilter(retrievalConstraint, versionFilter);
-        HybridSearchService.SearchOutcome citationSearchOutcome =
-                hybridSearchService.searchDocumentationCitationsOutcome(
-                        query, citationCandidateLimit, combinedRetrievalConstraint);
+        List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
+        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
+        List<Document> citationSearchDocuments =
+                searchCitationCandidates(query, citationCandidateLimit, combinedRetrievalConstraint, requestedVersions);
         List<Document> orderedCitationCandidates =
-                CitationCandidateRanker.orderForCitationQuery(query, citationSearchOutcome.documents());
-        CitationOutcome candidateCitationOutcome = toCitations(orderedCitationCandidates);
+                CitationCandidateRanker.orderForCitationQuery(query, citationSearchDocuments);
+        List<Document> limitedCitationCandidates = retainRequestedVersionCoverage(
+                orderedCitationCandidates, citationSearchDocuments, requestedVersions, citationLimit);
+        CitationOutcome candidateCitationOutcome = toCitations(limitedCitationCandidates);
         List<Citation> limitedCitations = candidateCitationOutcome.citations().stream()
                 .limit(citationLimit)
                 .toList();
@@ -150,9 +155,10 @@ public class RetrievalService {
         if (query == null || query.isBlank()) {
             return new RetrievalOutcome(List.of(), List.of());
         }
-        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        RetrievalConstraint retrievalConstraint = toRetrievalConstraint(versionFilter);
-        return retrieveOutcome(query, retrievalConstraint, versionFilter);
+        List<String> requestedVersions =
+                QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
+        RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersions(requestedVersions);
+        return retrieveOutcome(query, retrievalConstraint, requestedVersions);
     }
 
     /**
@@ -170,50 +176,57 @@ public class RetrievalService {
         if (query == null || query.isBlank()) {
             return new RetrievalOutcome(List.of(), List.of());
         }
-        Optional<VersionFilterPatterns> versionFilter = QueryVersionExtractor.extractFilterPatterns(query);
-        RetrievalConstraint combinedRetrievalConstraint = combineWithVersionFilter(retrievalConstraint, versionFilter);
-        return retrieveOutcome(query, combinedRetrievalConstraint, versionFilter);
-    }
-
-    private static RetrievalConstraint combineWithVersionFilter(
-            RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
-        return versionFilter
-                .map(filterPatterns -> retrievalConstraint.withDocVersion(filterPatterns.versionNumber()))
-                .orElse(retrievalConstraint);
+        List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
+        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
+        return retrieveOutcome(query, combinedRetrievalConstraint, requestedVersions);
     }
 
     private RetrievalOutcome retrieveOutcome(
-            String query, RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
-        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, versionFilter);
+            String query, RetrievalConstraint retrievalConstraint, List<String> requestedVersions) {
+        CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, requestedVersions);
 
-        List<Document> reranked = rerankerService.rerank(
-                query, candidateRetrieval.documents(), appProperties.getRag().getSearchReturnK());
+        int returnDocumentLimit = appProperties.getRag().getSearchReturnK();
+        List<Document> reranked = rerankerService.rerank(query, candidateRetrieval.documents(), returnDocumentLimit);
+        List<Document> coveredRerankedDocuments = retainRequestedVersionCoverage(
+                reranked, candidateRetrieval.documents(), requestedVersions, returnDocumentLimit);
 
-        if (!reranked.isEmpty()) {
-            Map<String, ?> firstDocMetadata = reranked.get(0).getMetadata();
+        if (!coveredRerankedDocuments.isEmpty()) {
+            Map<String, ?> firstDocMetadata = coveredRerankedDocuments.get(0).getMetadata();
             int metadataSize = firstDocMetadata.size();
-            String firstDocumentText =
-                    Optional.ofNullable(reranked.get(0).getText()).orElse("");
+            String firstDocumentText = Optional.ofNullable(
+                            coveredRerankedDocuments.get(0).getText())
+                    .orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, firstDocumentText.length());
             log.debug("First doc metadata size: {}", metadataSize);
             log.debug("First doc content preview length: {}", previewLength);
         }
-        return new RetrievalOutcome(reranked, candidateRetrieval.notices());
+        return new RetrievalOutcome(coveredRerankedDocuments, candidateRetrieval.notices());
     }
 
     private CandidateRetrieval retrieveCandidates(
-            String query, RetrievalConstraint retrievalConstraint, Optional<VersionFilterPatterns> versionFilter) {
-        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query);
+            String query, RetrievalConstraint retrievalConstraint, List<String> requestedVersions) {
+        String boostedQuery = QueryVersionExtractor.boostQueryWithVersionContext(query, requestedVersions);
         int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
-        HybridSearchService.SearchOutcome searchOutcome =
-                hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint);
-        List<Document> filtered = retrievalConstraint.hasServerSideConstraint()
-                ? searchOutcome.documents()
-                : applyVersionFilterIfPresent(versionFilter, searchOutcome.documents());
-        List<Document> deduplicatedCandidates = deduplicateByContentHashThenHashlessCanonicalUrl(filtered);
-        List<RetrievalNotice> retrievalNotices = searchOutcome.notices().stream()
-                .map(searchNotice -> new RetrievalNotice(searchNotice.summary(), searchNotice.details()))
-                .toList();
+        List<Document> retrievedDocuments = new ArrayList<>();
+        List<RetrievalNotice> retrievalNotices = new ArrayList<>();
+        if (requestedVersions.isEmpty()) {
+            appendSearchOutcome(
+                    hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint),
+                    retrievedDocuments,
+                    retrievalNotices);
+        } else {
+            for (String requestedVersion : requestedVersions) {
+                RetrievalConstraint exactVersionConstraint =
+                        retrievalConstraint.withDocVersions(List.of(requestedVersion));
+                HybridSearchService.SearchOutcome versionSearchOutcome =
+                        hybridSearchService.searchOutcome(boostedQuery, baseTopK, exactVersionConstraint);
+                requireRequestedVersionEvidence(requestedVersion, versionSearchOutcome.documents());
+                appendSearchOutcome(versionSearchOutcome, retrievedDocuments, retrievalNotices);
+            }
+        }
+        List<Document> deduplicatedCandidates =
+                deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(retrievedDocuments);
         return new CandidateRetrieval(deduplicatedCandidates, retrievalNotices);
     }
 
@@ -221,7 +234,11 @@ public class RetrievalService {
      * Retrieve documents with custom limits for token-constrained models.
      */
     public RetrievalOutcome retrieveWithLimitOutcome(String query, int maxDocuments, int maxTokensPerDocument) {
-        return limitRetrievalOutcome(retrieveOutcome(query), maxDocuments, maxTokensPerDocument);
+        return limitRetrievalOutcome(
+                retrieveOutcome(query),
+                maxDocuments,
+                maxTokensPerDocument,
+                QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS));
     }
 
     /**
@@ -235,17 +252,26 @@ public class RetrievalService {
      */
     public RetrievalOutcome retrieveWithLimitOutcome(
             String query, int maxDocuments, int maxTokensPerDocument, RetrievalConstraint retrievalConstraint) {
-        return limitRetrievalOutcome(retrieveOutcome(query, retrievalConstraint), maxDocuments, maxTokensPerDocument);
+        return limitRetrievalOutcome(
+                retrieveOutcome(query, retrievalConstraint),
+                maxDocuments,
+                maxTokensPerDocument,
+                applicableRequestedVersions(
+                        retrievalConstraint,
+                        QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS)));
     }
 
     private RetrievalOutcome limitRetrievalOutcome(
-            RetrievalOutcome outcome, int maxDocuments, int maxTokensPerDocument) {
+            RetrievalOutcome outcome, int maxDocuments, int maxTokensPerDocument, List<String> requestedVersions) {
         List<Document> documents = outcome.documents();
         if (documents.isEmpty()) {
             return outcome;
         }
-        List<Document> truncatedDocuments = documents.stream()
-                .limit(Math.max(1, maxDocuments))
+        int finalDocumentLimit = Math.max(1, maxDocuments);
+        List<Document> coveredDocuments = requestedVersions.isEmpty()
+                ? documents.stream().limit(finalDocumentLimit).toList()
+                : retainRequestedVersionCoverage(documents, documents, requestedVersions, finalDocumentLimit);
+        List<Document> truncatedDocuments = coveredDocuments.stream()
                 .map(document -> truncateDocumentToTokenLimit(document, maxTokensPerDocument))
                 .toList();
         return new RetrievalOutcome(truncatedDocuments, outcome.notices());
@@ -259,28 +285,6 @@ public class RetrievalService {
                 .documents();
     }
 
-    private List<Document> applyVersionFilterIfPresent(
-            Optional<VersionFilterPatterns> versionFilter, List<Document> documents) {
-        if (versionFilter.isEmpty()) {
-            return documents;
-        }
-        VersionFilterPatterns filter = versionFilter.get();
-        List<Document> matched = documents.stream()
-                .filter(document -> filter.matchesMetadata(
-                        stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.URL_FIELD),
-                        stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.TITLE_FIELD)))
-                .toList();
-        return matched.isEmpty() ? documents : matched;
-    }
-
-    private static RetrievalConstraint toRetrievalConstraint(Optional<VersionFilterPatterns> versionFilter) {
-        if (versionFilter.isEmpty()) {
-            return RetrievalConstraint.none();
-        }
-        String versionNumber = versionFilter.get().versionNumber();
-        return RetrievalConstraint.forDocVersion(versionNumber);
-    }
-
     /** Holds hybrid-ranked candidates before the operation-specific final ordering step. */
     private record CandidateRetrieval(List<Document> documents, List<RetrievalNotice> notices) {
         private CandidateRetrieval {
@@ -289,18 +293,19 @@ public class RetrievalService {
         }
     }
 
-    private List<Document> deduplicateByContentHashThenHashlessCanonicalUrl(List<Document> documents) {
+    private List<Document> deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(List<Document> documents) {
         if (documents.isEmpty()) {
             return documents;
         }
-        Set<String> retainedContentHashes = new HashSet<>();
+        Set<String> retainedVersionedContentHashes = new HashSet<>();
         Set<String> retainedHashlessCanonicalUrls = new HashSet<>();
         List<Document> deduplicatedDocuments = new ArrayList<>(documents.size());
         int unidentifiedDocumentCount = 0;
         for (Document document : documents) {
             String contentHash = stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.HASH_FIELD);
             if (!contentHash.isBlank()) {
-                if (!retainedContentHashes.add(contentHash)) {
+                String documentVersion = documentVersion(document);
+                if (!retainedVersionedContentHashes.add(documentVersion + "\u0000" + contentHash)) {
                     continue;
                 }
             } else {
@@ -326,6 +331,117 @@ public class RetrievalService {
             log.warn("Dedup kept {} documents with neither hash nor URL metadata", unidentifiedDocumentCount);
         }
         return List.copyOf(deduplicatedDocuments);
+    }
+
+    private static void appendSearchOutcome(
+            HybridSearchService.SearchOutcome searchOutcome,
+            List<Document> retrievedDocuments,
+            List<RetrievalNotice> retrievalNotices) {
+        retrievedDocuments.addAll(searchOutcome.documents());
+        searchOutcome.notices().stream()
+                .map(searchNotice -> new RetrievalNotice(searchNotice.summary(), searchNotice.details()))
+                .forEach(retrievalNotices::add);
+    }
+
+    private List<Document> searchCitationCandidates(
+            String query,
+            int citationCandidateLimit,
+            RetrievalConstraint retrievalConstraint,
+            List<String> requestedVersions) {
+        if (requestedVersions.isEmpty()) {
+            return hybridSearchService
+                    .searchDocumentationCitationsOutcome(query, citationCandidateLimit, retrievalConstraint)
+                    .documents();
+        }
+        List<Document> citationCandidates = new ArrayList<>();
+        for (String requestedVersion : requestedVersions) {
+            RetrievalConstraint exactVersionConstraint = retrievalConstraint.withDocVersions(List.of(requestedVersion));
+            List<Document> versionCandidates = hybridSearchService
+                    .searchDocumentationCitationsOutcome(query, citationCandidateLimit, exactVersionConstraint)
+                    .documents();
+            requireRequestedVersionEvidence(requestedVersion, versionCandidates);
+            citationCandidates.addAll(versionCandidates);
+        }
+        return deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(citationCandidates);
+    }
+
+    private static void requireRequestedVersionEvidence(String requestedVersion, List<Document> documents) {
+        boolean hasRequestedVersion =
+                documents.stream().anyMatch(document -> requestedVersion.equals(documentVersion(document)));
+        if (!hasRequestedVersion) {
+            throw new IllegalStateException(
+                    "No official documentation evidence found for requested Java release " + requestedVersion);
+        }
+    }
+
+    private static List<Document> retainRequestedVersionCoverage(
+            List<Document> orderedDocuments,
+            List<Document> candidateDocuments,
+            List<String> requestedVersions,
+            int documentLimit) {
+        if (requestedVersions.isEmpty()) {
+            return List.copyOf(orderedDocuments);
+        }
+        if (documentLimit < requestedVersions.size()) {
+            throw new IllegalStateException("Retrieval result limit cannot represent every requested Java release");
+        }
+        List<Document> coveredDocuments = new ArrayList<>(
+                orderedDocuments.stream().limit(Math.max(0, documentLimit)).toList());
+        for (String requestedVersion : requestedVersions) {
+            if (coveredDocuments.stream().anyMatch(document -> requestedVersion.equals(documentVersion(document)))) {
+                continue;
+            }
+            Document requiredVersionDocument = candidateDocuments.stream()
+                    .filter(document -> requestedVersion.equals(documentVersion(document)))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "No official documentation evidence found for requested Java release " + requestedVersion));
+            if (coveredDocuments.size() < documentLimit) {
+                coveredDocuments.add(requiredVersionDocument);
+                continue;
+            }
+            int replacementIndex = findReplaceableDocumentIndex(coveredDocuments, requestedVersions);
+            if (replacementIndex < 0) {
+                throw new IllegalStateException("Retrieval result cannot represent every requested Java release");
+            }
+            coveredDocuments.set(replacementIndex, requiredVersionDocument);
+        }
+        return List.copyOf(coveredDocuments);
+    }
+
+    private static int findReplaceableDocumentIndex(List<Document> documents, List<String> requestedVersions) {
+        for (int documentIndex = documents.size() - 1; documentIndex >= 0; documentIndex--) {
+            String candidateVersion = documentVersion(documents.get(documentIndex));
+            if (!requestedVersions.contains(candidateVersion)) {
+                return documentIndex;
+            }
+            long representedVersionCount = documents.stream()
+                    .filter(document -> candidateVersion.equals(documentVersion(document)))
+                    .count();
+            if (representedVersionCount > 1) {
+                return documentIndex;
+            }
+        }
+        return -1;
+    }
+
+    private static String documentVersion(Document document) {
+        return stringMetadataValue(document.getMetadata(), QdrantPayloadFieldSchema.DOC_VERSION_FIELD);
+    }
+
+    private static List<String> applicableRequestedVersions(
+            RetrievalConstraint retrievalConstraint, List<String> parsedVersions) {
+        if (parsedVersions.isEmpty() || retrievalConstraint.docSet().isEmpty()) {
+            return parsedVersions;
+        }
+        Set<String> allowedJavaApiVersions = new HashSet<>();
+        for (DocsSourceRegistry.JavaApiDocumentationSource javaApiSource :
+                DocsSourceRegistry.javaApiDocumentationSources()) {
+            if (retrievalConstraint.docSet().contains(javaApiSource.relativeMirrorPath())) {
+                allowedJavaApiVersions.add(javaApiSource.javaRelease());
+            }
+        }
+        return parsedVersions.stream().filter(allowedJavaApiVersions::contains).toList();
     }
 
     private static String stringMetadataValue(Map<String, ?> metadata, String key) {

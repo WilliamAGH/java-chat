@@ -1,16 +1,19 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
+import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serial;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -63,7 +66,7 @@ public class GuidedLearningService {
      * filled in at runtime to keep responses focused on the active topic.</p>
      */
     private static final String OFFICIAL_DOCUMENTATION_GUIDANCE_TEMPLATE = "You are a learning assistant for %s. Use"
-            + " the canonical curated lesson below as the authoritative teaching sequence and code-example style.%s Use"
+            + " the canonical curated lesson below %s.%s Use"
             + " ONLY the canonical curated lesson and retrieved official documentation context from these allowed docSet"
             + " values for factual claims: %s. If those sources do not cover a topic, say so plainly; do not answer from"
             + " general knowledge. This lesson source policy overrides any general-knowledge fallback instruction. Do NOT"
@@ -77,6 +80,16 @@ public class GuidedLearningService {
             + " steer back to the current lesson, explaining how the lesson topic relates or suggesting they complete this"
             + " lesson first.%n4. Never ignore the lesson context - every response should reinforce learning the current"
             + " topic.";
+
+    private static final String DEFAULT_CURATED_LESSON_USAGE =
+            "as the authoritative teaching sequence and code-example style";
+    private static final String VERSIONED_CURATED_LESSON_USAGE = "for pedagogical structure only; use the retrieved"
+            + " requested-release API documentation for every version-specific factual claim and code example, and do"
+            + " not project newer Java syntax or APIs onto an older requested release";
+    private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
+                    .toList();
 
     private final String jdkVersion;
 
@@ -164,9 +177,13 @@ public class GuidedLearningService {
         GuidedLesson lesson = requireListedLesson(slug);
         String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
         String query = buildLessonQuery(lesson) + "\n" + userMessage;
-        List<Document> lessonContextDocuments = retrieveLessonContext(lesson, query);
+        List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
+        boolean isJavaLesson = JAVA_TECHNOLOGY.equals(lesson.getTechnology());
+        List<String> requestedVersions = isJavaLesson ? parsedVersions : List.of();
+        List<String> effectiveDocSets = effectiveDocSetsFor(lesson, requestedVersions);
+        List<Document> lessonContextDocuments = retrieveLessonContext(query, effectiveDocSets);
 
-        String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown);
+        String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown, effectiveDocSets, requestedVersions);
         StructuredPrompt structuredPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
                 history, userMessage, lessonContextDocuments, guidance);
         return new GuidedChatPromptOutcome(structuredPrompt, lessonContextDocuments);
@@ -272,12 +289,29 @@ public class GuidedLearningService {
     }
 
     private List<Document> retrieveLessonContext(GuidedLesson lesson, String query) {
-        return retrievalService.retrieve(query, retrievalConstraintFor(lesson));
+        return retrieveLessonContext(query, effectiveDocSetsFor(lesson, List.of()));
     }
 
-    private RetrievalConstraint retrievalConstraintFor(GuidedLesson lesson) {
+    private List<Document> retrieveLessonContext(String query, List<String> effectiveDocSets) {
+        return retrievalService.retrieve(query, RetrievalConstraint.forOfficialDocSets(effectiveDocSets));
+    }
+
+    private List<String> effectiveDocSetsFor(GuidedLesson lesson, List<String> requestedVersions) {
         lesson.requireValidSourceScope();
-        return RetrievalConstraint.forOfficialDocSets(lesson.getDocSet());
+        if (!JAVA_TECHNOLOGY.equals(lesson.getTechnology()) || requestedVersions.isEmpty()) {
+            return List.copyOf(lesson.getDocSet());
+        }
+        List<String> effectiveDocSets = new ArrayList<>(requestedVersions.size());
+        for (String requestedVersion : requestedVersions) {
+            DocsSourceRegistry.JavaApiDocumentationSource requestedSource =
+                    DocsSourceRegistry.javaApiDocumentationSources().stream()
+                            .filter(javaApiSource -> javaApiSource.javaRelease().equals(requestedVersion))
+                            .findFirst()
+                            .orElseThrow(() -> new IllegalArgumentException(
+                                    "Unsupported Java documentation release " + requestedVersion));
+            effectiveDocSets.add(requestedSource.relativeMirrorPath());
+        }
+        return List.copyOf(effectiveDocSets);
     }
 
     private String buildLessonQuery(GuidedLesson lesson) {
@@ -303,9 +337,14 @@ public class GuidedLearningService {
      * @param lesson current lesson (never null)
      * @return complete guidance string for the LLM
      */
-    private String buildLessonGuidance(GuidedLesson lesson, String curatedLessonMarkdown) {
-        String lessonContext = buildLessonContextDescription(lesson);
-        return buildGuidanceFromContext(lesson, curatedLessonMarkdown, lessonContext);
+    private String buildLessonGuidance(
+            GuidedLesson lesson,
+            String curatedLessonMarkdown,
+            List<String> effectiveDocSets,
+            List<String> requestedVersions) {
+        String lessonContext = buildLessonContextDescription(lesson, effectiveDocSets);
+        return buildGuidanceFromContext(
+                lesson, curatedLessonMarkdown, lessonContext, effectiveDocSets, requestedVersions);
     }
 
     /**
@@ -319,12 +358,18 @@ public class GuidedLearningService {
      * @param lessonContext human-readable lesson context to embed in the template
      * @return complete guidance string for the LLM
      */
-    private String buildGuidanceFromContext(GuidedLesson lesson, String curatedLessonMarkdown, String lessonContext) {
+    private String buildGuidanceFromContext(
+            GuidedLesson lesson,
+            String curatedLessonMarkdown,
+            String lessonContext,
+            List<String> effectiveDocSets,
+            List<String> requestedVersions) {
         String officialDocumentationGuidance = String.format(
                 OFFICIAL_DOCUMENTATION_GUIDANCE_TEMPLATE,
                 lesson.getTechnology(),
-                compactJavaSourceGuidance(lesson, curatedLessonMarkdown),
-                String.join(", ", lesson.getDocSet()),
+                requestedVersions.isEmpty() ? DEFAULT_CURATED_LESSON_USAGE : VERSIONED_CURATED_LESSON_USAGE,
+                compactJavaSourceGuidance(lesson, curatedLessonMarkdown, requestedVersions),
+                String.join(", ", effectiveDocSets),
                 systemPromptConfig.getMarkerUsagePrompt(),
                 curatedLessonMarkdown,
                 lessonContext);
@@ -339,8 +384,10 @@ public class GuidedLearningService {
      * @param curatedLessonMarkdown canonical lesson content
      * @return compact-source guidance for matching Java lessons, otherwise an empty suffix
      */
-    private String compactJavaSourceGuidance(GuidedLesson lesson, String curatedLessonMarkdown) {
+    private String compactJavaSourceGuidance(
+            GuidedLesson lesson, String curatedLessonMarkdown, List<String> requestedVersions) {
         if (!JAVA_TECHNOLOGY.equals(lesson.getTechnology())
+                || requestedVersions.stream().anyMatch(requestedVersion -> !jdkVersion.equals(requestedVersion))
                 || !curatedLessonMarkdown.contains(COMPACT_JAVA_MAIN_MARKER)
                 || !curatedLessonMarkdown.contains(COMPACT_JAVA_OUTPUT_MARKER)) {
             return "";
@@ -354,7 +401,7 @@ public class GuidedLearningService {
      * @param lesson current lesson (never null)
      * @return description of the lesson context
      */
-    private String buildLessonContextDescription(GuidedLesson lesson) {
+    private String buildLessonContextDescription(GuidedLesson lesson, List<String> effectiveDocSets) {
         StringBuilder contextBuilder = new StringBuilder();
         contextBuilder
                 .append("The user is currently studying the lesson: **")
@@ -363,7 +410,7 @@ public class GuidedLearningService {
                 .append("\n\nTechnology: ")
                 .append(lesson.getTechnology())
                 .append("\n\nAllowed official docSet values: ")
-                .append(String.join(", ", lesson.getDocSet()));
+                .append(String.join(", ", effectiveDocSets));
 
         if (lesson.getSummary() != null && !lesson.getSummary().isBlank()) {
             contextBuilder.append("\n\nLesson Summary: ").append(lesson.getSummary());

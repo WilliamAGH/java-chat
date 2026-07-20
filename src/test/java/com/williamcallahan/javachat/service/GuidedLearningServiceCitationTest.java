@@ -188,6 +188,79 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
+    void guidedJavaComparisonUsesBothRequestedApiScopesInRetrievalAndGuidance() {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        Document java21Document = Document.builder()
+                .id("java-21-string")
+                .text("Java 21 String documentation")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "21")
+                .build();
+        Document java24Document = Document.builder()
+                .id("java-24-string")
+                .text("Java 24 String documentation")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "24")
+                .build();
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(List.of(java21Document, java24Document));
+        ChatService chatService = mock(ChatService.class);
+        when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
+                .thenReturn(StructuredPrompt.fromRawPrompt("guided comparison", 1));
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
+        String comparisonQuestion = "Compare Java 21 and Java 24 String methods";
+
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
+                guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        List.of(), LESSON_SLUG, comparisonQuestion);
+
+        assertEquals(List.of(java21Document, java24Document), promptOutcome.lessonContextDocuments());
+        ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
+                ArgumentCaptor.forClass(RetrievalConstraint.class);
+        verify(retrievalService).retrieve(anyString(), retrievalConstraintCaptor.capture());
+        assertEquals(
+                List.of("java/java21-complete", "java/java24-complete"),
+                retrievalConstraintCaptor.getValue().docSet());
+        ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
+        verify(chatService)
+                .buildStructuredPromptWithContextAndGuidance(
+                        eq(List.of()),
+                        eq(comparisonQuestion),
+                        eq(List.of(java21Document, java24Document)),
+                        guidanceCaptor.capture());
+        assertTrue(guidanceCaptor.getValue().contains("java/java21-complete"));
+        assertTrue(guidanceCaptor.getValue().contains("java/java24-complete"));
+        assertFalse(guidanceCaptor.getValue().contains("java/java25-complete"));
+        assertFalse(guidanceCaptor.getValue().contains("dev-java"));
+        assertTrue(guidanceCaptor.getValue().contains("for pedagogical structure only"));
+        assertFalse(guidanceCaptor.getValue().contains("Java 25 compact source form"));
+    }
+
+    @Test
+    void nonJavaLessonKeepsItsOwnScopeForAnOffTopicJavaVersionQuestion() {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(List.of());
+        ChatService chatService = mock(ChatService.class);
+        when(chatService.buildStructuredPromptWithContextAndGuidance(any(), anyString(), any(), anyString()))
+                .thenReturn(StructuredPrompt.fromRawPrompt("guided redirect", 1));
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider, retrievalService, mock(EnrichmentService.class), chatService, systemPromptConfig());
+        String offTopicQuestion = "What changed in Java 21?";
+
+        guidedLearningService.buildStructuredGuidedPromptWithContext(List.of(), KOTLIN_LESSON_SLUG, offTopicQuestion);
+
+        ArgumentCaptor<String> retrievalQueryCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
+                ArgumentCaptor.forClass(RetrievalConstraint.class);
+        verify(retrievalService).retrieve(retrievalQueryCaptor.capture(), retrievalConstraintCaptor.capture());
+        assertTrue(retrievalQueryCaptor.getValue().contains(offTopicQuestion));
+        assertEquals(List.of("kotlin"), retrievalConstraintCaptor.getValue().docSet());
+        assertTrue(retrievalConstraintCaptor.getValue().docVersions().isEmpty());
+    }
+
+    @Test
     void unknownAndBlankLessonsDoNotReachRetrievalOrPromptConstruction() {
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
         RetrievalService retrievalService = mock(RetrievalService.class);
