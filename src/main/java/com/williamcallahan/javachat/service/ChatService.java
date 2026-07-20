@@ -135,19 +135,14 @@ public class ChatService {
 
         // Use reduced RAG for token-constrained models (GPT-5.x family)
         RetrievalService.RetrievalOutcome retrievalOutcome;
-        RetrievalConstraint retrievalConstraint = officialDocumentationConstraint();
         if (ModelConfiguration.isTokenConstrained(modelHint)) {
-            retrievalOutcome = retrievalService.retrieveWithLimitOutcome(
-                    latestUserMessage,
-                    ModelConfiguration.RAG_LIMIT_CONSTRAINED,
-                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
-                    retrievalConstraint);
+            retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(latestUserMessage);
             logger.debug(
                     "Using reduced RAG: {} documents with max {} tokens each",
                     retrievalOutcome.documents().size(),
                     ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
         } else {
-            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage, retrievalConstraint);
+            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage, officialDocumentationConstraint());
         }
 
         List<Document> contextDocs = retrievalOutcome.documents();
@@ -176,6 +171,20 @@ public class ChatService {
                 new StructuredPrompt(systemSegment, contextSegments, conversationSegments, querySegment);
 
         return new StructuredPromptOutcome(structuredPrompt, retrievalOutcome.notices(), retrievalOutcome.documents());
+    }
+
+    /**
+     * Retrieves the official documentation context shared by constrained chat prompts and diagnostics.
+     *
+     * @param query learner query
+     * @return constrained official-document retrieval outcome
+     */
+    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(String query) {
+        return retrievalService.retrieveWithLimitOutcome(
+                query,
+                ModelConfiguration.RAG_LIMIT_CONSTRAINED,
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
+                officialDocumentationConstraint());
     }
 
     private static RetrievalConstraint officialDocumentationConstraint() {

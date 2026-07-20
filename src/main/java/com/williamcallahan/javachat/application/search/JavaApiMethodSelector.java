@@ -20,6 +20,15 @@ import java.util.Set;
 public final class JavaApiMethodSelector {
 
     private static final String JAVADOC_PAGE_SUFFIX = ".html";
+    private static final String VIRTUAL_THREAD_FACTORY_METHOD = "ofVirtual";
+    private static final String VIRTUAL_THREAD_FACTORY_ANCHOR = "ofVirtual()";
+    private static final String VIRTUAL_THREAD_START_CHAIN = "().start(Runnable)";
+    private static final String QUALIFIED_VIRTUAL_THREAD_START_CHAIN = "().start(java.lang.Runnable)";
+    private static final String THREAD_TYPE_PAGE = "Thread";
+    private static final String THREAD_BUILDER_TYPE_PAGE = "Thread.Builder";
+    private static final String THREAD_BUILDER_START_METHOD = "start";
+    private static final String THREAD_BUILDER_START_PARAMETER_CLAUSE = "(java.lang.Runnable)";
+    private static final String JAVA_LANG_PACKAGE = "java.lang";
     private static final int MINIMUM_TYPE_METHOD_SEGMENT_COUNT = 2;
     private static final Set<String> NON_METHOD_TERMINALS = Set.of("class", "super", "this", "java", "html");
     private final String packageName;
@@ -83,9 +92,94 @@ public final class JavaApiMethodSelector {
         SelectorOccurrence selectorOccurrence = selectorOccurrences.getFirst();
         JavaInvocationSignature invocationSignature =
                 JavaInvocationSignature.afterMethodName(query, selectorOccurrence.methodEndIndex());
+        if (invocationSignature.isExact()
+                && hasChainedMethodInvocationAfterInvocation(query, selectorOccurrence.methodEndIndex())) {
+            return mappedJavadocDeclarationForKnownChain(query, selectorOccurrence, invocationSignature);
+        }
         JavaApiMethodSelector exactSelector =
                 selectorOccurrence.selector().withInvocationSignature(invocationSignature);
         return exactSelector.exactOverloadAnchor().isPresent() ? Optional.of(exactSelector) : Optional.empty();
+    }
+
+    private static Optional<JavaApiMethodSelector> mappedJavadocDeclarationForKnownChain(
+            String query, SelectorOccurrence selectorOccurrence, JavaInvocationSignature invocationSignature) {
+        JavaApiMethodSelector receiverSelector = selectorOccurrence.selector();
+        if ((!receiverSelector.packageName().isBlank() && !JAVA_LANG_PACKAGE.equals(receiverSelector.packageName()))
+                || !THREAD_TYPE_PAGE.equals(receiverSelector.typePageName())
+                || !VIRTUAL_THREAD_FACTORY_METHOD.equals(receiverSelector.methodName())
+                || invocationSignature
+                        .anchorFor(VIRTUAL_THREAD_FACTORY_METHOD)
+                        .filter(VIRTUAL_THREAD_FACTORY_ANCHOR::equals)
+                        .isEmpty()) {
+            return Optional.empty();
+        }
+        String compactInvocationSuffix = removeWhitespace(query.substring(selectorOccurrence.methodEndIndex()));
+        if (!compactInvocationSuffix.startsWith(VIRTUAL_THREAD_START_CHAIN)
+                && !compactInvocationSuffix.startsWith(QUALIFIED_VIRTUAL_THREAD_START_CHAIN)) {
+            return Optional.empty();
+        }
+        return Optional.of(new JavaApiMethodSelector(
+                JAVA_LANG_PACKAGE,
+                THREAD_BUILDER_TYPE_PAGE,
+                THREAD_BUILDER_START_METHOD,
+                new JavaInvocationSignature(true, THREAD_BUILDER_START_PARAMETER_CLAUSE)));
+    }
+
+    private static String removeWhitespace(String querySuffix) {
+        StringBuilder compactQuerySuffix = new StringBuilder(querySuffix.length());
+        for (int currentIndex = 0; currentIndex < querySuffix.length(); currentIndex++) {
+            char currentCharacter = querySuffix.charAt(currentIndex);
+            if (!Character.isWhitespace(currentCharacter)) {
+                compactQuerySuffix.append(currentCharacter);
+            }
+        }
+        return compactQuerySuffix.toString();
+    }
+
+    private static boolean hasChainedMethodInvocationAfterInvocation(String query, int methodEndIndex) {
+        int openingParenthesisIndex = skipWhitespace(query, methodEndIndex);
+        int invocationDepth = 0;
+        for (int currentIndex = openingParenthesisIndex; currentIndex < query.length(); currentIndex++) {
+            char currentCharacter = query.charAt(currentIndex);
+            if (currentCharacter == '(') {
+                invocationDepth++;
+            } else if (currentCharacter == ')') {
+                invocationDepth--;
+                if (invocationDepth == 0) {
+                    int memberAccessIndex = skipWhitespace(query, currentIndex + 1);
+                    if (memberAccessIndex >= query.length() || query.charAt(memberAccessIndex) != '.') {
+                        return false;
+                    }
+                    int chainedMethodStartIndex = skipWhitespace(query, memberAccessIndex + 1);
+                    if (chainedMethodStartIndex < query.length() && query.charAt(chainedMethodStartIndex) == '<') {
+                        chainedMethodStartIndex = skipExplicitMethodTypeArguments(query, chainedMethodStartIndex);
+                    }
+                    if (!isIdentifierStartAt(query, chainedMethodStartIndex)) {
+                        return false;
+                    }
+                    int chainedMethodEndIndex = readIdentifierEnd(query, chainedMethodStartIndex);
+                    int chainedInvocationIndex = skipWhitespace(query, chainedMethodEndIndex);
+                    return chainedInvocationIndex < query.length() && query.charAt(chainedInvocationIndex) == '(';
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int skipExplicitMethodTypeArguments(String query, int openingTypeArgumentIndex) {
+        int typeArgumentDepth = 0;
+        for (int currentIndex = openingTypeArgumentIndex; currentIndex < query.length(); currentIndex++) {
+            char currentCharacter = query.charAt(currentIndex);
+            if (currentCharacter == '<') {
+                typeArgumentDepth++;
+            } else if (currentCharacter == '>') {
+                typeArgumentDepth--;
+                if (typeArgumentDepth == 0) {
+                    return skipWhitespace(query, currentIndex + 1);
+                }
+            }
+        }
+        return query.length();
     }
 
     private static List<SelectorOccurrence> selectorOccurrences(String query) {
@@ -286,6 +380,14 @@ public final class JavaApiMethodSelector {
     private static int readIdentifierEnd(String query, int startIndex) {
         int currentIndex = startIndex + 1;
         while (currentIndex < query.length() && Character.isJavaIdentifierPart(query.charAt(currentIndex))) {
+            currentIndex++;
+        }
+        return currentIndex;
+    }
+
+    private static int skipWhitespace(String query, int startIndex) {
+        int currentIndex = startIndex;
+        while (currentIndex < query.length() && Character.isWhitespace(query.charAt(currentIndex))) {
             currentIndex++;
         }
         return currentIndex;

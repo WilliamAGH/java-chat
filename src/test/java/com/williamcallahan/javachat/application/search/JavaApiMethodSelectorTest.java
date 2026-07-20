@@ -51,10 +51,18 @@ class JavaApiMethodSelectorTest {
         JavaApiMethodSelector varargsSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
                         "What does List.of(E...) return?")
                 .orElseThrow();
+        JavaApiMethodSelector threadBuilderSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "Explain java.lang.Thread.Builder.start(java.lang.Runnable)")
+                .orElseThrow();
 
         assertEquals("of(E,E)", listSelector.exactOverloadAnchor().orElseThrow());
         assertEquals("valueOf(char[])", stringSelector.exactOverloadAnchor().orElseThrow());
         assertEquals("of(E...)", varargsSelector.exactOverloadAnchor().orElseThrow());
+        assertEquals("java.lang", threadBuilderSelector.packageName());
+        assertEquals("Thread.Builder", threadBuilderSelector.typePageName());
+        assertEquals(
+                "start(java.lang.Runnable)",
+                threadBuilderSelector.exactOverloadAnchor().orElseThrow());
     }
 
     @Test
@@ -72,6 +80,36 @@ class JavaApiMethodSelectorTest {
                 JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of(E,").isEmpty());
         assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of(List<E>)")
                 .isEmpty());
+        JavaApiMethodSelector virtualThreadStartSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "Thread.ofVirtual().start(Runnable)")
+                .orElseThrow();
+        JavaApiMethodSelector spacedVirtualThreadStartSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "Thread.ofVirtual() . start(Runnable)")
+                .orElseThrow();
+        JavaApiMethodSelector qualifiedVirtualThreadStartSelector = JavaApiMethodSelector.uniqueExactOverloadFromQuery(
+                        "Thread.ofVirtual()\n.start(java.lang.Runnable)")
+                .orElseThrow();
+        assertEquals("java.lang", virtualThreadStartSelector.packageName());
+        assertEquals("Thread.Builder", virtualThreadStartSelector.typePageName());
+        assertEquals(
+                "start(java.lang.Runnable)",
+                virtualThreadStartSelector.exactOverloadAnchor().orElseThrow());
+        assertEquals(
+                "start(java.lang.Runnable)",
+                spacedVirtualThreadStartSelector.exactOverloadAnchor().orElseThrow());
+        assertEquals(
+                "start(java.lang.Runnable)",
+                qualifiedVirtualThreadStartSelector.exactOverloadAnchor().orElseThrow());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("List.of().stream()")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Stream.of().<String>map(Function)")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual().Start()")
+                .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual().")
+                .isPresent());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual(). Use the returned builder")
+                .isPresent());
     }
 
     @Test

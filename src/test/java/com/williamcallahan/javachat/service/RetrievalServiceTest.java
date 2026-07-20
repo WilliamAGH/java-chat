@@ -299,6 +299,34 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void virtualThreadStartChainUsesItsCanonicalBuilderDeclaration() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint officialDocumentationConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint java21Constraint = officialDocumentationConstraint.withDocVersions(List.of("21"));
+        String chainedInvocationQuery = "Using Java 21, explain Thread.ofVirtual().start(Runnable).";
+        Document virtualThreadDocument = exactThreadBuilderStartDocument();
+        when(hybridSearchService.searchDocumentationCitationsOutcome(
+                        eq(chainedInvocationQuery), anyInt(), eq(java21Constraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(virtualThreadDocument), List.of()));
+
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrievalService.retrieveOutcome(chainedInvocationQuery, officialDocumentationConstraint);
+        RetrievalService.CitationOutcome citationOutcome =
+                retrievalService.toCitationsForQuery(chainedInvocationQuery, retrievalOutcome.documents());
+
+        assertEquals(List.of(virtualThreadDocument), retrievalOutcome.documents());
+        assertEquals(
+                "start(java.lang.Runnable)",
+                citationOutcome.citations().getFirst().getAnchor());
+        verify(hybridSearchService, never()).searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class));
+        verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt());
+    }
+
+    @Test
     void unscopedExactLookingSyntaxStaysOnPrimaryHybridRetrieval() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
@@ -528,6 +556,27 @@ class RetrievalServiceTest {
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
                 .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html")
                 .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, "of(E,E)")
+                .build();
+    }
+
+    private static Document exactThreadBuilderStartDocument() {
+        DocsSourceRegistry.JavaApiDocumentationSource documentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().stream()
+                        .filter(candidateSource -> "21".equals(candidateSource.javaRelease()))
+                        .findFirst()
+                        .orElseThrow();
+        return Document.builder()
+                .id("java-21-thread-builder-start")
+                .text("Thread start(Runnable task) Creates a new Thread and schedules it to execute")
+                .metadata(QdrantPayloadFieldSchema.DOC_VERSION_FIELD, "21")
+                .metadata(QdrantPayloadFieldSchema.HASH_FIELD, "java-21-thread-builder-start-hash")
+                .metadata(
+                        QdrantPayloadFieldSchema.URL_FIELD,
+                        documentationSource.remoteBaseUrl() + "java.base/java/lang/Thread.Builder.html")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "Thread.Builder.html")
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, "start(java.lang.Runnable)")
                 .build();
     }
 
