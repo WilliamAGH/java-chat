@@ -16,11 +16,11 @@ import com.williamcallahan.javachat.application.completion.CompletionRequestConf
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +43,6 @@ public class OpenAIStreamingService {
 
     private static final String PROVIDER_UNAVAILABLE_MESSAGE =
             "LLM providers unavailable - active provider is rate limited or misconfigured";
-
     /** GitHub Models client when configured. */
     private OpenAIClient githubModelsClient;
 
@@ -295,12 +294,12 @@ public class OpenAIStreamingService {
 
         return Flux.defer(() -> {
             OpenAiProviderCandidate providerAdmission = requireConfiguredProviderAdmission();
-            AtomicBoolean emittedTextChunk = new AtomicBoolean(false);
+            AtomicBoolean emittedVisibleText = new AtomicBoolean(false);
             return executeStreamingRequest(
                             providerAdmission.client(), preparedStreamingRequest.responseParams(), configuredProvider)
                     .doOnNext(textChunk -> {
-                        if (!textChunk.isEmpty()) {
-                            emittedTextChunk.set(true);
+                        if (UnicodeVisibleContent.hasVisibleContent(textChunk)) {
+                            emittedVisibleText.set(true);
                         }
                     })
                     .onErrorResume(streamingFailure -> {
@@ -311,7 +310,7 @@ public class OpenAIStreamingService {
                                         preparedStreamingRequest.modelId(),
                                         1,
                                         1,
-                                        emittedTextChunk.get())));
+                                        emittedVisibleText.get())));
                     });
         });
     }
@@ -321,17 +320,41 @@ public class OpenAIStreamingService {
         RequestOptions requestOptions =
                 RequestOptions.builder().timeout(streamingTimeout()).build();
 
-        return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
-                        () -> client.responses().createStreaming(requestParameters, requestOptions),
-                        (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(responseStream.stream())
-                                .concatMap(event -> Mono.justOrEmpty(extractTextDelta(event))))
-                .doOnComplete(() -> {
-                    log.debug("[LLM] Stream completed successfully (providerId={})", activeProvider.ordinal());
-                    rateLimitService.recordSuccess(activeProvider);
-                })
-                .doOnError(exception -> {
-                    recordProviderFailurePreservingUpstream(activeProvider, exception);
-                });
+        return Flux.defer(() -> {
+            AtomicBoolean emittedVisibleText = new AtomicBoolean(false);
+            AtomicBoolean observedCompletedEvent = new AtomicBoolean(false);
+            return Flux.<String, StreamResponse<ResponseStreamEvent>>using(
+                            () -> client.responses().createStreaming(requestParameters, requestOptions),
+                            (StreamResponse<ResponseStreamEvent> responseStream) -> Flux.fromStream(
+                                            responseStream.stream())
+                                    .concatMap(responseStreamEvent -> {
+                                        if (responseStreamEvent.completed().isPresent()) {
+                                            observedCompletedEvent.set(true);
+                                        }
+                                        return extractTextOrTerminalFailure(responseStreamEvent);
+                                    })
+                                    .doOnNext(textChunk -> {
+                                        if (UnicodeVisibleContent.hasVisibleContent(textChunk)) {
+                                            emittedVisibleText.set(true);
+                                        }
+                                    }))
+                    .concatWith(Mono.defer(() -> {
+                        if (!observedCompletedEvent.get()) {
+                            return Mono.error(OpenAiResponseStreamException.missingCompletion());
+                        }
+                        if (!emittedVisibleText.get()) {
+                            return Mono.error(OpenAiResponseStreamException.withoutVisibleText());
+                        }
+                        return Mono.empty();
+                    }))
+                    .doOnComplete(() -> {
+                        log.debug("[LLM] Stream completed successfully (providerId={})", activeProvider.ordinal());
+                        rateLimitService.recordSuccess(activeProvider);
+                    })
+                    .doOnError(exception -> {
+                        recordProviderFailurePreservingUpstream(activeProvider, exception);
+                    });
+        });
     }
 
     private void recordProviderFailurePreservingUpstream(
@@ -382,8 +405,33 @@ public class OpenAIStreamingService {
         }
     }
 
-    private Optional<String> extractTextDelta(ResponseStreamEvent event) {
-        return event.outputTextDelta().map(ResponseTextDeltaEvent::delta);
+    private Mono<String> extractTextOrTerminalFailure(ResponseStreamEvent responseStreamEvent) {
+        var errorEvent = responseStreamEvent.error();
+        if (errorEvent.isPresent()) {
+            return Mono.error(
+                    OpenAiResponseStreamException.error(errorEvent.orElseThrow().code()));
+        }
+        var failedEvent = responseStreamEvent.failed();
+        if (failedEvent.isPresent()) {
+            var providerCode = failedEvent.orElseThrow().response().error().map(providerError -> providerError
+                    .code()
+                    .asString());
+            return Mono.error(OpenAiResponseStreamException.failed(providerCode));
+        }
+        var incompleteEvent = responseStreamEvent.incomplete();
+        if (incompleteEvent.isPresent()) {
+            var incompleteReason = incompleteEvent
+                    .orElseThrow()
+                    .response()
+                    .incompleteDetails()
+                    .flatMap(Response.IncompleteDetails::reason)
+                    .map(Response.IncompleteDetails.Reason::asString);
+            return Mono.error(OpenAiResponseStreamException.incomplete(incompleteReason));
+        }
+        return Mono.justOrEmpty(responseStreamEvent
+                .outputTextDelta()
+                .map(ResponseTextDeltaEvent::delta)
+                .or(() -> responseStreamEvent.refusalDelta().map(refusalDeltaEvent -> refusalDeltaEvent.delta())));
     }
 
     private String extractTextFromResponse(Response response) {

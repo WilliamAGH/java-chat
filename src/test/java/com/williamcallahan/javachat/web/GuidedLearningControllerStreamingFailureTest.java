@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
@@ -123,6 +124,8 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(Boolean.TRUE, streamError.retryable());
         assertEquals(STATUS_STAGE_STREAM, streamError.stage());
         assertFalse(serializedStreamError.contains(IllegalStateException.class.getSimpleName()));
+        assertFalse(streamEvents.stream().anyMatch(streamEvent -> EVENT_CITATION.equals(streamEvent.event())));
+        verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
         assertEquals(0, controllerErrorCount());
     }
 

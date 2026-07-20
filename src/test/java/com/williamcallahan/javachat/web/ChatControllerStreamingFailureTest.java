@@ -620,6 +620,7 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
         assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
+        assertFalse(streamEvents.stream().anyMatch(streamEvent -> EVENT_CITATION.equals(streamEvent.event())));
         verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
     }
 

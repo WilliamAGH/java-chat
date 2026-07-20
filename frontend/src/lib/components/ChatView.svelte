@@ -6,6 +6,7 @@
     import NewContentIndicator from "./NewContentIndicator.svelte";
     import StreamingMessagesList from "./StreamingMessagesList.svelte";
     import {
+        hasVisibleChatMessageText,
         streamChat,
         type ChatMessage,
         type Citation,
@@ -70,7 +71,7 @@
             (existingMessage) =>
                 existingMessage.messageId === activeStreamingMessageId,
         );
-        return !!activeMessage?.messageText;
+        return hasVisibleChatMessageText(activeMessage?.messageText ?? "");
     });
 
     function findMessageIndex(messageId: string): number {
@@ -165,11 +166,15 @@
                     ? error.message
                     : "Sorry, I encountered an error. Please try again.";
             ensureAssistantMessage(assistantMessageId);
-            updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-                ...existingMessage,
-                messageText: errorMessage,
-                isError: true,
-            }));
+            updateAssistantMessage(assistantMessageId, (existingMessage) =>
+                hasVisibleChatMessageText(existingMessage.messageText)
+                    ? { ...existingMessage, streamErrorMessage: errorMessage }
+                    : {
+                          ...existingMessage,
+                          messageText: errorMessage,
+                          isError: true,
+                      },
+            );
         }
     }
 
