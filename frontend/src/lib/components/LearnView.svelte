@@ -1049,6 +1049,9 @@
             /* Uses the larger mobile FAB footprint so compact breakpoints retain clearance. */
             --lesson-content-panel-mobile-reading-inset: var(--space-20);
             padding-bottom: var(--lesson-content-panel-mobile-reading-inset);
+            scroll-padding-bottom: var(
+                --lesson-content-panel-mobile-reading-inset
+            );
         }
     }
 

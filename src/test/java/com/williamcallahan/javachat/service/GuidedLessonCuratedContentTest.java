@@ -114,6 +114,14 @@ class GuidedLessonCuratedContentTest {
     }
 
     @Test
+    void modulesLessonRendersTheGreetingWithoutDuplicatePunctuation() throws IOException {
+        String modulesLessonMarkdown = readCuratedLessonMarkdown("modules");
+
+        assertTrue(modulesLessonMarkdown.contains("The program prints `Welcome, Maya.` If"));
+        assertFalse(modulesLessonMarkdown.contains("The program prints `Welcome, Maya.`."));
+    }
+
+    @Test
     void rejectsListedLessonWithoutPackagedCuratedMarkdown() {
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
         GuidedLesson listedLesson = new GuidedLesson();
