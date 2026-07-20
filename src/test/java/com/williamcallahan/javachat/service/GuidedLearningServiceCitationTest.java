@@ -19,6 +19,7 @@ import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
 import com.williamcallahan.javachat.model.GuidedLesson;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +49,7 @@ class GuidedLearningServiceCitationTest {
     ObjectMapper objectMapper;
 
     @Test
-    void guidedRetrievalFlowsUseTheLessonOfficialDocSetConstraint() {
+    void guidedEnrichmentAndPromptFlowsUseTheLessonOfficialDocSetConstraint() {
         GuidedLesson guidedLesson = guidedLesson();
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
         when(tocProvider.findBySlug(LESSON_SLUG)).thenReturn(Optional.of(guidedLesson));
@@ -58,8 +59,6 @@ class GuidedLearningServiceCitationTest {
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
                 .thenReturn(List.of(officialSourceDocument));
         Citation officialCitation = new Citation(officialSourceUrl(guidedLesson), "Strings", "", "substring");
-        when(retrievalService.discoverCitations(anyString(), any(RetrievalConstraint.class)))
-                .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(retrievalService.toCitations(List.of(officialSourceDocument)))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
 
@@ -77,7 +76,6 @@ class GuidedLearningServiceCitationTest {
         GuidedLearningService guidedLearningService = guidedLearningService(
                 tocProvider, retrievalService, enrichmentService, chatService, systemPromptConfig());
 
-        assertEquals(List.of(officialCitation), guidedLearningService.citationsForLesson(LESSON_SLUG));
         assertEquals(lessonEnrichment, guidedLearningService.enrichmentForLesson(LESSON_SLUG));
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                 guidedLearningService.buildStructuredGuidedPromptWithContext(List.of(), LESSON_SLUG, USER_QUESTION);
@@ -92,7 +90,6 @@ class GuidedLearningServiceCitationTest {
                 ArgumentCaptor.forClass(RetrievalConstraint.class);
         verify(retrievalService, org.mockito.Mockito.times(2))
                 .retrieve(anyString(), retrievalConstraintCaptor.capture());
-        verify(retrievalService).discoverCitations(anyString(), retrievalConstraintCaptor.capture());
         for (RetrievalConstraint guidedConstraint : retrievalConstraintCaptor.getAllValues()) {
             assertEquals("official", guidedConstraint.sourceKind());
             assertEquals(guidedLesson.getDocSet(), guidedConstraint.docSet());
@@ -108,6 +105,34 @@ class GuidedLearningServiceCitationTest {
         for (String allowedDocSet : guidedLesson.getDocSet()) {
             assertTrue(guidanceCaptor.getValue().contains(allowedDocSet));
         }
+    }
+
+    @Test
+    void modernJavaPatternMatchingCitationsMatchCanonicalMarkdownLinks() {
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                new GuidedTOCProvider(objectMapper),
+                retrievalService,
+                mock(EnrichmentService.class),
+                mock(ChatService.class),
+                systemPromptConfig());
+
+        List<Citation> lessonCitations = guidedLearningService.citationsForLesson("modern-java-pattern-matching");
+
+        assertEquals(3, lessonCitations.size());
+        assertCitation(
+                lessonCitations.get(0),
+                "https://docs.oracle.com/javase/specs/jls/se25/html/jls-6.html#jls-6.3.1.5",
+                "JLS 6.3.1.5: Scope for Pattern Variables");
+        assertCitation(
+                lessonCitations.get(1),
+                "https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.30",
+                "JLS 14.30: Patterns");
+        assertCitation(
+                lessonCitations.get(2),
+                "https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.11",
+                "JLS 14.11: switch");
+        verifyNoInteractions(retrievalService);
     }
 
     @Test
@@ -208,31 +233,6 @@ class GuidedLearningServiceCitationTest {
         assertEquals(expectedCitationOutcome, actualCitationOutcome);
     }
 
-    @Test
-    void lessonCitationsRejectPartialCitationConversionOutcomes() {
-        GuidedLesson guidedLesson = guidedLesson();
-        GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
-        when(tocProvider.findBySlug(LESSON_SLUG)).thenReturn(Optional.of(guidedLesson));
-
-        RetrievalService retrievalService = mock(RetrievalService.class);
-        when(retrievalService.discoverCitations(anyString(), any(RetrievalConstraint.class)))
-                .thenReturn(new RetrievalService.CitationOutcome(
-                        List.of(new Citation(officialSourceUrl(guidedLesson), "Strings", "", OFFICIAL_SOURCE_TEXT)),
-                        1));
-
-        GuidedLearningService guidedLearningService = guidedLearningService(
-                tocProvider,
-                retrievalService,
-                mock(EnrichmentService.class),
-                mock(ChatService.class),
-                systemPromptConfig());
-
-        CitationConversionFailureException conversionFailure = assertThrows(
-                CitationConversionFailureException.class, () -> guidedLearningService.citationsForLesson(LESSON_SLUG));
-
-        assertEquals(1, conversionFailure.failedConversionCount());
-    }
-
     private static GuidedLearningService guidedLearningService(
             GuidedTOCProvider tocProvider,
             RetrievalService retrievalService,
@@ -240,7 +240,20 @@ class GuidedLearningServiceCitationTest {
             ChatService chatService,
             SystemPromptConfig systemPromptConfig) {
         return new GuidedLearningService(
-                tocProvider, retrievalService, enrichmentService, chatService, systemPromptConfig, TEST_JDK_VERSION);
+                tocProvider,
+                retrievalService,
+                enrichmentService,
+                chatService,
+                systemPromptConfig,
+                new MarkdownService(new UnifiedMarkdownService()),
+                TEST_JDK_VERSION);
+    }
+
+    private static void assertCitation(Citation citation, String expectedUrl, String expectedTitle) {
+        assertEquals(expectedUrl, citation.getUrl());
+        assertEquals(expectedTitle, citation.getTitle());
+        assertEquals("", citation.getAnchor());
+        assertEquals("", citation.getSnippet());
     }
 
     private GuidedLesson guidedLesson() {

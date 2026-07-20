@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.model.GuidedLesson;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -139,6 +140,7 @@ class GuidedLessonCuratedContentTest {
                 mock(EnrichmentService.class),
                 mock(ChatService.class),
                 mock(SystemPromptConfig.class),
+                new MarkdownService(new UnifiedMarkdownService()),
                 TEST_JDK_VERSION);
     }
 

@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.config.SystemPromptConfig;
+import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
@@ -33,6 +34,7 @@ public class GuidedLearningService {
     private final EnrichmentService enrichmentService;
     private final ChatService chatService;
     private final SystemPromptConfig systemPromptConfig;
+    private final MarkdownService markdownService;
 
     /** Maximum retrieved official-documentation snippets to include in enrichment requests. */
     private static final int MAX_ENRICHMENT_SNIPPETS = 6;
@@ -87,12 +89,14 @@ public class GuidedLearningService {
             EnrichmentService enrichmentService,
             ChatService chatService,
             SystemPromptConfig systemPromptConfig,
+            MarkdownService markdownService,
             @Value("${app.docs.jdk-version}") String jdkVersion) {
         this.tocProvider = tocProvider;
         this.retrievalService = retrievalService;
         this.enrichmentService = enrichmentService;
         this.chatService = chatService;
         this.systemPromptConfig = systemPromptConfig;
+        this.markdownService = markdownService;
         this.jdkVersion = jdkVersion;
     }
 
@@ -110,16 +114,17 @@ public class GuidedLearningService {
         return tocProvider.findBySlug(slug);
     }
 
-    /**
-     * Retrieves citations from the official documentation sets declared by the lesson.
-     */
+    /** Returns the sources authored directly into the canonical lesson markdown. */
     public List<Citation> citationsForLesson(String slug) {
         GuidedLesson lesson = requireListedLesson(slug);
-        String query = buildLessonQuery(lesson);
-        RetrievalConstraint retrievalConstraint = retrievalConstraintFor(lesson);
-        RetrievalService.CitationOutcome citationOutcome =
-                retrievalService.discoverCitations(query, retrievalConstraint);
-        return citationOutcome.citationsOrThrow();
+        String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
+        return markdownService.processStructured(curatedLessonMarkdown).citations().stream()
+                .map(GuidedLearningService::toLessonCitation)
+                .toList();
+    }
+
+    private static Citation toLessonCitation(MarkdownCitation markdownCitation) {
+        return new Citation(markdownCitation.url(), markdownCitation.title(), "", markdownCitation.snippet());
     }
 
     /**
