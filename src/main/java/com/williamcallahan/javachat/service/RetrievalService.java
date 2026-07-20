@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.ModelConfiguration;
@@ -187,21 +188,32 @@ public class RetrievalService {
         CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, requestedVersions);
 
         int returnDocumentLimit = appProperties.getRag().getSearchReturnK();
-        List<Document> reranked = rerankerService.rerank(query, candidateRetrieval.documents(), returnDocumentLimit);
-        List<Document> coveredRerankedDocuments = retainRequestedVersionCoverage(
-                reranked, candidateRetrieval.documents(), requestedVersions, returnDocumentLimit);
+        List<Document> promptDocuments;
+        if (requiresExactJavaOverloadEvidence(query, retrievalConstraint)) {
+            List<Document> exactOverloadDocuments =
+                    CitationCandidateRanker.selectPromptContextForCitationQuery(query, candidateRetrieval.documents());
+            requireExactOverloadEvidence(exactOverloadDocuments, requestedVersions);
+            promptDocuments = requestedVersions.isEmpty()
+                    ? exactOverloadDocuments.stream().limit(returnDocumentLimit).toList()
+                    : retainRequestedVersionCoverage(
+                            exactOverloadDocuments, exactOverloadDocuments, requestedVersions, returnDocumentLimit);
+        } else {
+            List<Document> reranked =
+                    rerankerService.rerank(query, candidateRetrieval.documents(), returnDocumentLimit);
+            promptDocuments = retainRequestedVersionCoverage(
+                    reranked, candidateRetrieval.documents(), requestedVersions, returnDocumentLimit);
+        }
 
-        if (!coveredRerankedDocuments.isEmpty()) {
-            Map<String, ?> firstDocMetadata = coveredRerankedDocuments.get(0).getMetadata();
+        if (!promptDocuments.isEmpty()) {
+            Map<String, ?> firstDocMetadata = promptDocuments.get(0).getMetadata();
             int metadataSize = firstDocMetadata.size();
-            String firstDocumentText = Optional.ofNullable(
-                            coveredRerankedDocuments.get(0).getText())
-                    .orElse("");
+            String firstDocumentText =
+                    Optional.ofNullable(promptDocuments.get(0).getText()).orElse("");
             int previewLength = Math.min(DEBUG_FIRST_DOC_PREVIEW_LENGTH, firstDocumentText.length());
             log.debug("First doc metadata size: {}", metadataSize);
             log.debug("First doc content preview length: {}", previewLength);
         }
-        return new RetrievalOutcome(coveredRerankedDocuments, candidateRetrieval.notices());
+        return new RetrievalOutcome(promptDocuments, candidateRetrieval.notices());
     }
 
     private CandidateRetrieval retrieveCandidates(
@@ -210,6 +222,15 @@ public class RetrievalService {
         int baseTopK = Math.max(1, appProperties.getRag().getSearchTopK());
         List<Document> retrievedDocuments = new ArrayList<>();
         List<RetrievalNotice> retrievalNotices = new ArrayList<>();
+        if (requiresExactJavaOverloadEvidence(query, retrievalConstraint)) {
+            List<Document> citationCandidates =
+                    searchCitationCandidates(query, baseTopK, retrievalConstraint, requestedVersions);
+            List<Document> exactOverloadDocuments =
+                    CitationCandidateRanker.orderForCitationQuery(query, citationCandidates);
+            requireExactOverloadEvidence(exactOverloadDocuments, requestedVersions);
+            return new CandidateRetrieval(
+                    deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(exactOverloadDocuments), List.of());
+        }
         if (requestedVersions.isEmpty()) {
             appendSearchOutcome(
                     hybridSearchService.searchOutcome(boostedQuery, baseTopK, retrievalConstraint),
@@ -228,6 +249,23 @@ public class RetrievalService {
         List<Document> deduplicatedCandidates =
                 deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(retrievedDocuments);
         return new CandidateRetrieval(deduplicatedCandidates, retrievalNotices);
+    }
+
+    private static boolean requiresExactJavaOverloadEvidence(String query, RetrievalConstraint retrievalConstraint) {
+        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(query).isPresent()
+                && DocsSourceRegistry.javaApiDocumentationSources().stream()
+                        .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                        .anyMatch(retrievalConstraint.docSet()::contains);
+    }
+
+    private static void requireExactOverloadEvidence(
+            List<Document> exactOverloadDocuments, List<String> requestedVersions) {
+        if (exactOverloadDocuments.isEmpty()) {
+            throw new IllegalStateException("No official Java API evidence found for the requested exact overload");
+        }
+        for (String requestedVersion : requestedVersions) {
+            requireRequestedVersionEvidence(requestedVersion, exactOverloadDocuments);
+        }
     }
 
     /**
