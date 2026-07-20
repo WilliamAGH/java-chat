@@ -1,11 +1,13 @@
 package com.williamcallahan.javachat.web;
 
+import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
+import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.domain.ingestion.IngestionErrorResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionRunOutcome;
-import com.williamcallahan.javachat.service.DocsIngestionService;
 import jakarta.annotation.security.PermitAll;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,14 +34,15 @@ public class IngestionController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
     private static final int MAX_ALLOWED_PAGES = 10000;
 
-    private final DocsIngestionService docsIngestionService;
+    private final DocumentationIngestionUseCase documentationIngestionUseCase;
 
     /**
      * Creates the ingestion controller backed by the ingestion service and shared error response builder.
      */
-    public IngestionController(DocsIngestionService docsIngestionService, ExceptionResponseBuilder exceptionBuilder) {
+    public IngestionController(
+            DocumentationIngestionUseCase documentationIngestionUseCase, ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
-        this.docsIngestionService = docsIngestionService;
+        this.documentationIngestionUseCase = documentationIngestionUseCase;
     }
 
     /**
@@ -54,7 +57,8 @@ public class IngestionController extends BaseController {
 
         try {
             log.info("Starting ingestion for up to {} pages", maxPages);
-            docsIngestionService.crawlAndIngest(maxPages);
+            PageLimit pageLimit = new PageLimit(maxPages);
+            documentationIngestionUseCase.crawlAndIngest(pageLimit);
 
             return ResponseEntity.ok(
                     IngestionRunOutcome.success(String.format("Ingestion completed for up to %d pages", maxPages)));
@@ -81,7 +85,8 @@ public class IngestionController extends BaseController {
             @RequestParam(name = "dir", defaultValue = "data/docs") String directory,
             @RequestParam(name = "maxFiles", defaultValue = "50000") @Min(1) @Max(1000000) int maxFiles) {
         try {
-            IngestionLocalOutcome outcome = docsIngestionService.ingestLocalDirectory(directory, maxFiles);
+            FileLimit fileLimit = new FileLimit(maxFiles);
+            IngestionLocalOutcome outcome = documentationIngestionUseCase.ingestLocalDirectory(directory, fileLimit);
             return ResponseEntity.ok(outcome);
         } catch (IllegalArgumentException illegalArgumentException) {
             return buildIngestionValidationError(illegalArgumentException);

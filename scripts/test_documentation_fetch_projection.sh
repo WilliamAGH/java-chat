@@ -1,743 +1,743 @@
 #!/bin/bash
 
-# Verifies that non-Java documentation sources retain their manifest-owned fetch projections.
+# Exercises explicit fetch option routing and scoped source selection without network access.
 
 set -euo pipefail
 
 TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TEST_SCRIPT_DIRECTORY/.." && pwd)"
 FETCH_SCRIPT="$PROJECT_ROOT/scripts/fetch_all_docs.sh"
-DOCUMENTATION_SOURCES_MANIFEST="$PROJECT_ROOT/src/main/resources/documentation-sources.manifest"
-DOCUMENTATION_SEED_SCRIPT="$PROJECT_ROOT/scripts/documentation_seed.py"
-DOCUMENTATION_SEED_FIXTURES="$PROJECT_ROOT/scripts/testdata/documentation_seed"
-TEST_WORK_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_WORK_ROOT"' EXIT
+TEST_WORK_DIRECTORY="$(mktemp -d)"
+TEST_DOCS_ROOT="$TEST_WORK_DIRECTORY/docs"
+DISCOVERED_FETCH_CAPTURE="$TEST_WORK_DIRECTORY/discovered-fetch"
+SELECTED_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/selected-source"
+ALL_SOURCE_CAPTURE="$TEST_WORK_DIRECTORY/all-source"
+ENVIRONMENT_OVERRIDE_CAPTURE="$TEST_WORK_DIRECTORY/environment-override"
+mkdir -p "$TEST_DOCS_ROOT"
+trap 'rm -rf -- "$TEST_WORK_DIRECTORY"' EXIT
 
-fail_documentation_fetch_projection_test() {
+fail_documentation_fetch_test() {
     local failure_message="$1"
     printf 'FAIL: %s\n' "$failure_message" >&2
     exit 1
 }
 
+assert_captured_arguments() {
+    local capture_file="$1"
+    shift
+    local expected_argument
+    local captured_argument
+
+    exec 3< "$capture_file"
+    for expected_argument in "$@"; do
+        if ! IFS= read -r captured_argument <&3; then
+            fail_documentation_fetch_test "missing captured argument: $expected_argument"
+        fi
+        if [ "$captured_argument" != "$expected_argument" ]; then
+            fail_documentation_fetch_test "expected '$expected_argument' but captured '$captured_argument'"
+        fi
+    done
+    if IFS= read -r captured_argument <&3; then
+        fail_documentation_fetch_test "unexpected captured argument: $captured_argument"
+    fi
+    exec 3<&-
+}
+
+assert_no_source_dispatch() {
+    local capture_file="$1"
+    local selector_description="$2"
+    if [ -s "$capture_file" ]; then
+        fail_documentation_fetch_test "$selector_description dispatched a source before validation completed"
+    fi
+}
+
 set --
 # shellcheck source=fetch_all_docs.sh
 source "$FETCH_SCRIPT"
-DOCS_ROOT="$TEST_WORK_ROOT/docs"
-mkdir -p "$DOCS_ROOT"
 
+DOCS_ROOT="$TEST_DOCS_ROOT"
 log() {
     :
 }
 
-fetch_execution_arguments=()
-fetch_docs() {
-    fetch_execution_arguments=("$@")
-}
-
-if [ -e "$PROJECT_ROOT/src/main/resources/documentation-source-fields.manifest" ]; then
-    fail_documentation_fetch_projection_test "redundant documentation source field catalog must remain removed"
-fi
-
-canonical_seed_document_type_catalog="$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG"
-duplicate_seed_document_type_catalog="$TEST_WORK_ROOT/duplicate-seed-document-types.manifest"
-malformed_seed_document_type_catalog="$TEST_WORK_ROOT/malformed-seed-document-types.manifest"
-missing_reader_seed_document_type_catalog="$TEST_WORK_ROOT/missing-reader-seed-document-types.manifest"
-printf 'html-links\nxml-sitemap\nhtml-links\n' > "$duplicate_seed_document_type_catalog"
-printf 'html-links\nInvalid-Type\n' > "$malformed_seed_document_type_catalog"
-printf 'html-links\nunsupported-discovery\n' > "$missing_reader_seed_document_type_catalog"
-for invalid_seed_document_type_catalog in \
-    "$duplicate_seed_document_type_catalog" \
-    "$malformed_seed_document_type_catalog" \
-    "$missing_reader_seed_document_type_catalog"; do
-    DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG="$invalid_seed_document_type_catalog"
-    if load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST" > /dev/null 2>&1; then
-        fail_documentation_fetch_projection_test \
-            "shell manifest loading accepted an invalid canonical seed document type catalog"
-    fi
-done
-DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG="$canonical_seed_document_type_catalog"
-
-canonical_documentation_source_header="$(sed -n '1p' "$DOCUMENTATION_SOURCES_MANIFEST")"
-overlapping_active_mirror_paths_manifest="$TEST_WORK_ROOT/overlapping-active-mirror-paths.manifest"
-printf '%s\n' \
-    "$canonical_documentation_source_header" \
-    'https://docs.example.test/language/|https://docs.example.test/language/|language|Language|language|official|language-reference||1||false||||' \
-    'https://docs.example.test/language/reference/|https://docs.example.test/language/reference/|language/reference|Language Reference|language-reference|official|language-reference||1||false||||' \
-    > "$overlapping_active_mirror_paths_manifest"
-if load_documentation_sources "$overlapping_active_mirror_paths_manifest" > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test \
-        "manifest loading accepted segment-boundary-overlapping active mirror paths"
-fi
-
-valid_sibling_mirror_paths_manifest="$TEST_WORK_ROOT/valid-sibling-mirror-paths.manifest"
-printf '%s\n' \
-    "$canonical_documentation_source_header" \
-    'https://docs.example.test/language/|https://docs.example.test/language/|language|Language|language|official|language-reference||1||false||||' \
-    'https://docs.example.test/language-reference/|https://docs.example.test/language-reference/|language-reference|Language Reference|language-reference|official|language-reference||1||false||||' \
-    > "$valid_sibling_mirror_paths_manifest"
-DOCUMENTATION_SOURCE_PROJECTIONS=()
-if ! load_documentation_sources "$valid_sibling_mirror_paths_manifest"; then
-    fail_documentation_fetch_projection_test \
-        "manifest loading rejected segment-disjoint active mirror path siblings"
-fi
-if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -ne 2 ]; then
-    fail_documentation_fetch_projection_test \
-        "valid active mirror path siblings did not preserve both canonical projections"
-fi
-
-DOCUMENTATION_SOURCE_PROJECTIONS=()
-load_documentation_sources "$DOCUMENTATION_SOURCES_MANIFEST"
-seed_fetch_document_type="$(sed -n '1p' "$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG")"
-DOC_SOURCES=()
-append_manifest_documentation_fetch_sources
-
-if [ "${#DOCUMENTATION_SOURCE_PROJECTIONS[@]}" -ne "${#DOC_SOURCES[@]}" ]; then
-    fail_documentation_fetch_projection_test "fetch projections did not preserve the complete manifest order"
-fi
-
-for documentation_source_index in "${!DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-    expected_manifest_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[$documentation_source_index]}"
-    documentation_fetch_projection="${DOC_SOURCES[$documentation_source_index]}"
-
-    if [ "$documentation_fetch_projection" != "$expected_manifest_projection" ]; then
-        fail_documentation_fetch_projection_test "fetch projection at index $documentation_source_index diverged from the canonical manifest row"
-    fi
-
-    fetch_execution_arguments=()
-    fetch_manifest_documentation_source "$documentation_fetch_projection" > /dev/null
-    if [ "${#fetch_execution_arguments[@]}" -ne 12 ]; then
-        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index must receive exactly twelve arguments"
-    fi
-
-    expected_fetch_projection="|$(documentation_source_manifest_field "$expected_manifest_projection" "fetchUrl")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "relativeMirrorPath")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "displayName")"
-    expected_fetch_projection+="|$(documentation_fetch_cut_directories "$(documentation_source_manifest_field "$expected_manifest_projection" "fetchUrl")")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "minimumHtmlFiles")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "rejectRegex")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "allowPartial")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedDocumentType")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedDiscoveryUrl")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "seedSourcePrefix")"
-    expected_fetch_projection+="|$(documentation_source_manifest_field "$expected_manifest_projection" "supersededRelativeMirrorPath")"
-    actual_fetch_projection="$(IFS='|'; printf '%s' "${fetch_execution_arguments[*]}")"
-    if [ "$actual_fetch_projection" != "$expected_fetch_projection" ]; then
-        fail_documentation_fetch_projection_test "fetch execution at index $documentation_source_index diverged from canonical named fields"
-    fi
-done
-
-assert_documentation_selector_rejected() {
-    local documentation_selector="$1"
-    DOC_SOURCES=()
-    if append_manifest_documentation_fetch_sources "$documentation_selector" > /dev/null 2>&1; then
-        fail_documentation_fetch_projection_test "selector must be rejected: '$documentation_selector'"
-    fi
-    return 0
-}
-
-assert_documentation_selector_rejected ""
-assert_documentation_selector_rejected ",dev-java"
-assert_documentation_selector_rejected "dev-java,"
-assert_documentation_selector_rejected "dev-java,,kotlin"
-assert_documentation_selector_rejected "dev-java,dev-java"
-assert_documentation_selector_rejected "dev-java, kotlin"
-assert_documentation_selector_rejected "unknown-doc-set"
-
-DOC_SOURCES=("sentinel-projection")
-if append_manifest_documentation_fetch_sources "dev-java,unknown-doc-set" > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "mixed valid and unknown selectors must be rejected"
-fi
-if [ "${#DOC_SOURCES[@]}" -ne 1 ] || [ "${DOC_SOURCES[0]}" != "sentinel-projection" ]; then
-    fail_documentation_fetch_projection_test "rejected selectors must not retain partial fetch projections"
-fi
-
-seeded_doc_set_selector=""
-seeded_doc_set_count=0
-for documentation_source_projection in "${DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-    seed_document_type="$(documentation_source_manifest_field "$documentation_source_projection" "seedDocumentType")"
-    if [ -z "$seed_document_type" ]; then
-        continue
-    fi
-    doc_set="$(documentation_source_manifest_field "$documentation_source_projection" "docSet")"
-    if [ -n "$seeded_doc_set_selector" ]; then
-        seeded_doc_set_selector+=","
-    fi
-    seeded_doc_set_selector+="$doc_set"
-    seeded_doc_set_count=$((seeded_doc_set_count + 1))
-done
-if [ "$seeded_doc_set_count" -eq 0 ]; then
-    fail_documentation_fetch_projection_test "canonical manifest must retain at least one structured seed source"
-fi
-
-DOC_SOURCES=()
-append_manifest_documentation_fetch_sources "$seeded_doc_set_selector"
-
-if [ "${#DOC_SOURCES[@]}" -ne "$seeded_doc_set_count" ]; then
-    fail_documentation_fetch_projection_test "selected fetch must contain every manifest-owned structured seed row"
-fi
-
-selected_projection_index=0
-for documentation_source_index in "${!DOCUMENTATION_SOURCE_PROJECTIONS[@]}"; do
-    documentation_source_projection="${DOCUMENTATION_SOURCE_PROJECTIONS[$documentation_source_index]}"
-    seed_document_type="$(documentation_source_manifest_field "$documentation_source_projection" "seedDocumentType")"
-    if [ -z "$seed_document_type" ]; then
-        continue
-    fi
-    if [ "${DOC_SOURCES[$selected_projection_index]}" != "$documentation_source_projection" ]; then
-        fail_documentation_fetch_projection_test "selected fetch diverged from canonical manifest order"
-    fi
-    selected_projection_index=$((selected_projection_index + 1))
-done
-
-while IFS= read -r seed_document_type || [ -n "$seed_document_type" ]; do
-    seed_output_file="$TEST_WORK_ROOT/$seed_document_type.seed"
-    mirror_path_output_file="$TEST_WORK_ROOT/$seed_document_type.paths"
-    python3 "$DOCUMENTATION_SEED_SCRIPT" \
-        --document-type "$seed_document_type" \
-        --input "$DOCUMENTATION_SEED_FIXTURES/$seed_document_type.input" \
-        --discovery-url "https://docs.example.test/navigation" \
-        --source-prefix "https://docs.example.test/reference/" \
-        --canonical-prefix "https://docs.example.test/reference/" \
-        --output "$seed_output_file" \
-        --mirror-path-output "$mirror_path_output_file" \
-        --cut-directories 1
-    if ! diff -u "$DOCUMENTATION_SEED_FIXTURES/$seed_document_type.expected" "$seed_output_file"; then
-        fail_documentation_fetch_projection_test "seed output diverged for catalog type $seed_document_type"
-    fi
-    if ! diff -u "$DOCUMENTATION_SEED_FIXTURES/$seed_document_type.paths.expected" "$mirror_path_output_file"; then
-        fail_documentation_fetch_projection_test "seed mirror paths diverged from GNU Wget projection for catalog type $seed_document_type"
-    fi
-    while IFS= read -r mirror_path || [ -n "$mirror_path" ]; do
-        if [ -z "$mirror_path" ] \
-            || [[ "$mirror_path" == /* ]] \
-            || { [[ "$mirror_path" != *.html ]] && [[ "$mirror_path" != *.htm ]]; }; then
-            fail_documentation_fetch_projection_test "seed mirror path was unsafe for catalog type $seed_document_type"
-        fi
-    done < "$mirror_path_output_file"
-done < "$DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG"
-
-rejected_seed_output_file="$TEST_WORK_ROOT/rejected.seed"
-rejected_seed_paths_file="$TEST_WORK_ROOT/rejected.paths"
-python3 "$DOCUMENTATION_SEED_SCRIPT" \
-    --document-type html-links \
-    --input "$DOCUMENTATION_SEED_FIXTURES/html-links.input" \
-    --discovery-url "https://docs.example.test/navigation" \
-    --source-prefix "https://docs.example.test/reference/" \
-    --canonical-prefix "https://docs.example.test/reference/" \
-    --reject-regex '/archive[.]htm$' \
-    --output "$rejected_seed_output_file" \
-    --mirror-path-output "$rejected_seed_paths_file" \
-    --cut-directories 1
-if grep -Fq '/archive.htm' "$rejected_seed_output_file" \
-    || grep -Fxq 'archive.htm' "$rejected_seed_paths_file"; then
-    fail_documentation_fetch_projection_test "structured discovery retained a manifest-rejected URL"
-fi
-
-if python3 "$DOCUMENTATION_SEED_SCRIPT" \
-    --document-type xml-sitemap \
-    --input "$DOCUMENTATION_SEED_FIXTURES/sitemap-line-injection.xml" \
-    --discovery-url "https://docs.example.test/sitemap.xml" \
-    --source-prefix "https://docs.example.test/reference/" \
-    --canonical-prefix "https://docs.example.test/reference/" \
-    --output "$TEST_WORK_ROOT/injected-seed.txt" \
-    --mirror-path-output "$TEST_WORK_ROOT/injected-paths.txt" \
-    --cut-directories 1 > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "structured discovery must reject line-breaking seed injection"
-fi
-
-if python3 "$DOCUMENTATION_SEED_SCRIPT" \
-    --document-type xml-sitemap \
-    --input "$DOCUMENTATION_SEED_FIXTURES/sitemap-doctype-entity.xml" \
-    --discovery-url "https://docs.example.test/sitemap.xml" \
-    --source-prefix "https://docs.example.test/reference/" \
-    --canonical-prefix "https://docs.example.test/reference/" \
-    --output "$TEST_WORK_ROOT/doctype-entity-seed.txt" \
-    --mirror-path-output "$TEST_WORK_ROOT/doctype-entity-paths.txt" \
-    --cut-directories 1 > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "structured discovery must reject XML sitemap DOCTYPE entity expansion"
-fi
-if [ -e "$TEST_WORK_ROOT/doctype-entity-seed.txt" ]; then
-    fail_documentation_fetch_projection_test "rejected XML sitemap DOCTYPE must not write a seed output"
-fi
-
-if python3 "$DOCUMENTATION_SEED_SCRIPT" \
-    --document-type unsupported-discovery \
-    --input "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" \
-    --discovery-url "https://docs.example.test/sitemap.xml" \
-    --source-prefix "https://docs.example.test/reference/" \
-    --canonical-prefix "https://docs.example.test/reference/" \
-    --output "$TEST_WORK_ROOT/unsupported-seed.txt" \
-    --mirror-path-output "$TEST_WORK_ROOT/unsupported-paths.txt" \
-    --cut-directories 1 > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "structured discovery must reject seed types outside the canonical catalog"
-fi
-
-assert_seed_manifest_url_rejected() {
-    local discovery_url="$1"
-    local source_prefix="$2"
-    local canonical_prefix="$3"
-    if python3 "$DOCUMENTATION_SEED_SCRIPT" \
-        --document-type "$seed_fetch_document_type" \
-        --input "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" \
-        --discovery-url "$discovery_url" \
-        --source-prefix "$source_prefix" \
-        --canonical-prefix "$canonical_prefix" \
-        --output "$TEST_WORK_ROOT/invalid-url-seed.txt" \
-        --mirror-path-output "$TEST_WORK_ROOT/invalid-url-paths.txt" \
-        --cut-directories 1 > /dev/null 2>&1; then
-        fail_documentation_fetch_projection_test "structured discovery accepted invalid manifest URL input"
-    fi
-}
-
-while IFS= read -r invalid_remote_url || [ -n "$invalid_remote_url" ]; do
-    assert_seed_manifest_url_rejected \
-        "$invalid_remote_url" \
-        "https://docs.example.test/reference/" \
-        "https://docs.example.test/reference/"
-    assert_seed_manifest_url_rejected \
-        "https://docs.example.test/navigation" \
-        "$invalid_remote_url" \
-        "https://docs.example.test/reference/"
-    assert_seed_manifest_url_rejected \
-        "https://docs.example.test/navigation" \
-        "https://docs.example.test/reference/" \
-        "$invalid_remote_url"
-done < "$DOCUMENTATION_SEED_FIXTURES/invalid-remote-urls.txt"
-
-for valid_remote_port in 1 65535; do
-    python3 "$DOCUMENTATION_SEED_SCRIPT" \
-        --document-type "$seed_fetch_document_type" \
-        --input "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" \
-        --discovery-url "https://docs.example.test:$valid_remote_port/navigation" \
-        --source-prefix "https://docs.example.test:$valid_remote_port/reference/" \
-        --canonical-prefix "https://docs.example.test:$valid_remote_port/reference/" \
-        --output "$TEST_WORK_ROOT/valid-port-$valid_remote_port-seed.txt" \
-        --mirror-path-output "$TEST_WORK_ROOT/valid-port-$valid_remote_port-paths.txt" \
-        --cut-directories 1
-done
-
-generic_mirror_target_directory="$TEST_WORK_ROOT/generic-mirror"
-generic_mirror_wget_arguments_file="$TEST_WORK_ROOT/generic-mirror-wget-arguments"
-mkdir -p "$generic_mirror_target_directory"
-LOG_FILE="$TEST_WORK_ROOT/documentation-fetch.log"
-wget() {
-    printf '%s\n' "$@" > "$generic_mirror_wget_arguments_file"
-    printf '<html><body>Fetched</body></html>\n' > "$generic_mirror_target_directory/index.html"
-    mkdir -p "$generic_mirror_target_directory/nested"
-    printf '<html><body>Nested</body></html>\n' > "$generic_mirror_target_directory/nested/guide.htm"
-    printf 'User-agent: *\n' > "$generic_mirror_target_directory/robots.txt"
-    printf 'User-agent: *\n' > "$generic_mirror_target_directory/nested/robots.txt"
-    printf 'body {}\n' > "$generic_mirror_target_directory/site.css"
-    printf 'wget state\n' > "$generic_mirror_target_directory/.wget-state"
-    return 0
-}
-if ! (cd "$generic_mirror_target_directory" \
-    && fetch_docs_mirror \
-        "https://docs.example.test/reference/" \
-        "$generic_mirror_target_directory" \
-        "Generic Reference" \
-        1 \
-        1 \
-        "" \
-        false); then
-    fail_documentation_fetch_projection_test "generic mirror fetch policy failed"
-fi
-if grep -Fxq -- '--page-requisites' "$generic_mirror_wget_arguments_file"; then
-    fail_documentation_fetch_projection_test "generic mirrors must not fetch non-HTML page requisites"
-fi
-if grep -Eq '^--accept=' "$generic_mirror_wget_arguments_file"; then
-    fail_documentation_fetch_projection_test "generic mirrors must not restrict extensionless documentation URLs"
-fi
-if ! grep -Eq '^--reject=.*png' "$generic_mirror_wget_arguments_file"; then
-    fail_documentation_fetch_projection_test "generic mirrors must reject binary asset extensions"
-fi
-if [ ! -f "$generic_mirror_target_directory/index.html" ] \
-    || [ ! -f "$generic_mirror_target_directory/nested/guide.htm" ]; then
-    fail_documentation_fetch_projection_test "generic mirror cleanup removed governed HTML files"
-fi
-if find "$generic_mirror_target_directory" -type f ! \( -name '*.html' -o -name '*.htm' \) \
-    -print -quit | grep -q .; then
-    fail_documentation_fetch_projection_test "generic mirror cleanup retained non-HTML fetch artifacts"
-fi
-
-assert_seed_network_policy() {
-    local wget_arguments_file="$1"
-    local seed_network_argument
-    for seed_network_argument in "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}"; do
-        if ! grep -Fxq -- "$seed_network_argument" "$wget_arguments_file"; then
-            fail_documentation_fetch_projection_test "seed fetch omitted canonical network policy: $seed_network_argument"
-        fi
+fetch_discovered_documentation_seed() {
+    printf '%s\n' "$@" > "$DISCOVERED_FETCH_CAPTURE"
+    local captured_target_directory="$2"
+    local generated_page_number
+    for generated_page_number in 1 2 3 4 5 6 7; do
+        printf '<html>Example Reference stable</html>\n' > "$captured_target_directory/page-$generated_page_number.html"
     done
+    printf 'User-agent: *\n' > "$captured_target_directory/robots.txt"
+    cd - > /dev/null
 }
 
-seed_discovery_target_directory="$TEST_WORK_ROOT/seed-discovery"
-seed_discovery_wget_capture_prefix="$TEST_WORK_ROOT/seed-discovery-wget"
-seed_discovery_wget_call_count=0
-mkdir -p "$seed_discovery_target_directory"
-printf '<html><body>Stale</body></html>\n' > "$seed_discovery_target_directory/stale.html"
-wget() {
-    seed_discovery_wget_call_count=$((seed_discovery_wget_call_count + 1))
-    local wget_arguments_file="$seed_discovery_wget_capture_prefix-$seed_discovery_wget_call_count"
-    printf '%s\n' "$@" > "$wget_arguments_file"
-    if [ "$seed_discovery_wget_call_count" -eq 1 ]; then
-        local wget_argument
-        for wget_argument in "$@"; do
-            case "$wget_argument" in
-                --output-document=*)
-                    cp "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" "${wget_argument#--output-document=}"
-                    ;;
-            esac
-        done
-    else
-        local mirror_paths_file
-        mirror_paths_file="$(find "$seed_discovery_target_directory" -maxdepth 1 -name '.documentation-seed-paths.*' -print -quit)"
-        local mirror_path
-        while IFS= read -r mirror_path || [ -n "$mirror_path" ]; do
-            mkdir -p "$(dirname "$seed_discovery_target_directory/$mirror_path")"
-            printf '<html><body>Seeded</body></html>\n' > "$seed_discovery_target_directory/$mirror_path"
-        done < "$mirror_paths_file"
-    fi
-    return 0
-}
-if ! (cd "$seed_discovery_target_directory" \
-    && fetch_discovered_documentation_seed \
-        "https://docs.example.test/reference/" \
-        "$seed_discovery_target_directory" \
-        "Seed Discovery" \
-        1 \
-        1 \
-        "" \
-        false \
-        "$seed_fetch_document_type" \
-        "https://docs.example.test/sitemap.xml" \
-        "https://docs.example.test/reference/"); then
-    fail_documentation_fetch_projection_test "structured discovery fetch policy failed"
-fi
-if ! grep -Eq '^--output-document=' "$seed_discovery_wget_capture_prefix-1"; then
-    fail_documentation_fetch_projection_test "structured discovery did not write a local discovery file"
-fi
-assert_seed_network_policy "$seed_discovery_wget_capture_prefix-1"
-assert_seed_network_policy "$seed_discovery_wget_capture_prefix-2"
-if ! grep -Fxq -- '--max-redirect=0' "$seed_discovery_wget_capture_prefix-1" \
-    || ! grep -Fxq -- '--max-redirect=0' "$seed_discovery_wget_capture_prefix-2"; then
-    fail_documentation_fetch_projection_test "structured seed discovery must reject redirects"
-fi
-if [ -e "$seed_discovery_target_directory/stale.html" ]; then
-    fail_documentation_fetch_projection_test "structured seed reconciliation retained stale HTML"
+if ! (
+    fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "example/reference" \
+        --name "Example Reference" \
+        --source-version "stable" \
+        --identity-regex "Example Reference stable" \
+        --cut-directories 3 \
+        --minimum-html-files 7 \
+        --reject-regex "/archive" \
+        --seed-document-type xml-sitemap \
+        --seed-discovery-url "https://docs.example.invalid/sitemap.xml" \
+        --seed-source-prefix "https://docs.example.invalid/reference/"
+); then
+    fail_documentation_fetch_test "named fetch options did not reach the discovered-source strategy"
 fi
 
-seed_http_error_target_directory="$TEST_WORK_ROOT/seed-http-error"
-seed_http_error_call_count=0
-mkdir -p "$seed_http_error_target_directory"
-wget() {
-    seed_http_error_call_count=$((seed_http_error_call_count + 1))
-    if [ "$seed_http_error_call_count" -eq 1 ]; then
-        local wget_argument
-        for wget_argument in "$@"; do
-            case "$wget_argument" in
-                --output-document=*)
-                    cp "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" "${wget_argument#--output-document=}"
-                    ;;
-            esac
-        done
-        return 0
+assert_captured_arguments "$DISCOVERED_FETCH_CAPTURE" \
+    "https://docs.example.invalid/reference/" \
+    "$(dirname "$TEST_DOCS_ROOT")/.documentation-fetch-staging/reference.599af15c691cb0976ef8042aaaf54bb39c76fed2c030db21d93b263113606c4c.partial" \
+    "Example Reference" \
+    3 \
+    7 \
+    "/archive" \
+    false \
+    xml-sitemap \
+    "https://docs.example.invalid/sitemap.xml" \
+    "https://docs.example.invalid/reference/" \
+    ""
+
+if [ -f "$TEST_DOCS_ROOT/example/reference/robots.txt" ]; then
+    fail_documentation_fetch_test "published documentation retained a non-content fetch artifact"
+fi
+if ! find "$(dirname "$TEST_DOCS_ROOT")/.quarantine" -type f -name robots.txt -print -quit | grep -q .; then
+    fail_documentation_fetch_test "non-content fetch artifact was not preserved in quarantine"
+fi
+
+QUARANTINE_FAILURE_STAGE="$TEST_WORK_DIRECTORY/quarantine-failure-stage"
+mkdir -p "$QUARANTINE_FAILURE_STAGE"
+printf 'first\n' > "$QUARANTINE_FAILURE_STAGE/first.txt"
+printf 'second\n' > "$QUARANTINE_FAILURE_STAGE/second.txt"
+MOVE_CALL_COUNT=0
+mv() {
+    MOVE_CALL_COUNT=$((MOVE_CALL_COUNT + 1))
+    if [ "$MOVE_CALL_COUNT" -eq 2 ]; then
+        return 1
     fi
-    local mirror_paths_file
-    mirror_paths_file="$(find "$seed_http_error_target_directory" -maxdepth 1 -name '.documentation-seed-paths.*' -print -quit)"
-    local mirror_path
-    while IFS= read -r mirror_path || [ -n "$mirror_path" ]; do
-        mkdir -p "$(dirname "$seed_http_error_target_directory/$mirror_path")"
-        printf '<html><body>HTTP error body</body></html>\n' > "$seed_http_error_target_directory/$mirror_path"
-    done < "$mirror_paths_file"
-    return 8
+    command mv "$@"
 }
-if (cd "$seed_http_error_target_directory" \
-    && fetch_discovered_documentation_seed \
-        "https://docs.example.test/reference/" \
-        "$seed_http_error_target_directory" \
-        "Seed HTTP Error" \
+if quarantine_staged_non_html_files "$QUARANTINE_FAILURE_STAGE" "Quarantine Failure Test"; then
+    fail_documentation_fetch_test "partial non-content quarantine was accepted"
+fi
+unset -f mv
+if [ ! -f "$QUARANTINE_FAILURE_STAGE/first.txt" ] \
+    || [ ! -f "$QUARANTINE_FAILURE_STAGE/second.txt" ]; then
+    fail_documentation_fetch_test "failed non-content quarantine did not restore the complete staging tree"
+fi
+
+: > "$DISCOVERED_FETCH_CAPTURE"
+if fetch_source \
+    --url "https://docs.example.invalid/reference/" \
+    --mirror-path "example/reference" \
+    --source-version "stable" \
+    --cut-directories 3 \
+    --minimum-html-files 7 > /dev/null 2>&1; then
+    fail_documentation_fetch_test "fetch options without a name were accepted"
+fi
+assert_no_source_dispatch "$DISCOVERED_FETCH_CAPTURE" "missing required fetch option"
+
+if fetch_source \
+    --url "https://docs.example.invalid/reference/" \
+    --mirror-path "example/reference" \
+    --name "Example Reference" \
+    --source-version "stable" \
+    --cut-directories 3 \
+    --minimum-html-files 7 \
+    --unknown-option > /dev/null 2>&1; then
+    fail_documentation_fetch_test "unknown fetch option was accepted"
+fi
+assert_no_source_dispatch "$DISCOVERED_FETCH_CAPTURE" "unknown fetch option"
+
+fetch_source() {
+    printf '%s\n' "$@" > "$SELECTED_SOURCE_CAPTURE"
+}
+
+if ! (
+    run_documentation_fetch --doc-sets=kotlin > /dev/null
+); then
+    fail_documentation_fetch_test "named Kotlin selection did not complete"
+fi
+
+assert_captured_arguments "$SELECTED_SOURCE_CAPTURE" \
+    --url \
+    "https://kotlinlang.org/docs/" \
+    --mirror-path \
+    kotlin \
+    --name \
+    "Kotlin 2.4.10 Documentation" \
+    --source-version \
+    "2.4.10" \
+    --identity-regex \
+    "2\\.4\\.10" \
+    --required-identity-page \
+    "faq.html" \
+    --required-identity-text \
+    "The currently released version is 2.4.10, published on July 14, 2026." \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    250 \
+    --reject-regex \
+    '(^|/)([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(/|(-[^/]+)?\.html$)|(^|/)[^/]*-([Ee][Aa][Pp]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt])(-[^/]+)?\.html$' \
+    --seed-document-type \
+    xml-sitemap \
+    --seed-discovery-url \
+    "https://kotlinlang.org/sitemap.xml" \
+    --seed-source-prefix \
+    "https://kotlinlang.org/docs/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source groovy
+); then
+    fail_documentation_fetch_test "canonical Groovy documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    --mirror-path \
+    "groovy/5.0.7" \
+    --name \
+    "Groovy 5.0.7 Documentation" \
+    --source-version \
+    "5.0.7" \
+    --identity-regex \
+    'Groovy.*5\.0\.7|5\.0\.7.*Groovy' \
+    --cut-directories \
+    4 \
+    --minimum-html-files \
+    9 \
+    --reject-regex \
+    '/(gdk|templating|type-checking-extensions)\.html$' \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/" \
+    --seed-source-prefix \
+    "https://docs.groovy-lang.org/docs/groovy-5.0.7/html/documentation/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source scala
+); then
+    fail_documentation_fetch_test "canonical Scala documentation dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --mirror-path \
+    scala \
+    --name \
+    "Scala 3 Documentation" \
+    --source-version \
+    "3-stable" \
+    --identity-regex \
+    "Scala 3" \
+    --cut-directories \
+    2 \
+    --minimum-html-files \
+    300 \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --seed-source-prefix \
+    "https://docs.scala-lang.org/scala3/reference/" \
+    --seed-reject-regex \
+    '/index\.html$'
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source quarkus
+); then
+    fail_documentation_fetch_test "canonical Quarkus guides dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://quarkus.io/guides/" \
+    --mirror-path \
+    quarkus \
+    --name \
+    "Quarkus Guides" \
+    --source-version \
+    "stable-current" \
+    --identity-regex \
+    Quarkus \
+    --cut-directories \
+    1 \
+    --minimum-html-files \
+    200 \
+    --reject-regex \
+    '%7[BbDd]' \
+    --seed-document-type \
+    html-links \
+    --seed-discovery-url \
+    "https://quarkus.io/guides/" \
+    --seed-source-prefix \
+    "https://quarkus.io/guides/"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_DOCS_ROOT"
+    LOG_FILE="$TEST_WORK_DIRECTORY/all-source.log"
+    log() {
+        :
+    }
+    fetch_all_official_sources() {
+        printf '%s\n' "canonical-full" > "$ALL_SOURCE_CAPTURE"
+    }
+    fetch_quick_sources() {
+        printf '%s\n' "quick" > "$ALL_SOURCE_CAPTURE"
+        return 1
+    }
+    run_documentation_fetch --doc-sets=all > /dev/null
+); then
+    fail_documentation_fetch_test "all selector did not route to canonical full sources"
+fi
+
+if [ "$(< "$ALL_SOURCE_CAPTURE")" != "canonical-full" ]; then
+    fail_documentation_fetch_test "all selector included quick documentation mirrors"
+fi
+
+assert_rejected_selector() {
+    local documentation_source_selector="$1"
+    : > "$SELECTED_SOURCE_CAPTURE"
+    if (run_documentation_fetch "--doc-sets=$documentation_source_selector" > /dev/null 2>&1); then
+        fail_documentation_fetch_test "invalid selector was accepted: $documentation_source_selector"
+    fi
+    assert_no_source_dispatch "$SELECTED_SOURCE_CAPTURE" "invalid selector '$documentation_source_selector'"
+}
+
+assert_rejected_selector "kotlin,unknown-source"
+assert_rejected_selector "kotlin,kotlin"
+assert_rejected_selector "kotlin,,java/java25-complete"
+assert_rejected_selector "all,kotlin"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    SOURCE_CALL_COUNT=0
+    record_documentation_fetch() {
+        SOURCE_CALL_COUNT=$((SOURCE_CALL_COUNT + 1))
+        if [ "$SOURCE_CALL_COUNT" -eq 1 ]; then
+            printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+        fi
+    }
+    fetch_named_official_source spring-ai-reference
+); then
+    fail_documentation_fetch_test "canonical source dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.spring.io/spring-ai/reference/1.1/" \
+    --mirror-path \
+    "spring-ai-reference" \
+    --name \
+    "Spring AI Reference (stable 1.1)" \
+    --source-version \
+    "1.1.8" \
+    --identity-regex \
+    '<meta name="version" content="1\.1\.8"' \
+    --forbidden-identity-regex \
+    '<meta name="version" content="(2\.|[^"]*SNAPSHOT)|data-version="(2\.|[^"]*SNAPSHOT)' \
+    --expected-meta-version \
+    "1.1.8" \
+    --cut-directories \
+    3 \
+    --minimum-html-files \
+    80 \
+    --reject-regex \
+    'SNAPSHOT|/spring-ai/reference/(2\.|next/)' \
+    --superseded-mirror-path \
+    "spring-ai-complete"
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    SOURCE_CALL_COUNT=0
+    record_documentation_fetch() {
+        SOURCE_CALL_COUNT=$((SOURCE_CALL_COUNT + 1))
+        if [ "$SOURCE_CALL_COUNT" -eq 1 ]; then
+            printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+        fi
+    }
+    fetch_named_official_source spring-ai-api-stable
+); then
+    fail_documentation_fetch_test "canonical Spring AI API dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://docs.spring.io/spring-ai/docs/1.1.2/api/" \
+    --mirror-path \
+    "spring-ai-api-stable" \
+    --name \
+    "Spring AI API 1.1.2" \
+    --source-version \
+    "1.1.2" \
+    --identity-regex \
+    'Spring AI Parent 1\.1\.2 API' \
+    --forbidden-identity-regex \
+    'Spring AI Parent (2\.[^ ]*|[^ ]*SNAPSHOT) API' \
+    --cut-directories \
+    4 \
+    --minimum-html-files \
+    4000 \
+    --reject-regex \
+    'SNAPSHOT|/spring-ai/docs/2\.'
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source java/java25-complete
+); then
+    fail_documentation_fetch_test "canonical Java 25 API dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --java-release \
+    25 \
+    --url \
+    "https://docs.oracle.com/en/java/javase/25/docs/api/" \
+    --mirror-path \
+    "java/java25-complete" \
+    --name \
+    "Java 25 Complete API" \
+    --source-version \
+    "25-ga" \
+    --identity-regex \
+    'Overview \(Java SE 25 &amp; JDK 25\)' \
+    --required-identity-page \
+    "api/index.html" \
+    --required-identity-text \
+    "Overview (Java SE 25 & JDK 25)" \
+    --cut-directories \
+    5 \
+    --minimum-html-files \
+    5000
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
+    fetch_named_official_source jetbrains-java25-article
+); then
+    fail_documentation_fetch_test "governed JetBrains article dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/" \
+    --mirror-path \
+    "jetbrains/idea/2025/09" \
+    --name \
+    "JetBrains Java 25 Blog" \
+    --source-version \
+    "25-ga" \
+    --identity-regex \
+    'Java.*25|25.*Java' \
+    --cut-directories \
+    3 \
+    --minimum-html-files \
+    1 \
+    --single-page
+
+SINGLE_PAGE_STAGE="$TEST_WORK_DIRECTORY/single-page-stage"
+mkdir -p "$SINGLE_PAGE_STAGE"
+printf '<html><body>stale recursive page</body></html>\n' > "$SINGLE_PAGE_STAGE/unrelated.html"
+LOG_FILE="$TEST_WORK_DIRECTORY/single-page.log"
+wget() {
+    local wget_argument
+    local output_document=""
+    for wget_argument in "$@"; do
+        case "$wget_argument" in
+            --output-document=*) output_document="${wget_argument#--output-document=}" ;;
+        esac
+    done
+    if [ -z "$output_document" ]; then
+        return 1
+    fi
+    printf '<html><body>Java 25</body></html>\n' > "$output_document"
+}
+if ! (
+    cd "$TEST_WORK_DIRECTORY"
+    fetch_single_documentation_page \
+        "https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/" \
+        "$SINGLE_PAGE_STAGE" \
+        "JetBrains Java 25 Blog" \
+        3 \
         1 \
-        1 \
-        "" \
-        false \
-        "$seed_fetch_document_type" \
-        "https://docs.example.test/navigation" \
-        "https://docs.example.test/reference/") > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "structured seed fetch accepted wget HTTP error exit status"
+        false
+); then
+    fail_documentation_fetch_test "governed single-page fetch did not complete"
+fi
+unset -f wget
+if [ ! -f "$SINGLE_PAGE_STAGE/java-25-lts-and-intellij-idea/index.html" ]; then
+    fail_documentation_fetch_test "governed single-page fetch used the wrong projected path"
+fi
+if [ -f "$SINGLE_PAGE_STAGE/unrelated.html" ]; then
+    fail_documentation_fetch_test "governed single-page fetch retained an unrelated resumed page"
+fi
+
+SPRING_AI_MIXED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-mixed-stage"
+mkdir -p "$SPRING_AI_MIXED_STAGE"
+printf '<html><meta name="version" content="1.1.8"></html>\n' > "$SPRING_AI_MIXED_STAGE/stable.html"
+printf '<html><meta name="version" content="2.0.0"></html>\n' > "$SPRING_AI_MIXED_STAGE/prohibited.html"
+if validate_staged_documentation_mirror \
+    "$SPRING_AI_MIXED_STAGE" \
+    "Spring AI mixed-version fixture" \
+    2 \
+    '<meta name="version" content="1\.1\.8"' \
+    '<meta name="version" content="(2\.|[^\"]*SNAPSHOT)'; then
+    fail_documentation_fetch_test "mixed Spring AI stable and prohibited identities were accepted"
+fi
+
+KOTLIN_PINNED_STAGE="$TEST_WORK_DIRECTORY/kotlin-pinned-stage"
+mkdir -p "$KOTLIN_PINNED_STAGE"
+printf '<html><body><p>The currently released version is 2.4.10, published on July 14, 2026.</p></body></html>\n' \
+    > "$KOTLIN_PINNED_STAGE/faq.html"
+if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$KOTLIN_PINNED_STAGE" \
+    --required-page "faq.html" \
+    --required-text "The currently released version is 2.4.10, published on July 14, 2026."; then
+    fail_documentation_fetch_test "exact Kotlin 2.4.10 publication identity was rejected"
+fi
+printf '<html><body><p>The currently released version is 2.4.20, published later.</p></body></html>\n' \
+    > "$KOTLIN_PINNED_STAGE/faq.html"
+if python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$KOTLIN_PINNED_STAGE" \
+    --required-page "faq.html" \
+    --required-text "The currently released version is 2.4.10, published on July 14, 2026." \
+    > /dev/null 2>&1; then
+    fail_documentation_fetch_test "a newer rolling Kotlin publication was accepted as 2.4.10"
+fi
+
+SPRING_AI_PINNED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-pinned-stage"
+mkdir -p "$SPRING_AI_PINNED_STAGE"
+printf '<html><head><meta name="version" content="1.1.8"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/index.html"
+printf '<html><head><meta name="version" content="1.1.8"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/section.html"
+if ! python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$SPRING_AI_PINNED_STAGE" \
+    --expected-meta-version "1.1.8"; then
+    fail_documentation_fetch_test "homogeneous Spring AI 1.1.8 metadata was rejected"
+fi
+printf '<html><head><meta name="version" content="1.1.9"></head></html>\n' \
+    > "$SPRING_AI_PINNED_STAGE/section.html"
+if python3 "$SCRIPT_DIR/documentation_seed.py" \
+    --validate-published-identity \
+    --root "$SPRING_AI_PINNED_STAGE" \
+    --expected-meta-version "1.1.8" \
+    > /dev/null 2>&1; then
+    fail_documentation_fetch_test "mixed Spring AI 1.1.x metadata was accepted"
 fi
 
 if ! (
     set --
     # shellcheck source=fetch_all_docs.sh
     source "$FETCH_SCRIPT"
-    log() { :; }
-    atomic_seed_target_directory="$TEST_WORK_ROOT/atomic-documentation-seed"
-    mkdir -p "$atomic_seed_target_directory"
-    printf 'retained-seed\n' > "$atomic_seed_target_directory/.documentation-seed.txt"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/java-post-fetch/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/java-post-fetch.log"
+    JAVA_POST_FETCH_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
+    JAVA_POST_FETCH_WGET_ARGUMENTS="$TEST_WORK_DIRECTORY/java-post-fetch-wget-arguments"
+    mkdir -p "$JAVA_POST_FETCH_TARGET_DIRECTORY"
+    printf '%s\n%s\n' \
+        "https://docs.example.invalid/Record.html" \
+        "https://docs.example.invalid/String.html" \
+        > "$JAVA_POST_FETCH_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+    log() {
+        :
+    }
     wget() {
-        local wget_argument
-        for wget_argument in "$@"; do
-            case "$wget_argument" in
-                --output-document=*)
-                    cp "$DOCUMENTATION_SEED_FIXTURES/$seed_fetch_document_type.input" \
-                        "${wget_argument#--output-document=}"
-                    return 0
-                    ;;
-            esac
+        printf '%s\n' "$@" > "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+        printf '<html>Record</html>\n' > "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html"
+    }
+    write_java_api_seed_mirror_paths() {
+        printf '%s\n%s\n' Record.html String.html > "$4"
+    }
+    if (
+        cd "$JAVA_POST_FETCH_TARGET_DIRECTORY"
+        fetch_java_api_javadoc_seed \
+            "$JAVA_POST_FETCH_TARGET_DIRECTORY" \
+            "Java post-fetch verification" \
+            0 \
+            1 \
+            "" \
+            false \
+            "https://docs.example.invalid/"
+    ) > /dev/null 2>&1; then
+        exit 1
+    fi
+    [ -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/Record.html" ] || exit 1
+    [ ! -f "$JAVA_POST_FETCH_TARGET_DIRECTORY/String.html" ] || exit 1
+    grep -Fxq -- "--max-redirect=0" "$JAVA_POST_FETCH_WGET_ARGUMENTS"
+); then
+    fail_documentation_fetch_test "Java seed fetch did not reject redirects or verify fetched seed paths"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/java-quarantine/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/java-quarantine.log"
+    JAVA_QUARANTINE_TARGET_DIRECTORY="$DOCS_ROOT/java/java25-complete"
+    mkdir -p "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang"
+    printf '%s\n' "https://docs.example.invalid/java.base/java/lang/Record.html" \
+        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+    printf '<html>Canonical</html>\n' \
+        > "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang/Record.html"
+    printf '<html>Stale</html>\n' > "$JAVA_QUARANTINE_TARGET_DIRECTORY/Record.html"
+    log() {
+        :
+    }
+    write_java_api_seed_mirror_paths() {
+        printf '%s\n' "java.base/java/lang/Record.html" > "$4"
+    }
+    reconcile_java_api_seed_mirror \
+        "https://docs.example.invalid/" \
+        "$JAVA_QUARANTINE_TARGET_DIRECTORY" \
+        "Java stale-page quarantine" \
+        0
+    [ -f "$JAVA_QUARANTINE_TARGET_DIRECTORY/java.base/java/lang/Record.html" ] || exit 1
+    [ ! -e "$JAVA_QUARANTINE_TARGET_DIRECTORY/Record.html" ] || exit 1
+    find "$(dirname "$DOCS_ROOT")/.quarantine" -type f -name Record.html -print -quit | grep -q .
+); then
+    fail_documentation_fetch_test "unseeded Java pages were not quarantined outside the active mirror"
+fi
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    LOG_FILE="$TEST_WORK_DIRECTORY/java-seed-generation.log"
+    JAVA_SEED_TARGET_DIRECTORY="$TEST_WORK_DIRECTORY/java-seed-generation"
+    mkdir -p "$JAVA_SEED_TARGET_DIRECTORY"
+    printf 'retained-seed\n' > "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt"
+    log() {
+        :
+    }
+    python3() {
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--output" ]; then
+                printf 'incomplete-seed\n' > "$2"
+                return 42
+            fi
+            shift
         done
         return 1
     }
-    python3() {
-        local generated_seed_output_path=""
-        local generated_mirror_paths_output_path=""
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --output)
-                    generated_seed_output_path="$2"
-                    shift 2
-                    ;;
-                --mirror-path-output)
-                    generated_mirror_paths_output_path="$2"
-                    shift 2
-                    ;;
-                *)
-                    shift
-                    ;;
-            esac
-        done
-        printf 'incomplete-generated-seed\n' > "$generated_seed_output_path"
-        printf 'incomplete-generated-path.html\n' > "$generated_mirror_paths_output_path"
-        return 42
-    }
-    if (cd "$atomic_seed_target_directory" \
-        && fetch_discovered_documentation_seed \
-            "https://docs.example.test/reference/" \
-            "$atomic_seed_target_directory" \
-            "Atomic Seed Discovery" \
-            1 \
-            1 \
-            "" \
-            false \
-            "$seed_fetch_document_type" \
-            "https://docs.example.test/navigation" \
-            "https://docs.example.test/reference/"); then
+    if generate_java_api_javadoc_seed \
+        "https://docs.example.invalid/" \
+        "$JAVA_SEED_TARGET_DIRECTORY" > /dev/null 2>&1; then
         exit 1
     fi
-    if [ "$(< "$atomic_seed_target_directory/.documentation-seed.txt")" != "retained-seed" ]; then
-        exit 1
-    fi
-    if find "$atomic_seed_target_directory" -maxdepth 1 \
-        \( -name '.documentation-discovery.??????' \
-            -o -name '.documentation-seed.??????' \
-            -o -name '.documentation-seed-paths.??????' \) \
-        -print -quit | grep -q .; then
-        exit 1
-    fi
+    [ "$(< "$JAVA_SEED_TARGET_DIRECTORY/.oracle-javadoc-seed.txt")" = "retained-seed" ]
 ); then
-    fail_documentation_fetch_projection_test "failed paired seed generation replaced active non-Java seed state"
+    fail_documentation_fetch_test "failed Java seed generation replaced the active seed"
 fi
 
-if (parse_fetch_arguments --doc-sets=dev-java --doc-sets=kotlin) > /dev/null 2>&1; then
-    fail_documentation_fetch_projection_test "repeated --doc-sets options must be rejected"
-fi
-
-for external_active_mirror_root in java oracle; do
-    external_overlap_quarantine_capture="$TEST_WORK_ROOT/external-overlap-$external_active_mirror_root"
-    if (
-        set --
-        # shellcheck source=fetch_all_docs.sh
-        source "$FETCH_SCRIPT"
-        log() { :; }
-        DOCS_ROOT="$TEST_WORK_ROOT/external-overlap-docs"
-        mkdir -p "$DOCS_ROOT/$external_active_mirror_root"
-        load_java_api_documentation_sources "$JAVA_API_SOURCES_MANIFEST"
-        create_documentation_fetch_staging_directory() {
-            printf 'staging-invoked\n' > "$external_overlap_quarantine_capture"
-            return 1
-        }
-        fetch_docs \
-            "" \
-            "https://docs.example.test/reference/" \
-            "rolling-reference" \
-            "Rolling Reference" \
-            1 \
-            1 \
-            "" \
-            false \
-            "" \
-            "" \
-            "" \
-            "$external_active_mirror_root"
-    ) > /dev/null 2>&1; then
-        fail_documentation_fetch_projection_test \
-            "external active mirror overlap was accepted: $external_active_mirror_root"
-    fi
-    if [ -e "$external_overlap_quarantine_capture" ]; then
-        fail_documentation_fetch_projection_test \
-            "external active mirror overlap reached replacement staging: $external_active_mirror_root"
-    fi
-done
-
-for documentation_list_option in --list-java-api-sources --list-documentation-sources; do
-    set +e
-    (
-        set --
-        # shellcheck source=fetch_all_docs.sh
-        source "$FETCH_SCRIPT"
-        load_builtin_documentation_fetch_projections() {
-            LEGACY_DOCUMENTATION_FETCH_PROJECTIONS=(
-                "|https://example.invalid/|kotlin/2.4.10|Lifecycle collision|0|1||false"
-            )
-            QUICK_DOCUMENTATION_FETCH_PROJECTIONS=()
-            BUILTIN_DOCUMENTATION_FETCH_PROJECTIONS_LOADED="true"
-        }
-        run_documentation_fetch "$documentation_list_option"
-    ) > /dev/null 2>&1
-    documentation_list_status=$?
-    set -e
-    if [ "$documentation_list_status" -eq 0 ]; then
-        fail_documentation_fetch_projection_test \
-            "list mode bypassed external lifecycle-root validation: $documentation_list_option"
-    fi
-done
-
-generic_failure_docs_root="$TEST_WORK_ROOT/generic-failure-docs"
-mkdir -p "$generic_failure_docs_root/language/1.0"
-for superseded_page_name in one two three four; do
-    printf '<html><body>Superseded</body></html>\n' \
-        > "$generic_failure_docs_root/language/1.0/$superseded_page_name.html"
-done
-if (
-    set --
-    # shellcheck source=fetch_all_docs.sh
-    source "$FETCH_SCRIPT"
-    log() { :; }
-    DOCS_ROOT="$generic_failure_docs_root"
-    LOG_FILE="$TEST_WORK_ROOT/generic-failed-fetch.log"
-    CLEAN_INCOMPLETE="true"
-    wget() {
-        printf '<html><body>Incomplete replacement</body></html>\n' > replacement.html
-        return 0
-    }
-    fetch_docs \
-        "" \
-        "https://docs.example.test/reference/" \
-        "language" \
-        "Rolling Language Reference" \
-        1 \
-        4 \
-        "" \
-        false \
-        "" \
-        "" \
-        "" \
-        "language/1.0"
-); then
-    fail_documentation_fetch_projection_test \
-        "generic replacement counted superseded HTML toward staged completeness"
-fi
-if [ "$(count_html_files "$generic_failure_docs_root/language/1.0")" -ne 4 ] \
-    || [ -e "$generic_failure_docs_root/language/replacement.html" ]; then
-    fail_documentation_fetch_projection_test "failed generic replacement mutated the prior valid mirror"
-fi
-
-seeded_failure_docs_root="$TEST_WORK_ROOT/seeded-failure-docs"
-mkdir -p "$seeded_failure_docs_root/language/1.0"
-printf '<html><body>Superseded</body></html>\n' \
-    > "$seeded_failure_docs_root/language/1.0/index.html"
-printf 'retained-seed\n' > "$seeded_failure_docs_root/language/.documentation-seed.txt"
-if (
-    set --
-    # shellcheck source=fetch_all_docs.sh
-    source "$FETCH_SCRIPT"
-    log() { :; }
-    DOCS_ROOT="$seeded_failure_docs_root"
-    LOG_FILE="$TEST_WORK_ROOT/seeded-failed-fetch.log"
-    CLEAN_INCOMPLETE="true"
-    seeded_failure_wget_call_count=0
-    wget() {
-        seeded_failure_wget_call_count=$((seeded_failure_wget_call_count + 1))
-        if [ "$seeded_failure_wget_call_count" -eq 1 ]; then
-            local wget_argument
-            for wget_argument in "$@"; do
-                case "$wget_argument" in
-                    --output-document=*)
-                        cp "$DOCUMENTATION_SEED_FIXTURES/html-links.input" \
-                            "${wget_argument#--output-document=}"
-                        ;;
-                esac
-            done
-            return 0
-        fi
-        return 8
-    }
-    fetch_docs \
-        "" \
-        "https://docs.example.test/reference/" \
-        "language" \
-        "Rolling Seeded Language Reference" \
-        1 \
-        1 \
-        "" \
-        false \
-        html-links \
-        "https://docs.example.test/navigation" \
-        "https://docs.example.test/reference/" \
-        "language/1.0"
-); then
-    fail_documentation_fetch_projection_test "failed seeded replacement fetch was accepted"
-fi
-if [ ! -f "$seeded_failure_docs_root/language/1.0/index.html" ] \
-    || [ "$(< "$seeded_failure_docs_root/language/.documentation-seed.txt")" != "retained-seed" ]; then
-    fail_documentation_fetch_projection_test "failed seeded replacement mutated the prior mirror or seed"
-fi
-
-superseded_mirror_docs_root="$TEST_WORK_ROOT/superseded-mirror-docs"
-mkdir -p "$superseded_mirror_docs_root/language/1.0"
-printf '<html><body>Superseded</body></html>\n' \
-    > "$superseded_mirror_docs_root/language/1.0/index.html"
 if ! (
     set --
     # shellcheck source=fetch_all_docs.sh
     source "$FETCH_SCRIPT"
-    log() { :; }
-    DOCS_ROOT="$superseded_mirror_docs_root"
-    LOG_FILE="$TEST_WORK_ROOT/superseded-fetch.log"
-    CLEAN_INCOMPLETE="true"
-    wget() {
-        printf '<html><body>Replacement one</body></html>\n' > replacement-one.html
-        printf '<html><body>Replacement two</body></html>\n' > replacement-two.html
-        return 0
+    DOCS_ROOT="$TEST_WORK_DIRECTORY/staged-publication/data/docs"
+    LOG_FILE="$TEST_WORK_DIRECTORY/staged-publication.log"
+    STAGED_PUBLICATION_DIRECTORY="$TEST_WORK_DIRECTORY/staged-publication/replacement"
+    log() {
+        :
     }
-    fetch_docs \
-        "" \
-        "https://docs.example.test/reference/" \
-        "language" \
-        "Rolling Language Reference" \
-        1 \
-        2 \
-        "" \
-        false \
-        "" \
-        "" \
-        "" \
-        "language/1.0"
+    create_documentation_fetch_staging_directory() {
+        mkdir -p "$STAGED_PUBLICATION_DIRECTORY"
+        printf '<html>Rolling Reference stable</html>\n' > "$STAGED_PUBLICATION_DIRECTORY/index.html"
+        printf '%s\n' "$STAGED_PUBLICATION_DIRECTORY"
+    }
+    fetch_docs_mirror() {
+        cd - > /dev/null
+    }
+    publish_staged_documentation_mirror() {
+        return 71
+    }
+    if fetch_source \
+        --url "https://docs.example.invalid/reference/" \
+        --mirror-path "rolling-reference" \
+        --name "Rolling Reference" \
+        --source-version "stable" \
+        --identity-regex "Rolling Reference stable" \
+        --cut-directories 0 \
+        --minimum-html-files 1 \
+        --superseded-mirror-path "rolling-reference/1.0" > /dev/null; then
+        exit 1
+    fi
+    [ -d "$STAGED_PUBLICATION_DIRECTORY" ]
 ); then
-    fail_documentation_fetch_projection_test "superseded mirror migration failed"
-fi
-if [ -e "$superseded_mirror_docs_root/language/1.0" ]; then
-    fail_documentation_fetch_projection_test "superseded mirror migration retained the prior local root"
-fi
-if [ "$(count_html_files "$superseded_mirror_docs_root/language")" -ne 2 ]; then
-    fail_documentation_fetch_projection_test "published generic replacement failed post-quarantine completeness"
-fi
-if ! find "$TEST_WORK_ROOT/.quarantine" -path '*/language/1.0/index.html' -type f -print -quit \
-    | grep -q .; then
-    fail_documentation_fetch_projection_test "superseded mirror migration did not preserve the prior root outside data/docs"
+    fail_documentation_fetch_test "staged publication failure was not propagated"
 fi
 
-if [ "$(documentation_fetch_cut_directories "https://example.invalid/")" != "0" ]; then
-    fail_documentation_fetch_projection_test "root documentation URLs must retain zero cut directories"
-fi
-
-printf 'PASS: Documentation source fetch projections and selectors preserve canonical manifest ownership.\n'
+printf 'PASS: explicit fetch options, pinned source selection, version rejection, and Java seed safety are wired.\n'

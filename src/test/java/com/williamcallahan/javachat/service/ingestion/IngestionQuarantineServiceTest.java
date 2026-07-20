@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,17 +17,35 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 /** Verifies rejected documents are copied safely without mutating their canonical source mirror. */
 class IngestionQuarantineServiceTest {
+    private static final String CLI_PROFILE = "cli";
+    private static final String MALFORMED_UTF_8_DOCUMENT_HEX = "c328ff00fe";
+    private static final String MALFORMED_UTF_8_DOCUMENT_SHA_256 =
+            "2a7a4b5f058fd584512e1d10961a1dec97666d702a61a33c9472231d366f4ed0";
     private static final String QUARANTINE_DIRECTORY_NAME = ".quarantine";
     private static final Pattern CONTENT_ADDRESSED_STREAMS_DOCUMENT = Pattern.compile("streams\\.[0-9a-f]{64}\\.html");
     private static final Pattern CONTENT_ADDRESSED_LANDING_DOCUMENT = Pattern.compile("landing\\.[0-9a-f]{64}\\.html");
+
+    @Test
+    void springCliProfileConstructsServiceWithContentHasher() {
+        try (AnnotationConfigApplicationContext applicationContext = new AnnotationConfigApplicationContext()) {
+            applicationContext.getEnvironment().setActiveProfiles(CLI_PROFILE);
+            applicationContext.register(ContentHasher.class, IngestionQuarantineService.class);
+            applicationContext.refresh();
+
+            assertNotNull(applicationContext.getBean(IngestionQuarantineService.class));
+        }
+    }
 
     @Test
     void copiesDocumentInsideDocumentationRootToSiblingQuarantineWithRelativePath(@TempDir Path temporaryDirectory)
@@ -110,6 +129,37 @@ class IngestionQuarantineServiceTest {
         assertArrayEquals(canonicalDocumentBytes, Files.readAllBytes(repeatedQuarantineCopy.quarantined()));
         try (var inspectionCopies = Files.list(
                 Objects.requireNonNull(firstQuarantineCopy.quarantined().getParent(), "quarantine copy parent"))) {
+            assertEquals(1, inspectionCopies.count());
+        }
+    }
+
+    @Test
+    void derivesReusableInspectionPathFromMalformedUtf8Bytes(@TempDir Path temporaryDirectory) throws IOException {
+        Path documentationRoot = temporaryDirectory.resolve("data/docs");
+        Path canonicalDocument = documentationRoot.resolve("java/io/streams.html");
+        byte[] malformedUtf8DocumentBytes = HexFormat.of().parseHex(MALFORMED_UTF_8_DOCUMENT_HEX);
+        Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
+        Files.write(canonicalDocument, malformedUtf8DocumentBytes);
+        IngestionQuarantineService quarantineService =
+                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+
+        IngestionQuarantineService.QuarantineResult firstQuarantineCopy =
+                quarantineService.quarantine(canonicalDocument);
+        IngestionQuarantineService.QuarantineResult repeatedQuarantineCopy =
+                quarantineService.quarantine(canonicalDocument);
+
+        Path quarantineRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent")
+                .resolve(QUARANTINE_DIRECTORY_NAME)
+                .toAbsolutePath()
+                .normalize();
+        Path expectedInspectionCopy =
+                quarantineRoot.resolve("java/io/streams." + MALFORMED_UTF_8_DOCUMENT_SHA_256 + ".html");
+        assertEquals(expectedInspectionCopy, firstQuarantineCopy.quarantined());
+        assertEquals(expectedInspectionCopy, repeatedQuarantineCopy.quarantined());
+        assertArrayEquals(malformedUtf8DocumentBytes, Files.readAllBytes(canonicalDocument));
+        assertArrayEquals(malformedUtf8DocumentBytes, Files.readAllBytes(expectedInspectionCopy));
+        try (Stream<Path> inspectionCopies =
+                Files.list(Objects.requireNonNull(expectedInspectionCopy.getParent(), "quarantine copy parent"))) {
             assertEquals(1, inspectionCopies.count());
         }
     }

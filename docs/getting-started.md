@@ -15,14 +15,18 @@
 cp .env.example .env
 ```
 
-2) Edit `.env` and select one chat provider with its matching credential:
+2) Edit `.env` for local execution. The checked-in example already uses `SPRING_PROFILE=local`, the
+`java-chat-local-qwen3-embedding-4b-2560-*` collection names, and repository-local generation state roots.
+Configure the shared gateway `OPENAI_BASE_URL` and `OPENAI_API_KEY` used by embeddings and gateway chat.
+
+Select one chat provider with its matching chat credential:
 
 - GitHub Models: `LLM_PRIMARY_PROVIDER=github_models` and `GITHUB_TOKEN`
 - OpenAI: `LLM_PRIMARY_PROVIDER=openai` and `OPENAI_API_KEY`
 
 Java Chat does not dispatch a failed request to another provider.
 
-3) Start local Qdrant (optional but recommended for full RAG):
+3) Start the fresh generation-specific Qdrant 1.18.3 Compose project (optional but required for full RAG):
 
 ```bash
 make compose-up
@@ -65,7 +69,9 @@ To mirror upstream docs into `data/docs/` and index them into Qdrant hybrid coll
 make full-pipeline
 ```
 
-This fetches all documentation sources and ingests them with dense + sparse (BM25) vectors across four Qdrant collections.
+Run this only after the local generation configuration and gateway/Qdrant preflight are valid. It fetches all
+canonical full documentation sources and ingests them with dense + sparse (BM25) vectors across four isolated
+local collections. Quick mirrors remain explicitly opt-in.
 
 For incremental vs full runs, doc set filtering, and all available flags:
 

@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.config;
 
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import java.util.Objects;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,6 +20,12 @@ public class SystemPromptConfig {
             "Never place an enrichment marker inside inline code or a fenced code block; put it before or after the fence.";
     static final String JAVA_FENCE_VALIDITY_CLAUSE =
             "A fenced `java` block contains syntactically valid Java that compiles with its stated imports and context. Use real APIs appropriate to the response context; never invent API names, method signatures, or type arguments.";
+    private static final String MARKER_USAGE_PROMPT = """
+            - {{hint:Text here}} (Helpful Hints)
+            - {{background:Text here}} (Background Context)
+            - {{reminder:Text here}} (Important Reminders)
+            - {{warning:Text here}} (Warning)
+            - {{example:Text here}} (Example)""";
     private static final String CORE_PROMPT_TEMPLATE = """
             You are a Java learning assistant focused on Java __JDK_VERSION__ and current stable JDK releases.
 
@@ -80,7 +85,6 @@ public class SystemPromptConfig {
             .replace(JAVA_FENCE_VALIDITY_PLACEHOLDER, JAVA_FENCE_VALIDITY_CLAUSE);
 
     private final String jdkVersion;
-    private final String markerUsagePrompt;
 
     /**
      * Creates prompt configuration from the validated application-properties owner.
@@ -90,7 +94,6 @@ public class SystemPromptConfig {
     public SystemPromptConfig(AppProperties appProperties) {
         this.jdkVersion = Integer.toString(
                 Objects.requireNonNull(appProperties, "appProperties").getDocs().getJdkVersion());
-        this.markerUsagePrompt = buildMarkerUsagePrompt(EnrichmentKindCatalog.load());
     }
 
     /**
@@ -99,18 +102,12 @@ public class SystemPromptConfig {
     public String getCoreSystemPrompt() {
         return CORE_PROMPT_TEMPLATE
                 .replace(JDK_VERSION_PLACEHOLDER, jdkVersion)
-                .replace(MARKER_INVENTORY_PLACEHOLDER, markerUsagePrompt);
+                .replace(MARKER_INVENTORY_PLACEHOLDER, MARKER_USAGE_PROMPT);
     }
 
-    /** Returns marker syntax projected from the canonical enrichment-kind manifest. */
+    /** Returns the marker syntax taught at the model prompt boundary. */
     public String getMarkerUsagePrompt() {
-        return markerUsagePrompt;
-    }
-
-    private static String buildMarkerUsagePrompt(EnrichmentKindCatalog enrichmentKindCatalog) {
-        return enrichmentKindCatalog.all().stream()
-                .map(presentation -> "- {{" + presentation.token() + ":Text here}} (" + presentation.title() + ")")
-                .collect(java.util.stream.Collectors.joining("\n"));
+        return MARKER_USAGE_PROMPT;
     }
 
     /**

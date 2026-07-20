@@ -116,7 +116,7 @@ java --module-path out \
     --module com.example.application/com.example.application.Main
 ```
 
-The program prints `Welcome, Maya.`. If the library also contains a public class in `com.example.library.internal`, the application still cannot import it unless the library exports that package. `public` controls access within Java's type system; `exports` controls whether another module can reach the public types in the package at all.
+The program prints `Welcome, Maya.` If the library also contains a public class in `com.example.library.internal`, the application still cannot import it unless the library exports that package. `public` controls access within Java's type system; `exports` controls whether another module can reach the public types in the package at all.
 
 ## Declare dependencies and boundaries
 

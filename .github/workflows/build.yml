@@ -75,7 +75,7 @@ jobs:
         run: ./scripts/with_build_state_lock.sh ./gradlew --version
       
       - name: Run tests
-        run: ./gradlew test --no-daemon
+        run: make test
       
       - name: Build application
         run: ./gradlew build -x test --no-daemon
@@ -126,13 +126,42 @@ jobs:
             --tag java-chat:ci \
             .
 
+      - name: Start pinned Qdrant dependency
+        run: |
+          set -euo pipefail
+          docker compose \
+            --project-name java-chat-ci \
+            --file infra/docker-compose-qdrant.yml \
+            up --detach qdrant
+
+          qdrant_ready=false
+          for startup_attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+              --output /dev/null http://127.0.0.1:8087/; then
+              qdrant_ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$qdrant_ready" != true ]]; then
+            docker compose \
+              --project-name java-chat-ci \
+              --file infra/docker-compose-qdrant.yml \
+              logs qdrant
+            exit 1
+          fi
+
       - name: Start runtime smoke container
         run: |
           docker run --detach --rm \
             --name java-chat-ci-smoke \
+            --network java-chat-ci_default \
             --publish 8085:8085 \
             --env GITHUB_TOKEN=ci-smoke-token \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
+            --env QDRANT_HOST=qdrant \
+            --env QDRANT_PORT=6334 \
             java-chat:ci
 
       - name: Verify runtime readiness and deployment identity
@@ -187,3 +216,7 @@ jobs:
           if docker container inspect java-chat-ci-smoke >/dev/null 2>&1; then
             docker stop java-chat-ci-smoke
           fi
+          docker compose \
+            --project-name java-chat-ci \
+            --file infra/docker-compose-qdrant.yml \
+            down --volumes

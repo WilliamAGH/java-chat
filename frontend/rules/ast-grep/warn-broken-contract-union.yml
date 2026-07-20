@@ -7,7 +7,6 @@
 # Bad: z.union([z.string(), z.object({ url: z.string() })])
 # Good: z.object({ url: z.string() }) // Consistent shape from API
 #
-# @see docs/contracts/clean-code-project-structure.md#inbound-vs-domain-objects
 id: warn-broken-contract-union
 language: tsx
 severity: warning
@@ -19,8 +18,6 @@ message: |
   1. STOP - Do not create adapters/helpers to normalize
   2. REQUEST FIX - Generate an LLM prompt for the backend team
   3. DOCUMENT - File an issue referencing this pattern
-
-  See docs/contracts/clean-code-project-structure.md#backend-fix-request-template
 
 files:
   - "src/**/*.ts"

@@ -10,33 +10,39 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * Ingests local HTML/PDF documentation files under {@code data/docs/**} into Qdrant (or cache).
+ * Ingests local HTML/PDF documentation files from a selected readable mirror into Qdrant.
  */
 @Service
-public class LocalDocsDirectoryIngestionService {
-    private static final String DEFAULT_DOCS_ROOT = "data/docs";
-
+public final class LocalDocsDirectoryIngestionService {
     private final LocalDocsFileIngestionProcessor fileProcessor;
+    private final Path configuredDocumentationRoot;
 
     /**
      * Creates a directory ingestor backed by a per-file ingestion processor.
      *
      * @param fileProcessor file processor for extraction, chunking, and persistence
+     * @param documentationRoot configured boundary for every caller-selected source directory
      */
-    public LocalDocsDirectoryIngestionService(LocalDocsFileIngestionProcessor fileProcessor) {
+    public LocalDocsDirectoryIngestionService(
+            LocalDocsFileIngestionProcessor fileProcessor, @Value("${DOCS_DIR:data/docs}") String documentationRoot) {
         this.fileProcessor = Objects.requireNonNull(fileProcessor, "fileProcessor");
+        if (documentationRoot == null || documentationRoot.isBlank()) {
+            throw new IllegalArgumentException("Configured documentation root is required");
+        }
+        this.configuredDocumentationRoot =
+                Path.of(documentationRoot).toAbsolutePath().normalize();
     }
 
     /**
      * Ingests HTML/PDF files from a local directory mirror (for example, {@code data/docs/**}).
      *
-     * @param rootDir root directory to scan (must be under {@code data/docs})
+     * @param rootDir root directory to scan
      * @param maxFiles maximum number of files to process
      * @return ingestion outcome including per-file failures
      * @throws IOException if directory walking fails
@@ -50,31 +56,32 @@ public class LocalDocsDirectoryIngestionService {
         }
 
         Path root = Path.of(rootDir).toAbsolutePath().normalize();
-        Path baseDir = Path.of(DEFAULT_DOCS_ROOT).toAbsolutePath().normalize();
-        Path rootRoot = root.getRoot();
-        Path absoluteBaseDir =
-                rootRoot == null ? baseDir : rootRoot.resolve(DEFAULT_DOCS_ROOT).normalize();
-        if (!root.startsWith(baseDir) && !root.startsWith(absoluteBaseDir)) {
-            throw new IllegalArgumentException("Local docs directory must be under " + absoluteBaseDir);
-        }
-        if (!Files.exists(root)) {
+        if (!Files.isDirectory(root) || !Files.isReadable(root)) {
             throw new IllegalArgumentException("Local docs directory does not exist: " + rootDir);
+        }
+        Path realDocumentationRoot = configuredDocumentationRoot.toRealPath();
+        Path realSelectedRoot = root.toRealPath();
+        if (!realSelectedRoot.startsWith(realDocumentationRoot)) {
+            throw new IllegalArgumentException("Local docs directory must remain beneath the configured DOCS_DIR");
         }
 
         AtomicInteger processedCount = new AtomicInteger(0);
         List<IngestionLocalFailure> failures = new ArrayList<>();
 
-        try (Stream<Path> paths = Files.walk(root)) {
+        try (Stream<Path> paths = Files.walk(realSelectedRoot)) {
             Iterator<Path> pathIterator = paths.filter(pathCandidate -> !Files.isDirectory(pathCandidate))
                     .filter(this::isIngestableFile)
                     .iterator();
             while (pathIterator.hasNext() && processedCount.get() < maxFiles) {
                 Path file = pathIterator.next();
-                LocalDocsFileOutcome outcome = fileProcessor.process(root, file);
+                LocalDocsFileOutcome outcome = fileProcessor.process(realSelectedRoot, file);
                 if (outcome.processed()) {
                     processedCount.incrementAndGet();
                 }
                 outcome.failure().ifPresent(failures::add);
+                if (outcome.failure().isPresent()) {
+                    break;
+                }
             }
         }
 
@@ -86,72 +93,7 @@ public class LocalDocsDirectoryIngestionService {
         if (fileNamePath == null) {
             return false;
         }
-        if (shouldSkipVersionedSpringReference(path)) {
-            return false;
-        }
         String name = fileNamePath.toString().toLowerCase(Locale.ROOT);
         return name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".pdf");
-    }
-
-    private boolean shouldSkipVersionedSpringReference(Path path) {
-        if (path == null) {
-            return false;
-        }
-        String normalized = path.toAbsolutePath().normalize().toString().replace('\\', '/');
-        return shouldSkipSpringFrameworkReference(normalized) || shouldSkipSpringAiReference(normalized);
-    }
-
-    private boolean shouldSkipSpringFrameworkReference(String normalizedPath) {
-        return containsDisallowedVersionedSpringReference(normalizedPath, "spring-framework", version -> true);
-    }
-
-    private boolean shouldSkipSpringAiReference(String normalizedPath) {
-        return containsDisallowedVersionedSpringReference(
-                normalizedPath, "spring-ai", version -> !version.startsWith("2."));
-    }
-
-    private boolean containsDisallowedVersionedSpringReference(
-            String normalizedPath, String springMarker, java.util.function.Predicate<String> versionDisallowed) {
-        return extractReferenceSubdirectory(normalizedPath, springMarker)
-                .filter(this::isVersionedOrSnapshot)
-                .filter(subdir -> isSnapshot(subdir) || versionDisallowed.test(subdir))
-                .isPresent();
-    }
-
-    private Optional<String> extractReferenceSubdirectory(String normalizedPath, String springMarker) {
-        if (normalizedPath == null || normalizedPath.isBlank() || springMarker == null || springMarker.isBlank()) {
-            return Optional.empty();
-        }
-        String marker = "/" + springMarker;
-        int springIndex = normalizedPath.indexOf(marker);
-        if (springIndex < 0) {
-            return Optional.empty();
-        }
-        int referenceIndex = normalizedPath.indexOf("/reference/", springIndex);
-        if (referenceIndex < 0) {
-            return Optional.empty();
-        }
-        int versionStart = referenceIndex + "/reference/".length();
-        if (versionStart >= normalizedPath.length()) {
-            return Optional.empty();
-        }
-        int versionEnd = normalizedPath.indexOf('/', versionStart);
-        if (versionEnd < 0) {
-            versionEnd = normalizedPath.length();
-        }
-        String subdirectory = normalizedPath.substring(versionStart, versionEnd);
-        return subdirectory.isBlank() ? Optional.empty() : Optional.of(subdirectory);
-    }
-
-    private boolean isVersionedOrSnapshot(String subdirectory) {
-        return isSnapshot(subdirectory) || startsWithDigit(subdirectory);
-    }
-
-    private boolean isSnapshot(String subdirectory) {
-        return subdirectory.contains("SNAPSHOT");
-    }
-
-    private boolean startsWithDigit(String subdirectory) {
-        return !subdirectory.isEmpty() && Character.isDigit(subdirectory.charAt(0));
     }
 }

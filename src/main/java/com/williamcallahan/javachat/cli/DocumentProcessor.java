@@ -1,8 +1,10 @@
 package com.williamcallahan.javachat.cli;
 
+import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
+import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
-import com.williamcallahan.javachat.service.DocsIngestionService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -64,20 +66,44 @@ public class DocumentProcessor {
     private static final String LOG_PROCESSED_STATS = "Processed {} files in {}s ({} files/sec) ({})";
     private static final String LOG_TOTAL_PROCESSED = "Total new documents processed: {}";
     private static final String LOG_TOTAL_DUPLICATES = "Total duplicates skipped: {}";
-    private static final String LOG_TOTAL_SKIPPED = "Documentation sets skipped: {}";
     private static final String LOG_TOTAL_FAILED = "Documentation sets FAILED: {}";
     private static final String LOG_NEXT_STEP_QDRANT = "1. Verify in Qdrant Dashboard";
     private static final String LOG_NEXT_STEP_RETRIEVAL = "2. Test retrieval";
     private static final String LOG_NEXT_STEP_CHAT = "3. Start chat: ./gradlew bootRun";
     private static final String LOG_DOCSET_FILTER = "Doc set filter active";
     private static final String LOG_DOCSET_SELECTED = "Doc sets selected: {} set(s)";
+    private static final String LOG_DOCSET_POSTCONDITION = "Qdrant postcondition required for docSet: {}";
 
     private static final String DOCSET_ALL_SELECTOR = "all";
     private static final String DOCSET_FILTER_DELIMITER = ",";
+    private static final FileLimit CLI_FILE_LIMIT = new FileLimit(Integer.MAX_VALUE);
 
-    private static final String SKIP_REASON_INVALID_PATH = "invalid path";
-    private static final String SKIP_REASON_DIR_MISSING = "directory not found";
-    private static final String SKIP_REASON_NO_ELIGIBLE_FILES = "no eligible files";
+    private static final String DOCSET_PDF_BOOKS_NAME = "PDF Books";
+    private static final String DOCSET_PDF_BOOKS_PATH = "books";
+    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_NAME = "Spring Framework Quick";
+    private static final String DOCSET_SPRING_FRAMEWORK_QUICK_PATH = "spring-framework";
+    private static final String DOCSET_SPRING_AI_QUICK_NAME = "Spring AI Quick";
+    private static final String DOCSET_SPRING_AI_QUICK_PATH = "spring-ai";
+
+    private static final List<DocumentationSet> BASE_DOCUMENTATION_SETS = buildBaseDocumentationSets();
+
+    private static final List<DocumentationSet> QUICK_DOCUMENTATION_SETS = List.of(
+            new DocumentationSet(
+                    DOCSET_SPRING_FRAMEWORK_QUICK_NAME,
+                    DOCSET_SPRING_FRAMEWORK_QUICK_PATH,
+                    DOCSET_SPRING_FRAMEWORK_QUICK_PATH),
+            new DocumentationSet(
+                    DOCSET_SPRING_AI_QUICK_NAME, DOCSET_SPRING_AI_QUICK_PATH, DOCSET_SPRING_AI_QUICK_PATH));
+
+    private static final List<DocumentationSet> EXPLICIT_BOOK_DOCUMENTATION_SETS =
+            List.of(new DocumentationSet(DOCSET_PDF_BOOKS_NAME, DOCSET_PDF_BOOKS_PATH, DOCSET_PDF_BOOKS_PATH));
+
+    private static final List<DocumentationSet> ALL_DOCUMENTATION_SETS = Stream.of(
+                    BASE_DOCUMENTATION_SETS.stream(),
+                    EXPLICIT_BOOK_DOCUMENTATION_SETS.stream(),
+                    QUICK_DOCUMENTATION_SETS.stream())
+            .flatMap(documentationSets -> documentationSets)
+            .toList();
 
     private static final String EXT_HTML = ".html";
     private static final String EXT_HTM = ".htm";
@@ -92,7 +118,7 @@ public class DocumentProcessor {
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
             "Failed to enumerate files in %s - check directory permissions";
 
-    private final DocsIngestionService ingestionService;
+    private final DocumentationIngestionUseCase ingestionService;
     private final ProgressTracker progressTracker;
 
     /**
@@ -101,7 +127,8 @@ public class DocumentProcessor {
      * @param ingestionService service for ingesting documentation into the vector store
      * @param progressTracker tracker for monitoring ingestion progress
      */
-    public DocumentProcessor(final DocsIngestionService ingestionService, final ProgressTracker progressTracker) {
+    public DocumentProcessor(
+            final DocumentationIngestionUseCase ingestionService, final ProgressTracker progressTracker) {
         this.ingestionService = ingestionService;
         this.progressTracker = progressTracker;
     }
@@ -143,9 +170,14 @@ public class DocumentProcessor {
      * completion marker as proof that every selected set ingested cleanly.</p>
      */
     void processDocumentationSets(final Path basePath, final List<DocumentationSet> selectedSets) {
-        final IngestionTotals totals = selectedSets.stream()
-                .map(docSet -> processDocumentationSet(basePath, docSet))
-                .reduce(IngestionTotals.ZERO, this::accumulateOutcome, IngestionTotals::combine);
+        IngestionTotals totals = IngestionTotals.ZERO;
+        for (DocumentationSet documentationSet : selectedSets) {
+            ProcessingOutcome processingOutcome = processDocumentationSet(basePath, documentationSet);
+            totals = accumulateOutcome(totals, processingOutcome);
+            if (processingOutcome instanceof ProcessingOutcome.Failed) {
+                break;
+            }
+        }
 
         if (totals.failedSets() > 0) {
             logFailureSummary(totals);
@@ -158,7 +190,6 @@ public class DocumentProcessor {
     private IngestionTotals accumulateOutcome(final IngestionTotals totals, final ProcessingOutcome outcome) {
         return switch (outcome) {
             case ProcessingOutcome.Success success -> totals.addSuccess(success.processed(), success.duplicates());
-            case ProcessingOutcome.Skipped _ -> totals.addSkipped();
             case ProcessingOutcome.Failed failed -> totals.addFailed(failed.processed(), failed.duplicates());
         };
     }
@@ -170,14 +201,14 @@ public class DocumentProcessor {
             if (LOGGER.isWarnEnabled()) {
                 LOGGER.warn(LOG_SKIP_PATH_ESCAPE);
             }
-            return new ProcessingOutcome.Skipped(docSet.displayName(), SKIP_REASON_INVALID_PATH);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
         }
 
         if (!Files.exists(docsPath) || !Files.isDirectory(docsPath)) {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_SKIP_DIR_NOT_FOUND);
             }
-            return new ProcessingOutcome.Skipped(docSet.displayName(), SKIP_REASON_DIR_MISSING);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
         }
 
         final long fileCount = countEligibleFiles(docsPath);
@@ -185,7 +216,7 @@ public class DocumentProcessor {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug(LOG_SKIP_NO_ELIGIBLE);
             }
-            return new ProcessingOutcome.Skipped(docSet.displayName(), SKIP_REASON_NO_ELIGIBLE_FILES);
+            return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
         }
 
         if (LOGGER.isInfoEnabled()) {
@@ -197,7 +228,7 @@ public class DocumentProcessor {
         final long startMillis = System.currentTimeMillis();
         try {
             final IngestionLocalOutcome outcome =
-                    ingestionService.ingestLocalDirectory(docsPath.toString(), Integer.MAX_VALUE);
+                    ingestionService.ingestLocalDirectory(docsPath.toString(), CLI_FILE_LIMIT);
             final int processed = outcome.processed();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
@@ -216,6 +247,9 @@ public class DocumentProcessor {
                 }
                 return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
             }
+            String safeDocumentationSet =
+                    docSet.indexedDocSet().replace('\r', '?').replace('\n', '?');
+            LOGGER.info(LOG_DOCSET_POSTCONDITION, safeDocumentationSet);
             return new ProcessingOutcome.Success(processed, duplicates);
 
         } catch (IOException ioException) {
@@ -273,20 +307,43 @@ public class DocumentProcessor {
         LOGGER.info(LOG_BLANK_LINE);
     }
 
+    private static List<DocumentationSet> buildBaseDocumentationSets() {
+        List<DocumentationSet> baseDocumentationSets = new ArrayList<>();
+        baseDocumentationSets.addAll(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                .map(javaApiDocumentationSource -> new DocumentationSet(
+                        javaApiDocumentationSource.displayName(),
+                        javaApiDocumentationSource.relativeMirrorPath(),
+                        javaApiDocumentationSource.relativeMirrorPath()))
+                .toList());
+        baseDocumentationSets.addAll(DocsSourceRegistry.documentationSources().stream()
+                .map(documentationSource -> new DocumentationSet(
+                        documentationSource.displayName(),
+                        documentationSource.relativeMirrorPath(),
+                        documentationSource.docSet()))
+                .toList());
+        return List.copyOf(baseDocumentationSets);
+    }
+
     private List<DocumentationSet> selectDocumentationSets(final EnvironmentConfig config) {
-        final String filter = config.docSetFilter();
+        return selectDocumentationSets(config.docSetFilter(), config.includeQuickSets());
+    }
+
+    List<DocumentationSet> selectDocumentationSets(final String filter, final boolean includeQuickSets) {
         if (filter == null || filter.isBlank()) {
-            if (config.includeQuickSets()) {
-                return DocumentationSetCatalog.allSets();
-            }
-            return DocumentationSetCatalog.baseSets();
+            return includeQuickSets ? QUICK_DOCUMENTATION_SETS : BASE_DOCUMENTATION_SETS;
         }
         final Set<String> selectorTokens = parseDocSetFilter(filter);
-        if (selectorTokens.isEmpty() || selectorTokens.stream().anyMatch(DOCSET_ALL_SELECTOR::equalsIgnoreCase)) {
-            return DocumentationSetCatalog.allSets();
+        if (selectorTokens.isEmpty()) {
+            return BASE_DOCUMENTATION_SETS;
+        }
+        if (selectorTokens.stream().anyMatch(DOCSET_ALL_SELECTOR::equalsIgnoreCase)) {
+            if (selectorTokens.size() != 1) {
+                throw new DocumentProcessingException("DOCS_SETS=all cannot be combined with other selectors");
+            }
+            return BASE_DOCUMENTATION_SETS;
         }
         final List<DocumentationSet> selectedDocumentationSets = new ArrayList<>();
-        for (DocumentationSet documentationSet : DocumentationSetCatalog.allSets()) {
+        for (DocumentationSet documentationSet : ALL_DOCUMENTATION_SETS) {
             if (documentationSet.matchesSelectorTokens(selectorTokens)) {
                 selectedDocumentationSets.add(documentationSet);
             }
@@ -295,7 +352,13 @@ public class DocumentProcessor {
             throw new DocumentProcessingException(String.format(
                     Locale.ROOT,
                     "DOCS_SETS matched no documentation sets. Available doc sets: %s",
-                    formatDocSetSummary(DocumentationSetCatalog.allSets())));
+                    formatDocSetSummary(ALL_DOCUMENTATION_SETS)));
+        }
+        boolean includesCanonicalSet = selectedDocumentationSets.stream().anyMatch(BASE_DOCUMENTATION_SETS::contains);
+        boolean includesQuickSet = selectedDocumentationSets.stream().anyMatch(QUICK_DOCUMENTATION_SETS::contains);
+        if (includesCanonicalSet && includesQuickSet) {
+            throw new DocumentProcessingException(
+                    "Quick documentation mirrors cannot be ingested with canonical documentation sets");
         }
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info(LOG_DOCSET_FILTER);
@@ -369,7 +432,6 @@ public class DocumentProcessor {
             LOGGER.info(LOG_BANNER_LINE);
             LOGGER.info(LOG_TOTAL_PROCESSED, totals.processed());
             LOGGER.info(LOG_TOTAL_DUPLICATES, totals.duplicates());
-            LOGGER.info(LOG_TOTAL_SKIPPED, totals.skippedSets());
         }
     }
 
@@ -378,19 +440,16 @@ public class DocumentProcessor {
      */
     private record EnvironmentConfig(
             String docsDirectory,
-            String qdrantCollection,
             String qdrantHost,
             String qdrantPort,
             String appPort,
             String docSetFilter,
             boolean includeQuickSets) {
         private static final String DOCS_DIR_DEFAULT = "data/docs";
-        private static final String QDRANT_COLLECTION_DEFAULT = "(not set)";
         private static final String QDRANT_HOST_DEFAULT = "localhost";
         private static final String QDRANT_PORT_DEFAULT = "8086";
         private static final String APP_PORT_DEFAULT = "8085";
         private static final String ENV_DOCS_DIR = "DOCS_DIR";
-        private static final String ENV_QDRANT_COLLECTION = "QDRANT_COLLECTION";
         private static final String ENV_QDRANT_HOST = "QDRANT_HOST";
         private static final String ENV_QDRANT_PORT = "QDRANT_PORT";
         private static final String ENV_APP_PORT = "PORT";
@@ -400,7 +459,6 @@ public class DocumentProcessor {
         static EnvironmentConfig fromEnvironment() {
             return new EnvironmentConfig(
                     envOrDefault(ENV_DOCS_DIR, DOCS_DIR_DEFAULT),
-                    envOrDefault(ENV_QDRANT_COLLECTION, QDRANT_COLLECTION_DEFAULT),
                     envOrDefault(ENV_QDRANT_HOST, QDRANT_HOST_DEFAULT),
                     envOrDefault(ENV_QDRANT_PORT, QDRANT_PORT_DEFAULT),
                     envOrDefault(ENV_APP_PORT, APP_PORT_DEFAULT),
@@ -426,28 +484,15 @@ public class DocumentProcessor {
     /**
      * Accumulated totals across all documentation sets, tracking successes and failures separately.
      */
-    private record IngestionTotals(long processed, long duplicates, int skippedSets, int failedSets) {
-        static final IngestionTotals ZERO = new IngestionTotals(0, 0, 0, 0);
+    private record IngestionTotals(long processed, long duplicates, int failedSets) {
+        static final IngestionTotals ZERO = new IngestionTotals(0, 0, 0);
 
         IngestionTotals addSuccess(final long newProcessed, final long newDuplicates) {
-            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, skippedSets, failedSets);
-        }
-
-        IngestionTotals addSkipped() {
-            return new IngestionTotals(processed, duplicates, skippedSets + 1, failedSets);
+            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, failedSets);
         }
 
         IngestionTotals addFailed(final long newProcessed, final long newDuplicates) {
-            return new IngestionTotals(
-                    processed + newProcessed, duplicates + newDuplicates, skippedSets, failedSets + 1);
-        }
-
-        static IngestionTotals combine(final IngestionTotals left, final IngestionTotals right) {
-            return new IngestionTotals(
-                    left.processed + right.processed,
-                    left.duplicates + right.duplicates,
-                    left.skippedSets + right.skippedSets,
-                    left.failedSets + right.failedSets);
+            return new IngestionTotals(processed + newProcessed, duplicates + newDuplicates, failedSets + 1);
         }
     }
 
@@ -456,8 +501,6 @@ public class DocumentProcessor {
      */
     private sealed interface ProcessingOutcome {
         record Success(long processed, long duplicates) implements ProcessingOutcome {}
-
-        record Skipped(String setName, String reason) implements ProcessingOutcome {}
 
         record Failed(String setName, long processed, long duplicates) implements ProcessingOutcome {}
     }

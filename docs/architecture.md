@@ -25,11 +25,11 @@ For the full 5-stage retrieval pipeline (query enhancement, hybrid search, dedup
 
 The ingestion pipeline uses:
 
-- `scripts/fetch_all_docs.sh` to mirror docs into `data/docs/`
+- `scripts/fetch_all_docs.sh` to mirror docs into the configured `DOCS_DIR`
 - `com.williamcallahan.javachat.cli.DocumentProcessor` (Spring `cli` profile) to ingest local docs
 - `HybridVectorService` to write dense + sparse (BM25) vectors to Qdrant via gRPC
 - `QdrantCollectionRouter` to route each doc set to the appropriate hybrid collection
-- `LocalStoreService` to store parsed chunks (`data/parsed/`) and hash markers (`data/index/`)
+- `LocalStoreService` to store parsed chunks and hash markers under the configured generation-specific `DOCS_PARSED_DIR` and `DOCS_INDEX_DIR`
 
 See [ingestion.md](ingestion.md), [pipeline-commands.md](pipeline-commands.md), and [local store directories](domains/local-store-directories.md).
 

@@ -119,13 +119,14 @@ public class SourceCodeFileIngestionProcessor {
         FileIngestionRecord previousFileRecord = storage.fileMarkers()
                 .readFileIngestionRecord(fileContext.sourceUrl())
                 .orElse(null);
-        try {
-            previousFileRecord = persistCanonicalMarkerCollectionIdentity(
-                    previousFileRecord, fileContext.sourceUrl(), canonicalCollectionName);
-        } catch (IOException markerMigrationException) {
+        if (previousFileRecord != null
+                && (!previousFileRecord.hasCollectionIdentity()
+                        || !canonicalCollectionName.equals(previousFileRecord.collectionName()))) {
             return new SourceFileProcessingResult(
                     LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                            sourceFilePath.toString(), "marker-migration", markerMigrationException.getMessage())),
+                            sourceFilePath.toString(),
+                            "collection-generation",
+                            "The ingestion state belongs to a different or unknown collection generation")),
                     fileUrl);
         }
 
@@ -144,17 +145,6 @@ public class SourceCodeFileIngestionProcessor {
         }
 
         boolean requiresFullReindex = previousFileRecord != null;
-        if (requiresFullReindex) {
-            try {
-                ingestedFilePruneService.pruneCollectionFileStrict(
-                        previousFileRecord.collectionName(), fileContext.sourceUrl(), previousFileRecord);
-            } catch (IOException pruneException) {
-                return new SourceFileProcessingResult(
-                        LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
-                                sourceFilePath.toString(), "prune", pruneException.getMessage())),
-                        fileUrl);
-            }
-        }
 
         LocalDocsFileOutcome chunkOutcome = chunkAndUpsert(
                 sourceFilePath,
@@ -163,23 +153,9 @@ public class SourceCodeFileIngestionProcessor {
                 repositoryMetadata,
                 canonicalCollectionName,
                 requiresFullReindex,
+                previousFileRecord,
                 fileStartMillis);
         return new SourceFileProcessingResult(chunkOutcome, fileUrl);
-    }
-
-    private FileIngestionRecord persistCanonicalMarkerCollectionIdentity(
-            FileIngestionRecord previousFileRecord, String sourceUrl, String canonicalCollectionName)
-            throws IOException {
-        if (previousFileRecord == null || previousFileRecord.hasCollectionIdentity()) {
-            return previousFileRecord;
-        }
-        FileIngestionRecord canonicalFileRecord = previousFileRecord.bindCollectionIdentity(canonicalCollectionName);
-        storage.fileMarkers().markFileIngested(sourceUrl, canonicalFileRecord);
-        log.info(
-                "Persisted canonical repository collection identity '{}' for file marker: {}",
-                canonicalCollectionName,
-                sourceUrl);
-        return canonicalFileRecord;
     }
 
     private Optional<LocalDocsFileOutcome> validateFileAttributes(Path sourceFilePath) {
@@ -317,6 +293,7 @@ public class SourceCodeFileIngestionProcessor {
             GitHubRepoMetadata repositoryMetadata,
             String collectionName,
             boolean forceChunking,
+            FileIngestionRecord previousFileRecord,
             long fileStartMillis) {
         String packageName = extractPackageName(fileContext.fileName(), fileContent.text());
         ChunkProcessingService.ChunkProcessingOutcome chunkingOutcome;
@@ -345,7 +322,21 @@ public class SourceCodeFileIngestionProcessor {
                 fileContext.relativePath(),
                 fileContext.sourceLanguage(),
                 fileContext.documentType());
-        storage.hybridVector().upsertToCollection(collectionName, indexedDocuments);
+        try {
+            if (forceChunking) {
+                storage.hybridVector().replaceUrlDocuments(collectionName, fileContext.sourceUrl(), indexedDocuments);
+                ingestedFilePruneService.pruneObsoleteLocalStateAfterReplacement(
+                        fileContext.sourceUrl(), previousFileRecord, chunkingOutcome.allChunkHashes());
+            } else {
+                storage.hybridVector().upsertToCollection(collectionName, indexedDocuments);
+            }
+        } catch (IOException localCleanupException) {
+            return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
+                    sourceFilePath.toString(), "prune-local", localCleanupException.getMessage()));
+        } catch (RuntimeException vectorStorageException) {
+            return LocalDocsFileOutcome.failedFile(new IngestionLocalFailure(
+                    sourceFilePath.toString(), "qdrant-replacement", vectorStorageException.getMessage()));
+        }
 
         logProcessingComplete(
                 indexedDocuments.size(), chunkingOutcome.totalChunks(), fileContext.relativePath(), fileStartMillis);

@@ -12,6 +12,18 @@
 
 # ── Canonical naming ─────────────────────────────────────────────────
 
+GITHUB_COLLECTION_GENERATION="qwen3-embedding-4b-2560"
+
+active_github_collection_prefix() {
+    case "${SPRING_PROFILE:-}" in
+        local|dev|prod) printf 'github-%s-%s-' "$SPRING_PROFILE" "$GITHUB_COLLECTION_GENERATION" ;;
+        *)
+            echo "ERROR: SPRING_PROFILE must be exactly local, dev, or prod" >&2
+            return 1
+            ;;
+    esac
+}
+
 expand_user_path() {
     local raw_path="$1"
     case "$raw_path" in
@@ -116,7 +128,11 @@ extract_repository_identity() {
     if [[ ! "$REPOSITORY_OWNER" =~ ^[a-z0-9]+$ ]]; then
         repository_boundary="_"
     fi
-    CANONICAL_COLLECTION_NAME="github-${encoded_owner_segment}${repository_boundary}${encoded_name_segment}"
+    local active_collection_prefix
+    if ! active_collection_prefix="$(active_github_collection_prefix)"; then
+        exit 1
+    fi
+    CANONICAL_COLLECTION_NAME="${active_collection_prefix}${encoded_owner_segment}${repository_boundary}${encoded_name_segment}"
 }
 
 # Rejects collection names that do not match their repository's canonical identity.
@@ -314,38 +330,6 @@ ensure_github_payload_indexes() {
     echo -e "${GREEN}Payload indexes ensured${NC}"
 }
 
-# ── Manifest I/O ─────────────────────────────────────────────────────
-
-# Writes an ingestion manifest recording the collection, repo identity, and
-# timestamp for post-ingestion sync operations.
-#
-# Reads PROJECT_ROOT and REPOSITORY_* globals at call time.
-write_ingestion_manifest() {
-    local collection_name="$1"
-    local repository_path="$2"
-
-    if [ -z "${PROJECT_ROOT:-}" ]; then
-        echo -e "${RED}Error: PROJECT_ROOT is not set${NC}"
-        exit 1
-    fi
-    local manifest_dir="$PROJECT_ROOT/data/github-manifests"
-    mkdir -p "$manifest_dir"
-    local manifest_file="$manifest_dir/${collection_name}.manifest"
-
-    cat > "$manifest_file" <<MANIFEST_EOF
-repo_path="$repository_path"
-collection_name="$collection_name"
-repo_url="$REPOSITORY_URL"
-repo_owner="$REPOSITORY_OWNER"
-repo_name="$REPOSITORY_NAME"
-repo_branch="$REPOSITORY_BRANCH"
-last_commit="$REPOSITORY_COMMIT"
-last_ingested="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-MANIFEST_EOF
-
-    echo -e "${GREEN}Manifest written: $manifest_file${NC}"
-}
-
 # ── Qdrant collection queries (GitHub-specific) ─────────────────────
 
 # Reads repository metadata (repoUrl, repoKey, commitHash) from the first
@@ -357,43 +341,55 @@ read_collection_repository_metadata() {
     local scroll_query='{"limit":1,"with_payload":["repoUrl","repoKey","commitHash"],"with_vector":false}'
     local qdrant_scroll_body
 
-    qdrant_scroll_body="$(qdrant_curl -s -X POST \
+    if ! qdrant_scroll_body="$(qdrant_curl -fsS -X POST \
         -H "Content-Type: application/json" \
         -d "$scroll_query" \
-        "$qdrant_base_url/collections/$collection_name/points/scroll" 2>/dev/null || echo "")"
-
-    if [ -z "$qdrant_scroll_body" ]; then
-        echo "||"
-        return
+        "$qdrant_base_url/collections/$collection_name/points/scroll")"; then
+        echo "Failed to read repository metadata from Qdrant collection $collection_name" >&2
+        return 1
     fi
 
-    echo "$qdrant_scroll_body" | jq -r '
-        .result.points[0].payload // {} |
+    echo "$qdrant_scroll_body" | jq -er '
+        .result.points |
+        if type != "array" or length == 0 then error("collection has no repository point") else . end |
+        .[0].payload |
+        if type != "object" then error("repository payload is missing") else . end |
         [(.repoUrl // "" | gsub("^\\s+|\\s+$"; "")),
          (.repoKey // "" | gsub("^\\s+|\\s+$"; "")),
          (.commitHash // "" | gsub("^\\s+|\\s+$"; ""))] |
         join("|")
-    ' 2>/dev/null || echo "||"
+    '
 }
 
 remote_head_commit() {
     local repository_url="$1"
-    git ls-remote "$repository_url" HEAD 2>/dev/null | awk '{print $1}'
+    local remote_commit
+    if ! remote_commit="$(git ls-remote "$repository_url" HEAD | awk 'NR == 1 {print $1}')" \
+        || [[ ! "$remote_commit" =~ ^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$ ]]; then
+        echo "Failed to resolve a full remote HEAD for $repository_url" >&2
+        return 1
+    fi
+    printf '%s\n' "$remote_commit"
 }
 
-# Lists all Qdrant collections with the "github-" prefix.
+# Lists Qdrant collections for the exact active environment and embedding generation.
 list_github_collections() {
     local qdrant_base_url="$1"
     local qdrant_collections_listing
 
-    qdrant_collections_listing="$(qdrant_curl -s "$qdrant_base_url/collections" 2>/dev/null || echo "")"
-
-    if [ -z "$qdrant_collections_listing" ]; then
-        return
+    if ! qdrant_collections_listing="$(qdrant_curl -fsS "$qdrant_base_url/collections")"; then
+        echo "Failed to list Qdrant collections" >&2
+        return 1
     fi
 
-    echo "$qdrant_collections_listing" | jq -r '
-        .result.collections[]?.name // empty |
-        select(startswith("github-"))
-    ' 2>/dev/null || true
+    local active_collection_prefix
+    active_collection_prefix="$(active_github_collection_prefix)" || return 1
+    echo "$qdrant_collections_listing" | jq -er --arg prefix "$active_collection_prefix" '
+        .result.collections |
+        if type != "array" then error("Qdrant collections response is malformed") else . end |
+        [ .[] |
+          if (.name | type) != "string" then error("Qdrant collection name is malformed") else .name end |
+          select(startswith($prefix)) ] |
+        join("\n")
+    '
 }

@@ -17,6 +17,7 @@ import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.service.ChunkProcessingService;
 import com.williamcallahan.javachat.service.ContentHasher;
 import com.williamcallahan.javachat.service.FileIngestionMarkerStore;
+import com.williamcallahan.javachat.service.FileIngestionMarkerStore.FileIngestionRecord;
 import com.williamcallahan.javachat.service.FileOperationsService;
 import com.williamcallahan.javachat.service.HtmlContentExtractor;
 import com.williamcallahan.javachat.service.HybridVectorService;
@@ -29,6 +30,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,7 +59,8 @@ class MalformedUtf8LocalDocsIngestionTest {
     }
 
     @Test
-    void shouldRejectMalformedUtf8BeforeChunkingOrIndexing(@TempDir Path temporaryDirectory) throws IOException {
+    void shouldRejectMalformedUtf8BeforePruningPriorCorpusOrIndexing(@TempDir Path temporaryDirectory)
+            throws IOException {
         Path localDocsRoot = temporaryDirectory.resolve("data").resolve("docs");
         Path malformedHtmlFile = localDocsRoot.resolve("malformed.html");
         Files.createDirectories(localDocsRoot);
@@ -66,8 +69,19 @@ class MalformedUtf8LocalDocsIngestionTest {
         ChunkProcessingService chunkProcessingService = mock(ChunkProcessingService.class);
         HybridVectorService hybridVectorService = mock(HybridVectorService.class);
         LocalStoreService localStoreService = mock(LocalStoreService.class);
-        FileIngestionMarkerStore fileMarkerStore = mock(FileIngestionMarkerStore.class);
-        when(fileMarkerStore.readFileIngestionRecord(anyString())).thenReturn(Optional.empty());
+        FileIngestionMarkerStore fileIngestionMarkerStore = mock(FileIngestionMarkerStore.class);
+        IngestedFilePruneService ingestedFilePruneService = mock(IngestedFilePruneService.class);
+        FileIngestionRecord changedPriorIngestionRecord = new FileIngestionRecord(
+                0,
+                0,
+                "prior-ingestion-fingerprint",
+                LocalDocsFileIngestionProcessor.LOCAL_DOCS_EXTRACTION_SEMANTICS_VERSION,
+                "documentation",
+                List.of("prior-document-hash"));
+        when(fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
+                .thenReturn(Optional.of(changedPriorIngestionRecord));
+        when(hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(hybridVectorService.countPointsForUrl(anyString(), anyString())).thenReturn(1L);
 
         LocalDocsFileIngestionProcessor ingestionProcessor = new LocalDocsFileIngestionProcessor(
                 new FileContentServices(
@@ -82,12 +96,12 @@ class MalformedUtf8LocalDocsIngestionTest {
                         chunkProcessingService,
                         new ContentHasher(),
                         localStoreService,
-                        fileMarkerStore,
+                        fileIngestionMarkerStore,
                         new QdrantCollectionRouter()),
                 mock(ProgressTracker.class),
                 new IngestionProvenanceDeriver(),
                 new LocalIngestionFailureFactory(),
-                mock(IngestedFilePruneService.class));
+                ingestedFilePruneService);
 
         LocalDocsFileOutcome processingOutcome = ingestionProcessor.process(localDocsRoot, malformedHtmlFile);
 
@@ -101,7 +115,10 @@ class MalformedUtf8LocalDocsIngestionTest {
                 .anyMatch(logEvent -> logEvent.getLevel() == Level.ERROR
                         && logEvent.getFormattedMessage().contains("MalformedInputException")));
         verify(hybridVectorService).resolveCollectionName(any());
+        verify(fileIngestionMarkerStore).readFileIngestionRecord(anyString());
         verifyNoMoreInteractions(hybridVectorService);
-        verifyNoInteractions(chunkProcessingService, localStoreService);
+        verifyNoMoreInteractions(localStoreService);
+        verifyNoMoreInteractions(fileIngestionMarkerStore);
+        verifyNoInteractions(chunkProcessingService, ingestedFilePruneService);
     }
 }

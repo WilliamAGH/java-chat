@@ -5,7 +5,7 @@
 # Modes:
 #   --repo-path=PATH         Ingest from a local git clone
 #   --repo-url=URL           Clone/refresh from GitHub, then ingest
-#   --sync-existing          Re-ingest all github-* Qdrant collections with upstream changes
+#   --sync-existing          Re-ingest active environment/generation collections with upstream changes
 #
 # Prerequisites:
 #   - Qdrant vector store reachable (QDRANT_HOST, QDRANT_PORT)
@@ -15,7 +15,7 @@
 #
 # Environment variables (loaded from .env):
 #   QDRANT_HOST, QDRANT_PORT, QDRANT_API_KEY (optional), QDRANT_SSL (optional)
-#   APP_LOCAL_EMBEDDING_ENABLED, REMOTE_EMBEDDING_API_KEY, OPENAI_API_KEY
+#   APP_LOCAL_EMBEDDING_ENABLED, OPENAI_BASE_URL, OPENAI_API_KEY
 # Non-secret embedding endpoint and model settings are read from application.properties.
 #
 # Exit codes:
@@ -70,7 +70,7 @@ for argument in "$@"; do
             echo "  --repo-cache-path=PATH     Exact local clone path for URL mode (single repo only)"
             echo ""
             echo "Batch options:"
-            echo "  --sync-existing            Sync all github-* collections by repo URL + remote HEAD"
+            echo "  --sync-existing            Sync active environment/generation collections by repo URL + remote HEAD"
             exit 0
             ;;
         *)
@@ -81,7 +81,30 @@ for argument in "$@"; do
     esac
 done
 
-initialize_pipeline "QDRANT_HOST" "QDRANT_PORT"
+prepare_pipeline_environment "QDRANT_HOST" "QDRANT_PORT" "SPRING_PROFILE" "QDRANT_COLLECTION_DOCS" \
+    "DOCS_SNAPSHOT_DIR" "DOCS_PARSED_DIR" "DOCS_INDEX_DIR"
+
+case "$SPRING_PROFILE" in
+    local|dev|prod) ;;
+    *)
+        echo "SPRING_PROFILE must be exactly local, dev, or prod" >&2
+        exit 1
+        ;;
+esac
+EXPECTED_DOCUMENTATION_COLLECTION="java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs"
+if [ "$QDRANT_COLLECTION_DOCS" != "$EXPECTED_DOCUMENTATION_COLLECTION" ]; then
+    echo "QDRANT_COLLECTION_DOCS must match SPRING_PROFILE and the 4B/2560 generation" >&2
+    exit 1
+fi
+for configured_state_directory in "$DOCS_SNAPSHOT_DIR:snapshots" "$DOCS_PARSED_DIR:parsed" "$DOCS_INDEX_DIR:index"; do
+    state_directory="${configured_state_directory%:*}"
+    state_leaf_directory="${configured_state_directory##*:}"
+    required_state_suffix="qwen3-embedding-4b-2560/${SPRING_PROFILE}/${state_leaf_directory}"
+    if [[ "$state_directory" != *"/$required_state_suffix" ]]; then
+        echo "Ingestion state paths must match SPRING_PROFILE and the 4B/2560 generation" >&2
+        exit 1
+    fi
+done
 
 # Effective precedence:
 # 1) CLI arguments
@@ -121,13 +144,19 @@ ensure_collection_exists() {
 
     if [ "$collection_status" = "200" ]; then
         echo -e "${GREEN}Collection '$collection_name' already exists${NC}"
+        require_qwen_generation_collection_schema "$collection_name" "$qdrant_base_url"
         ensure_github_payload_indexes "$collection_name" "$qdrant_base_url"
         return
     fi
 
     echo -e "${YELLOW}Creating collection '$collection_name'...${NC}"
-    local reference_collection="${QDRANT_REFERENCE_COLLECTION:-java-docs}"
+    local reference_collection="${QDRANT_COLLECTION_DOCS:-}"
+    if [ -z "$reference_collection" ]; then
+        echo -e "${RED}QDRANT_COLLECTION_DOCS is required to clone the active documentation schema${NC}"
+        exit 1
+    fi
     create_collection_from_reference "$collection_name" "$qdrant_base_url" "$reference_collection"
+    require_qwen_generation_collection_schema "$collection_name" "$qdrant_base_url"
     ensure_github_payload_indexes "$collection_name" "$qdrant_base_url"
 }
 
@@ -191,8 +220,6 @@ run_single_ingestion() {
     local point_count
     point_count="$(collection_point_count "$collection_name" "$qdrant_base_url")"
 
-    write_ingestion_manifest "$collection_name" "$repository_path"
-
     echo ""
     echo -e "${GREEN}Pipeline completed${NC}"
     echo "Collection: $collection_name"
@@ -203,16 +230,19 @@ run_single_ingestion() {
 # Evaluates a single collection for sync: resolves metadata, checks remote HEAD,
 # and re-ingests if upstream has changed.
 #
-# Sets SYNC_COLLECTION_OUTCOME to "processed", "unchanged", or "skipped".
+# Sets SYNC_COLLECTION_OUTCOME to "processed" or "unchanged".
 # Must be called directly (not in a subshell) so that side effects from
-# run_single_ingestion (env exports, manifest writes) persist.
+# run_single_ingestion environment exports persist.
 sync_single_collection() {
     local collection_name="$1"
     local qdrant_base_url="$2"
     local app_jar="$3"
 
     local metadata_line
-    metadata_line="$(read_collection_repository_metadata "$collection_name" "$qdrant_base_url")"
+    if ! metadata_line="$(read_collection_repository_metadata "$collection_name" "$qdrant_base_url")"; then
+        echo "Unable to synchronize $collection_name because its Qdrant metadata could not be read" >&2
+        return 1
+    fi
     local stored_repository_url
     stored_repository_url="$(echo "$metadata_line" | cut -d'|' -f1)"
     local stored_repository_key
@@ -225,19 +255,16 @@ sync_single_collection() {
     fi
 
     if [ -z "$stored_repository_url" ]; then
-        echo -e "${YELLOW}Skipping $collection_name (missing repoUrl/repoKey payload metadata)${NC}"
-        SYNC_COLLECTION_OUTCOME="skipped"
-        return
+        echo "Collection $collection_name is missing required repoUrl/repoKey payload metadata" >&2
+        return 1
     fi
 
     require_canonical_collection_name "$collection_name" "$stored_repository_url"
 
     local remote_commit
-    remote_commit="$(remote_head_commit "$stored_repository_url")"
-    if [ -z "$remote_commit" ]; then
-        echo -e "${YELLOW}Skipping $collection_name (unable to resolve remote HEAD for $stored_repository_url)${NC}"
-        SYNC_COLLECTION_OUTCOME="skipped"
-        return
+    if ! remote_commit="$(remote_head_commit "$stored_repository_url")"; then
+        echo "Unable to synchronize $collection_name because remote HEAD resolution failed" >&2
+        return 1
     fi
 
     if [ -n "$stored_commit" ] && [ "$stored_commit" = "$remote_commit" ]; then
@@ -263,17 +290,18 @@ sync_existing_collections() {
     local app_jar="$2"
 
     local github_collections
-    github_collections="$(list_github_collections "$qdrant_base_url")"
+    if ! github_collections="$(list_github_collections "$qdrant_base_url")"; then
+        echo "Unable to synchronize GitHub collections because Qdrant discovery failed" >&2
+        return 1
+    fi
 
     if [ -z "$github_collections" ]; then
-        echo -e "${YELLOW}No github-* collections found in Qdrant${NC}"
+        echo -e "${YELLOW}No active environment/generation GitHub collections found in Qdrant${NC}"
         return
     fi
 
     local processed_collections=0
     local unchanged_collections=0
-    local skipped_collections=0
-
     while IFS= read -r collection_name; do
         [ -z "$collection_name" ] && continue
 
@@ -282,7 +310,10 @@ sync_existing_collections() {
         case "$SYNC_COLLECTION_OUTCOME" in
             processed) processed_collections=$((processed_collections + 1)) ;;
             unchanged) unchanged_collections=$((unchanged_collections + 1)) ;;
-            skipped)   skipped_collections=$((skipped_collections + 1)) ;;
+            *)
+                echo "Unexpected GitHub synchronization outcome for $collection_name" >&2
+                return 1
+                ;;
         esac
     done <<< "$github_collections"
 
@@ -292,7 +323,6 @@ sync_existing_collections() {
     echo "=============================================="
     echo "Collections updated: $processed_collections"
     echo "Collections unchanged: $unchanged_collections"
-    echo "Collections skipped: $skipped_collections"
 }
 
 if [ "$SYNC_EXISTING" = "1" ]; then
@@ -315,6 +345,7 @@ else
     fi
 fi
 
+verify_pipeline_connections
 build_application "$LOG_FILE"
 SOURCE_APP_JAR="$(locate_app_jar)"
 STAGED_APP_JAR_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-github-ingestion.XXXXXX")"

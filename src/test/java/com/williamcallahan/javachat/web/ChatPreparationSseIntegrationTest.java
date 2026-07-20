@@ -127,7 +127,8 @@ class ChatPreparationSseIntegrationTest {
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
-        when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
+        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(Flux.just("Complete"), RateLimitService.ApiProvider.OPENAI)));
         doAnswer(ignoredInvocation -> {

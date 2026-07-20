@@ -16,9 +16,8 @@ class AppPropertiesValidationTest {
     private static final int TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET = 640;
     private static final int TEST_RERANKER_OUTPUT_TOKEN_BUDGET = 256;
     private static final long TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS = 120L;
-    private static final String TEST_OPENAI_EMBEDDING_BASE_URL = "https://api.openai.com";
-    private static final String TEST_REMOTE_EMBEDDING_MODEL = "provider/test-embedding-model";
-    private static final int TEST_REMOTE_EMBEDDING_DIMENSIONS = 8;
+    private static final String TEST_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
+    private static final int TEST_EMBEDDING_DIMENSIONS = 2_560;
 
     @Test
     void rejectsNonPositiveRrfK() {
@@ -108,26 +107,49 @@ class AppPropertiesValidationTest {
     }
 
     @Test
-    void rejectsBlankOpenAiEmbeddingBaseUrl() {
+    void rejectsBlankEmbeddingModel() {
         AppProperties appProperties = validAppProperties();
-        appProperties.getEmbeddings().setOpenAiBaseUrl("");
+        appProperties.getEmbeddings().setModel(" ");
 
         assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
     }
 
     @Test
-    void rejectsBlankRemoteEmbeddingModel() {
+    void rejectsNonPositiveEmbeddingDimensions() {
         AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setDimensions(0);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> appProperties.getRemoteEmbedding().setModel(" "));
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
     }
 
     @Test
-    void rejectsNonPositiveRemoteEmbeddingDimensions() {
+    void rejectsNonPositiveLiveEmbeddingConcurrency() {
         AppProperties appProperties = validAppProperties();
-        appProperties.getRemoteEmbedding().setDimensions(0);
+        appProperties.getEmbeddings().setLiveMaxConcurrentRequests(0);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonPositiveBatchEmbeddingConcurrency() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setBatchMaxConcurrentRequests(0);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonFiniteLiveEmbeddingRequestRate() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setLiveRequestsPerSecond(Double.NaN);
+
+        assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
+    }
+
+    @Test
+    void rejectsNonPositiveBatchEmbeddingRequestRate() {
+        AppProperties appProperties = validAppProperties();
+        appProperties.getEmbeddings().setBatchRequestsPerSecond(0.0);
 
         assertThrows(IllegalArgumentException.class, appProperties::validateConfiguration);
     }
@@ -141,10 +163,8 @@ class AppPropertiesValidationTest {
         llmProperties.setEnrichmentOutputTokenBudget(TEST_ENRICHMENT_OUTPUT_TOKEN_BUDGET);
         llmProperties.setRerankerOutputTokenBudget(TEST_RERANKER_OUTPUT_TOKEN_BUDGET);
         llmProperties.setConfiguredProviderBackoffSeconds(TEST_CONFIGURED_PROVIDER_BACKOFF_SECONDS);
-        appProperties.getEmbeddings().setOpenAiBaseUrl(TEST_OPENAI_EMBEDDING_BASE_URL);
-        appProperties.getEmbeddings().setOpenAiModel("");
-        appProperties.getRemoteEmbedding().setModel(TEST_REMOTE_EMBEDDING_MODEL);
-        appProperties.getRemoteEmbedding().setDimensions(TEST_REMOTE_EMBEDDING_DIMENSIONS);
+        appProperties.getEmbeddings().setModel(TEST_EMBEDDING_MODEL);
+        appProperties.getEmbeddings().setDimensions(TEST_EMBEDDING_DIMENSIONS);
         return appProperties;
     }
 

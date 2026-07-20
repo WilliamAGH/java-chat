@@ -39,6 +39,7 @@ public class ExternalServiceHealth {
     private static final String UNHEALTHY_RETRY_DUE_MSG = "Unhealthy (retry due)";
     private static final String UNHEALTHY_NEXT_CHECK_TEMPLATE = "Unhealthy (failed %d times, next check in %s)";
     private static final String UNKNOWN_SERVICE_MSG = "Unknown service";
+    private static final String QDRANT_HEALTH_ENDPOINT = "/healthz";
 
     private final WebClient webClient;
     private final QdrantRestConnection qdrantRestConnection;
@@ -178,8 +179,7 @@ public class ExternalServiceHealth {
 
         try {
             String base = qdrantRestConnection.restBaseUrl();
-            String connectivityPath = qdrantRestConnection.useTls() ? "/collections" : "/health";
-            String connectivityUrl = base + connectivityPath;
+            String connectivityUrl = base + QDRANT_HEALTH_ENDPOINT;
 
             String qdrantApiKey = qdrantRestConnection.apiKey();
             var requestSpec = webClient.get().uri(connectivityUrl);

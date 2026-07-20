@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
  * Tracks ingestion progress by counting parsed and indexed chunk artifacts on disk and in memory.
  */
 @Service
-public class ProgressTracker {
+public final class ProgressTracker {
     private static final Logger log = LoggerFactory.getLogger(ProgressTracker.class);
 
     private final Path parsedDir;
@@ -26,9 +26,13 @@ public class ProgressTracker {
      * Creates a tracker rooted at the parsed and index directories.
      */
     public ProgressTracker(
-            @Value("${app.docs.parsed-dir}") String parsedDir, @Value("${app.docs.index-dir}") String indexDir) {
-        this.parsedDir = Path.of(parsedDir);
-        this.indexDir = Path.of(indexDir);
+            @Value("${app.docs.parsed-dir}") String parsedDir,
+            @Value("${app.docs.index-dir}") String indexDir,
+            @Value("${SPRING_PROFILE:prod}") String deploymentProfile) {
+        this.parsedDir =
+                LocalStoreService.requireGenerationStateDirectory(Path.of(parsedDir), deploymentProfile, "parsed");
+        this.indexDir =
+                LocalStoreService.requireGenerationStateDirectory(Path.of(indexDir), deploymentProfile, "index");
     }
 
     /**

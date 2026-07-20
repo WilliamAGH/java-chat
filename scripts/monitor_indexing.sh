@@ -12,32 +12,58 @@ source "$SCRIPT_DIR/lib/common_qdrant.sh"
 
 load_env_file
 apply_pipeline_defaults
+validate_required_vars "QDRANT_COLLECTION_BOOKS" "QDRANT_COLLECTION_DOCS" \
+    "QDRANT_COLLECTION_ARTICLES" "QDRANT_COLLECTION_PDFS"
 
 # Configuration (use REST API)
 QDRANT_BASE_URL="$(qdrant_rest_base_url)"
-QDRANT_URL="${QDRANT_BASE_URL}/collections/${QDRANT_COLLECTION}"
+ACTIVE_COLLECTION_NAMES=(
+    "$QDRANT_COLLECTION_BOOKS"
+    "$QDRANT_COLLECTION_DOCS"
+    "$QDRANT_COLLECTION_ARTICLES"
+    "$QDRANT_COLLECTION_PDFS"
+)
 LOG_FILE="$PROJECT_ROOT/process_qdrant.log"
 REFRESH_INTERVAL=${1:-5}  # Default 5 seconds, or pass as argument
 
 # Function to get Qdrant stats
 get_qdrant_stats() {
-    local qdrant_response
-    if qdrant_response=$(qdrant_curl -s "$QDRANT_URL" 2>/dev/null); then
-        echo "$qdrant_response" | jq -r '.result | "\(.points_count)|\(.vectors_count)|\(.indexed_vectors_count)"' 2>/dev/null || echo "0|0|0"
-    else
-        echo "0|0|0"
-    fi
+    local total_points=0
+    local total_vectors=0
+    local total_indexed_vectors=0
+    local active_collection_name
+    for active_collection_name in "${ACTIVE_COLLECTION_NAMES[@]}"; do
+        local collection_state
+        if ! collection_state=$(qdrant_curl -s "$QDRANT_BASE_URL/collections/$active_collection_name" 2>/dev/null); then
+            echo "0|0|0"
+            return
+        fi
+        local collection_stats
+        collection_stats=$(echo "$collection_state" \
+            | jq -r '.result | "\(.points_count // 0)|\(.vectors_count // 0)|\(.indexed_vectors_count // 0)"' \
+                2>/dev/null) || {
+            echo "0|0|0"
+            return
+        }
+        local collection_points
+        local collection_vectors
+        local collection_indexed_vectors
+        IFS='|' read -r collection_points collection_vectors collection_indexed_vectors <<< "$collection_stats"
+        total_points=$((total_points + collection_points))
+        total_vectors=$((total_vectors + collection_vectors))
+        total_indexed_vectors=$((total_indexed_vectors + collection_indexed_vectors))
+    done
+    echo "$total_points|$total_vectors|$total_indexed_vectors"
 }
 
 # Function to get embedding server status
 check_embedding_server_status() {
-    local probe_url="${LOCAL_EMBEDDING_SERVER_URL:-http://127.0.0.1:8088}/v1/models"
-    local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$probe_url" 2>/dev/null)
-    if [ "$http_code" = "200" ]; then
-        echo "OK"
+    if [ "${APP_LOCAL_EMBEDDING_ENABLED:-false}" = "true" ]; then
+        echo "LOCAL"
+    elif [ -n "${OPENAI_API_KEY:-}" ] && [[ "${OPENAI_BASE_URL:-}" == */v1 ]]; then
+        echo "GATEWAY"
     else
-        echo "UNAVAILABLE"
+        echo "UNCONFIGURED"
     fi
 }
 
@@ -97,14 +123,14 @@ while true; do
     fi
     
     # Get processing stats from logs
-    EMBEDDINGS_GENERATED=$(count_log_events "Generated.*embeddings successfully")
-    EMBEDDINGS_CALLED=$(count_log_events "Calling embedding API")
-    DOCS_PROCESSED=$(count_log_events "✓ Processed")
+    EMBEDDINGS_GENERATED=$(count_log_events "\[INDEXING\] Added .* hybrid vectors")
+    EMBEDDINGS_CALLED=$(count_log_events "\[EMBEDDING\].*embedding")
+    DOCS_PROCESSED=$(count_log_events "\[INDEXING\] Completed processing")
     ERRORS=$(count_log_events "ERROR")
     WARNINGS=$(count_log_events "WARN")
     
     # Get last activity
-    LAST_EMBEDDING=$(get_last_log "LocalEmbeddingClient")
+    LAST_EMBEDDING=$(get_last_log "\[INDEXING\] Added .* hybrid vectors")
     LAST_ERROR=$(get_last_log "ERROR")
     
     # Check services
@@ -120,7 +146,7 @@ while true; do
     
     # Qdrant Status
     echo -e "${BOLD}${YELLOW}QDRANT STATUS${NC}"
-    echo -e "├─ Collection: ${CYAN}$QDRANT_COLLECTION${NC}"
+    echo -e "├─ Collections: ${CYAN}${#ACTIVE_COLLECTION_NAMES[@]} active core collections${NC}"
     echo -e "├─ Vectors: ${GREEN}${BOLD}$VECTORS${NC}"
     if [ "$VECTOR_DELTA" -gt 0 ]; then
         echo -e "├─ Change: ${GREEN}+$VECTOR_DELTA${NC} in last ${TIME_DELTA}s"
@@ -134,7 +160,7 @@ while true; do
     # Services Status
     echo -e "${BOLD}${YELLOW}SERVICES${NC}"
     echo -e "├─ Java App: $([[ "$APP_RUNNING" == "✓" ]] && echo -e "${GREEN}Running${NC}" || echo -e "${RED}Stopped${NC}")"
-    echo -e "└─ Embedding Server: $([[ "$EMBEDDING_STATUS" == "OK" ]] && echo -e "${GREEN}Healthy${NC}" || echo -e "${RED}Unavailable${NC}")"
+    echo -e "└─ Embedding Provider: $([[ "$EMBEDDING_STATUS" != "UNCONFIGURED" ]] && echo -e "${GREEN}$EMBEDDING_STATUS configured${NC}" || echo -e "${RED}Unconfigured${NC}")"
     echo ""
     
     # Processing Stats

@@ -16,13 +16,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * Persists document snapshots, parsed chunks, and chunk-hash markers on the local filesystem.
+ * Persists document snapshots, parsed chunks, and ingestion markers on the local filesystem.
  */
 @Service
 public class LocalStoreService {
+    static final String EMBEDDING_GENERATION_DIRECTORY = "qwen3-embedding-4b-2560";
+    static final String LOCAL_PROFILE = "local";
+    static final String DEVELOPMENT_PROFILE = "dev";
+    static final String PRODUCTION_PROFILE = "prod";
     private static final String SHA_256_ALGORITHM = "SHA-256";
     private static final int SHORT_SHA_BYTES = 6;
-    private static final int HASH_PREFIX_LENGTH = 12;
     private static final int SAFE_NAME_MAX_LENGTH = 150;
     private static final int SAFE_NAME_PREFIX_LENGTH = 80;
     private static final int SAFE_NAME_SUFFIX_LENGTH = 40;
@@ -33,6 +36,7 @@ public class LocalStoreService {
     private final String snapshotDirConfig;
     private final String parsedDirConfig;
     private final String indexDirConfig;
+    private final String deploymentProfile;
     private Path snapshotDir;
     private Path parsedDir;
     private Path indexDir;
@@ -45,10 +49,12 @@ public class LocalStoreService {
             @Value("${app.docs.snapshot-dir}") String snapshotDir,
             @Value("${app.docs.parsed-dir}") String parsedDir,
             @Value("${app.docs.index-dir}") String indexDir,
+            @Value("${SPRING_PROFILE:prod}") String deploymentProfile,
             ProgressTracker progressTracker) {
         this.snapshotDirConfig = snapshotDir;
         this.parsedDirConfig = parsedDir;
         this.indexDirConfig = indexDir;
+        this.deploymentProfile = deploymentProfile;
         this.progressTracker = progressTracker;
     }
 
@@ -61,12 +67,30 @@ public class LocalStoreService {
             this.snapshotDir = Path.of(snapshotDirConfig);
             this.parsedDir = Path.of(parsedDirConfig);
             this.indexDir = Path.of(indexDirConfig);
+            requireGenerationStateDirectory(this.snapshotDir, deploymentProfile, "snapshots");
+            requireGenerationStateDirectory(this.parsedDir, deploymentProfile, "parsed");
+            requireGenerationStateDirectory(this.indexDir, deploymentProfile, "index");
             Files.createDirectories(this.snapshotDir);
             Files.createDirectories(this.parsedDir);
             Files.createDirectories(this.indexDir);
         } catch (InvalidPathException | IOException exception) {
             throw new IllegalStateException("Failed to create local store directories", exception);
         }
+    }
+
+    static Path requireGenerationStateDirectory(
+            Path configuredDirectory, String deploymentProfile, String stateDirectoryName) {
+        if (!LOCAL_PROFILE.equals(deploymentProfile)
+                && !DEVELOPMENT_PROFILE.equals(deploymentProfile)
+                && !PRODUCTION_PROFILE.equals(deploymentProfile)) {
+            throw new IllegalStateException("SPRING_PROFILE must be exactly local, dev, or prod");
+        }
+        Path requiredSuffix = Path.of(EMBEDDING_GENERATION_DIRECTORY, deploymentProfile, stateDirectoryName);
+        if (!configuredDirectory.normalize().endsWith(requiredSuffix)) {
+            throw new IllegalStateException("Configured ingestion state directory must end with " + requiredSuffix
+                    + ": " + configuredDirectory);
+        }
+        return configuredDirectory;
     }
 
     /**
@@ -82,8 +106,7 @@ public class LocalStoreService {
      * Stores parsed chunk text for later local search and attribution.
      */
     public void saveChunkText(String url, int index, String text, String hash) throws IOException {
-        String shortHash = hash.length() >= HASH_PREFIX_LENGTH ? hash.substring(0, HASH_PREFIX_LENGTH) : hash;
-        Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + shortHash + ".txt");
+        Path chunkFilePath = parsedDir.resolve(safeName(url) + "_" + index + "_" + hash + ".txt");
         ensureParentDirectoryExists(chunkFilePath);
         Files.writeString(chunkFilePath, text, StandardCharsets.UTF_8);
         if (progressTracker != null) {

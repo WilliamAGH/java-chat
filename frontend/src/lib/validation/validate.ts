@@ -5,7 +5,6 @@
  * Never swallows errors - every validation failure is logged with full context.
  *
  * @see {@link ./schemas.ts} for schema definitions
- * @see {@link docs/type-safety-zod-validation.md} for validation patterns
  */
 
 import { z } from "zod/v4";

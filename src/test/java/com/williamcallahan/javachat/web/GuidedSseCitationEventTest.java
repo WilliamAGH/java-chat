@@ -60,7 +60,7 @@ import reactor.core.publisher.Mono;
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseStatusContractCatalog.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
 
@@ -75,9 +75,6 @@ class GuidedSseCitationEventTest {
 
     @Autowired
     ObjectMapper objectMapper;
-
-    @Autowired
-    SseStatusContractCatalog statusContractCatalog;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -162,7 +159,6 @@ class GuidedSseCitationEventTest {
 
         int citationPartialFailureStatusIndex = -1;
         int citationEventIndex = -1;
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
             ServerSentEvent<String> streamEvent = streamEvents.get(eventIndex);
             if (EVENT_CITATION.equals(streamEvent.event())) {
@@ -174,10 +170,10 @@ class GuidedSseCitationEventTest {
             }
             SseSupport.SseEventPayload guidedStatus = objectMapper.readValue(
                     Objects.requireNonNull(streamEvent.data(), "guided status data"), SseSupport.SseEventPayload.class);
-            if (citationContract.code().equals(guidedStatus.code())) {
+            if ("citation.partial-failure".equals(guidedStatus.code())) {
                 citationPartialFailureStatusIndex = eventIndex;
-                assertEquals(Boolean.valueOf(citationContract.retryable()), guidedStatus.retryable());
-                assertEquals(citationContract.stage(), guidedStatus.stage());
+                assertEquals(Boolean.FALSE, guidedStatus.retryable());
+                assertEquals("citation", guidedStatus.stage());
             }
         }
 

@@ -24,13 +24,13 @@ Common variables:
 - `GITHUB_MODELS_BASE_URL` (default `https://models.github.ai/inference/v1`)
 - `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
 - `OPENAI_API_KEY` (OpenAI auth)
-- `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (default `gpt-5.2`; shared-gateway alias `gemma-4-26b-a4b`)
+- `OPENAI_BASE_URL` (`https://api.llm-gateway.iocloudhost.net/v1` for Java Chat deployments)
+- `OPENAI_MODEL` (default `gpt-5.2`; chat only)
 - `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call while provider gateways own first-output and inter-output deadlines)
 
 Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. Invalid values fail startup. Supported reasoning-effort subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 
-### Researchly shared gateway
+### Shared LLM gateway
 
 Configure chat through the shared gateway with:
 
@@ -38,16 +38,16 @@ Configure chat through the shared gateway with:
 LLM_PRIMARY_PROVIDER=openai
 OPENAI_API_KEY=lgw-...
 OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
-OPENAI_MODEL=gemma-4-26b-a4b
+OPENAI_MODEL=gpt-5.2
 ```
 
-`gemma-4-26b-a4b` is the gateway's regular Gemma alias. Java Chat sends the request only to its configured `openai` provider; any routing inside the gateway is outside Java Chat. `OPENAI_BASE_URL` remains the chat base URL; embeddings keep their explicit provider selection through the `app.embeddings.open-ai-base-url` or `app.remote-embedding.server-url` application properties rather than the chat gateway URL.
+Java Chat sends chat and embedding requests to the same configured gateway URL and credential. `OPENAI_MODEL`, `LLM_PRIMARY_PROVIDER`, and `LLM_GATEWAY_TIER` affect chat only. Embeddings always use the application-owned `app.embeddings.model` and intent-specific tier described below.
 
 ### Provider notes
 
 - GitHub Models uses `https://models.github.ai/inference` (the OpenAI SDK requires `/v1`, so the default is `.../inference/v1`).
 - GitHub Models model IDs should be provider-qualified (for example `openai/gpt-5`, `xai/grok-3-mini`).
-- OpenAI uses `https://api.openai.com` (the OpenAI SDK requires `/v1`; the app normalizes URLs when needed).
+- The configured gateway base URL must end in `/v1`; the SDK appends `/embeddings` for embedding calls.
 - Avoid `azure.com`-style endpoints unless you are explicitly running an Azure OpenAI-compatible gateway; this project does not configure Azure by default.
 
 ### Rate limiting
@@ -56,39 +56,29 @@ OPENAI_MODEL=gemma-4-26b-a4b
 
 ## Embeddings
 
-Embeddings are configured with explicit provider selection (see `EmbeddingConfig`).
+Gateway embeddings are configured by `EmbeddingConfig`.
 Runtime fallback and error swallowing are disallowed per [AGENTS.md](../AGENTS.md) ([RC1a], [RC1c], [RC1e]).
 Using fallback embeddings or suppressing provider failures is an explicit [AGENTS.md](../AGENTS.md) violation.
 If a provider is unreachable or returns an HTTP error, the failure is surfaced immediately
 and ingestion/retrieval stops so invalid vectors are never cached.
 
-Selection order:
+The normal runtime path uses `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `app.embeddings.model=qwen/qwen3-embedding-4b`. The model's native 2,560-dimensional output is required exactly. Retrieval requests send `X-Tier: production-z`; ingestion, probes, and warmups send `X-Tier: batch`. `OPENAI_MODEL` is never used for embeddings.
 
-1) Local embedding server when `APP_LOCAL_EMBEDDING_ENABLED=true`
-2) Remote OpenAI-compatible provider when `REMOTE_EMBEDDING_API_KEY` is set; its endpoint and model come from `application.properties`
-3) OpenAI embeddings when `OPENAI_API_KEY` and `app.embeddings.open-ai-model` are set
-
-`GITHUB_TOKEN` / GitHub Models is never used for embeddings. GitHub Models does not expose an embeddings API in this project.
-
-If none are configured, the application fails fast with an explicit error.
+The local embedding server remains an explicit development-only mode enabled by `APP_LOCAL_EMBEDDING_ENABLED=true`. There is no remote-provider fallback, separate remote credential, endpoint normalization, dimension remapping, padding, or alternate 8B route. `GITHUB_TOKEN` is never used for embeddings.
 
 Reprocessing note:
 
-- If you change embedding providers or suspect stale vectors, remove existing Qdrant collections and clear local dedup markers (`data/index/`) before re-ingesting so vectors are rebuilt with the new provider.
+- Every embedding generation uses new collection names and new ingestion-state roots. Preserve prior-generation collections and state for rollback; never alter an existing collection's vector size.
 
 Common variables:
 
 - `APP_LOCAL_EMBEDDING_ENABLED` (`true|false`)
 - `LOCAL_EMBEDDING_SERVER_URL` (default `http://127.0.0.1:8088`)
-- `APP_LOCAL_EMBEDDING_MODEL` (default `text-embedding-qwen3-embedding-8b`)
-- `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `4096`)
+- `APP_LOCAL_EMBEDDING_MODEL` (default `qwen/qwen3-embedding-4b`)
+- `APP_LOCAL_EMBEDDING_DIMENSIONS` (default `2560`)
 - `APP_LOCAL_EMBEDDING_BATCH_SIZE` (default `32`)
-- `REMOTE_EMBEDDING_API_KEY` (optional credential loaded from the environment or `.env`)
-- `app.remote-embedding.server-url`, `app.remote-embedding.model`, and `app.remote-embedding.dimensions` in `application.properties`
-  - `app.remote-embedding.server-url` accepts either `.../v1` or `.../v1/embeddings`; both normalize correctly.
-  - The remote credential activates this provider. A configured non-secret endpoint without that credential does not override an explicitly configured OpenAI embedding provider.
-- `app.embeddings.open-ai-base-url` and `app.embeddings.open-ai-model` in `application.properties`
-  - `app.embeddings.open-ai-model` must be set before selecting OpenAI embeddings with `OPENAI_API_KEY`.
+- `app.embeddings.model` (fixed deployment value `qwen/qwen3-embedding-4b`)
+- `app.embeddings.dimensions` (fixed deployment value `2560`)
 
 Environment precedence is universal across Make targets and ingestion scripts:
 1) CLI arguments (script flags / Make variables passed inline)
@@ -98,17 +88,7 @@ Environment precedence is universal across Make targets and ingestion scripts:
 
 ### Embedding preflight checks
 
-Ingestion scripts now run remote embedding probes before starting application indexing:
-
-1. Plain text probe
-2. Code-like multiline probe (for source ingestion realism)
-
-A probe fails when the endpoint returns malformed embedding payloads (for example HTTP `200` with null vector values).
-Plain-text probe failure stops ingestion immediately and prints the specific probe failure reason plus a response excerpt.
-Code-like probe failure stops ingestion by default (`EMBEDDING_CODE_PROBE_MODE=strict`).
-Set `EMBEDDING_CODE_PROBE_MODE=warn` only when you explicitly want to continue despite the risk.
-
-This catches provider issues earlier than full ingestion runs and prevents generic downstream failures.
+Before indexing, ingestion scripts verify the model alias through `/v1/models`, then issue `X-Tier: batch` embedding probes with batches of 1 and 32. Each response must preserve input count/order and contain exactly 2,560 numeric values per vector. Any HTTP, model, shape, null-value, or dimension failure stops ingestion.
 
 ## Qdrant
 
@@ -125,10 +105,10 @@ See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the col
 
 ### Hybrid collection variables
 
-- `QDRANT_COLLECTION_BOOKS` (default `java-chat-books`)
-- `QDRANT_COLLECTION_DOCS` (default `java-docs`)
-- `QDRANT_COLLECTION_ARTICLES` (default `java-articles`)
-- `QDRANT_COLLECTION_PDFS` (default `java-pdfs`)
+- `QDRANT_COLLECTION_BOOKS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books`)
+- `QDRANT_COLLECTION_DOCS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs`)
+- `QDRANT_COLLECTION_ARTICLES` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles`)
+- `QDRANT_COLLECTION_PDFS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs`)
 - `QDRANT_DENSE_VECTOR_NAME` (default `dense`) — named vector for dense embeddings
 - `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
 - `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
@@ -148,11 +128,12 @@ make compose-up
 - `QDRANT_HOST` must be a hostname only (no `http://` or `https://` prefix).
 - Local compose maps Qdrant to allowed ports: gRPC `8086`, REST `8087` (`infra/docker-compose-qdrant.yml`).
 - Some scripts use REST for health checks; set `QDRANT_REST_PORT=8087` when using local compose.
-- On startup, `QdrantIndexInitializer` validates that all four collections have matching dense vector dimensions. A dimension mismatch (e.g., after changing embedding providers) causes startup failure — delete the collections and re-ingest.
+- Local Compose runs Qdrant 1.18.3 in project `java-chat-qwen3-embedding-4b-2560` with a fresh generation-specific volume. It never opens the old 1.16.2 volume.
+- On startup, `QdrantIndexInitializer` requires named `dense` 2,560/Cosine and `bm25`/IDF vectors, on-disk payloads, and required payload indexes. A mismatch fails readiness.
 
 ## GitHub repository ingestion
 
-GitHub source ingestion uses `scripts/process_github_repo.sh` and supports local-path mode, URL mode, and batch sync of existing `github-*` collections.
+GitHub source ingestion uses `scripts/process_github_repo.sh` and supports local-path mode, URL mode, and `--sync-existing` for the exact active prefix `github-${SPRING_PROFILE}-qwen3-embedding-4b-2560-`.
 
 Common variables:
 
@@ -160,8 +141,8 @@ Common variables:
 - `REPO_URL` — GitHub URL for URL ingestion mode (`https://github.com/owner/repository`)
 - `REPO_CACHE_DIR` — local clone cache root for URL mode (default `data/repos/github`)
 - `REPO_CACHE_PATH` — exact local clone path for a specific URL ingestion run (single repo mode)
-- `SYNC_EXISTING` — set to `1` to batch-sync all existing `github-*` collections
-- `QDRANT_REFERENCE_COLLECTION` — source collection used for schema cloning when creating new GitHub collections (default `java-docs`)
+- `SYNC_EXISTING` — set to `1` to sync collections under the active environment/generation prefix
+- `QDRANT_COLLECTION_DOCS` — the active environment's documentation collection is the only schema source for a new GitHub collection
 
 ## RAG tuning
 

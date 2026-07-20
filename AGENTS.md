@@ -11,17 +11,18 @@ alwaysApply: true
 - [ORG2] Structure: Rule Summary first, then detailed sections keyed by short hashes (e.g., `[GT1a]`).
 - [ORG3] Usage: cite hashes when giving guidance or checking compliance; add new rules without renumbering older ones.
 - [ORG4] Directive language: rules use imperative/prohibitive phrasing ("do X", "no Y", "never Z"); no discretionary hedges ("prefer", "consider", "try to", "ideally", "when possible") that give agents interpretive latitude.
+- [ORG5] Sole policy owner: `AGENTS.md` is the only repository policy source. Never create, retain, or cite a separate policy mirror, manifest, catalog, contract, or registry.
 
 ## Rule Summary [SUM]
 
 - [ZA1a-c] Zero Tolerance Policy (zero assumptions, validation workflow, forbidden practices)
-- [GT1a-l] Git, history safety, hooks/signing, lock files, and clean commits
+- [GT1a-o] Git, history safety, hooks/signing, dirty paths, worktrees, and clean commits
 - [CC1a-d] Clean Code & DDD (Mandatory)
-- [SS1a-j] Single Semantic Owner and Java API catalog ownership
+- [SS1a-j] Direct Ownership & Boundary Locality
 - [ID1a-d] Idiomatic Patterns & Defaults
 - [EV1a-f] Secrets and Env Vars (no secrets in properties; OpenAI/Qdrant via .env/env)
 - [RC1a-f] Root Cause Resolution (single implementation, no fallbacks, no shims/workarounds)
-- [FS1a-k] File Creation & Clean Architecture (search first, strict types, single responsibility)
+- [FS1a-l] File Responsibility & Clean Architecture (direct owner, deletion first, strict types)
 - [TY1a-d] Type Safety (strict generics, no raw types, no unchecked casts)
 - [FV1a-h] Frontend Validation (Zod schemas, discriminated unions, never swallow errors)
 - [AB1a-d] Abstraction Discipline (reuse-first, no anemic wrappers)
@@ -59,6 +60,8 @@ alwaysApply: true
 - [GT1k] **Do Not Block On Baseline Diffs**: If `git status` already shows modified files when you start, assume those changes are intentional and continue the requested task without stopping to ask about them. Avoid touching unrelated files.
 - [GT1l] **Stop Only On Concurrent Drift**: Only stop and ask for direction if a file changes unexpectedly *during your work* in a way that conflicts with edits you are actively making (e.g., a file you are editing changes on disk between reads/writes). Otherwise, proceed and keep changes scoped.
 - [GT1m] **Repository-Local Writes Only**: NEVER commit or push to this repository from a temporary clone, alternate checkout/worktree, or any other directory copy of the same repo. All git writes must be executed from this exact working tree.
+- [GT1n] **Dirty-Path Integrity**: Never rewrite, restore, replace, regenerate, or copy a dirty path from `HEAD`, the index, cached copies, an alternate worktree, or a temporary clone. Read the live path and apply the smallest in-place edit.
+- [GT1o] **Writable Agent Root**: Each worktree has exactly one writable agent root. All other agents remain read-only in that worktree or use a distinct worktree; never share write authority.
 
 ## [CC1] Clean Code & DDD (Mandatory)
 
@@ -69,18 +72,18 @@ alwaysApply: true
 - [CC1e] **Tracer bullet**: Build one tiny end-to-end slice through all layers first; validate it works; then expand — never build horizontal layers in isolation.
 - [CC1f] **KISS**: Simplest solution that works; achieve by removing, not adding; use platform/framework defaults unless deviation is proven necessary
 
-## [SS1] Single Semantic Owner (Mandatory)
+## [SS1] Direct Ownership & Boundary Locality (Mandatory)
 
-- [SS1a] **One Owner**: For any governed concept, exactly one file/module may define its field inventory, names, allowed keys, dependency graph, or behavior selection.
-- [SS1b] **No Mirrors**: Tests, fixtures, docs, examples, generators, web models, frontend models, and schemas are NOT exempt; they must bind/import/project the canonical owner instead of restating it.
-- [SS1c] **Projection Rule**: Every non-canonical location may only project the canonical owner with identical governed names. Renaming governed fields in projections is prohibited.
-- [SS1d] **No Aliases**: Plural/singular variants, compatibility aliases, label identifiers, alternate display-name identifiers, and convenience transport names for a governed concept are prohibited.
-- [SS1e] **Canonical-Key Parity**: Catalog-backed request/query/schema fields MUST use the exact canonical key name. Transport aliases and convenience plurals are prohibited.
-- [SS1f] **Stop-Work Trigger**: If an implementation requires listing the same governed fields/keys/rules in a second place, stop and redesign before editing.
-- [SS1g] **No Positional-Null Sludge**: Constructor/factory calls with repeated placeholder nulls or low-legibility optional argument trains are prohibited; use named factories/builders, parameter objects, or bind/import the canonical owner.
-- [SS1h] **Whole-List Smell**: If a file "knows the whole list" of a governed concept and it is not the canonical owner, the design is presumed wrong and must be reduced or removed.
-- [SS1i] **Java API Catalog Owner**: Define complete Java API mirror records only in `src/main/resources/java-api-documentation-sources.manifest`; consume that manifest from Java, shell, tests, and documentation.
-- [SS1j] **Java API Catalog Projection**: Never recreate Java API releases, URLs, mirror paths, display names, or fetch parameters in properties, constants, arrays, fixtures, or documentation; verify projections with `--list-java-api-sources` and `JavaApiDocumentationSourceParityTest`.
+- [SS1a] **Direct Owner**: Put each behavior and business rule with its closest production owner. Do not introduce a central owner merely because multiple consumers have equivalent shapes.
+- [SS1b] **No Invented Schema Machinery**: Never create a manifest, catalog, contract, registry, or equivalent metadata layer merely to claim SSOT, enumerate a field inventory, share equivalent shapes across languages, prove parity, or support tests.
+- [SS1c] **Boundary-Local Duplication**: Duplicate a small, stable declaration at a genuine boundary (HTTP, persistence, CLI, frontend, or test) when direct typed code is clearer and avoids invented schema machinery. Keep it local to that boundary and delete it when it no longer serves the boundary.
+- [SS1d] **No Semantic Aliases**: Outside a boundary's actual protocol, plural/singular variants, compatibility aliases, label identifiers, alternate display-name identifiers, and convenience transport names for the same concept are prohibited.
+- [SS1e] **Boundary Fidelity**: Use the names required by each real boundary. Do not add aliases or cross-layer transport names solely to imitate another representation.
+- [SS1f] **Stop-Work Trigger**: If repeated declarations stop being small and boundary-local, delete obsolete copies or place the behavior or rule with its direct owner. Never resolve the problem by adding an inventory artifact.
+- [SS1g] **No Positional-Null Sludge**: Constructor/factory calls with repeated placeholder nulls or low-legibility optional argument trains are prohibited; use named factories, builders, or parameter objects.
+- [SS1h] **Whole-List Smell**: A whole-list declaration is valid only when local runtime behavior uses the whole list. Delete stale or test-only inventory copies; never maintain an all-purpose list merely to prove ownership or coverage.
+- [SS1i] **Policy Owner**: `AGENTS.md` is the sole policy owner. Do not move or mirror policy into documentation, manifests, catalogs, contracts, registries, tests, or generators.
+- [SS1j] **No Fabricated Sharing**: Cross-language code uses native boundary types. Do not add shared metadata, a generated mirror, or a parity test merely because fields align.
 
 ## [ID1] Idiomatic Patterns & Defaults
 
@@ -113,19 +116,19 @@ alwaysApply: true
   - Adding a secondary retrieval/indexing path that runs only when the primary path fails.
 - [RC1g] BANNED slop indirection: no `*Adapter`, `*Transformer`, `*Normalizer`, `*Bridge`, `*Converter`, `*Mapper`, `*Compatibility`, `*Transition` modules that exist solely to reshape data between equivalent types; fix the type mismatch at source (architectural adapters at genuine boundaries per [AR1] are fine)
 
-## [FS1] File Creation & Clean Architecture
+## [FS1] File Responsibility & Clean Architecture
 
-- [FS1a] **Search First**: Search exhaustively for existing logic → reuse or extend → only then create new files.
-- [FS1b] **Single Responsibility**: New features belong in NEW files named for their single responsibility. Do not cram code into existing files.
+- [FS1a] **Search and Direct Owner**: Search exhaustively for existing logic and identify its direct owner. Reuse or extend that owner, or delete obsolete logic, before creating a type.
+- [FS1b] **Responsibility, Not File Count**: Put behavior in its closest existing owner when it shares that owner's responsibility. Create a new file only for a genuinely independent responsibility; never require a new file merely because a feature is new.
 - [FS1c] **Canonical Roots**: `boot/`, `application/`, `domain/`, `adapters/`, `support/`.
 - [FS1d] **Convention over Configuration**: Prefer Spring Boot defaults and existing utilities.
 - [FS1e] **No Generic Utilities**: Reject `*Utils/*Helper/*Common`. Banned: `BaseMapper<T>`, `GenericRepository<T,ID>`, `SharedUtils`.
-- [FS1f] **Large Files**: >500 LOC is a monolith. Extract pieces you touch into clean-architecture roots.
+- [FS1f] **Deletion-First Scope**: Line count never determines design. Delete dead, duplicate, or accidental complexity first; extract only when an independent responsibility needs a clearer direct owner, never merely to meet a file-size threshold.
 - [FS1g] **Domain Value Types**: Identifiers, amounts, slugs wrap in records with constructor validation; never raw primitives across API boundaries.
 - [FS1h] **Single Responsibility Methods**: No dead code; no empty try/catch that swallows exceptions.
 - [FS1i] **Dependency Injection**: Never manually instantiate `ObjectMapper`, `RestTemplate`, or `HttpClient`; always inject the Spring-managed bean.
 - [FS1j] **Custom Properties**: Custom `app.*` properties require `@ConfigurationProperties` binding in `AppProperties`.
-- [FS1l] **Contract**: `docs/contracts/code-change.md`
+- [FS1l] **Policy Location**: Consult `AGENTS.md` for repository policy. Never create or maintain a separate code-change policy contract.
 
 ## [TY1] Type Safety
 
@@ -144,8 +147,6 @@ alwaysApply: true
 - [FV1f] **Single Source of Truth**: All schemas live in `frontend/src/lib/validation/schemas.ts`. Types are inferred via `z.infer<>`, never duplicated.
 - [FV1g] **No `parse()`**: Use `safeParse()` exclusively. `parse()` throws and can crash rendering.
 - [FV1h] **Schema Matches API**: Schema `optional()`/`nullable()`/`nullish()` MUST match the actual API contract. Verify against real responses.
-
-@see `docs/type-safety-zod-validation.md` for full patterns and examples.
 
 ## [AB1] Abstraction Discipline
 
@@ -169,7 +170,7 @@ alwaysApply: true
 - [AR1c] **Domain** (domain/): Invariants/transformations, framework-free, no Spring imports.
 - [AR1d] **Adapters** (adapters/out/): Implement ports, persist validated models, no HTTP/web concerns.
 - [AR1e] **Composition**: Favor composition over inheritance; constructor injection only; services stateless.
-- [AR1f] **Monoliths**: Monolith = >500 LOC or multi-concern catch-all. Shrink on touch.
+- [AR1f] **Catch-Alls**: A multi-concern catch-all is a monolith regardless of line count. Delete misplaced or dead code and split only when an independent responsibility needs its own direct owner.
 
 ## [CS1] Code Smells
 
@@ -188,7 +189,7 @@ alwaysApply: true
 - [VR1b] **Tests**: `make test` or `./gradlew test`; targeted runs use `--tests ClassName`.
 - [VR1c] **Runtime**: `make run &`, hit `/actuator/health` and changed endpoints; then stop.
 - [VR1d] **Validate each slice**: After completing an end-to-end slice ([CC1e]), run `make build` and `make test` before starting the next slice.
-- [VR1e] **Contract Cleanup Handoff**: Name the canonical owner, list each duplicate owner removed, prove that tests/fixtures now bind or import the canonical owner, and explicitly call out any remaining duplicate owner as a blocker.
+- [VR1e] **Direct-Owner Cleanup Handoff**: Name the direct production owner, list redundant artifacts deleted, identify each intentional small boundary-local duplication and why it avoids schema machinery, and cite tests that exercise the behavior. Do not create a manifest, catalog, contract, registry, or parity report for handoff.
 
 ## [JD1] Javadoc Standards
 

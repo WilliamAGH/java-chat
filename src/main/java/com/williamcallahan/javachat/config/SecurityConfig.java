@@ -5,6 +5,7 @@ import com.williamcallahan.javachat.adapters.in.web.security.CsrfAccessDeniedHan
 import com.williamcallahan.javachat.adapters.in.web.security.CsrfTokenCookieFilter;
 import java.util.List;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -24,6 +25,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  * preflight OPTIONS requests are handled before authentication filters.
  */
 @Configuration
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfig {
     private static final String WILDCARD_ORIGIN = "*";
     private static final String HEALTH_ENDPOINT = "/actuator/health";

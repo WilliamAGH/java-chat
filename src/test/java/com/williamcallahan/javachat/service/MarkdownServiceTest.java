@@ -120,6 +120,18 @@ class MarkdownServiceTest {
     }
 
     @Test
+    void citationTitlePreservesInlineCode() {
+        String sourceUrl = "https://docs.oracle.com/javase/specs/jls/se25/html/jls-14.html#jls-14.11";
+        String markdown = "[JLS 14.11: `switch`](" + sourceUrl + ")";
+
+        var markdownCitations = markdownService.processStructured(markdown).citations();
+
+        assertEquals(1, markdownCitations.size());
+        assertEquals(sourceUrl, markdownCitations.getFirst().url());
+        assertEquals("JLS 14.11: switch", markdownCitations.getFirst().title());
+    }
+
+    @Test
     @DisplayName("Should preserve enrichment markers")
     void testEnrichmentMarkers() {
         String markdown = "Text with {{hint:This is a hint}} and {{warning:This is a warning}}";

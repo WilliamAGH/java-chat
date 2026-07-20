@@ -41,8 +41,9 @@ asdf install
 
 ```bash
 cp .env.example .env
-# edit .env: select LLM_PRIMARY_PROVIDER and set its matching credential
-make compose-up   # optional local Qdrant
+# edit .env: set SPRING_PROFILE=local, local generation collection/state paths,
+# and the shared gateway OPENAI_BASE_URL/OPENAI_API_KEY
+make compose-up   # fresh Qdrant 1.18.3 generation-specific volume
 make dev
 ```
 
@@ -51,6 +52,7 @@ Open `http://localhost:8085/`.
 ## Index documentation (RAG)
 
 ```bash
+# Run only after the generation configuration and gateway/Qdrant preflight are valid.
 make full-pipeline          # fetch all docs + ingest into Qdrant
 make process-all            # ingest only (incremental, upload to Qdrant)
 REPO_PATH=/absolute/path/to/repository make process-github-repo

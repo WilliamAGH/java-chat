@@ -14,25 +14,48 @@ import java.util.Set;
  * Javadoc page filename {@code List.html}. Sparse citation retrieval uses its expanded terms to
  * bridge punctuation tokenization, while citation ranking uses the same selector to recognize the
  * matching Javadoc type page. A qualified selector also owns its package path so {@code
- * java.util.Date.toString} cannot match {@code java.sql.Date}.</p>
- *
- * @param packageName optional declaring package name, or empty for an unqualified selector
- * @param typePageName Javadoc type page name without the {@code .html} suffix
- * @param methodName Java method name named by the query
+ * java.util.Date.toString} cannot match {@code java.sql.Date}. A selector exposes an exact source
+ * anchor only when the learner supplied one unambiguous Java type signature.</p>
  */
-public record JavaApiMethodSelector(String packageName, String typePageName, String methodName) {
+public final class JavaApiMethodSelector {
 
     private static final String JAVADOC_PAGE_SUFFIX = ".html";
+    private static final String VIRTUAL_THREAD_FACTORY_METHOD = "ofVirtual";
+    private static final String VIRTUAL_THREAD_FACTORY_ANCHOR = "ofVirtual()";
+    private static final String VIRTUAL_THREAD_START_CHAIN = "().start(Runnable)";
+    private static final String QUALIFIED_VIRTUAL_THREAD_START_CHAIN = "().start(java.lang.Runnable)";
+    private static final String THREAD_TYPE_PAGE = "Thread";
+    private static final String THREAD_BUILDER_TYPE_PAGE = "Thread.Builder";
+    private static final String THREAD_BUILDER_START_METHOD = "start";
+    private static final String THREAD_BUILDER_START_PARAMETER_CLAUSE = "(java.lang.Runnable)";
+    private static final String JAVA_LANG_PACKAGE = "java.lang";
     private static final int MINIMUM_TYPE_METHOD_SEGMENT_COUNT = 2;
     private static final Set<String> NON_METHOD_TERMINALS = Set.of("class", "super", "this", "java", "html");
+    private final String packageName;
+    private final String typePageName;
+    private final String methodName;
+    private final JavaInvocationSignature invocationSignature;
 
     /**
-     * Enforces a concrete Java API type and method spelling.
+     * Creates a selector without an exact invocation signature.
+     *
+     * <p>Direct construction names a method independently of a learner query, so it must not imply
+     * an overload choice.</p>
+     *
+     * @param packageName optional declaring package name, or empty for an unqualified selector
+     * @param typePageName Javadoc type page name without the {@code .html} suffix
+     * @param methodName Java method name
      */
-    public JavaApiMethodSelector {
-        packageName = packageName == null ? "" : packageName.trim();
-        typePageName = requireNonBlank(typePageName, "typePageName");
-        methodName = requireNonBlank(methodName, "methodName");
+    public JavaApiMethodSelector(String packageName, String typePageName, String methodName) {
+        this(packageName, typePageName, methodName, JavaInvocationSignature.unavailable());
+    }
+
+    private JavaApiMethodSelector(
+            String packageName, String typePageName, String methodName, JavaInvocationSignature invocationSignature) {
+        this.packageName = packageName == null ? "" : packageName.trim();
+        this.typePageName = requireNonBlank(typePageName, "typePageName");
+        this.methodName = requireNonBlank(methodName, "methodName");
+        this.invocationSignature = Objects.requireNonNull(invocationSignature, "invocationSignature");
     }
 
     /**
@@ -40,29 +63,143 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      *
      * <p>Invocation parentheses are optional because learners commonly ask both {@code List.of()}
      * and {@code Explain Stream.map}. Fully qualified type names and Javadoc nested-type page names
-     * are retained without re-parsing them elsewhere.</p>
+     * are retained without re-parsing them elsewhere. This relevance-only selector never exposes an
+     * overload anchor; use {@link #uniqueExactOverloadFromQuery(String)} for that stricter path.</p>
      *
      * @param query learner query text
      * @return first explicit Java API method selector, or empty when the query names none
      */
     public static Optional<JavaApiMethodSelector> fromQuery(String query) {
-        if (query == null || query.isBlank()) {
+        return selectorOccurrences(query).stream()
+                .map(SelectorOccurrence::selector)
+                .findFirst();
+    }
+
+    /**
+     * Extracts an exact overload selector only when one selector has an unambiguous type signature.
+     *
+     * <p>Comparisons and value-expression invocations retain broad relevance ordering because this
+     * method refuses to infer a Javadoc anchor from either form.</p>
+     *
+     * @param query learner query text
+     * @return sole selector with an exact source-anchor lookup key, or empty when none is safe
+     */
+    public static Optional<JavaApiMethodSelector> uniqueExactOverloadFromQuery(String query) {
+        List<SelectorOccurrence> selectorOccurrences = selectorOccurrences(query);
+        if (selectorOccurrences.size() != 1) {
             return Optional.empty();
         }
+        SelectorOccurrence selectorOccurrence = selectorOccurrences.getFirst();
+        JavaInvocationSignature invocationSignature =
+                JavaInvocationSignature.afterMethodName(query, selectorOccurrence.methodEndIndex());
+        if (invocationSignature.isExact()
+                && hasChainedMethodInvocationAfterInvocation(query, selectorOccurrence.methodEndIndex())) {
+            return mappedJavadocDeclarationForKnownChain(query, selectorOccurrence, invocationSignature);
+        }
+        JavaApiMethodSelector exactSelector =
+                selectorOccurrence.selector().withInvocationSignature(invocationSignature);
+        return exactSelector.exactOverloadAnchor().isPresent() ? Optional.of(exactSelector) : Optional.empty();
+    }
 
+    private static Optional<JavaApiMethodSelector> mappedJavadocDeclarationForKnownChain(
+            String query, SelectorOccurrence selectorOccurrence, JavaInvocationSignature invocationSignature) {
+        JavaApiMethodSelector receiverSelector = selectorOccurrence.selector();
+        if ((!receiverSelector.packageName().isBlank() && !JAVA_LANG_PACKAGE.equals(receiverSelector.packageName()))
+                || !THREAD_TYPE_PAGE.equals(receiverSelector.typePageName())
+                || !VIRTUAL_THREAD_FACTORY_METHOD.equals(receiverSelector.methodName())
+                || invocationSignature
+                        .anchorFor(VIRTUAL_THREAD_FACTORY_METHOD)
+                        .filter(VIRTUAL_THREAD_FACTORY_ANCHOR::equals)
+                        .isEmpty()) {
+            return Optional.empty();
+        }
+        String compactInvocationSuffix = removeWhitespace(query.substring(selectorOccurrence.methodEndIndex()));
+        if (!compactInvocationSuffix.startsWith(VIRTUAL_THREAD_START_CHAIN)
+                && !compactInvocationSuffix.startsWith(QUALIFIED_VIRTUAL_THREAD_START_CHAIN)) {
+            return Optional.empty();
+        }
+        return Optional.of(new JavaApiMethodSelector(
+                JAVA_LANG_PACKAGE,
+                THREAD_BUILDER_TYPE_PAGE,
+                THREAD_BUILDER_START_METHOD,
+                new JavaInvocationSignature(true, THREAD_BUILDER_START_PARAMETER_CLAUSE)));
+    }
+
+    private static String removeWhitespace(String querySuffix) {
+        StringBuilder compactQuerySuffix = new StringBuilder(querySuffix.length());
+        for (int currentIndex = 0; currentIndex < querySuffix.length(); currentIndex++) {
+            char currentCharacter = querySuffix.charAt(currentIndex);
+            if (!Character.isWhitespace(currentCharacter)) {
+                compactQuerySuffix.append(currentCharacter);
+            }
+        }
+        return compactQuerySuffix.toString();
+    }
+
+    private static boolean hasChainedMethodInvocationAfterInvocation(String query, int methodEndIndex) {
+        int openingParenthesisIndex = skipWhitespace(query, methodEndIndex);
+        int invocationDepth = 0;
+        for (int currentIndex = openingParenthesisIndex; currentIndex < query.length(); currentIndex++) {
+            char currentCharacter = query.charAt(currentIndex);
+            if (currentCharacter == '(') {
+                invocationDepth++;
+            } else if (currentCharacter == ')') {
+                invocationDepth--;
+                if (invocationDepth == 0) {
+                    int memberAccessIndex = skipWhitespace(query, currentIndex + 1);
+                    if (memberAccessIndex >= query.length() || query.charAt(memberAccessIndex) != '.') {
+                        return false;
+                    }
+                    int chainedMethodStartIndex = skipWhitespace(query, memberAccessIndex + 1);
+                    if (chainedMethodStartIndex < query.length() && query.charAt(chainedMethodStartIndex) == '<') {
+                        chainedMethodStartIndex = skipExplicitMethodTypeArguments(query, chainedMethodStartIndex);
+                    }
+                    if (!isIdentifierStartAt(query, chainedMethodStartIndex)) {
+                        return false;
+                    }
+                    int chainedMethodEndIndex = readIdentifierEnd(query, chainedMethodStartIndex);
+                    int chainedInvocationIndex = skipWhitespace(query, chainedMethodEndIndex);
+                    return chainedInvocationIndex < query.length() && query.charAt(chainedInvocationIndex) == '(';
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int skipExplicitMethodTypeArguments(String query, int openingTypeArgumentIndex) {
+        int typeArgumentDepth = 0;
+        for (int currentIndex = openingTypeArgumentIndex; currentIndex < query.length(); currentIndex++) {
+            char currentCharacter = query.charAt(currentIndex);
+            if (currentCharacter == '<') {
+                typeArgumentDepth++;
+            } else if (currentCharacter == '>') {
+                typeArgumentDepth--;
+                if (typeArgumentDepth == 0) {
+                    return skipWhitespace(query, currentIndex + 1);
+                }
+            }
+        }
+        return query.length();
+    }
+
+    private static List<SelectorOccurrence> selectorOccurrences(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+
+        List<SelectorOccurrence> selectorOccurrences = new ArrayList<>();
         int queryLength = query.length();
         for (int queryIndex = 0; queryIndex < queryLength; queryIndex++) {
             if (!isIdentifierStartAt(query, queryIndex) || hasIdentifierPrefix(query, queryIndex)) {
                 continue;
             }
             ParsedQualifiedName parsedQualifiedName = parseQualifiedName(query, queryIndex);
-            Optional<JavaApiMethodSelector> candidateSelector = fromQualifiedName(parsedQualifiedName.segments());
-            if (candidateSelector.isPresent()) {
-                return candidateSelector;
-            }
+            fromQualifiedName(parsedQualifiedName.segments())
+                    .ifPresent(selector ->
+                            selectorOccurrences.add(new SelectorOccurrence(selector, parsedQualifiedName.endIndex())));
             queryIndex = parsedQualifiedName.endIndex() - 1;
         }
-        return Optional.empty();
+        return List.copyOf(selectorOccurrences);
     }
 
     /**
@@ -81,6 +218,33 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
         return fromQuery(citationQuery)
                 .map(selector -> citationQuery + " " + selector.sparseQueryTerms())
                 .orElse(citationQuery);
+    }
+
+    /**
+     * Returns the optional declaring package named by the learner.
+     *
+     * @return package name, or an empty string for an unqualified selector
+     */
+    public String packageName() {
+        return packageName;
+    }
+
+    /**
+     * Returns the Javadoc type-page name without its filename suffix.
+     *
+     * @return declaring type-page name
+     */
+    public String typePageName() {
+        return typePageName;
+    }
+
+    /**
+     * Returns the exact Java method name named by the learner.
+     *
+     * @return method name
+     */
+    public String methodName() {
+        return methodName;
     }
 
     /**
@@ -118,6 +282,19 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
      */
     public String sparseQueryTerms() {
         return typePageName;
+    }
+
+    /**
+     * Returns the source-anchor lookup key that the learner wrote without ambiguity.
+     *
+     * @return exact method anchor such as {@code of(E,E)}, or empty when no safe key exists
+     */
+    public Optional<String> exactOverloadAnchor() {
+        return invocationSignature.anchorFor(methodName);
+    }
+
+    private JavaApiMethodSelector withInvocationSignature(JavaInvocationSignature invocationSignature) {
+        return new JavaApiMethodSelector(packageName, typePageName, methodName, invocationSignature);
     }
 
     private Optional<JavaPackageName> expectedPackageName(String candidatePackageName) {
@@ -208,6 +385,14 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
         return currentIndex;
     }
 
+    private static int skipWhitespace(String query, int startIndex) {
+        int currentIndex = startIndex;
+        while (currentIndex < query.length() && Character.isWhitespace(query.charAt(currentIndex))) {
+            currentIndex++;
+        }
+        return currentIndex;
+    }
+
     private static String requireNonBlank(String text, String fieldName) {
         String nonNullText = Objects.requireNonNull(text, fieldName);
         if (nonNullText.isBlank()) {
@@ -221,4 +406,6 @@ public record JavaApiMethodSelector(String packageName, String typePageName, Str
             segments = List.copyOf(segments);
         }
     }
+
+    private record SelectorOccurrence(JavaApiMethodSelector selector, int methodEndIndex) {}
 }

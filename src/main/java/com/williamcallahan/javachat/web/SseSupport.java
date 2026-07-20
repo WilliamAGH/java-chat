@@ -9,7 +9,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -60,13 +59,21 @@ public class SseSupport {
     private static final String CITATION_PARTIAL_FAILURE_MESSAGE_TEMPLATE =
             "Some citations could not be loaded (%d failed)";
 
+    /** Stable code for a partial citation-conversion status event. */
+    private static final String CITATION_PARTIAL_FAILURE_STATUS_CODE = "citation.partial-failure";
+
+    /** Pipeline stage reported for a partial citation-conversion status event. */
+    private static final String CITATION_PARTIAL_FAILURE_STATUS_STAGE = "citation";
+
+    /** Partial citation conversion cannot succeed by retrying the same stream. */
+    private static final boolean CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE = false;
+
     private static final Counter COALESCED_CHUNK_OVERFLOW_COUNTER =
             Metrics.counter("javachat.sse.backpressure.overflowed_chunks");
     private static final Counter DROPPED_HEARTBEAT_COUNTER =
             Metrics.counter("javachat.sse.backpressure.dropped_heartbeats");
 
     private final ObjectWriter jsonWriter;
-    private final SseStatusContractCatalog statusContractCatalog;
     private final AtomicLong coalescedChunkOverflowCount = new AtomicLong();
     private final AtomicLong droppedHeartbeatCount = new AtomicLong();
 
@@ -74,11 +81,9 @@ public class SseSupport {
      * Creates SSE support wired to the application's ObjectMapper.
      *
      * @param objectMapper JSON mapper for safe SSE serialization
-     * @param statusContractCatalog canonical client-visible SSE status contracts
      */
-    public SseSupport(ObjectMapper objectMapper, SseStatusContractCatalog statusContractCatalog) {
+    public SseSupport(ObjectMapper objectMapper) {
         this.jsonWriter = objectMapper.writer();
-        this.statusContractCatalog = Objects.requireNonNull(statusContractCatalog, "statusContractCatalog");
     }
 
     /**
@@ -312,13 +317,12 @@ public class SseSupport {
         if (failedCitationConversionCount < 0) {
             throw new IllegalArgumentException("Failed citation conversion count cannot be negative");
         }
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         String citationWarning = CITATION_PARTIAL_FAILURE_MESSAGE_TEMPLATE.formatted(failedCitationConversionCount);
         return Flux.just(statusEvent(SseEventPayload.builder(citationWarning)
                 .details(CITATION_PARTIAL_FAILURE_DETAILS)
-                .code(citationContract.code())
-                .retryable(citationContract.retryable())
-                .stage(citationContract.stage())
+                .code(CITATION_PARTIAL_FAILURE_STATUS_CODE)
+                .retryable(CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE)
+                .stage(CITATION_PARTIAL_FAILURE_STATUS_STAGE)
                 .build()));
     }
 

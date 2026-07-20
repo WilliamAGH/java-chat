@@ -77,6 +77,7 @@ final class PlainTextProgressReporter implements ProgressReporter {
 }
 
 final class CompactProgressReporter implements ProgressReporter {
+    /** Produces a delimiter-stable representation for compact consumers. */
     @Override
     public String describe(LearningActivity learningActivity) {
         return learningActivity.title() + "|minutes=" + learningActivity.estimatedMinutes();

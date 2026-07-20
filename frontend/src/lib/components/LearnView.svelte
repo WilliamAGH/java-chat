@@ -9,6 +9,7 @@
     } from "../services/guided";
     import {
         clearChatSession,
+        hasVisibleChatMessageText,
         type Citation,
         type ChatMessage,
     } from "../services/chat";
@@ -76,7 +77,7 @@
             (existingMessage) =>
                 existingMessage.messageId === activeStreamingMessageId,
         );
-        return !!activeMessage?.messageText;
+        return hasVisibleChatMessageText(activeMessage?.messageText ?? "");
     });
 
     // Desktop chat panel ref for scroll management
@@ -519,11 +520,15 @@
                     ? error.message
                     : "Sorry, I encountered an error. Please try again.";
             ensureAssistantMessage(assistantMessageId);
-            updateAssistantMessage(assistantMessageId, (existingMessage) => ({
-                ...existingMessage,
-                messageText: errorMessage,
-                isError: true,
-            }));
+            updateAssistantMessage(assistantMessageId, (existingMessage) =>
+                hasVisibleChatMessageText(existingMessage.messageText)
+                    ? { ...existingMessage, streamErrorMessage: errorMessage }
+                    : {
+                          ...existingMessage,
+                          messageText: errorMessage,
+                          isError: true,
+                      },
+            );
         } finally {
             // Guard: only reset streaming state if still on same lesson
             if (
@@ -1044,6 +1049,9 @@
             /* Uses the larger mobile FAB footprint so compact breakpoints retain clearance. */
             --lesson-content-panel-mobile-reading-inset: var(--space-20);
             padding-bottom: var(--lesson-content-panel-mobile-reading-inset);
+            scroll-padding-bottom: var(
+                --lesson-content-panel-mobile-reading-inset
+            );
         }
     }
 

@@ -6,6 +6,11 @@ This project uses a reproducible build system across macOS/Linux local dev and C
 
 ### Local Development
 
+Set `SPRING_PROFILE=local`, configure the `java-chat-local-qwen3-embedding-4b-2560-*` collections and matching
+local generation state roots, and supply the shared gateway `OPENAI_BASE_URL` and `OPENAI_API_KEY` before running
+retrieval or ingestion. The local Qdrant Compose project uses server 1.18.3 and a fresh generation-specific
+volume; it never opens the previous server volume.
+
 #### Prerequisites
 
 The Gradle build requires a **BellSoft Liberica Java 25** toolchain. Exact release pinning is

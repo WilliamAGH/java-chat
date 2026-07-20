@@ -5,11 +5,9 @@
  * Schemas are co-located here to ensure single source of truth and DRY compliance.
  *
  * @see {@link ./validate.ts} for validation utilities
- * @see {@link docs/type-safety-zod-validation.md} for validation patterns
  */
 
 import { z } from "zod/v4";
-import sseStatusContracts from "../../../../src/main/resources/sse-status-contracts.json";
 
 // =============================================================================
 // SSE Stream Event Schemas
@@ -24,20 +22,21 @@ const sseEventFieldShape = {
   stage: z.string().nullish(),
 };
 
-/** Frontend projection of the canonical citation partial-failure contract. */
-export const CITATION_PARTIAL_FAILURE_STATUS_CONTRACT = sseStatusContracts.citationPartialFailure;
+/** Identifies the non-fatal citation conversion warning emitted by SSE streams. */
+export const CITATION_PARTIAL_FAILURE_STATUS_CODE = "citation.partial-failure";
+
+const CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE = false;
+const CITATION_PARTIAL_FAILURE_STATUS_STAGE = "citation";
 
 /** Validates citation partial-failure statuses before they enter durable UI state. */
 export const CitationPartialFailureStatusSchema = z.object({
   ...sseEventFieldShape,
-  code: z
-    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code)
-    .brand<"CitationPartialFailureStatusCode">(),
+  code: z.literal(CITATION_PARTIAL_FAILURE_STATUS_CODE).brand<"CitationPartialFailureStatusCode">(),
   retryable: z
-    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.retryable)
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_RETRYABLE)
     .brand<"CitationPartialFailureStatusRetryable">(),
   stage: z
-    .literal(CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.stage)
+    .literal(CITATION_PARTIAL_FAILURE_STATUS_STAGE)
     .brand<"CitationPartialFailureStatusStage">(),
 });
 
@@ -45,8 +44,8 @@ export const CitationPartialFailureStatusSchema = z.object({
 const GenericStreamStatusSchema = z
   .object(sseEventFieldShape)
   .refine(
-    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code,
-    "Citation partial-failure statuses must satisfy their specialized contract",
+    (streamStatus) => streamStatus.code !== CITATION_PARTIAL_FAILURE_STATUS_CODE,
+    "Citation partial-failure statuses must satisfy their required fields",
   );
 
 /** Status message from SSE status events. */

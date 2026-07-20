@@ -9,10 +9,10 @@ import java.util.Set;
  * Owns Qdrant collection names used by the ingestion and retrieval pipelines.
  */
 public class QdrantCollectionNames {
-    private String books = "java-chat-books";
-    private String docs = "java-docs";
-    private String articles = "java-articles";
-    private String pdfs = "java-pdfs";
+    private String books = "java-chat-prod-qwen3-embedding-4b-2560-books";
+    private String docs = "java-chat-prod-qwen3-embedding-4b-2560-docs";
+    private String articles = "java-chat-prod-qwen3-embedding-4b-2560-articles";
+    private String pdfs = "java-chat-prod-qwen3-embedding-4b-2560-pdfs";
 
     /**
      * Creates collection-name defaults used when no explicit configuration is provided.

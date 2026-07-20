@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.model.GuidedLesson;
+import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -51,9 +52,13 @@ class GuidedLessonCuratedContentTest {
         assertUniqueLessonSlugs(curatedResourceSlugs, "curated lesson classpath resources");
         assertEquals(Set.copyOf(tocLessonSlugs), Set.copyOf(curatedResourceSlugs));
         for (String curatedLessonSlug : curatedResourceSlugs) {
+            String curatedLessonMarkdown = readCuratedLessonMarkdown(curatedLessonSlug);
             assertFalse(
-                    readCuratedLessonMarkdown(curatedLessonSlug).isBlank(),
+                    curatedLessonMarkdown.isBlank(),
                     () -> "Curated lesson markdown must not be blank: " + curatedLessonSlug);
+            assertFalse(
+                    curatedLessonMarkdown.startsWith("# "),
+                    () -> "GuidedLessonHeader owns the sole level-one heading for: " + curatedLessonSlug);
         }
     }
 
@@ -109,6 +114,14 @@ class GuidedLessonCuratedContentTest {
     }
 
     @Test
+    void modulesLessonRendersTheGreetingWithoutDuplicatePunctuation() throws IOException {
+        String modulesLessonMarkdown = readCuratedLessonMarkdown("modules");
+
+        assertTrue(modulesLessonMarkdown.contains("The program prints `Welcome, Maya.` If"));
+        assertFalse(modulesLessonMarkdown.contains("The program prints `Welcome, Maya.`."));
+    }
+
+    @Test
     void rejectsListedLessonWithoutPackagedCuratedMarkdown() {
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
         GuidedLesson listedLesson = new GuidedLesson();
@@ -135,6 +148,7 @@ class GuidedLessonCuratedContentTest {
                 mock(EnrichmentService.class),
                 mock(ChatService.class),
                 mock(SystemPromptConfig.class),
+                new MarkdownService(new UnifiedMarkdownService()),
                 TEST_JDK_VERSION);
     }
 

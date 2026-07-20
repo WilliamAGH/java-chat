@@ -21,10 +21,8 @@ SSE event types (see `SseConstants`):
 - `error` → shared status/error payload for a terminal stream failure
 
 `status` and `error` both serialize the payload fields below. The event type determines whether
-the payload is a progress/warning notice or a terminal failure. Citation warning metadata is
-projected directly from the canonical
-[`sse-status-contracts.json`](../src/main/resources/sse-status-contracts.json) resource by both the
-backend and frontend; this document does not restate those governed values.
+the payload is a progress/warning notice or a terminal failure. Backend emission and frontend
+validation each own the small declaration required at their transport boundary.
 
 | Field | Meaning |
 | --- | --- |

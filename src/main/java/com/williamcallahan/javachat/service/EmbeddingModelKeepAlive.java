@@ -13,9 +13,8 @@ import org.springframework.stereotype.Component;
 /**
  * Probes the configured embedding provider on a fixed cadence and reports its lifecycle state.
  *
- * <p>OpenAI-compatible embedding providers scale to zero when idle: serverless cloud hosts
- * (Novita) spin the model down between bursts, and self-hosted servers (LM Studio, Ollama)
- * unload after an idle TTL. The first request after either pays the full model spin-up on
+ * <p>OpenAI-compatible embedding providers can scale to zero when idle, while self-hosted servers
+ * can unload models after an idle TTL. The first request after either pays the full model spin-up on
  * the user's critical path — observed in production at 53.5s on a live chat turn and
  * reproduced at 23.7s cold versus 1.0s warm against the same provider. A probe cadence
  * below common scale-down windows can reduce how often user requests pay that startup cost.

@@ -1,63 +1,15 @@
 import { Marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
 import DOMPurify from "dompurify";
-import enrichmentKindsManifest from "../../../../src/main/resources/enrichment-kinds.manifest?raw";
 
-/**
- * Display metadata projected from the canonical enrichment-kind manifest.
- */
+/** Display metadata owned by the browser renderer. */
 interface EnrichmentPresentation {
   title: string;
   iconHtml: string;
 }
 
-const ENRICHMENT_MANIFEST_FIELD_DELIMITER = "|";
-const CARRIAGE_RETURN = "\r";
 const NEWLINE = "\n";
 const ZERO_WIDTH_SPACE_CODE_POINT = 0x200b;
 const WORD_JOINER_CODE_POINT = 0x2060;
-
-function parseEnrichmentKindsManifest(
-  manifestSource: string,
-): ReadonlyMap<string, EnrichmentPresentation> {
-  if (!manifestSource) {
-    throw new Error("Enrichment kind manifest must contain at least one row");
-  }
-
-  const manifestRows = manifestSource.split(NEWLINE);
-  if (manifestRows.at(-1) === "") {
-    manifestRows.pop();
-  }
-
-  const enrichmentPresentationsByToken = new Map<string, EnrichmentPresentation>();
-  for (const [rowIndex, manifestRow] of manifestRows.entries()) {
-    const normalizedManifestRow = manifestRow.endsWith(CARRIAGE_RETURN)
-      ? manifestRow.slice(0, -1)
-      : manifestRow;
-    const [enrichmentToken, presentationTitle, iconHtml, ...unexpectedFields] =
-      normalizedManifestRow.split(ENRICHMENT_MANIFEST_FIELD_DELIMITER);
-
-    if (
-      !isCanonicalEnrichmentToken(enrichmentToken) ||
-      !presentationTitle ||
-      presentationTitle !== presentationTitle.trim() ||
-      !iconHtml.startsWith("<svg") ||
-      !iconHtml.endsWith("</svg>") ||
-      unexpectedFields.length > 0
-    ) {
-      throw new Error(`Malformed enrichment kind manifest row ${rowIndex + 1}`);
-    }
-    if (enrichmentPresentationsByToken.has(enrichmentToken)) {
-      throw new Error(`Duplicate enrichment kind manifest token: ${enrichmentToken}`);
-    }
-
-    enrichmentPresentationsByToken.set(enrichmentToken, {
-      title: presentationTitle,
-      iconHtml,
-    });
-  }
-
-  return enrichmentPresentationsByToken;
-}
 
 interface EnrichmentToken extends Tokens.Generic {
   type: "enrichment";
@@ -82,22 +34,48 @@ const COMMONMARK_INDENTED_CODE_SPACES = 4;
 type FenceMarker = { character: string; length: number };
 type BacktickRun = { length: number };
 
-function isCanonicalEnrichmentToken(enrichmentToken: string): boolean {
-  if (!enrichmentToken || enrichmentToken !== enrichmentToken.trim()) {
-    return false;
-  }
-  for (const tokenCharacter of enrichmentToken) {
-    const tokenCharacterCode = tokenCharacter.charCodeAt(0);
-    const isLowercaseAsciiLetter =
-      tokenCharacterCode >= ASCII_LOWERCASE_START && tokenCharacterCode <= ASCII_LOWERCASE_END;
-    if (!isLowercaseAsciiLetter && tokenCharacter !== "-") {
-      return false;
-    }
-  }
-  return true;
-}
-
-const ENRICHMENT_PRESENTATIONS_BY_TOKEN = parseEnrichmentKindsManifest(enrichmentKindsManifest);
+const ENRICHMENT_PRESENTATIONS_BY_TOKEN: ReadonlyMap<string, EnrichmentPresentation> = new Map([
+  [
+    "hint",
+    {
+      title: "Helpful Hints",
+      iconHtml:
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z"/></svg>',
+    },
+  ],
+  [
+    "background",
+    {
+      title: "Background Context",
+      iconHtml:
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z"/></svg>',
+    },
+  ],
+  [
+    "reminder",
+    {
+      title: "Important Reminders",
+      iconHtml:
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
+    },
+  ],
+  [
+    "warning",
+    {
+      title: "Warning",
+      iconHtml:
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z"/></svg>',
+    },
+  ],
+  [
+    "example",
+    {
+      title: "Example",
+      iconHtml:
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>',
+    },
+  ],
+]);
 
 function scanFenceMarker(src: string, index: number): FenceMarker | null {
   if (index < 0 || index >= src.length) {

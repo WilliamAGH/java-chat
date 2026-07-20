@@ -18,8 +18,8 @@ import org.springframework.stereotype.Service;
  * @param hybridVector gRPC-based hybrid vector upsert service
  * @param chunks chunk processing pipeline
  * @param hasher content hash helper for deterministic vector IDs
- * @param localStore local snapshot and chunk storage
- * @param fileMarkers canonical file-level ingestion marker store
+ * @param localStore canonical local snapshot and chunk-marker storage
+ * @param fileMarkers file-level ingestion marker storage
  * @param router routes documents to the correct Qdrant collection
  */
 @Service

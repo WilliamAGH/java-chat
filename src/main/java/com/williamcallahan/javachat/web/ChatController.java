@@ -146,10 +146,10 @@ public class ChatController extends BaseController {
                                             "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
                                             requestToken);
 
-                                    // Cite the exact official documents supplied to the model so source attribution
-                                    // cannot drift from the answer context. Conversion failures remain observable.
+                                    // Cite only documents supplied to the model. Exact overload queries narrow this
+                                    // same context by authoritative source-anchor metadata before conversion.
                                     RetrievalService.CitationOutcome citationOutcome =
-                                            retrievalService.toCitations(promptOutcome.documents());
+                                            retrievalService.toCitationsForQuery(latest, promptOutcome.documents());
                                     final List<Citation> finalCitations = citationOutcome.citations();
 
                                     // Stream with provider transparency - surfaces which LLM is responding
@@ -241,16 +241,16 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/diagnostics/retrieval")
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
-        // Mirror token-constrained model constraints used in buildPromptWithContext
-        RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
-                query, ModelConfiguration.RAG_LIMIT_CONSTRAINED, ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                chatService.retrieveTokenConstrainedOfficialDocumentation(query);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations =
-                retrievalService.toCitations(outcome.documents()).citations();
-        if (outcome.notices().isEmpty()) {
+        List<Citation> citations = retrievalService
+                .toCitationsForQuery(query, retrievalOutcome.documents())
+                .citations();
+        if (retrievalOutcome.notices().isEmpty()) {
             return RetrievalDiagnosticsResponse.success(citations);
         }
-        String noticeDetails = outcome.notices().stream()
+        String noticeDetails = retrievalOutcome.notices().stream()
                 .map(notice -> notice.summary() + ": " + notice.details())
                 .reduce((first, second) -> first + "; " + second)
                 .orElse("Retrieval warnings present");
