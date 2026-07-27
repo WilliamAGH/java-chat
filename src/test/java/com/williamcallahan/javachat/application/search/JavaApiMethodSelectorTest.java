@@ -104,6 +104,8 @@ class JavaApiMethodSelectorTest {
                 .isEmpty());
         assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Stream.of().<String>map(Function)")
                 .isEmpty());
+        assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual().start(Run nable)")
+                .isEmpty());
         assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual().Start()")
                 .isEmpty());
         assertTrue(JavaApiMethodSelector.uniqueExactOverloadFromQuery("Thread.ofVirtual().")
