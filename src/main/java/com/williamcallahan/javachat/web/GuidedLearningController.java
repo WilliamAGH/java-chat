@@ -288,15 +288,9 @@ public class GuidedLearningController extends BaseController {
                                     promptOutcome.structuredPrompt(),
                                     appProperties.getLlm().getTemperature())
                             .flatMapMany(streamingResult -> {
-                                List<org.springframework.ai.document.Document> retainedLessonContextDocuments =
-                                        promptOutcome.lessonContextDocuments().stream()
-                                                .filter(document -> streamingResult
-                                                        .contextDocumentIds()
-                                                        .contains(document.getId()))
-                                                .toList();
                                 RetrievalService.CitationOutcome citationOutcome =
-                                        guidedService.citationOutcomeForContextDocuments(
-                                                retainedLessonContextDocuments);
+                                        guidedService.citationOutcomeForRetainedContext(
+                                                promptOutcome, streamingResult.contextDocumentIds());
                                 List<Citation> finalCitations = citationOutcome.citations();
 
                                 // Provider event first - surfaces which LLM is handling this request

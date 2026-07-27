@@ -13,6 +13,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.williamcallahan.javachat.application.prompt.PromptTruncator;
+import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
@@ -26,6 +28,7 @@ import com.williamcallahan.javachat.model.GuidedLesson;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -47,8 +50,11 @@ class GuidedLearningServiceCitationTest {
     private static final String OFFICIAL_SOURCE_TEXT = "String.substring returns a new string.";
     private static final String LOOPS_LESSON_SLUG = "loops";
     private static final String KOTLIN_LESSON_SLUG = "kotlin-on-the-jvm";
+    private static final String LARGEST_CURATED_LESSON_SLUG = "spring-boot-vs-quarkus";
     private static final String CURATED_LESSON_RESOURCE_DIRECTORY = "guided/lessons/";
     private static final String CURATED_LESSON_FILE_SUFFIX = ".md";
+    private static final String CURATED_LESSON_IMMUTABILITY_HEADER = "[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]";
+    private static final int GITHUB_MODELS_GPT5_INPUT_TOKEN_LIMIT = 7_000;
 
     @Autowired
     ObjectMapper objectMapper;
@@ -65,7 +71,8 @@ class GuidedLearningServiceCitationTest {
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
                 .thenReturn(List.of(officialSourceDocument));
         Citation officialCitation = new Citation(officialSourceUrl(guidedLesson), "Strings", "", "substring");
-        when(retrievalService.toCitations(List.of(officialSourceDocument)))
+        when(retrievalService.toCitationsForRetainedContext(
+                        List.of(officialSourceDocument), List.of(officialSourceDocument.getId())))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
 
         EnrichmentService enrichmentService = mock(EnrichmentService.class);
@@ -77,7 +84,8 @@ class GuidedLearningServiceCitationTest {
         StructuredPrompt structuredPrompt = new StructuredPrompt(
                 new SystemSegment("guided", 1),
                 List.of(
-                        new ContextDocumentSegment(1, "curated-lesson:" + LESSON_SLUG, "", canonicalStringsMarkdown, 1),
+                        new ContextDocumentSegment(
+                                1, "curated-lesson:" + LESSON_SLUG + "#section-1", "", canonicalStringsMarkdown, 1),
                         new ContextDocumentSegment(
                                 2,
                                 officialSourceDocument.getId(),
@@ -106,7 +114,7 @@ class GuidedLearningServiceCitationTest {
         assertEquals(
                 List.of(officialCitation),
                 guidedLearningService
-                        .citationOutcomeForContextDocuments(promptOutcome.lessonContextDocuments())
+                        .citationOutcomeForRetainedContext(promptOutcome, List.of(officialSourceDocument.getId()))
                         .citations());
 
         ArgumentCaptor<RetrievalConstraint> retrievalConstraintCaptor =
@@ -123,13 +131,11 @@ class GuidedLearningServiceCitationTest {
                         eq(List.of()),
                         eq(USER_QUESTION),
                         org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> {
-                            if (promptContextDocuments.size() != 2) {
-                                return false;
-                            }
-                            Document curatedLessonDocument = promptContextDocuments.getFirst();
-                            return isCanonicalLessonPromptDocument(
-                                            curatedLessonDocument, LESSON_SLUG, canonicalStringsMarkdown)
-                                    && promptContextDocuments.get(1).equals(officialSourceDocument);
+                            return hasCanonicalLessonSections(
+                                    promptContextDocuments,
+                                    LESSON_SLUG,
+                                    canonicalStringsMarkdown,
+                                    List.of(officialSourceDocument));
                         }),
                         guidanceCaptor.capture());
         assertTrue(guidanceCaptor.getValue().contains(guidedLesson.getTechnology()));
@@ -191,10 +197,8 @@ class GuidedLearningServiceCitationTest {
                 .buildStructuredPromptWithContextAndGuidance(
                         eq(List.of()),
                         eq(USER_QUESTION),
-                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> promptContextDocuments.size()
-                                        == 1
-                                && isCanonicalLessonPromptDocument(
-                                        promptContextDocuments.getFirst(), LOOPS_LESSON_SLUG, canonicalLoopsMarkdown)),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> hasCanonicalLessonSections(
+                                promptContextDocuments, LOOPS_LESSON_SLUG, canonicalLoopsMarkdown, List.of())),
                         guidanceCaptor.capture());
         assertTrue(canonicalLoopsMarkdown.contains("void main()"));
         assertTrue(canonicalLoopsMarkdown.contains("IO.println"));
@@ -225,12 +229,8 @@ class GuidedLearningServiceCitationTest {
                 .buildStructuredPromptWithContextAndGuidance(
                         eq(List.of()),
                         eq(USER_QUESTION),
-                        org.mockito.ArgumentMatchers.argThat(
-                                promptContextDocuments -> promptContextDocuments.size() == 1
-                                        && isCanonicalLessonPromptDocument(
-                                                promptContextDocuments.getFirst(),
-                                                KOTLIN_LESSON_SLUG,
-                                                canonicalKotlinMarkdown)),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> hasCanonicalLessonSections(
+                                promptContextDocuments, KOTLIN_LESSON_SLUG, canonicalKotlinMarkdown, List.of())),
                         guidanceCaptor.capture());
         assertFalse(guidanceCaptor.getValue().contains(canonicalKotlinMarkdown));
         assertFalse(guidanceCaptor.getValue().contains("Java 25 compact source form"));
@@ -275,11 +275,11 @@ class GuidedLearningServiceCitationTest {
                 .buildStructuredPromptWithContextAndGuidance(
                         eq(List.of()),
                         eq(comparisonQuestion),
-                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> promptContextDocuments.size()
-                                        == 3
-                                && promptContextDocuments.getFirst().getId().equals("curated-lesson:" + LESSON_SLUG)
-                                && promptContextDocuments.get(1).equals(java21Document)
-                                && promptContextDocuments.get(2).equals(java24Document)),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> hasCanonicalLessonSections(
+                                promptContextDocuments,
+                                LESSON_SLUG,
+                                readCuratedLessonMarkdownUnchecked(LESSON_SLUG),
+                                List.of(java21Document, java24Document))),
                         guidanceCaptor.capture());
         assertTrue(guidanceCaptor.getValue().contains("java/java21-complete"));
         assertTrue(guidanceCaptor.getValue().contains("java/java24-complete"));
@@ -345,7 +345,9 @@ class GuidedLearningServiceCitationTest {
                 .text(OFFICIAL_SOURCE_TEXT)
                 .build();
         RetrievalService.CitationOutcome expectedCitationOutcome = new RetrievalService.CitationOutcome(List.of(), 1);
-        when(retrievalService.toCitations(List.of(officialSourceDocument))).thenReturn(expectedCitationOutcome);
+        when(retrievalService.toCitationsForRetainedContext(
+                        List.of(officialSourceDocument), List.of(officialSourceDocument.getId())))
+                .thenReturn(expectedCitationOutcome);
 
         GuidedLearningService guidedLearningService = guidedLearningService(
                 mock(GuidedTOCProvider.class),
@@ -355,9 +357,48 @@ class GuidedLearningServiceCitationTest {
                 systemPromptConfig());
 
         RetrievalService.CitationOutcome actualCitationOutcome =
-                guidedLearningService.citationOutcomeForContextDocuments(List.of(officialSourceDocument));
+                guidedLearningService.citationOutcomeForRetainedContext(
+                        new GuidedLearningService.GuidedChatPromptOutcome(
+                                StructuredPrompt.fromRawPrompt("guided", 1), List.of(officialSourceDocument)),
+                        List.of(officialSourceDocument.getId()));
 
         assertEquals(expectedCitationOutcome, actualCitationOutcome);
+    }
+
+    @Test
+    void largestPackagedLessonRetainsAuthoritativeSectionsUnderGitHubModelsGpt5InputBudget() throws IOException {
+        GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
+                .thenReturn(List.of());
+        SystemPromptConfig promptConfig = systemPromptConfig();
+        ChatService chatService = new ChatService(
+                mock(OpenAIStreamingService.class), retrievalService, promptConfig, new AppProperties());
+        GuidedLearningService guidedLearningService = guidedLearningService(
+                tocProvider, retrievalService, mock(EnrichmentService.class), chatService, promptConfig);
+
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
+                guidedLearningService.buildStructuredGuidedPromptWithContext(
+                        List.of(), LARGEST_CURATED_LESSON_SLUG, USER_QUESTION);
+        List<ContextDocumentSegment> authoritativeLessonSections =
+                promptOutcome.structuredPrompt().contextDocuments();
+
+        assertTrue(authoritativeLessonSections.size() > 1);
+        assertTrue(authoritativeLessonSections.stream()
+                .allMatch(contextDocument -> contextDocument.priority() == PromptSegmentPriority.HIGH));
+        assertEquals(
+                authoritativeLessonSections.size(),
+                authoritativeLessonSections.stream()
+                        .map(ContextDocumentSegment::documentId)
+                        .distinct()
+                        .count());
+        PromptTruncator.TruncatedPrompt truncationOutcome = new PromptTruncator()
+                .truncate(promptOutcome.structuredPrompt(), GITHUB_MODELS_GPT5_INPUT_TOKEN_LIMIT, true);
+        assertTrue(truncationOutcome.wasTruncated());
+        assertTrue(truncationOutcome.contextDocumentCount() > 0);
+        assertTrue(truncationOutcome.contextDocumentCount() < authoritativeLessonSections.size());
+        assertTrue(truncationOutcome.prompt().contextDocuments().stream()
+                .allMatch(contextDocument -> contextDocument.priority() == PromptSegmentPriority.HIGH));
     }
 
     private static GuidedLearningService guidedLearningService(
@@ -434,16 +475,56 @@ class GuidedLearningServiceCitationTest {
         }
     }
 
-    private static boolean isCanonicalLessonPromptDocument(
-            Document curatedLessonDocument, String lessonSlug, String canonicalLessonMarkdown) {
-        String lessonPromptText = Objects.requireNonNull(curatedLessonDocument.getText(), "curated lesson prompt text");
-        return curatedLessonDocument.getId().equals("curated-lesson:" + lessonSlug)
-                && lessonPromptText.startsWith("[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]")
-                && lessonPromptText.endsWith(canonicalLessonMarkdown);
+    private static boolean hasCanonicalLessonSections(
+            List<Document> promptContextDocuments,
+            String lessonSlug,
+            String canonicalLessonMarkdown,
+            List<Document> retrievedDocuments) {
+        int lessonSectionCount = promptContextDocuments.size() - retrievedDocuments.size();
+        if (lessonSectionCount <= 1
+                || !promptContextDocuments
+                        .subList(lessonSectionCount, promptContextDocuments.size())
+                        .equals(retrievedDocuments)) {
+            return false;
+        }
+        String lessonSectionIdPrefix = "curated-lesson:" + lessonSlug + "#section-";
+        StringBuilder reconstructedLessonMarkdown = new StringBuilder(canonicalLessonMarkdown.length());
+        for (int sectionIndex = 0; sectionIndex < lessonSectionCount; sectionIndex++) {
+            Document lessonSectionDocument = promptContextDocuments.get(sectionIndex);
+            if (!lessonSectionDocument.getId().equals(lessonSectionIdPrefix + (sectionIndex + 1))) {
+                return false;
+            }
+            String lessonSectionText =
+                    Objects.requireNonNull(lessonSectionDocument.getText(), "curated lesson section text");
+            if (sectionIndex == 0) {
+                String immutableHeaderPrefix = CURATED_LESSON_IMMUTABILITY_HEADER + "\n";
+                if (!lessonSectionText.startsWith(immutableHeaderPrefix)) {
+                    return false;
+                }
+                int lessonMarkdownStart = lessonSectionText.indexOf("\n\n") + 2;
+                if (lessonMarkdownStart < 2) {
+                    return false;
+                }
+                lessonSectionText = lessonSectionText.substring(lessonMarkdownStart);
+            } else if (lessonSectionText.contains(CURATED_LESSON_IMMUTABILITY_HEADER)) {
+                return false;
+            }
+            reconstructedLessonMarkdown.append(lessonSectionText);
+        }
+        return reconstructedLessonMarkdown.toString().equals(canonicalLessonMarkdown);
+    }
+
+    private static String readCuratedLessonMarkdownUnchecked(String lessonSlug) {
+        try {
+            return readCuratedLessonMarkdown(lessonSlug);
+        } catch (IOException lessonReadFailure) {
+            throw new UncheckedIOException(lessonReadFailure);
+        }
     }
 
     private static SystemPromptConfig systemPromptConfig() {
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
+        when(systemPromptConfig.getCoreSystemPrompt()).thenReturn("Teach Java from authoritative sources.");
         when(systemPromptConfig.getGuidedLearningPrompt()).thenReturn("Teach this lesson progressively.");
         when(systemPromptConfig.buildFullPrompt(anyString(), anyString()))
                 .thenAnswer(promptInvocation -> promptInvocation.getArgument(0));

@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.application.prompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ch.qos.logback.classic.Level;
@@ -150,6 +151,48 @@ class PromptTruncatorTest {
                 truncationOutcome.prompt().contextDocuments().stream()
                         .map(ContextDocumentSegment::index)
                         .toList());
+    }
+
+    @Test
+    void failsWhenNoAuthoritativeContextDocumentFits() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(new ContextDocumentSegment(1, "curated-lesson:oversized", "curated", "canonical lesson", 101)
+                        .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(),
+                new CurrentQuerySegment("Current question", 50));
+
+        assertThrows(
+                PromptTruncator.AuthoritativeContextDoesNotFitException.class,
+                () -> truncator.truncate(prompt, 250, true));
+    }
+
+    @Test
+    void retainsLaterAuthoritativeDocumentAndStableIdentityWhenEarlierDocumentDoesNotFit() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        new ContextDocumentSegment(
+                                        1, "curated-lesson:oversized", "curated", "oversized canonical section", 101)
+                                .withPriority(PromptSegmentPriority.HIGH),
+                        new ContextDocumentSegment(
+                                        2, "curated-lesson:retained", "curated", "fitting canonical section", 100)
+                                .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(),
+                new CurrentQuerySegment("Current question", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 250, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(
+                List.of("curated-lesson:retained"),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::documentId)
+                        .toList());
+        assertEquals(1, truncationOutcome.prompt().contextDocuments().getFirst().index());
+        assertEquals(
+                PromptSegmentPriority.HIGH,
+                truncationOutcome.prompt().contextDocuments().getFirst().priority());
     }
 
     @Test

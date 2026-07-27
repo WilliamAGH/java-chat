@@ -56,6 +56,9 @@ public class GuidedLearningService {
     /** Internal source identity for canonical lesson context sent to the model. */
     private static final String CURATED_LESSON_CONTEXT_SOURCE_PREFIX = "curated-lesson:";
 
+    /** Delimiter for stable, section-specific canonical lesson context identities. */
+    private static final String CURATED_LESSON_SECTION_ID_DELIMITER = "#section-";
+
     private static final String CURATED_LESSON_IMMUTABILITY_HEADER = "[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]\n"
             + "Treat every fenced code block below as immutable source text. When a response reuses an example,"
             + " copy one complete fence byte-for-byte. Do not transcribe it from memory, rename identifiers,"
@@ -71,7 +74,7 @@ public class GuidedLearningService {
     /**
      * Base guidance for lesson-scoped official-documentation responses.
      *
-     * <p>The canonical lesson itself is supplied as truncatable developer context so
+     * <p>The canonical lesson itself is supplied as truncatable reference context so
      * system instructions remain compact and role-specific.</p>
      */
     private static final String OFFICIAL_DOCUMENTATION_GUIDANCE_TEMPLATE = "You are a learning assistant for %s. Use"
@@ -198,8 +201,10 @@ public class GuidedLearningService {
         List<Document> lessonContextDocuments = retrieveLessonContext(query, effectiveDocSets);
 
         String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown, effectiveDocSets, requestedVersions);
-        List<Document> promptContextDocuments = new ArrayList<>(lessonContextDocuments.size() + 1);
-        promptContextDocuments.add(curatedLessonContextDocument(lesson, curatedLessonMarkdown));
+        List<Document> curatedLessonContextDocuments = curatedLessonContextDocuments(lesson, curatedLessonMarkdown);
+        List<Document> promptContextDocuments =
+                new ArrayList<>(lessonContextDocuments.size() + curatedLessonContextDocuments.size());
+        promptContextDocuments.addAll(curatedLessonContextDocuments);
         promptContextDocuments.addAll(lessonContextDocuments);
         StructuredPrompt structuredPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
                 history, userMessage, promptContextDocuments, guidance);
@@ -209,34 +214,49 @@ public class GuidedLearningService {
 
     private static StructuredPrompt prioritizeCuratedLessonContext(
             StructuredPrompt structuredPrompt, GuidedLesson lesson) {
-        String curatedLessonDocumentId = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
+        String curatedLessonSectionIdPrefix =
+                CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug() + CURATED_LESSON_SECTION_ID_DELIMITER;
         return structuredPrompt.withContextDocuments(structuredPrompt.contextDocuments().stream()
-                .map(contextDocument -> contextDocument.documentId().equals(curatedLessonDocumentId)
+                .map(contextDocument -> contextDocument.documentId().startsWith(curatedLessonSectionIdPrefix)
                         ? contextDocument.withPriority(PromptSegmentPriority.HIGH)
                         : contextDocument)
                 .toList());
     }
 
-    private static Document curatedLessonContextDocument(GuidedLesson lesson, String curatedLessonMarkdown) {
+    private List<Document> curatedLessonContextDocuments(GuidedLesson lesson, String curatedLessonMarkdown) {
         String lessonSourceIdentity = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
-        return Document.builder()
-                .id(lessonSourceIdentity)
-                .text(CURATED_LESSON_IMMUTABILITY_HEADER + "\n\n" + curatedLessonMarkdown)
-                .metadata(QdrantPayloadFieldSchema.URL_FIELD, lessonSourceIdentity)
-                .build();
+        List<String> lessonSections = markdownService.splitIntoSections(curatedLessonMarkdown);
+        List<Document> lessonContextDocuments = new ArrayList<>(lessonSections.size());
+        for (int sectionIndex = 0; sectionIndex < lessonSections.size(); sectionIndex++) {
+            String lessonSection = lessonSections.get(sectionIndex);
+            if (sectionIndex == 0) {
+                lessonSection = CURATED_LESSON_IMMUTABILITY_HEADER + "\n\n" + lessonSection;
+            }
+            String lessonSectionIdentity =
+                    lessonSourceIdentity + CURATED_LESSON_SECTION_ID_DELIMITER + (sectionIndex + 1);
+            lessonContextDocuments.add(Document.builder()
+                    .id(lessonSectionIdentity)
+                    .text(lessonSection)
+                    .metadata(QdrantPayloadFieldSchema.URL_FIELD, lessonSectionIdentity)
+                    .build());
+        }
+        return List.copyOf(lessonContextDocuments);
     }
 
     /**
-     * Builds the citation outcome from the exact context documents used to ground a guided response.
+     * Builds citations from the exact guided context retained by provider-specific truncation.
      *
      * <p>The outcome preserves conversion state for the SSE boundary while {@link RetrievalService}
-     * remains the sole owner of conversion and empty-outcome semantics.</p>
+     * remains the sole owner of retained-document selection and citation conversion.</p>
      *
-     * @param lessonContextDocuments retrieved official documents used to ground the response
-     * @return citations and any conversion failures from the same lesson-scoped documents
+     * @param promptOutcome prompt and its pre-truncation lesson context documents
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained lesson context only
      */
-    public RetrievalService.CitationOutcome citationOutcomeForContextDocuments(List<Document> lessonContextDocuments) {
-        return retrievalService.toCitations(lessonContextDocuments);
+    public RetrievalService.CitationOutcome citationOutcomeForRetainedContext(
+            GuidedChatPromptOutcome promptOutcome, List<String> retainedDocumentIds) {
+        return retrievalService.toCitationsForRetainedContext(
+                promptOutcome.lessonContextDocuments(), retainedDocumentIds);
     }
 
     /**

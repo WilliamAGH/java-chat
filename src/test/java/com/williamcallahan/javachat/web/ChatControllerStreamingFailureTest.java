@@ -293,8 +293,6 @@ class ChatControllerStreamingFailureTest {
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
-        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
-                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.never());
 
@@ -461,17 +459,23 @@ class ChatControllerStreamingFailureTest {
                 new AppProperties());
         Document officialPromptDocument = mock(Document.class);
         when(officialPromptDocument.getId()).thenReturn("official-prompt-document");
+        Document truncatedPromptDocument = mock(Document.class);
+        when(truncatedPromptDocument.getId()).thenReturn("truncated-prompt-document");
         Citation officialCitation = new Citation(
                 "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html",
                 "List",
                 "of()",
                 "Creates an unmodifiable list.");
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        ChatService.StructuredPromptOutcome promptOutcome = new ChatService.StructuredPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1),
+                List.of(),
+                List.of(officialPromptDocument, truncatedPromptDocument));
         when(chatService.buildStructuredPromptWithContextOutcome(
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
-                .thenReturn(new ChatService.StructuredPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(officialPromptDocument)));
-        when(retrievalService.toCitationsForQuery(USER_QUERY, List.of(officialPromptDocument)))
+                .thenReturn(promptOutcome);
+        when(chatService.citationOutcomeForRetainedContext(
+                        USER_QUERY, promptOutcome, List.of(officialPromptDocument.getId())))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(streamingService.isAvailable()).thenReturn(true);
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
@@ -494,7 +498,9 @@ class ChatControllerStreamingFailureTest {
 
         assertEquals(1, streamedCitations.size());
         assertEquals(officialCitation.getUrl(), streamedCitations.getFirst().getUrl());
-        verify(retrievalService).toCitationsForQuery(USER_QUERY, List.of(officialPromptDocument));
+        verify(chatService)
+                .citationOutcomeForRetainedContext(USER_QUERY, promptOutcome, List.of(officialPromptDocument.getId()));
+        verifyNoInteractions(retrievalService);
         verify(chatService, never()).citationsFor(anyString());
     }
 
@@ -521,11 +527,13 @@ class ChatControllerStreamingFailureTest {
                 "of(E,E)",
                 "Creates an unmodifiable list containing two elements.");
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        ChatService.StructuredPromptOutcome promptOutcome = new ChatService.StructuredPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(broadPromptDocument));
         when(chatService.buildStructuredPromptWithContextOutcome(
                         anyList(), eq(exactOverloadQuery), eq(ModelConfiguration.DEFAULT_MODEL)))
-                .thenReturn(new ChatService.StructuredPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(broadPromptDocument)));
-        when(retrievalService.toCitationsForQuery(exactOverloadQuery, List.of(broadPromptDocument)))
+                .thenReturn(promptOutcome);
+        when(chatService.citationOutcomeForRetainedContext(
+                        exactOverloadQuery, promptOutcome, List.of(broadPromptDocument.getId())))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(exactOverloadCitation), 1));
         when(streamingService.isAvailable()).thenReturn(true);
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
@@ -564,7 +572,10 @@ class ChatControllerStreamingFailureTest {
                 exactOverloadCitation.getUrl(), streamedCitations.getFirst().getUrl());
         assertEquals("of(E,E)", streamedCitations.getFirst().getAnchor());
         assertEquals(1, partialFailureStatusCount);
-        verify(retrievalService).toCitationsForQuery(exactOverloadQuery, List.of(broadPromptDocument));
+        verify(chatService)
+                .citationOutcomeForRetainedContext(
+                        exactOverloadQuery, promptOutcome, List.of(broadPromptDocument.getId()));
+        verifyNoInteractions(retrievalService);
         verify(chatService, never()).citationsFor(anyString());
     }
 
@@ -588,7 +599,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+        when(chatService.citationOutcomeForRetainedContext(
+                        eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 2));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
@@ -650,7 +662,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+        when(chatService.citationOutcomeForRetainedContext(
+                        eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(
@@ -696,7 +709,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+        when(chatService.citationOutcomeForRetainedContext(
+                        eq(USER_QUERY), any(ChatService.StructuredPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(

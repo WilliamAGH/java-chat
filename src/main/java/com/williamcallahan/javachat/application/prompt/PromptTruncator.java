@@ -4,6 +4,7 @@ import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import java.io.Serial;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -46,10 +47,15 @@ public class PromptTruncator {
      * @param maxTokens maximum allowed tokens
      * @param isGpt5Family true if targeting GPT-5 family models (affects notice text)
      * @return truncation result with the fitted prompt and truncation metadata
+     * @throws AuthoritativeContextDoesNotFitException when no HIGH-priority context segment fits
      */
     public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens, boolean isGpt5Family) {
         int reservedTokens =
                 prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
+        List<ContextDocumentSegment> authoritativeContextDocuments = prompt.contextDocuments().stream()
+                .filter(contextDocument -> contextDocument.priority() == PromptSegmentPriority.HIGH)
+                .toList();
+        requireAuthoritativeContextFits(authoritativeContextDocuments, maxTokens, reservedTokens);
 
         if (reservedTokens >= maxTokens) {
             log.warn(
@@ -69,7 +75,7 @@ public class PromptTruncator {
         int originalTurnCount = prompt.conversationHistory().size();
 
         List<ContextDocumentSegment> fittingHighPriorityDocuments =
-                fitDocumentsByPriority(prompt.contextDocuments(), available, PromptSegmentPriority.HIGH);
+                fitDocumentsByPriority(authoritativeContextDocuments, available, PromptSegmentPriority.HIGH);
         available -= sumTokens(fittingHighPriorityDocuments);
 
         // Fit conversation history (newest first - reverse to prioritize recent)
@@ -150,9 +156,11 @@ public class PromptTruncator {
      * their original order and re-indexed with sequential [CTX N] markers.</p>
      */
     private List<ContextDocumentSegment> fitDocumentsByPriority(
-            List<ContextDocumentSegment> docs, int availableTokens, PromptSegmentPriority retentionPriority) {
+            List<ContextDocumentSegment> contextDocuments,
+            int availableTokens,
+            PromptSegmentPriority retentionPriority) {
 
-        if (docs.isEmpty()) {
+        if (contextDocuments.isEmpty()) {
             return List.of();
         }
 
@@ -160,16 +168,32 @@ public class PromptTruncator {
         List<ContextDocumentSegment> fitting = new ArrayList<>();
         int usedTokens = 0;
 
-        for (ContextDocumentSegment doc : docs) {
-            if (doc.priority() != retentionPriority) {
+        for (ContextDocumentSegment contextDocument : contextDocuments) {
+            if (contextDocument.priority() != retentionPriority) {
                 continue;
             }
-            if (usedTokens + doc.estimatedTokens() <= availableTokens) {
-                fitting.add(doc);
-                usedTokens += doc.estimatedTokens();
+            if (usedTokens + contextDocument.estimatedTokens() <= availableTokens) {
+                fitting.add(contextDocument);
+                usedTokens += contextDocument.estimatedTokens();
             }
         }
         return List.copyOf(fitting);
+    }
+
+    private static void requireAuthoritativeContextFits(
+            List<ContextDocumentSegment> authoritativeContextDocuments, int maxTokens, int reservedTokens) {
+        if (authoritativeContextDocuments.isEmpty()) {
+            return;
+        }
+        int availableTokens = maxTokens - reservedTokens;
+        int smallestAuthoritativeSegmentTokens = authoritativeContextDocuments.stream()
+                .mapToInt(ContextDocumentSegment::estimatedTokens)
+                .min()
+                .orElseThrow();
+        if (smallestAuthoritativeSegmentTokens > availableTokens) {
+            throw new AuthoritativeContextDoesNotFitException(
+                    maxTokens, reservedTokens, smallestAuthoritativeSegmentTokens);
+        }
     }
 
     private List<ContextDocumentSegment> reindexDocuments(List<ContextDocumentSegment> retainedDocuments) {
@@ -248,6 +272,22 @@ public class PromptTruncator {
          */
         public int conversationTurnCount() {
             return prompt.conversationHistory().size();
+        }
+    }
+
+    /** Signals that a grounded prompt cannot retain any authoritative context segment. */
+    public static final class AuthoritativeContextDoesNotFitException extends IllegalStateException {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        private AuthoritativeContextDoesNotFitException(
+                int maxTokens, int reservedTokens, int smallestAuthoritativeSegmentTokens) {
+            super("No authoritative context segment fits the prompt budget: maxTokens="
+                    + maxTokens
+                    + ", reservedTokens="
+                    + reservedTokens
+                    + ", smallestAuthoritativeSegmentTokens="
+                    + smallestAuthoritativeSegmentTokens);
         }
     }
 }

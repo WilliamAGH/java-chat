@@ -99,7 +99,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
                 .thenReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of()));
-        when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
+        when(guidedLearningService.citationOutcomeForRetainedContext(
+                        any(GuidedLearningService.GuidedChatPromptOutcome.class), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.just(new StreamingResult(

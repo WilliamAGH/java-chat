@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service.markdown;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
 import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension;
@@ -14,6 +15,7 @@ import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
 import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -180,6 +182,46 @@ public class UnifiedMarkdownService {
             logger.error("Error processing markdown with AST approach", processingFailure);
             throw new MarkdownProcessingException("Markdown processing failed", processingFailure);
         }
+    }
+
+    /**
+     * Splits source Markdown at parsed heading boundaries without changing source bytes.
+     *
+     * <p>Flexmark identifies headings in the document AST, so heading-like text inside fenced
+     * code blocks never becomes a split point. Each returned section therefore keeps every
+     * fenced example whole.</p>
+     *
+     * @param markdown source Markdown
+     * @return source-ordered sections whose concatenation equals the original Markdown
+     */
+    public List<String> splitIntoSections(String markdown) {
+        if (markdown == null || markdown.isEmpty()) {
+            return List.of();
+        }
+
+        Node markdownDocument = parser.parse(markdown);
+        List<Integer> headingOffsets = new ArrayList<>();
+        for (Node markdownBlock = markdownDocument.getFirstChild();
+                markdownBlock != null;
+                markdownBlock = markdownBlock.getNext()) {
+            if (markdownBlock instanceof Heading) {
+                headingOffsets.add(markdownBlock.getStartOffset());
+            }
+        }
+        if (headingOffsets.isEmpty()) {
+            return List.of(markdown);
+        }
+
+        List<String> markdownSections = new ArrayList<>(headingOffsets.size());
+        int sectionStartOffset = 0;
+        int nextHeadingIndex = headingOffsets.getFirst() == 0 ? 1 : 0;
+        for (int headingIndex = nextHeadingIndex; headingIndex < headingOffsets.size(); headingIndex++) {
+            int sectionEndOffset = headingOffsets.get(headingIndex);
+            markdownSections.add(markdown.substring(sectionStartOffset, sectionEndOffset));
+            sectionStartOffset = sectionEndOffset;
+        }
+        markdownSections.add(markdown.substring(sectionStartOffset));
+        return List.copyOf(markdownSections);
     }
 
     // === AST-level transformations ===

@@ -42,7 +42,10 @@ import com.williamcallahan.javachat.adapters.out.llm.openai.OpenAiStreamingFailu
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
+import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.domain.prompt.SystemSegment;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.time.Duration;
 import java.util.List;
@@ -570,6 +573,40 @@ class OpenAIStreamingServiceTest {
                 .expectError(ConfiguredProviderTemporarilyUnavailableException.class)
                 .verify();
 
+        verifyNoInteractions(githubModelsClient);
+    }
+
+    @Test
+    void exposesOnlyDocumentIdentitiesRetainedByProviderSpecificTruncation() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        OpenAiProviderRoutingService providerRoutingService =
+                configuredProviderRoutingService(rateLimitService, RateLimitService.ApiProvider.GITHUB_MODELS);
+        OpenAIStreamingService streamingService = new OpenAIStreamingService(
+                rateLimitService, testRequestFactory(), providerRoutingService, new OpenAiStreamingFailureReporter());
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
+        StructuredPrompt oversizedPrompt = new StructuredPrompt(
+                new SystemSegment("System instructions", 100),
+                List.of(
+                        new ContextDocumentSegment(
+                                1,
+                                "truncated-context-document",
+                                "https://example.test/truncated",
+                                "Oversized reference",
+                                7_000),
+                        new ContextDocumentSegment(
+                                2,
+                                "retained-context-document",
+                                "https://example.test/retained",
+                                "Retained reference",
+                                100)),
+                List.of(),
+                new CurrentQuerySegment("Explain the retained reference", 50));
+
+        StreamingResult streamingResult = Objects.requireNonNull(
+                streamingService.streamResponse(oversizedPrompt, 0.7).block());
+
+        assertEquals(List.of("retained-context-document"), streamingResult.contextDocumentIds());
         verifyNoInteractions(githubModelsClient);
     }
 

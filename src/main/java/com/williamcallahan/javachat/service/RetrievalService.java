@@ -612,6 +612,44 @@ public class RetrievalService {
         return toCitations(CitationCandidateRanker.selectPromptContextForCitationQuery(query, promptDocuments));
     }
 
+    /**
+     * Converts the exact retained subset of query-aware prompt context into citations.
+     *
+     * @param userQuery current user query
+     * @param promptContextDocuments context documents supplied before provider truncation
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public CitationOutcome toCitationsForRetainedContext(
+            String userQuery, List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        return toCitationsForQuery(
+                userQuery, retainedPromptContextDocuments(promptContextDocuments, retainedDocumentIds));
+    }
+
+    /**
+     * Converts the exact retained subset of prompt context into citations.
+     *
+     * @param promptContextDocuments context documents supplied before provider truncation
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public CitationOutcome toCitationsForRetainedContext(
+            List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        return toCitations(retainedPromptContextDocuments(promptContextDocuments, retainedDocumentIds));
+    }
+
+    private static List<Document> retainedPromptContextDocuments(
+            List<Document> promptContextDocuments, List<String> retainedDocumentIds) {
+        Objects.requireNonNull(retainedDocumentIds, "retainedDocumentIds");
+        if (promptContextDocuments == null || promptContextDocuments.isEmpty() || retainedDocumentIds.isEmpty()) {
+            return List.of();
+        }
+        Set<String> retainedDocumentIdSet = Set.copyOf(retainedDocumentIds);
+        return promptContextDocuments.stream()
+                .filter(promptContextDocument -> retainedDocumentIdSet.contains(promptContextDocument.getId()))
+                .toList();
+    }
+
     private static String fragmentlessCitationSourceUrl(String citationUrl) {
         int fragmentDelimiterIndex = citationUrl.indexOf(URL_FRAGMENT_DELIMITER);
         return fragmentDelimiterIndex < 0 ? citationUrl : citationUrl.substring(0, fragmentDelimiterIndex);

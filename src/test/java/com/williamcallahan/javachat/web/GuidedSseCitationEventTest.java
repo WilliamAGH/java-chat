@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -106,16 +107,18 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1),
+                List.of(lessonContextDocument, truncatedLessonContextDocument));
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
-                .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1),
-                        List.of(lessonContextDocument, truncatedLessonContextDocument)));
-        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+                .willReturn(promptOutcome);
+        given(guidedLearningService.citationOutcomeForRetainedContext(
+                        eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
                 .willReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 0));
 
@@ -138,6 +141,8 @@ class GuidedSseCitationEventTest {
         assertTrue(
                 aggregated.contains("https://example.com"),
                 "Citation payload should include the citation URL. Response was:\n" + aggregated);
+        verify(guidedLearningService)
+                .citationOutcomeForRetainedContext(promptOutcome, List.of(lessonContextDocument.getId()));
     }
 
     @Test
@@ -150,15 +155,17 @@ class GuidedSseCitationEventTest {
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
+        GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
+                StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument));
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .willReturn(Mono.just(new StreamingResult(
                         Flux.just("Hello"),
                         RateLimitService.ApiProvider.OPENAI,
                         List.of(lessonContextDocument.getId()))));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
-                .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
-        given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
+                .willReturn(promptOutcome);
+        given(guidedLearningService.citationOutcomeForRetainedContext(
+                        eq(promptOutcome), eq(List.of(lessonContextDocument.getId()))))
                 .willReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 1));
 

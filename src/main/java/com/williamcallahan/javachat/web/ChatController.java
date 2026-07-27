@@ -160,15 +160,11 @@ public class ChatController extends BaseController {
                                                     promptOutcome.structuredPrompt(),
                                                     appProperties.getLlm().getTemperature())
                                             .flatMapMany(streamingResult -> {
-                                                List<org.springframework.ai.document.Document>
-                                                        retainedContextDocuments = promptOutcome.documents().stream()
-                                                                .filter(document -> streamingResult
-                                                                        .contextDocumentIds()
-                                                                        .contains(document.getId()))
-                                                                .toList();
                                                 RetrievalService.CitationOutcome citationOutcome =
-                                                        retrievalService.toCitationsForQuery(
-                                                                latest, retainedContextDocuments);
+                                                        chatService.citationOutcomeForRetainedContext(
+                                                                latest,
+                                                                promptOutcome,
+                                                                streamingResult.contextDocumentIds());
                                                 List<Citation> finalCitations = citationOutcome.citations();
 
                                                 // Provider event first - surfaces which LLM is handling this request

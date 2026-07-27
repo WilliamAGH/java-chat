@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.domain.markdown.ProcessedMarkdown;
 import com.williamcallahan.javachat.service.markdown.UnifiedMarkdownService;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,5 +36,15 @@ public class MarkdownService {
      */
     public ProcessedMarkdown processStructured(String markdownText) {
         return unifiedService.process(markdownText);
+    }
+
+    /**
+     * Splits source Markdown into byte-preserving, fenced-block-safe sections.
+     *
+     * @param markdownText source Markdown
+     * @return source-ordered Markdown sections
+     */
+    public List<String> splitIntoSections(String markdownText) {
+        return unifiedService.splitIntoSections(markdownText);
     }
 }

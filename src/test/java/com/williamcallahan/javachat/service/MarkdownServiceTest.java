@@ -41,6 +41,33 @@ class MarkdownServiceTest {
     }
 
     @Test
+    void splitsMarkdownAtParsedHeadingsWithoutSplittingFencedExamples() {
+        String sourceMarkdown = """
+            # Lesson
+
+            Introductory text.
+
+            ## Complete example
+
+            ```java
+            String headingLikeText = "## Not a Markdown heading";
+            ```
+
+            ## Explanation
+
+            Closing text.
+            """;
+
+        var markdownSections = markdownService.splitIntoSections(sourceMarkdown);
+
+        assertEquals(3, markdownSections.size());
+        assertEquals(sourceMarkdown, String.join("", markdownSections));
+        assertTrue(markdownSections.get(1).contains("## Not a Markdown heading"));
+        assertTrue(markdownSections.get(1).contains("```java"));
+        assertTrue(markdownSections.get(1).endsWith("```\n\n"));
+    }
+
+    @Test
     @DisplayName("Should render bold and italic text")
     void testBoldAndItalic() {
         String markdown = "**bold text** and *italic text* and ***bold italic***";

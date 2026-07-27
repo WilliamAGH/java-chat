@@ -86,6 +86,20 @@ public class ChatService {
     }
 
     /**
+     * Builds citations from the exact prompt context retained by provider-specific truncation.
+     *
+     * @param userQuery current user query
+     * @param promptOutcome prompt and its pre-truncation context documents
+     * @param retainedDocumentIds source identities retained after provider truncation
+     * @return citations and conversion failures for retained prompt context only
+     */
+    public RetrievalService.CitationOutcome citationOutcomeForRetainedContext(
+            String userQuery, StructuredPromptOutcome promptOutcome, List<String> retainedDocumentIds) {
+        return retrievalService.toCitationsForRetainedContext(
+                userQuery, promptOutcome.documents(), retainedDocumentIds);
+    }
+
+    /**
      * Builds a structured prompt with pre-selected context and custom guidance.
      *
      * <p>Used by guided learning flows where context documents are pre-filtered

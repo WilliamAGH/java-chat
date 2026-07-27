@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import java.util.List;
+import java.util.Objects;
 import reactor.core.publisher.Flux;
 
 /**
@@ -12,9 +13,13 @@ import reactor.core.publisher.Flux;
  */
 public record StreamingResult(
         Flux<String> textChunks, RateLimitService.ApiProvider provider, List<String> contextDocumentIds) {
-    /** Normalizes retained document identities to an immutable list. */
+    /**
+     * Requires retained document identities and stores them as an immutable list.
+     *
+     * @throws NullPointerException when contextDocumentIds or any contained identity is null
+     */
     public StreamingResult {
-        contextDocumentIds = contextDocumentIds == null ? List.of() : List.copyOf(contextDocumentIds);
+        contextDocumentIds = List.copyOf(Objects.requireNonNull(contextDocumentIds, "contextDocumentIds"));
     }
 
     /** Returns a user-friendly display name for the provider. */
