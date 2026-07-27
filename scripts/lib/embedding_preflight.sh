@@ -6,6 +6,23 @@
 #   - Color constants from common_qdrant.sh: RED, GREEN, YELLOW, BLUE, NC
 #   - Environment variables loaded before invocation
 
+if [[ "${GATEWAY_EMBEDDING_MODEL:-}" != "qwen/qwen3-embedding-4b" ]]; then
+    GATEWAY_EMBEDDING_MODEL="qwen/qwen3-embedding-4b"
+fi
+readonly GATEWAY_EMBEDDING_MODEL
+if [[ "${GATEWAY_EMBEDDING_DIMENSIONS:-}" != "2560" ]]; then
+    GATEWAY_EMBEDDING_DIMENSIONS=2560
+fi
+readonly GATEWAY_EMBEDDING_DIMENSIONS
+if [[ "${GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS:-}" != "1" ]]; then
+    GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS=1
+fi
+readonly GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS
+if [[ "${GATEWAY_MAX_RETRY_AFTER_SECONDS:-}" != "86400" ]]; then
+    GATEWAY_MAX_RETRY_AFTER_SECONDS=86400
+fi
+readonly GATEWAY_MAX_RETRY_AFTER_SECONDS
+
 trim_embedding_credential() {
     local embedding_credential="$1"
     embedding_credential="${embedding_credential#"${embedding_credential%%[![:space:]]*}"}"
@@ -131,10 +148,10 @@ validate_embedding_probe_payload() {
             fi
         else
             failure_reason="HTTP $http_status_code"
-            local rate_limit_header
-            rate_limit_header="$(grep -i '^retry-after:' "$response_headers_file" | tail -n 1 | tr -d '\r' || true)"
-            if [ -n "$rate_limit_header" ]; then
-                failure_reason="$failure_reason ($rate_limit_header)"
+            local retry_after_header
+            retry_after_header="$(grep -i '^retry-after:' "$response_headers_file" | tail -n 1 | tr -d '\r' || true)"
+            if [ -n "$retry_after_header" ]; then
+                failure_reason="$failure_reason ($retry_after_header)"
             fi
         fi
 
@@ -144,8 +161,25 @@ validate_embedding_probe_payload() {
         fi
 
         if [ "$attempt_number" -lt "$max_attempts" ]; then
-            $log_fn "${YELLOW}Embedding probe '$probe_label' failed on attempt $attempt_number/$max_attempts; retrying in ${retry_delay_seconds}s (${failure_reason})${NC}"
-            sleep "$retry_delay_seconds"
+            local next_retry_delay_seconds="$retry_delay_seconds"
+            if [ -n "${retry_after_header:-}" ]; then
+                local retry_after_seconds
+                retry_after_seconds="${retry_after_header#*:}"
+                retry_after_seconds="$(trim_embedding_credential "$retry_after_seconds")"
+                if ! [[ "$retry_after_seconds" =~ ^[0-9]+$ ]] \
+                    || [ "${#retry_after_seconds}" -gt "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
+                    || { [ "${#retry_after_seconds}" -eq "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
+                        && [[ "$retry_after_seconds" > "$GATEWAY_MAX_RETRY_AFTER_SECONDS" ]]; }; then
+                    rm -f "$response_body_file" "$response_headers_file"
+                    $log_fn "${RED}Embedding probe '$probe_label' received an unsupported Retry-After value; refusing an early retry${NC}"
+                    return 1
+                fi
+                if [ "$retry_after_seconds" -gt "$next_retry_delay_seconds" ]; then
+                    next_retry_delay_seconds="$retry_after_seconds"
+                fi
+            fi
+            $log_fn "${YELLOW}Embedding probe '$probe_label' failed on attempt $attempt_number/$max_attempts; retrying in ${next_retry_delay_seconds}s (${failure_reason})${NC}"
+            sleep "$next_retry_delay_seconds"
             retry_delay_seconds=$((retry_delay_seconds * 2))
             rm -f "$response_body_file" "$response_headers_file"
             continue
@@ -207,6 +241,11 @@ check_embedding_server() {
         $log_fn "${RED}Embedding dimension configuration is unavailable or invalid${NC}"
         return 1
     fi
+    if [ "$embedding_model" != "$GATEWAY_EMBEDDING_MODEL" ] \
+        || [ "$expected_dimensions" -ne "$GATEWAY_EMBEDDING_DIMENSIONS" ]; then
+        $log_fn "${RED}Embedding configuration must remain ${GATEWAY_EMBEDDING_MODEL} at ${GATEWAY_EMBEDDING_DIMENSIONS} dimensions${NC}"
+        return 1
+    fi
 
     local model_list_body_file
     model_list_body_file="$(mktemp)"
@@ -239,6 +278,7 @@ check_embedding_server() {
         return 1
     fi
 
+    sleep "$GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS"
     if validate_embedding_probe_payload \
         "$embedding_endpoint" \
         "$embedding_key" \

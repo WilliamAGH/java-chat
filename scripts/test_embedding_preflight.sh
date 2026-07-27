@@ -8,6 +8,8 @@ EMBEDDING_TEST_SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EMBEDDING_TEST_PROJECT_ROOT="$EMBEDDING_TEST_SCRIPT_DIRECTORY/.."
 EMBEDDING_TEST_WORK_DIRECTORY="$(mktemp -d)"
 EMBEDDING_TEST_CAPTURE="$EMBEDDING_TEST_WORK_DIRECTORY/curl-requests.jsonl"
+EMBEDDING_TEST_SLEEP_CAPTURE="$EMBEDDING_TEST_WORK_DIRECTORY/sleep-delays.txt"
+EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS="$EMBEDDING_TEST_WORK_DIRECTORY/rate-limit-attempts.txt"
 trap 'rm -rf -- "$EMBEDDING_TEST_WORK_DIRECTORY"' EXIT
 
 fail_embedding_preflight_test() {
@@ -29,7 +31,7 @@ embedding_test_log() {
 }
 
 sleep() {
-    :
+    printf '%s\n' "$1" >> "$EMBEDDING_TEST_SLEEP_CAPTURE"
 }
 
 curl() {
@@ -89,6 +91,31 @@ curl() {
     requested_count="$(jq -r '.input | length' <<< "$request_body")"
     local expected_dimensions="${EMBEDDING_TEST_DIMENSIONS:-2560}"
     local validation_mode="${EMBEDDING_TEST_MODE:-success}"
+    if [ "$validation_mode" = "rate_limit_once" ] \
+        || [ "$validation_mode" = "rate_limit_oversized" ] \
+        || [ "$validation_mode" = "service_unavailable_once" ]; then
+        local rate_limit_attempt_count=0
+        if [ -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS" ]; then
+            rate_limit_attempt_count="$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")"
+        fi
+        rate_limit_attempt_count=$((rate_limit_attempt_count + 1))
+        printf '%s\n' "$rate_limit_attempt_count" > "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+        if [ "$rate_limit_attempt_count" -eq 1 ]; then
+            if [ "$validation_mode" = "rate_limit_oversized" ]; then
+                printf 'Retry-After: 999999999999999999999999999999\r\n' > "$output_headers_file"
+            else
+                printf 'Retry-After: 7\r\n' > "$output_headers_file"
+            fi
+            printf '%s\n' '{"error":{"message":"batch capacity is queued"}}' > "$output_body_file"
+            if [ "$validation_mode" = "service_unavailable_once" ]; then
+                printf '503'
+            else
+                printf '429'
+            fi
+            return
+        fi
+        validation_mode="success"
+    fi
     jq -n \
         --argjson count "$requested_count" \
         --argjson dimensions "$expected_dimensions" \
@@ -124,6 +151,87 @@ if ! jq -e -s '
 ' "$EMBEDDING_TEST_CAPTURE" >/dev/null; then
     fail_embedding_preflight_test "gateway probes did not use the batch tier, model list, and batches 1 and 32"
 fi
+if ! grep -Fqx '1' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+    fail_embedding_preflight_test "gateway probes were not paced at one request per second"
+fi
+
+: > "$EMBEDDING_TEST_SLEEP_CAPTURE"
+rm -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+if ! EMBEDDING_TEST_MODE=rate_limit_once \
+    validate_embedding_probe_payload \
+        "https://gateway.test/v1/embeddings" \
+        "test-gateway-key" \
+        "qwen/qwen3-embedding-4b" \
+        "rate-limited probe" \
+        "rate-limit" \
+        embedding_test_log \
+        1 \
+        2560; then
+    fail_embedding_preflight_test "rate-limited embedding probe did not recover"
+fi
+if ! grep -Fqx '7' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+    fail_embedding_preflight_test "gateway Retry-After did not control the next request"
+fi
+
+: > "$EMBEDDING_TEST_SLEEP_CAPTURE"
+rm -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+if ! EMBEDDING_TEST_MODE=service_unavailable_once \
+    validate_embedding_probe_payload \
+        "https://gateway.test/v1/embeddings" \
+        "test-gateway-key" \
+        "qwen/qwen3-embedding-4b" \
+        "service unavailable probe" \
+        "service-unavailable" \
+        embedding_test_log \
+        1 \
+        2560; then
+    fail_embedding_preflight_test "service-unavailable embedding probe did not recover"
+fi
+if ! grep -Fqx '7' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+    fail_embedding_preflight_test "non-429 Retry-After did not control the next request"
+fi
+
+: > "$EMBEDDING_TEST_SLEEP_CAPTURE"
+rm -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+if EMBEDDING_TEST_MODE=rate_limit_oversized \
+    validate_embedding_probe_payload \
+        "https://gateway.test/v1/embeddings" \
+        "test-gateway-key" \
+        "qwen/qwen3-embedding-4b" \
+        "oversized rate limit probe" \
+        "oversized-rate-limit" \
+        embedding_test_log \
+        1 \
+        2560; then
+    fail_embedding_preflight_test "oversized Retry-After was accepted"
+fi
+if [ -s "$EMBEDDING_TEST_SLEEP_CAPTURE" ]; then
+    fail_embedding_preflight_test "oversized Retry-After caused an early retry"
+fi
+
+for drifted_model_and_dimensions in "qwen/qwen3-embedding-8b 2560" "qwen/qwen3-embedding-4b 4096"; do
+    read -r EMBEDDING_TEST_CONFIG_MODEL EMBEDDING_TEST_CONFIG_DIMENSIONS <<< "$drifted_model_and_dimensions"
+    EMBEDDING_TEST_DRIFT_CURL_CAPTURE="$EMBEDDING_TEST_WORK_DIRECTORY/drift-curl-${EMBEDDING_TEST_CONFIG_DIMENSIONS}.txt"
+    if (
+        read_embedding_application_property() {
+            case "$1" in
+                app.embeddings.model) printf '%s\n' "$EMBEDDING_TEST_CONFIG_MODEL" ;;
+                app.embeddings.dimensions) printf '%s\n' "$EMBEDDING_TEST_CONFIG_DIMENSIONS" ;;
+                *) return 1 ;;
+            esac
+        }
+        curl() {
+            : > "$EMBEDDING_TEST_DRIFT_CURL_CAPTURE"
+            printf '200'
+        }
+        check_embedding_server embedding_test_log
+    ); then
+        fail_embedding_preflight_test "drifted embedding generation was accepted"
+    fi
+    if [ -e "$EMBEDDING_TEST_DRIFT_CURL_CAPTURE" ]; then
+        fail_embedding_preflight_test "drifted embedding generation made a network request"
+    fi
+done
 
 for rejected_mode in count order null nonnumeric dimension; do
     if EMBEDDING_TEST_MODE="$rejected_mode" EMBEDDING_TEST_DIMENSIONS=3 \
@@ -140,4 +248,4 @@ for rejected_mode in count order null nonnumeric dimension; do
     fi
 done
 
-printf 'PASS: gateway preflight requires X-Tier batch, batches 1/32, ordering, numeric values, and exact dimensions.\n'
+printf 'PASS: gateway preflight requires the canonical model/dimensions, batch tier, paced batches 1/32, Retry-After, ordering, and numeric values.\n'
