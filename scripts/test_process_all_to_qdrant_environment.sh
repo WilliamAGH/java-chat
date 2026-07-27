@@ -64,7 +64,10 @@ mkdir -p \
     "$TEST_WORK_DIRECTORY/arbitrary-corpus/kotlin" \
     "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/snapshots" \
     "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/parsed" \
-    "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/index"
+    "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/index" \
+    "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/snapshots" \
+    "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/parsed" \
+    "$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/index"
 printf '<html>Kotlin 2.4.10</html>\n' > "$TEST_WORK_DIRECTORY/arbitrary-corpus/kotlin/index.html"
 : > "$TEST_WORK_DIRECTORY/application.jar"
 
@@ -72,10 +75,10 @@ export QDRANT_HOST=127.0.0.1
 export QDRANT_PORT=8086
 export APP_LOCAL_EMBEDDING_ENABLED=false
 export SPRING_PROFILE=local
-export QDRANT_COLLECTION_BOOKS=java-chat-local-qwen3-embedding-4b-2560-books
-export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-4b-2560-docs
-export QDRANT_COLLECTION_ARTICLES=java-chat-local-qwen3-embedding-4b-2560-articles
-export QDRANT_COLLECTION_PDFS=java-chat-local-qwen3-embedding-4b-2560-pdfs
+export QDRANT_COLLECTION_BOOKS=java-chat-qwen3-embedding-4b-2560-books
+export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-4b-2560-docs
+export QDRANT_COLLECTION_ARTICLES=java-chat-qwen3-embedding-4b-2560-articles
+export QDRANT_COLLECTION_PDFS=java-chat-qwen3-embedding-4b-2560-pdfs
 export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
 export DOCS_SNAPSHOT_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/local/parsed"
@@ -112,15 +115,28 @@ fi
 if (
     export SPRING_PROFILE=dev
     export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
+    export DOCS_SNAPSHOT_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/snapshots"
+    export DOCS_PARSED_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/parsed"
+    export DOCS_INDEX_DIR="$TEST_WORK_DIRECTORY/state/qwen3-embedding-4b-2560/dev/index"
     run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
 ); then
-    fail_process_environment_test "local collections and state were accepted under the dev profile"
+    :
+else
+    fail_process_environment_test "shared generation collections were rejected under the dev profile"
+fi
+
+if (
+    export SPRING_PROFILE=dev
+    export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
+    run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
+); then
+    fail_process_environment_test "local ingestion state was accepted under the dev profile"
 fi
 
 if (
     export SPRING_PROFILE=local
     export DOCS_DIR="$TEST_WORK_DIRECTORY/arbitrary-corpus"
-    export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-8b-4096-docs
+    export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-8b-4096-docs
     run_documentation_ingestion --doc-sets=kotlin >/dev/null 2>&1
 ); then
     fail_process_environment_test "a different embedding-generation collection was accepted"

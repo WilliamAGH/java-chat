@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -24,25 +23,17 @@ import io.qdrant.client.grpc.Collections.VectorsConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.health.Status;
 
-/** Verifies exact environment/generation discovery and fail-closed GitHub schema validation. */
+/** Verifies shared-generation discovery and fail-closed GitHub schema validation. */
 class QdrantGitHubCollectionDiscoveryTest {
-    private static final String DEV_PREFIX = "github-dev-qwen3-embedding-4b-2560-";
+    private static final String GENERATION_PREFIX = "github-qwen3-embedding-4b-2560-";
     private static final int EMBEDDING_DIMENSIONS = 2_560;
 
     @Test
-    void rejectsUnknownDeploymentProfileBeforeDiscovery() {
-        assertThrows(
-                IllegalStateException.class,
-                () -> new QdrantGitHubCollectionDiscovery(
-                        mock(QdrantClient.class), mock(EmbeddingClient.class), new AppProperties(), "staging"));
-    }
-
-    @Test
-    void discoversOnlyExactActivePrefixWhenSchemaIsValid() {
+    void discoversOnlyExactGenerationPrefixWhenSchemaIsValid() {
         QdrantClient qdrantClient = mock(QdrantClient.class);
         EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
         AppProperties appProperties = new AppProperties();
-        String activeCollection = DEV_PREFIX + "openai-java-chat";
+        String activeCollection = GENERATION_PREFIX + "openai-java-chat";
         SettableFuture<java.util.List<String>> collectionNames = SettableFuture.create();
         collectionNames.set(java.util.List.of(
                 activeCollection,
@@ -55,7 +46,7 @@ class QdrantGitHubCollectionDiscoveryTest {
         when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
 
         QdrantGitHubCollectionDiscovery discovery =
-                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, appProperties, "dev");
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, appProperties);
         discovery.discoverGitHubCollections();
 
         assertEquals(java.util.List.of(activeCollection), discovery.getDiscoveredCollections());
@@ -66,7 +57,7 @@ class QdrantGitHubCollectionDiscoveryTest {
     void schemaMismatchMarksDiscoveryFailedAndPublishesNoCollections() {
         QdrantClient qdrantClient = mock(QdrantClient.class);
         EmbeddingClient embeddingClient = mock(EmbeddingClient.class);
-        String activeCollection = DEV_PREFIX + "openai-java-chat";
+        String activeCollection = GENERATION_PREFIX + "openai-java-chat";
         SettableFuture<java.util.List<String>> collectionNames = SettableFuture.create();
         collectionNames.set(java.util.List.of(activeCollection));
         SettableFuture<CollectionInfo> collectionInfo = SettableFuture.create();
@@ -76,7 +67,7 @@ class QdrantGitHubCollectionDiscoveryTest {
         when(embeddingClient.dimensions()).thenReturn(EMBEDDING_DIMENSIONS);
 
         QdrantGitHubCollectionDiscovery discovery =
-                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties(), "dev");
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties());
         discovery.discoverGitHubCollections();
 
         assertEquals(java.util.List.of(), discovery.getDiscoveredCollections());
@@ -97,7 +88,7 @@ class QdrantGitHubCollectionDiscoveryTest {
                 .thenReturn(recoveredCollectionNames);
 
         QdrantGitHubCollectionDiscovery discovery =
-                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties(), "dev");
+                new QdrantGitHubCollectionDiscovery(qdrantClient, embeddingClient, new AppProperties());
 
         discovery.discoverGitHubCollections();
         assertEquals(Status.DOWN, discovery.discoveryHealth().getStatus());

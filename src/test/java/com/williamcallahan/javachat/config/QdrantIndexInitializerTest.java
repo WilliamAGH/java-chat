@@ -88,7 +88,7 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void profileMismatchedCollectionFailsBeforeQdrantMutation() {
+    void nonGenerationCollectionFailsBeforeQdrantMutation() {
         InitializerHarness initializerHarness = newInitializer(true);
         QdrantCollectionNames mismatchedCollectionNames =
                 initializerHarness.appProperties().getQdrant().getCollections();
@@ -114,6 +114,38 @@ class QdrantIndexInitializerTest {
         when(initializerHarness.embeddingClient().dimensions()).thenReturn(MISMATCHED_COLLECTION_DIMENSIONS);
 
         assertThrows(IllegalStateException.class, initializerHarness.initializer()::validateGenerationConfiguration);
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void unhealthyCollectionFailsInitialization() {
+        InitializerHarness initializerHarness = newInitializer(false);
+        String firstCollection = initializerHarness.collectionName().getFirst();
+        expectCollectionGet(
+                initializerHarness,
+                QDRANT_REST_BASE_URL,
+                firstCollection,
+                collectionMetadataJson(EMBEDDING_DIMENSIONS)
+                        .replace(
+                                "\"status\": \"green\"",
+                                "\"status\": \"red\", \"optimizer_status\": {\"error\": \"insufficient disk\"}"));
+
+        IllegalStateException initializationFailure = assertThrows(
+                IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
+
+        assertEquals(
+                "Qdrant collection '" + firstCollection + "' must be green but status was 'red': insufficient disk",
+                initializationFailure.getMessage());
+        assertEquals(
+                Status.DOWN,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        assertEquals(
+                "failed",
+                initializerHarness
+                        .initializer()
+                        .initializationHealth()
+                        .getDetails()
+                        .get("initialization"));
         initializerHarness.qdrantServer().verify();
     }
 
@@ -362,8 +394,7 @@ class QdrantIndexInitializerTest {
                 appProperties,
                 restTemplateBuilder,
                 embeddingClient,
-                new ObjectMapper(),
-                "prod");
+                new ObjectMapper());
         MockRestServiceServer.MockRestServiceServerBuilder qdrantServerBuilder =
                 MockRestServiceServer.bindTo(initializedRestTemplate.get());
         MockRestServiceServer qdrantServer = ignoreExpectationOrder
@@ -410,6 +441,7 @@ class QdrantIndexInitializerTest {
         return """
                 {
                   "result": {
+                    "status": "green",
                     "config": {
                       "params": {
                         "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},
@@ -447,6 +479,7 @@ class QdrantIndexInitializerTest {
         return """
                 {
                   "result": {
+                    "status": "green",
                     "config": {
                       "params": {
                         "vectors": {"dense": {"size": ${DENSE_VECTOR_DIMENSIONS}, "distance": "Cosine"}},

@@ -82,8 +82,8 @@ verify_doc_set_postconditions() {
     fi
 }
 
-validate_environment_generation_contract() {
-    local expected_collection_prefix="java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560"
+validate_generation_and_state_contract() {
+    local expected_collection_prefix="java-chat-qwen3-embedding-4b-2560"
     local -a expected_collection_names=(
         "${expected_collection_prefix}-books"
         "${expected_collection_prefix}-docs"
@@ -99,7 +99,7 @@ validate_environment_generation_contract() {
     local collection_index
     for collection_index in "${!expected_collection_names[@]}"; do
         if [ "${configured_collection_names[$collection_index]}" != "${expected_collection_names[$collection_index]}" ]; then
-            echo "Qdrant collection names must match SPRING_PROFILE and the 4B/2560 generation" >&2
+            echo "Qdrant collection names must match the shared 4B/2560 generation" >&2
             return 1
         fi
     done
@@ -148,7 +148,7 @@ case "$SPRING_PROFILE" in
     local|dev|prod) ;;
     *) echo "SPRING_PROFILE must be exactly local, dev, or prod" >&2; exit 1 ;;
 esac
-if ! validate_environment_generation_contract; then
+if ! validate_generation_and_state_contract; then
     return 1
 fi
 DOCS_ROOT="${DOCS_DIR:-$PROJECT_ROOT/data/docs}"

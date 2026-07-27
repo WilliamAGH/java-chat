@@ -125,10 +125,10 @@ When `app.qdrant.fail-on-partial-search-error=true` (default), any collection qu
 
 | Collection | Default name | Property |
 |---|---|---|
-| Books | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` | `app.qdrant.collections.books` |
-| Docs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` | `app.qdrant.collections.docs` |
-| Articles | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` | `app.qdrant.collections.articles` |
-| PDFs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` | `app.qdrant.collections.pdfs` |
+| Books | `java-chat-qwen3-embedding-4b-2560-books` | `app.qdrant.collections.books` |
+| Docs | `java-chat-qwen3-embedding-4b-2560-docs` | `app.qdrant.collections.docs` |
+| Articles | `java-chat-qwen3-embedding-4b-2560-articles` | `app.qdrant.collections.articles` |
+| PDFs | `java-chat-qwen3-embedding-4b-2560-pdfs` | `app.qdrant.collections.pdfs` |
 
 ### Metadata extraction
 
@@ -286,10 +286,10 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 
 | Property | Default |
 |---|---|
-| `app.qdrant.collections.books` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` |
-| `app.qdrant.collections.docs` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` |
-| `app.qdrant.collections.articles` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` |
-| `app.qdrant.collections.pdfs` | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` |
+| `app.qdrant.collections.books` | `java-chat-qwen3-embedding-4b-2560-books` |
+| `app.qdrant.collections.docs` | `java-chat-qwen3-embedding-4b-2560-docs` |
+| `app.qdrant.collections.articles` | `java-chat-qwen3-embedding-4b-2560-articles` |
+| `app.qdrant.collections.pdfs` | `java-chat-qwen3-embedding-4b-2560-pdfs` |
 
 All four must be non-blank and distinct (validated on startup).
 

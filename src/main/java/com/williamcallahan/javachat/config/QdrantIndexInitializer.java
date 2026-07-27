@@ -15,7 +15,6 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -50,6 +49,7 @@ public final class QdrantIndexInitializer {
     private static final String SCHEMA_TYPE_INTEGER = "integer";
     private static final String VECTOR_DISTANCE_COSINE = "Cosine";
     private static final String SPARSE_MODIFIER_IDF = "idf";
+    private static final String COLLECTION_STATUS_GREEN = "green";
     private static final String REQUIRED_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
     private static final int REQUIRED_EMBEDDING_DIMENSIONS = 2_560;
     private static final String EMPTY_TEXT = "";
@@ -79,7 +79,6 @@ public final class QdrantIndexInitializer {
     private final RestTemplate restTemplate;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
-    private final String deploymentProfile;
     private volatile QdrantInitializationState initializationState = QdrantInitializationState.PENDING;
 
     /** Creates the initializer with strict validation of reachable Qdrant schemas. */
@@ -88,13 +87,11 @@ public final class QdrantIndexInitializer {
             AppProperties appProperties,
             RestTemplateBuilder restTemplateBuilder,
             EmbeddingClient embeddingClient,
-            ObjectMapper objectMapper,
-            @Value("${SPRING_PROFILE:prod}") String deploymentProfile) {
+            ObjectMapper objectMapper) {
         this.qdrantRestConnection = Objects.requireNonNull(qdrantRestConnection, "qdrantRestConnection");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-        this.deploymentProfile = requireDeploymentProfile(deploymentProfile);
         this.restTemplate = restTemplateBuilder
                 .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
                 .readTimeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
@@ -105,7 +102,7 @@ public final class QdrantIndexInitializer {
                 .build();
     }
 
-    /** Rejects cross-environment collection routing before command-line runners or web traffic can mutate Qdrant. */
+    /** Rejects collection routing outside the shared 4B/2,560 generation before Qdrant mutation. */
     @PostConstruct
     void validateGenerationConfiguration() {
         validateGenerationCollections(appProperties.getQdrant().getCollections().all());
@@ -198,24 +195,10 @@ public final class QdrantIndexInitializer {
     }
 
     private void validateGenerationCollections(List<String> collections) {
-        List<String> expectedCollections = List.of(
-                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-books",
-                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-docs",
-                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-articles",
-                "java-chat-" + deploymentProfile + "-qwen3-embedding-4b-2560-pdfs");
+        List<String> expectedCollections = new QdrantCollectionNames().all();
         if (!expectedCollections.equals(collections)) {
-            throw new IllegalStateException(
-                    "Core Qdrant collections must match SPRING_PROFILE and the 4B/2560 generation");
+            throw new IllegalStateException("Core Qdrant collections must match the shared 4B/2560 generation");
         }
-    }
-
-    private static String requireDeploymentProfile(String deploymentProfile) {
-        if (!"local".equals(deploymentProfile)
-                && !"dev".equals(deploymentProfile)
-                && !"prod".equals(deploymentProfile)) {
-            throw new IllegalStateException("SPRING_PROFILE must be exactly local, dev, or prod");
-        }
-        return deploymentProfile;
     }
 
     private void ensureHybridCollectionsExist(
@@ -299,6 +282,7 @@ public final class QdrantIndexInitializer {
         HttpHeaders headers = jsonHeaders();
         for (String collection : collections) {
             JsonNode info = fetchCollectionInfo(restBaseUrl, collection, headers);
+            validateCollectionStatus(info, collection);
             int actualDimensions = extractDenseVectorDimensions(info, denseVectorName);
             if (actualDimensions != expectedDimensions) {
                 throw new IllegalStateException("Qdrant collection dimension mismatch for '"
@@ -326,6 +310,25 @@ public final class QdrantIndexInitializer {
                 throw new IllegalStateException("Qdrant collection '" + collection + "' must store payload on disk.");
             }
         }
+    }
+
+    private void validateCollectionStatus(JsonNode collectionInfo, String collection) {
+        String collectionStatus = collectionInfo.path("result").path("status").asText(EMPTY_TEXT);
+        if (COLLECTION_STATUS_GREEN.equalsIgnoreCase(collectionStatus)) {
+            return;
+        }
+        String optimizerError = collectionInfo
+                .path("result")
+                .path("optimizer_status")
+                .path("error")
+                .asText(EMPTY_TEXT);
+        String optimizerErrorDetails = optimizerError.isBlank() ? EMPTY_TEXT : ": " + optimizerError;
+        throw new IllegalStateException("Qdrant collection '"
+                + collection
+                + "' must be green but status was '"
+                + collectionStatus
+                + "'"
+                + optimizerErrorDetails);
     }
 
     private void validateDenseDistance(JsonNode collectionInfo, String denseVectorName, String collection) {

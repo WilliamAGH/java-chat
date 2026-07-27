@@ -105,10 +105,10 @@ See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the col
 
 ### Hybrid collection variables
 
-- `QDRANT_COLLECTION_BOOKS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books`)
-- `QDRANT_COLLECTION_DOCS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs`)
-- `QDRANT_COLLECTION_ARTICLES` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles`)
-- `QDRANT_COLLECTION_PDFS` (default `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs`)
+- `QDRANT_COLLECTION_BOOKS` (default `java-chat-qwen3-embedding-4b-2560-books`)
+- `QDRANT_COLLECTION_DOCS` (default `java-chat-qwen3-embedding-4b-2560-docs`)
+- `QDRANT_COLLECTION_ARTICLES` (default `java-chat-qwen3-embedding-4b-2560-articles`)
+- `QDRANT_COLLECTION_PDFS` (default `java-chat-qwen3-embedding-4b-2560-pdfs`)
 - `QDRANT_DENSE_VECTOR_NAME` (default `dense`) — named vector for dense embeddings
 - `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
 - `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
@@ -133,7 +133,7 @@ make compose-up
 
 ## GitHub repository ingestion
 
-GitHub source ingestion uses `scripts/process_github_repo.sh` and supports local-path mode, URL mode, and `--sync-existing` for the exact active prefix `github-${SPRING_PROFILE}-qwen3-embedding-4b-2560-`.
+GitHub source ingestion uses `scripts/process_github_repo.sh` and supports local-path mode, URL mode, and `--sync-existing` for the exact shared prefix `github-qwen3-embedding-4b-2560-`.
 
 Common variables:
 
@@ -141,8 +141,8 @@ Common variables:
 - `REPO_URL` — GitHub URL for URL ingestion mode (`https://github.com/owner/repository`)
 - `REPO_CACHE_DIR` — local clone cache root for URL mode (default `data/repos/github`)
 - `REPO_CACHE_PATH` — exact local clone path for a specific URL ingestion run (single repo mode)
-- `SYNC_EXISTING` — set to `1` to sync collections under the active environment/generation prefix
-- `QDRANT_COLLECTION_DOCS` — the active environment's documentation collection is the only schema source for a new GitHub collection
+- `SYNC_EXISTING` — set to `1` to sync collections under the shared generation prefix
+- `QDRANT_COLLECTION_DOCS` — the shared documentation collection is the only schema source for a new GitHub collection
 
 ## RAG tuning
 

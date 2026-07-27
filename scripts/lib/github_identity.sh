@@ -14,14 +14,8 @@
 
 GITHUB_COLLECTION_GENERATION="qwen3-embedding-4b-2560"
 
-active_github_collection_prefix() {
-    case "${SPRING_PROFILE:-}" in
-        local|dev|prod) printf 'github-%s-%s-' "$SPRING_PROFILE" "$GITHUB_COLLECTION_GENERATION" ;;
-        *)
-            echo "ERROR: SPRING_PROFILE must be exactly local, dev, or prod" >&2
-            return 1
-            ;;
-    esac
+github_collection_prefix() {
+    printf 'github-%s-' "$GITHUB_COLLECTION_GENERATION"
 }
 
 expand_user_path() {
@@ -128,11 +122,9 @@ extract_repository_identity() {
     if [[ ! "$REPOSITORY_OWNER" =~ ^[a-z0-9]+$ ]]; then
         repository_boundary="_"
     fi
-    local active_collection_prefix
-    if ! active_collection_prefix="$(active_github_collection_prefix)"; then
-        exit 1
-    fi
-    CANONICAL_COLLECTION_NAME="${active_collection_prefix}${encoded_owner_segment}${repository_boundary}${encoded_name_segment}"
+    local generation_collection_prefix
+    generation_collection_prefix="$(github_collection_prefix)"
+    CANONICAL_COLLECTION_NAME="${generation_collection_prefix}${encoded_owner_segment}${repository_boundary}${encoded_name_segment}"
 }
 
 # Rejects collection names that do not match their repository's canonical identity.
@@ -372,7 +364,7 @@ remote_head_commit() {
     printf '%s\n' "$remote_commit"
 }
 
-# Lists Qdrant collections for the exact active environment and embedding generation.
+# Lists Qdrant collections for the exact shared embedding generation.
 list_github_collections() {
     local qdrant_base_url="$1"
     local qdrant_collections_listing
@@ -382,9 +374,9 @@ list_github_collections() {
         return 1
     fi
 
-    local active_collection_prefix
-    active_collection_prefix="$(active_github_collection_prefix)" || return 1
-    echo "$qdrant_collections_listing" | jq -er --arg prefix "$active_collection_prefix" '
+    local generation_collection_prefix
+    generation_collection_prefix="$(github_collection_prefix)"
+    echo "$qdrant_collections_listing" | jq -er --arg prefix "$generation_collection_prefix" '
         .result.collections |
         if type != "array" then error("Qdrant collections response is malformed") else . end |
         [ .[] |

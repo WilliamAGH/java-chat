@@ -15,8 +15,8 @@
 cp .env.example .env
 ```
 
-2) Edit `.env` for local execution. The checked-in example already uses `SPRING_PROFILE=local`, the
-`java-chat-local-qwen3-embedding-4b-2560-*` collection names, and repository-local generation state roots.
+2) Edit `.env` for local execution. The checked-in example already uses `SPRING_PROFILE=local`, the shared
+`java-chat-qwen3-embedding-4b-2560-*` collection names, and repository-local generation state roots.
 Configure the shared gateway `OPENAI_BASE_URL` and `OPENAI_API_KEY` used by embeddings and gateway chat.
 
 Select one chat provider with its matching chat credential:

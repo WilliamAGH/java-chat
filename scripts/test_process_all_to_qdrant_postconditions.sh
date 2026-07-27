@@ -50,17 +50,17 @@ qdrant_curl() {
     case "${POSTCONDITION_TEST_MODE:-success}:$request_url" in
         malformed:*) printf '%s\n' '{"status":"ok"}' ;;
         zero:*) printf '%s\n' '{"result":{"count":0}}' ;;
-        success:*/java-chat-local-qwen3-embedding-4b-2560-docs/*)
+        success:*/java-chat-qwen3-embedding-4b-2560-docs/*)
             printf '%s\n' '{"result":{"count":1}}'
             ;;
         success:*) printf '%s\n' '{"result":{"count":0}}' ;;
     esac
 }
 
-export QDRANT_COLLECTION_BOOKS=java-chat-local-qwen3-embedding-4b-2560-books
-export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-4b-2560-docs
-export QDRANT_COLLECTION_ARTICLES=java-chat-local-qwen3-embedding-4b-2560-articles
-export QDRANT_COLLECTION_PDFS=java-chat-local-qwen3-embedding-4b-2560-pdfs
+export QDRANT_COLLECTION_BOOKS=java-chat-qwen3-embedding-4b-2560-books
+export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-4b-2560-docs
+export QDRANT_COLLECTION_ARTICLES=java-chat-qwen3-embedding-4b-2560-articles
+export QDRANT_COLLECTION_PDFS=java-chat-qwen3-embedding-4b-2560-pdfs
 
 SUCCESS_LOG="$POSTCONDITION_TEST_WORK_DIRECTORY/success.log"
 printf '%s\n' \

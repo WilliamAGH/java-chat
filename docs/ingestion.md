@@ -119,7 +119,7 @@ REPO_URL=https://github.com/owner/repository make process-github-repo
 REPO_URL=https://github.com/owner/repository REPO_CACHE_DIR=/tmp/repo-cache make process-github-repo
 REPO_URL=https://github.com/owner/repository REPO_CACHE_PATH=/tmp/repos/openai/java-chat make process-github-repo
 
-# Sync repositories represented by the exact active environment/generation prefix
+# Sync repositories represented by the exact shared generation prefix
 SPRING_PROFILE=local SYNC_EXISTING=1 make process-github-repo
 ```
 

@@ -24,7 +24,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Profile;
@@ -35,7 +34,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Discovers Qdrant collections for the active environment and embedding generation at startup.
+ * Discovers Qdrant collections for the shared embedding generation at startup.
  *
  * <p>After the core collections are validated by {@link QdrantIndexInitializer}, this component
  * scans for dynamically created GitHub repository collections and validates that their dense
@@ -49,7 +48,7 @@ import org.springframework.stereotype.Component;
 public final class QdrantGitHubCollectionDiscovery {
     private static final Logger log = LoggerFactory.getLogger(QdrantGitHubCollectionDiscovery.class);
 
-    private static final String GITHUB_COLLECTION_PREFIX_TEMPLATE = "github-%s-qwen3-embedding-4b-2560-";
+    private static final String GITHUB_COLLECTION_PREFIX = "github-qwen3-embedding-4b-2560-";
     private static final long GRPC_TIMEOUT_SECONDS = 10;
     private static final long DISCOVERY_RETRY_MILLIS = 30_000L;
     private static final Map<String, PayloadSchemaType> REQUIRED_PAYLOAD_INDEXES = Map.ofEntries(
@@ -76,7 +75,7 @@ public final class QdrantGitHubCollectionDiscovery {
     private final QdrantClient qdrantClient;
     private final EmbeddingClient embeddingClient;
     private final AppProperties appProperties;
-    private final String activeCollectionPrefix;
+    private final String generationCollectionPrefix;
 
     private final AtomicReference<List<String>> discoveredCollections = new AtomicReference<>(List.of());
     private final AtomicReference<GitHubDiscoveryState> discoveryState =
@@ -88,22 +87,17 @@ public final class QdrantGitHubCollectionDiscovery {
      * @param qdrantClient Qdrant gRPC client for listing and inspecting collections
      * @param embeddingClient embedding client for resolving expected vector dimensions
      * @param appProperties application configuration for vector name resolution
-     * @param springProfile deployment environment used to isolate GitHub collections
      */
     public QdrantGitHubCollectionDiscovery(
-            QdrantClient qdrantClient,
-            EmbeddingClient embeddingClient,
-            AppProperties appProperties,
-            @Value("${SPRING_PROFILE:prod}") String springProfile) {
+            QdrantClient qdrantClient, EmbeddingClient embeddingClient, AppProperties appProperties) {
         this.qdrantClient = Objects.requireNonNull(qdrantClient, "qdrantClient");
         this.embeddingClient = Objects.requireNonNull(embeddingClient, "embeddingClient");
         this.appProperties = Objects.requireNonNull(appProperties, "appProperties");
-        this.activeCollectionPrefix =
-                GITHUB_COLLECTION_PREFIX_TEMPLATE.formatted(requireDeploymentProfile(springProfile));
+        this.generationCollectionPrefix = GITHUB_COLLECTION_PREFIX;
     }
 
     /**
-     * Scans Qdrant for collections under the exact active prefix after the application is ready.
+     * Scans Qdrant for collections under the exact shared-generation prefix after the application is ready.
      *
      * <p>Runs after {@link QdrantIndexInitializer} to avoid interfering with core collection setup.</p>
      */
@@ -128,12 +122,14 @@ public final class QdrantGitHubCollectionDiscovery {
                     qdrantClient.listCollectionsAsync().get(GRPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<String> gitHubCandidates = allCollectionNames.stream()
-                    .filter(name -> name.startsWith(activeCollectionPrefix))
+                    .filter(name -> name.startsWith(generationCollectionPrefix))
                     .toList();
 
             if (gitHubCandidates.isEmpty()) {
                 discoveryState.set(GitHubDiscoveryState.READY);
-                log.info("[QDRANT] No GitHub collections found for active prefix '{}'", activeCollectionPrefix);
+                log.info(
+                        "[QDRANT] No GitHub collections found for shared-generation prefix '{}'",
+                        generationCollectionPrefix);
                 return;
             }
 
@@ -316,13 +312,6 @@ public final class QdrantGitHubCollectionDiscovery {
                 || statusCode == Status.Code.DEADLINE_EXCEEDED
                 || statusCode == Status.Code.RESOURCE_EXHAUSTED
                 || statusCode == Status.Code.ABORTED;
-    }
-
-    private static String requireDeploymentProfile(String springProfile) {
-        if (!"local".equals(springProfile) && !"dev".equals(springProfile) && !"prod".equals(springProfile)) {
-            throw new IllegalStateException("SPRING_PROFILE must be exactly local, dev, or prod");
-        }
-        return springProfile;
     }
 
     /** Represents whether governed collection discovery may serve retrieval traffic. */

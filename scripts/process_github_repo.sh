@@ -5,7 +5,7 @@
 # Modes:
 #   --repo-path=PATH         Ingest from a local git clone
 #   --repo-url=URL           Clone/refresh from GitHub, then ingest
-#   --sync-existing          Re-ingest active environment/generation collections with upstream changes
+#   --sync-existing          Re-ingest shared-generation collections with upstream changes
 #
 # Prerequisites:
 #   - Qdrant vector store reachable (QDRANT_HOST, QDRANT_PORT)
@@ -70,7 +70,7 @@ for argument in "$@"; do
             echo "  --repo-cache-path=PATH     Exact local clone path for URL mode (single repo only)"
             echo ""
             echo "Batch options:"
-            echo "  --sync-existing            Sync active environment/generation collections by repo URL + remote HEAD"
+            echo "  --sync-existing            Sync shared-generation collections by repo URL + remote HEAD"
             exit 0
             ;;
         *)
@@ -91,9 +91,9 @@ case "$SPRING_PROFILE" in
         exit 1
         ;;
 esac
-EXPECTED_DOCUMENTATION_COLLECTION="java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs"
+EXPECTED_DOCUMENTATION_COLLECTION="java-chat-qwen3-embedding-4b-2560-docs"
 if [ "$QDRANT_COLLECTION_DOCS" != "$EXPECTED_DOCUMENTATION_COLLECTION" ]; then
-    echo "QDRANT_COLLECTION_DOCS must match SPRING_PROFILE and the 4B/2560 generation" >&2
+    echo "QDRANT_COLLECTION_DOCS must match the shared 4B/2560 generation" >&2
     exit 1
 fi
 for configured_state_directory in "$DOCS_SNAPSHOT_DIR:snapshots" "$DOCS_PARSED_DIR:parsed" "$DOCS_INDEX_DIR:index"; do
@@ -296,7 +296,7 @@ sync_existing_collections() {
     fi
 
     if [ -z "$github_collections" ]; then
-        echo -e "${YELLOW}No active environment/generation GitHub collections found in Qdrant${NC}"
+        echo -e "${YELLOW}No shared-generation GitHub collections found in Qdrant${NC}"
         return
     fi
 

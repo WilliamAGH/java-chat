@@ -41,7 +41,7 @@ asdf install
 
 ```bash
 cp .env.example .env
-# edit .env: set SPRING_PROFILE=local, local generation collection/state paths,
+# edit .env: set SPRING_PROFILE=local, shared generation collections, local state paths,
 # and the shared gateway OPENAI_BASE_URL/OPENAI_API_KEY
 make compose-up   # fresh Qdrant 1.18.3 generation-specific volume
 make dev

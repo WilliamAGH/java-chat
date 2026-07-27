@@ -29,7 +29,7 @@ if (
     export QDRANT_HOST=invalid.example
     export QDRANT_PORT=6334
     export SPRING_PROFILE=staging
-    export QDRANT_COLLECTION_DOCS=java-chat-staging-qwen3-embedding-4b-2560-docs
+    export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-4b-2560-docs
     export DOCS_SNAPSHOT_DIR=/app/data/qwen3-embedding-4b-2560/staging/snapshots
     export DOCS_PARSED_DIR=/app/data/qwen3-embedding-4b-2560/staging/parsed
     export DOCS_INDEX_DIR=/app/data/qwen3-embedding-4b-2560/staging/index
@@ -46,8 +46,6 @@ set --
 source "$TEST_SCRIPT_DIRECTORY/lib/common_qdrant.sh"
 # shellcheck source=lib/github_identity.sh
 source "$TEST_SCRIPT_DIRECTORY/lib/github_identity.sh"
-export SPRING_PROFILE=dev
-
 qdrant_curl() {
     return 42
 }
@@ -55,7 +53,7 @@ if list_github_collections "https://qdrant.invalid" >/dev/null 2>&1; then
     fail_github_sync_test "Qdrant collection-list transport failure was accepted as an empty cohort"
 fi
 if read_collection_repository_metadata \
-    "github-dev-qwen3-embedding-4b-2560-example-repository" \
+    "github-qwen3-embedding-4b-2560-example-repository" \
     "https://qdrant.invalid" >/dev/null 2>&1; then
     fail_github_sync_test "Qdrant metadata transport failure was accepted as missing metadata"
 fi

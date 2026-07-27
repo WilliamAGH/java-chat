@@ -3,7 +3,7 @@
 Command reference for documentation scraping, embedding, and ingestion into Qdrant.
 
 Incremental runs are the default — unchanged content is skipped via SHA-256 hash markers.
-"Full" runs publish into fresh environment- and generation-specific collections and state roots. Existing
+"Full" runs publish into fresh generation-specific collections and profile-specific state roots. Existing
 collections and state remain read-only for rollback; never clear or rewrite them to change vector dimensions.
 
 ---
@@ -112,7 +112,7 @@ REPO_PATH=/absolute/path/to/repository make process-github-repo
 # GitHub URL (auto clone/pull cache)
 REPO_URL=https://github.com/owner/repository make process-github-repo
 
-# Sync repositories represented by the exact active github-${SPRING_PROFILE}-qwen3-embedding-4b-2560- prefix
+# Sync repositories represented by the exact shared github-qwen3-embedding-4b-2560- prefix
 SPRING_PROFILE=local SYNC_EXISTING=1 make process-github-repo
 ```
 
@@ -169,10 +169,10 @@ Ingestion writes to four Qdrant collections, each containing **dense vectors** (
 
 | Collection | Default name | Content |
 |---|---|---|
-| Books | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-books` | PDF books |
-| Docs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-docs` | Java API, Spring reference/API, Oracle Javase |
-| Articles | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-articles` | IBM articles, JetBrains blog posts |
-| PDFs | `java-chat-${SPRING_PROFILE}-qwen3-embedding-4b-2560-pdfs` | Non-book PDFs (reserved) |
+| Books | `java-chat-qwen3-embedding-4b-2560-books` | PDF books |
+| Docs | `java-chat-qwen3-embedding-4b-2560-docs` | Java API, Spring reference/API, Oracle Javase |
+| Articles | `java-chat-qwen3-embedding-4b-2560-articles` | IBM articles, JetBrains blog posts |
+| PDFs | `java-chat-qwen3-embedding-4b-2560-pdfs` | Non-book PDFs (reserved) |
 
 Each collection has two named vector spaces:
 
@@ -199,7 +199,7 @@ See [configuration.md](configuration.md#qdrant) for the full list of Qdrant envi
 
 ## Full re-ingest
 
-There is no in-place generation conversion. A full re-ingest creates new environment/generation collection names and uses the matching new state roots:
+There is no in-place generation conversion. A full re-ingest creates new generation collection names and uses the matching profile-specific state roots. Changing `SPRING_PROFILE` never creates another collection set:
 
 1. Stop the app and any running ingestion processes.
 
@@ -209,10 +209,10 @@ There is no in-place generation conversion. A full re-ingest creates new environ
 export DOCS_SNAPSHOT_DIR="$PWD/data/qwen3-embedding-4b-2560/local/snapshots"
 export DOCS_PARSED_DIR="$PWD/data/qwen3-embedding-4b-2560/local/parsed"
 export DOCS_INDEX_DIR="$PWD/data/qwen3-embedding-4b-2560/local/index"
-export QDRANT_COLLECTION_BOOKS=java-chat-local-qwen3-embedding-4b-2560-books
-export QDRANT_COLLECTION_DOCS=java-chat-local-qwen3-embedding-4b-2560-docs
-export QDRANT_COLLECTION_ARTICLES=java-chat-local-qwen3-embedding-4b-2560-articles
-export QDRANT_COLLECTION_PDFS=java-chat-local-qwen3-embedding-4b-2560-pdfs
+export QDRANT_COLLECTION_BOOKS=java-chat-qwen3-embedding-4b-2560-books
+export QDRANT_COLLECTION_DOCS=java-chat-qwen3-embedding-4b-2560-docs
+export QDRANT_COLLECTION_ARTICLES=java-chat-qwen3-embedding-4b-2560-articles
+export QDRANT_COLLECTION_PDFS=java-chat-qwen3-embedding-4b-2560-pdfs
 ```
 
 3. Start the generation-specific Qdrant 1.18.3 Compose project. Preserve old collections and state read-only for rollback.

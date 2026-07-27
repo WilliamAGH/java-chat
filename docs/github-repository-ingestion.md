@@ -7,7 +7,7 @@ Java Chat supports GitHub source-code ingestion into dedicated hybrid Qdrant col
 - Use one canonical repository identity for all ingestion entrypoints.
 - Prevent local-path and URL ingestion from creating duplicate variants of the same repo.
 - Reindex only changed files on reruns.
-- Sync only collections under the exact active environment/generation prefix.
+- Sync only collections under the exact shared generation prefix.
 
 ## Canonical repository identity
 
@@ -16,7 +16,7 @@ The canonical owner for repository identity and collection-name validation is
 `require_canonical_collection_name`.
 
 Every ingestion entrypoint asks that owner to validate the repository before processing. The result
-is one environment- and generation-specific collection for each GitHub repository: local-clone, URL, and sync ingestion reject a
+is one generation-specific collection for each GitHub repository shared by dev and production: local-clone, URL, and sync ingestion reject a
 collection name that does not match the source repository. Ingested content retains the repository
 metadata required for incremental synchronization.
 
@@ -71,7 +71,7 @@ SYNC_EXISTING=1 make process-github-repo
 Batch sync flow:
 
 1. Require `SPRING_PROFILE` to be exactly `local`, `dev`, or `prod`.
-2. Discover only Qdrant collections prefixed with `github-${SPRING_PROFILE}-qwen3-embedding-4b-2560-`.
+2. Discover only Qdrant collections prefixed with `github-qwen3-embedding-4b-2560-`.
 3. Read the source repository and indexed revision from each collection's payload metadata.
 4. Verify collection identity through `require_canonical_collection_name`.
 5. Resolve the source repository's remote HEAD commit.
@@ -115,7 +115,7 @@ An embedding or upsert failure leaves the prior complete page and its marker int
 
 GitHub payload-index behavior is owned by
 [`scripts/lib/github_identity.sh`](../scripts/lib/github_identity.sh), specifically
-`ensure_github_payload_indexes`. A missing collection clones only the active environment's
+`ensure_github_payload_indexes`. A missing collection clones only the shared
 `QDRANT_COLLECTION_DOCS` schema. Both existing and newly cloned collections must validate as named
 `dense` 2,560/Cosine plus `bm25`/IDF with on-disk payloads before ingestion.
 
@@ -129,7 +129,7 @@ Common optional variables for GitHub ingestion:
 - `REPO_CACHE_PATH` (single-repo URL mode only)
 - `SYNC_EXISTING`
 - `SPRING_PROFILE` (exactly `local`, `dev`, or `prod`)
-- `QDRANT_COLLECTION_DOCS` (active environment/generation schema source)
+- `QDRANT_COLLECTION_DOCS` (shared generation schema source)
 - `DOCS_SNAPSHOT_DIR` (matching environment/generation snapshot state root)
 - `DOCS_PARSED_DIR` (matching environment/generation parsed state root)
 - `DOCS_INDEX_DIR` (matching environment/generation marker state root)
