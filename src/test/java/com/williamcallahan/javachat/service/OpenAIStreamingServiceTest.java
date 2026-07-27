@@ -48,9 +48,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -65,6 +68,9 @@ class OpenAIStreamingServiceTest {
     private static final String OPENAI_BASE_URL = "https://api.llm-gateway.iocloudhost.net/v1";
     private static final long CONFIGURED_PROVIDER_BACKOFF_SECONDS = 600L;
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
+    private static final String INVISIBLE_PROVIDER_DELTA = " \t\u200B";
+    private static final Duration INVISIBLE_PROVIDER_DELTA_INTERVAL = Duration.ofSeconds(3);
+    private static final Duration VISIBLE_OUTPUT_DEADLINE_REMAINDER = Duration.ofSeconds(2);
 
     private OpenAIStreamingService createStreamingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
@@ -180,6 +186,36 @@ class OpenAIStreamingServiceTest {
 
             verify(rateLimitService, never()).recordSuccess(RateLimitService.ApiProvider.OPENAI);
         }
+    }
+
+    @Test
+    void invisibleProviderDeltasCannotResetTheVisibleOutputDeadline() {
+        OpenAIStreamingService streamingService = createStreamingService();
+        AtomicBoolean upstreamCancelled = new AtomicBoolean();
+
+        StepVerifier.withVirtualTime(() -> {
+                    Flux<String> invisibleProviderDeltas = Flux.interval(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                            .map(ignoredTick -> INVISIBLE_PROVIDER_DELTA)
+                            .doOnCancel(() -> upstreamCancelled.set(true));
+                    return streamingService.enforceVisibleOutputDeadline(invisibleProviderDeltas);
+                })
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(INVISIBLE_PROVIDER_DELTA_INTERVAL)
+                .expectNext(INVISIBLE_PROVIDER_DELTA)
+                .thenAwait(VISIBLE_OUTPUT_DEADLINE_REMAINDER)
+                .expectError(TimeoutException.class)
+                .verify();
+
+        assertTrue(upstreamCancelled.get());
     }
 
     @Test

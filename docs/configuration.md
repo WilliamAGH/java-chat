@@ -20,7 +20,7 @@ Common variables:
 - `OPENAI_API_KEY` (shared-gateway auth)
 - `OPENAI_BASE_URL` (`https://api.llm-gateway.iocloudhost.net/v1` for Java Chat deployments)
 - `OPENAI_MODEL` (required value `gpt-5.4`; any other value fails startup)
-- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call)
+- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `90`; bounds the complete SDK call while Java Chat enforces a 20-second visible-output deadline)
 
 Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. Invalid values fail startup. Supported reasoning-effort subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 
@@ -108,7 +108,6 @@ See [pipeline-commands.md](pipeline-commands.md#hybrid-qdrant-setup) for the col
 - `QDRANT_SPARSE_VECTOR_NAME` (default `bm25`) — named vector for BM25 sparse tokens
 - `HYBRID_PREFETCH_LIMIT` (default `20`) — per-stage prefetch limit for RRF fusion queries
 - `HYBRID_RRF_K` (default `60`) — reciprocal-rank-fusion k parameter used by Qdrant query fusion
-- `HYBRID_FAIL_ON_PARTIAL_SEARCH_ERROR` (default `true`) — fail retrieval when any collection query fails
 - `HYBRID_QUERY_TIMEOUT` (default `5s`) — timeout for hybrid search queries
 - `APP_QDRANT_ENSURE_PAYLOAD_INDEXES` (default `true`) — create payload indexes on startup
 
@@ -148,4 +147,4 @@ Common variables (see `app.rag.*` defaults in `application.properties`):
 - `RAG_TOP_K`
 - `RAG_RETURN_K`
 - `RAG_CITATIONS_K`
-- `RAG_RERANKER_TIMEOUT` (default `30s`) — timeout budget for LLM reranking calls
+- `RAG_RERANKER_TIMEOUT` (default `8s`) — timeout budget for LLM reranking calls

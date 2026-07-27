@@ -66,7 +66,7 @@ public class OpenAIStreamingService {
     @Value("${OPENAI_BASE_URL:}")
     private String openaiBaseUrl;
 
-    @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:600}")
+    @Value("${OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS:90}")
     private long streamingRequestTimeoutSeconds;
 
     /** Sends live chat through the gateway's production tier; batch callers use {@code batch}. */
@@ -305,14 +305,14 @@ public class OpenAIStreamingService {
         return Flux.defer(() -> {
             AtomicBoolean emittedVisibleText = new AtomicBoolean(false);
             AtomicBoolean observedCompletedEvent = new AtomicBoolean(false);
-            return asyncResponseEvents(client, requestParameters, requestOptions)
+            Flux<String> responseTextChunks = asyncResponseEvents(client, requestParameters, requestOptions)
                     .concatMap(responseStreamEvent -> {
                         if (responseStreamEvent.completed().isPresent()) {
                             observedCompletedEvent.set(true);
                         }
                         return extractTextOrTerminalFailure(responseStreamEvent);
-                    })
-                    .timeout(STREAM_OUTPUT_TIMEOUT)
+                    });
+            return enforceVisibleOutputDeadline(responseTextChunks)
                     .doOnNext(textChunk -> {
                         if (UnicodeVisibleContent.hasVisibleContent(textChunk)) {
                             emittedVisibleText.set(true);
@@ -334,6 +334,16 @@ public class OpenAIStreamingService {
                     .doOnError(exception -> {
                         recordProviderFailurePreservingUpstream(activeProvider, exception);
                     });
+        });
+    }
+
+    Flux<String> enforceVisibleOutputDeadline(Flux<String> responseTextChunks) {
+        return responseTextChunks.publish(sharedTextChunks -> {
+            Flux<String> visibleOutputWatchdog = sharedTextChunks
+                    .filter(UnicodeVisibleContent::hasVisibleContent)
+                    .timeout(STREAM_OUTPUT_TIMEOUT)
+                    .thenMany(Flux.empty());
+            return Flux.merge(sharedTextChunks, visibleOutputWatchdog);
         });
     }
 

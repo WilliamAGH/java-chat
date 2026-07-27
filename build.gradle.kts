@@ -193,6 +193,7 @@ tasks.withType<Test> {
 // Unit test task - exclude integration tests
 tasks.test {
     environment("OPENAI_API_KEY", "test-token")
+    environment("OPENAI_BASE_URL", "https://api.llm-gateway.iocloudhost.net/v1")
     useJUnitPlatform {
         excludeTags("integration")
     }
