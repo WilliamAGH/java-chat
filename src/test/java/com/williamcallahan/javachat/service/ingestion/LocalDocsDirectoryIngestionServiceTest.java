@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 /** Verifies caller-selected ingestion roots remain inside the configured documentation mirror. */
 class LocalDocsDirectoryIngestionServiceTest {
@@ -25,8 +26,9 @@ class LocalDocsDirectoryIngestionServiceTest {
         Path documentationFile = selectedSourceRoot.resolve("index.html");
         Files.writeString(documentationFile, "<html>Kotlin 2.4.10</html>");
         LocalDocsFileIngestionProcessor fileProcessor = mock(LocalDocsFileIngestionProcessor.class);
-        when(fileProcessor.process(selectedSourceRoot.toRealPath(), documentationFile.toRealPath()))
-                .thenReturn(LocalDocsFileOutcome.processedFile());
+        when(fileProcessor.processBatch(
+                        selectedSourceRoot.toRealPath(), java.util.List.of(documentationFile.toRealPath())))
+                .thenReturn(java.util.List.of(LocalDocsFileOutcome.processedFile()));
         LocalDocsDirectoryIngestionService directoryIngestionService =
                 new LocalDocsDirectoryIngestionService(fileProcessor, configuredDocumentationRoot.toString());
 
@@ -34,7 +36,8 @@ class LocalDocsDirectoryIngestionServiceTest {
                 directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), 1);
 
         assertEquals(1, ingestionOutcome.processed());
-        verify(fileProcessor).process(selectedSourceRoot.toRealPath(), documentationFile.toRealPath());
+        verify(fileProcessor)
+                .processBatch(selectedSourceRoot.toRealPath(), java.util.List.of(documentationFile.toRealPath()));
     }
 
     @Test
@@ -52,5 +55,32 @@ class LocalDocsDirectoryIngestionServiceTest {
                 IllegalArgumentException.class,
                 () -> directoryIngestionService.ingestLocalDirectory(outsideDocumentationRoot.toString(), 1));
         verifyNoInteractions(fileProcessor);
+    }
+
+    @Test
+    void skippedFileConsumesInspectionLimit(@TempDir Path temporaryDirectory) throws IOException {
+        Path configuredDocumentationRoot = temporaryDirectory.resolve("arbitrary-corpus");
+        Path selectedSourceRoot = configuredDocumentationRoot.resolve("kotlin");
+        Files.createDirectories(selectedSourceRoot);
+        Files.writeString(selectedSourceRoot.resolve("first.html"), "<html>First</html>");
+        Files.writeString(selectedSourceRoot.resolve("second.html"), "<html>Second</html>");
+        LocalDocsFileIngestionProcessor fileProcessor = mock(LocalDocsFileIngestionProcessor.class);
+        when(fileProcessor.processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(java.util.List.of(LocalDocsFileOutcome.skippedFile()));
+        LocalDocsDirectoryIngestionService directoryIngestionService =
+                new LocalDocsDirectoryIngestionService(fileProcessor, configuredDocumentationRoot.toString());
+
+        IngestionLocalOutcome ingestionOutcome =
+                directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), 1);
+
+        assertEquals(0, ingestionOutcome.processed());
+        ArgumentCaptor<java.util.List<Path>> inspectedFilesCaptor = ArgumentCaptor.captor();
+        verify(fileProcessor)
+                .processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        inspectedFilesCaptor.capture());
+        assertEquals(1, inspectedFilesCaptor.getValue().size());
     }
 }

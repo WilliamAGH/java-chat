@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public final class LocalDocsDirectoryIngestionService {
+    private static final int LOCAL_INGESTION_FILE_BATCH_SIZE = 32;
+
     private final LocalDocsFileIngestionProcessor fileProcessor;
     private final Path configuredDocumentationRoot;
 
@@ -66,21 +68,31 @@ public final class LocalDocsDirectoryIngestionService {
         }
 
         AtomicInteger processedCount = new AtomicInteger(0);
+        int inspectedFileCount = 0;
         List<IngestionLocalFailure> failures = new ArrayList<>();
 
         try (Stream<Path> paths = Files.walk(realSelectedRoot)) {
             Iterator<Path> pathIterator = paths.filter(pathCandidate -> !Files.isDirectory(pathCandidate))
                     .filter(this::isIngestableFile)
                     .iterator();
-            while (pathIterator.hasNext() && processedCount.get() < maxFiles) {
-                Path file = pathIterator.next();
-                LocalDocsFileOutcome outcome = fileProcessor.process(realSelectedRoot, file);
-                if (outcome.processed()) {
-                    processedCount.incrementAndGet();
+            boolean failed = false;
+            while (pathIterator.hasNext() && inspectedFileCount < maxFiles && !failed) {
+                int remainingFileCapacity = maxFiles - inspectedFileCount;
+                int batchFileCount = Math.min(LOCAL_INGESTION_FILE_BATCH_SIZE, remainingFileCapacity);
+                List<Path> fileBatch = new ArrayList<>(batchFileCount);
+                while (pathIterator.hasNext() && fileBatch.size() < batchFileCount) {
+                    fileBatch.add(pathIterator.next());
+                    inspectedFileCount++;
                 }
-                outcome.failure().ifPresent(failures::add);
-                if (outcome.failure().isPresent()) {
-                    break;
+                for (LocalDocsFileOutcome outcome : fileProcessor.processBatch(realSelectedRoot, fileBatch)) {
+                    if (outcome.processed()) {
+                        processedCount.incrementAndGet();
+                    }
+                    outcome.failure().ifPresent(failures::add);
+                    if (outcome.failure().isPresent()) {
+                        failed = true;
+                        break;
+                    }
                 }
             }
         }

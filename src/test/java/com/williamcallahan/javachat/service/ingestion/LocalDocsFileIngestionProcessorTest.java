@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -50,6 +51,9 @@ import org.springframework.ai.document.Document;
 
 /** Verifies configured local Javadoc files use structured Java API extraction. */
 class LocalDocsFileIngestionProcessorTest {
+    private static final int DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES =
+            LocalDocsFileIngestionProcessor.MAX_EMBEDDING_BATCH_DOCUMENTS + 1;
+    private static final int EXPECTED_EMBEDDING_BATCH_COUNT = 2;
 
     private static final String JAVA_API_CLASS_NAME = "StringBuilder";
     private static final String JAVA_API_METHOD_SIGNATURE = "append(String text)";
@@ -63,6 +67,181 @@ class LocalDocsFileIngestionProcessorTest {
     private static final String JAVA_API_DESCRIPTION =
             "Detailed Java API documentation explains mutability, character sequences, and method contracts. "
                     .repeat(JAVA_API_DESCRIPTION_REPEAT_COUNT);
+
+    @Test
+    void shouldCoalesceThirtyThreeNewFilesIntoTwoHybridUpserts(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        List<Path> documentationFiles = new ArrayList<>();
+        for (int i = 0; i < DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES; i++) {
+            Path documentationFile = selectedDocumentationRoot.resolve("documentation-" + i + ".html");
+            Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+            documentationFiles.add(documentationFile);
+        }
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+
+        List<LocalDocsFileOutcome> outcomes =
+                ingestionFixture.ingestionProcessor().processBatch(selectedDocumentationRoot, documentationFiles);
+
+        assertEquals(DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES, outcomes.size());
+        assertTrue(outcomes.stream().allMatch(LocalDocsFileOutcome::processed));
+        ArgumentCaptor<List<Document>> documentBatchCaptor = ArgumentCaptor.captor();
+        verify(ingestionFixture.hybridVectorService, times(EXPECTED_EMBEDDING_BATCH_COUNT))
+                .upsert(eq(QdrantCollectionKind.DOCS), documentBatchCaptor.capture());
+        assertEquals(
+                LocalDocsFileIngestionProcessor.MAX_EMBEDDING_BATCH_DOCUMENTS,
+                documentBatchCaptor.getAllValues().getFirst().size());
+        assertEquals(1, documentBatchCaptor.getAllValues().getLast().size());
+        verify(ingestionFixture.hybridVectorService, never())
+                .replaceUrlDocuments(any(QdrantCollectionKind.class), anyString(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, times(DOCUMENT_COUNT_SPANNING_TWO_EMBEDDING_BATCHES))
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+    }
+
+    @Test
+    void shouldWriteNoMarkersWhenCombinedEmbeddingFails(@TempDir Path temporaryDirectory) throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path firstDocumentationFile = selectedDocumentationRoot.resolve("first.html");
+        Path secondDocumentationFile = selectedDocumentationRoot.resolve("second.html");
+        Files.writeString(firstDocumentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+        Files.writeString(secondDocumentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+        doThrow(new com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException("gateway unavailable"))
+                .when(ingestionFixture.hybridVectorService)
+                .upsert(eq(QdrantCollectionKind.DOCS), any());
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(firstDocumentationFile, secondDocumentationFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "embedding-unavailable",
+                outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.fileIngestionMarkerStore, never())
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+        verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldNotRunLaterExcludedPageTransitionWhenEarlierEmbeddingFails(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        JavaApiDocumentationSource javaApiDocumentationSource =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst();
+        Path localDocsRoot = temporaryDirectory.resolve("corpus");
+        Path documentationFile =
+                localDocsRoot.resolve(documentationSource.relativeMirrorPath()).resolve("index.html");
+        Files.createDirectories(Objects.requireNonNull(documentationFile.getParent(), "documentationFile parent"));
+        Files.writeString(documentationFile, javaApiHtml(), StandardCharsets.UTF_8);
+        Path classUseFile = writeJavaApiFile(
+                localDocsRoot, javaApiDocumentationSource, JAVA_API_CLASS_USE_RELATIVE_PATH, javaApiHtml());
+        String expectedClassUseUrl = javaApiDocumentationSource.remoteBaseUrl() + JAVA_API_CLASS_USE_RELATIVE_PATH;
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.hybridVectorService.countPointsForUrl(any(QdrantCollectionKind.class), anyString()))
+                .thenAnswer(
+                        invocation -> expectedClassUseUrl.equals(invocation.getArgument(1, String.class)) ? 1L : 0L);
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+        doThrow(new com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException("gateway unavailable"))
+                .when(ingestionFixture.hybridVectorService)
+                .upsert(eq(QdrantCollectionKind.DOCS), any());
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(localDocsRoot, List.of(documentationFile, classUseFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "embedding-unavailable",
+                outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.hybridVectorService, never()).deleteByUrl(any(QdrantCollectionKind.class), anyString());
+        verify(ingestionFixture.ingestedFilePruneService, never())
+                .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());
+        verify(ingestionFixture.fileIngestionMarkerStore, never())
+                .markFileIngested(anyString(), any(FileIngestionRecord.class));
+    }
+
+    @Test
+    void shouldNotQuarantineLaterRejectedPageWhenEarlierEmbeddingFails(@TempDir Path temporaryDirectory)
+            throws IOException {
+        DocumentationSource documentationSource =
+                DocsSourceRegistry.documentationSources().getFirst();
+        Path selectedDocumentationRoot =
+                temporaryDirectory.resolve("corpus").resolve(documentationSource.relativeMirrorPath());
+        Files.createDirectories(selectedDocumentationRoot);
+        Path acceptedFile = selectedDocumentationRoot.resolve("accepted.html");
+        Path rejectedFile = selectedDocumentationRoot.resolve("rejected.html");
+        Files.writeString(acceptedFile, javaApiHtml(), StandardCharsets.UTF_8);
+        Files.writeString(
+                rejectedFile,
+                "<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>",
+                StandardCharsets.UTF_8);
+
+        LocalDocsIngestionFixture ingestionFixture = new LocalDocsIngestionFixture();
+        when(ingestionFixture.fileIngestionMarkerStore.readFileIngestionRecord(anyString()))
+                .thenReturn(Optional.empty());
+        when(ingestionFixture.hybridVectorService.resolveCollectionName(any())).thenReturn("documentation");
+        when(ingestionFixture.chunkProcessingService.processAndStoreChunks(
+                        anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String sourceUrl = invocation.getArgument(1, String.class);
+                    Document indexedDocument = new Document(sourceUrl, "Documentation body", new HashMap<>());
+                    return new ChunkProcessingService.ChunkProcessingOutcome(
+                            List.of(indexedDocument), List.of(sourceUrl + "-hash"), 1, 0);
+                });
+        doThrow(new com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException("gateway unavailable"))
+                .when(ingestionFixture.hybridVectorService)
+                .upsert(eq(QdrantCollectionKind.DOCS), any());
+
+        List<LocalDocsFileOutcome> outcomes = ingestionFixture
+                .ingestionProcessor()
+                .processBatch(selectedDocumentationRoot, List.of(acceptedFile, rejectedFile));
+
+        assertEquals(1, outcomes.size());
+        assertEquals(
+                "embedding-unavailable",
+                outcomes.getFirst().failure().orElseThrow().phase());
+        verify(ingestionFixture.quarantineService, never()).quarantine(any(Path.class));
+    }
 
     @Test
     void shouldSendAnchoredJavadocSectionsToChunkingForConfiguredJavaApiFile(@TempDir Path temporaryDirectory)
