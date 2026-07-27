@@ -72,6 +72,21 @@
     }: Props = $props();
 
     let messagesContainer: HTMLElement | null = $state(null);
+    let chatDialog: HTMLDialogElement | null = $state(null);
+    let chatTrigger: HTMLButtonElement | null = $state(null);
+
+    $effect(() => {
+        if (!isOpen || !chatDialog || chatDialog.open) {
+            return;
+        }
+
+        chatDialog.showModal();
+        chatDialog
+            .querySelector<HTMLTextAreaElement>(
+                "textarea[aria-label='Message input']",
+            )
+            ?.focus();
+    });
 
     /** Exposes the messages container element for external scroll management. */
     export function getMessagesContainer(): HTMLElement | null {
@@ -81,10 +96,31 @@
     function handleJumpToBottom(): void {
         onJumpToBottom?.();
     }
+
+    function closeDialog(): void {
+        chatDialog?.close();
+    }
+
+    function handleDialogCancel(cancelEvent: Event): void {
+        cancelEvent.preventDefault();
+        closeDialog();
+    }
+
+    function handleDialogClose(): void {
+        onClose();
+        chatTrigger?.focus();
+    }
+
+    function handleDialogBackdropClick(mouseEvent: MouseEvent): void {
+        if (mouseEvent.target === chatDialog) {
+            closeDialog();
+        }
+    }
 </script>
 
 <!-- Mobile Chat FAB -->
 <button
+    bind:this={chatTrigger}
     type="button"
     class="chat-fab"
     onclick={onToggle}
@@ -110,14 +146,17 @@
 </button>
 
 <!-- Mobile Chat Drawer -->
-{#if isOpen}
-    <div
-        class="chat-drawer-backdrop"
-        onclick={onClose}
-        aria-hidden="true"
-    ></div>
-    <div class="chat-drawer" role="dialog" aria-label="Lesson chat">
-        <div class="chat-drawer-header">
+<dialog
+    bind:this={chatDialog}
+    class="chat-drawer"
+    aria-label="Lesson chat"
+    aria-modal="true"
+    oncancel={handleDialogCancel}
+    onclose={handleDialogClose}
+    onclick={handleDialogBackdropClick}
+>
+    {#if isOpen}
+    <div class="chat-drawer-header">
             <div class="chat-drawer-title">
                 <svg
                     viewBox="0 0 24 24"
@@ -157,7 +196,7 @@
                 <button
                     type="button"
                     class="drawer-close-btn"
-                    onclick={onClose}
+                    onclick={closeDialog}
                     aria-label="Close chat"
                 >
                     <svg
@@ -211,11 +250,11 @@
             />
         </div>
 
-        <div class="chat-drawer-input">
-            <ChatInput {onSend} disabled={isStreaming} {placeholder} />
-        </div>
+    <div class="chat-drawer-input">
+        <ChatInput {onSend} disabled={isStreaming} {placeholder} />
     </div>
-{/if}
+    {/if}
+</dialog>
 
 <style>
     /* Mobile Chat FAB - hidden on desktop, shown via media query */
@@ -292,13 +331,27 @@
     }
 
     /* Mobile Chat Drawer */
-    .chat-drawer-backdrop {
+    .chat-drawer::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+        animation: fade-in var(--duration-fast) var(--ease-out);
+    }
+
+    .chat-drawer {
         display: none;
         position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 60;
-        animation: fade-in var(--duration-fast) var(--ease-out);
+        inset: auto 0 0;
+        width: 100%;
+        height: 85vh;
+        max-height: 85vh;
+        margin: 0;
+        padding: 0;
+        background: var(--color-bg-primary);
+        border: none;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        box-shadow: var(--shadow-xl);
+        z-index: 70;
+        flex-direction: column;
+        animation: slide-up var(--duration-normal) var(--ease-out);
     }
 
     @keyframes fade-in {
@@ -308,22 +361,6 @@
         to {
             opacity: 1;
         }
-    }
-
-    .chat-drawer {
-        display: none;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 85vh;
-        max-height: 85vh;
-        background: var(--color-bg-primary);
-        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-        box-shadow: var(--shadow-xl);
-        z-index: 70;
-        flex-direction: column;
-        animation: slide-up var(--duration-normal) var(--ease-out);
     }
 
     @keyframes slide-up {
@@ -441,11 +478,7 @@
             justify-content: center;
         }
 
-        .chat-drawer-backdrop {
-            display: block;
-        }
-
-        .chat-drawer {
+        .chat-drawer[open] {
             display: flex;
         }
     }
