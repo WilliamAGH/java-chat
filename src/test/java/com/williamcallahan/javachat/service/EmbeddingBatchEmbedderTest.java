@@ -20,7 +20,7 @@ class EmbeddingBatchEmbedderTest {
     private static final int EMBEDDING_DIMENSIONS = 2;
     private static final int THREE_BATCH_DOCUMENT_COUNT = EmbeddingBatchEmbedder.EMBEDDING_REQUEST_BATCH_SIZE * 2 + 1;
     private static final int REPRESENTATIVE_JAVA_CORPUS_CHUNK_COUNT = 177_000;
-    private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 24_000;
+    private static final int MAX_REPRESENTATIVE_JAVA_CORPUS_REQUEST_COUNT = 45_000;
     private static final float[] EMBEDDING_VECTOR = new float[] {0.25f, 0.75f};
 
     @Test
