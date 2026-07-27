@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.actuate.health.Health;
@@ -49,7 +50,8 @@ public final class QdrantIndexInitializer {
     private static final String SCHEMA_TYPE_INTEGER = "integer";
     private static final String VECTOR_DISTANCE_COSINE = "Cosine";
     private static final String SPARSE_MODIFIER_IDF = "idf";
-    private static final String COLLECTION_STATUS_GREEN = "green";
+    private static final String COLLECTION_STATUS_RED = "red";
+    private static final Set<String> QUERYABLE_COLLECTION_STATUSES = Set.of("green", "yellow", "grey");
     private static final String REQUIRED_EMBEDDING_MODEL = "qwen/qwen3-embedding-4b";
     private static final int REQUIRED_EMBEDDING_DIMENSIONS = 2_560;
     private static final String EMPTY_TEXT = "";
@@ -312,23 +314,27 @@ public final class QdrantIndexInitializer {
         }
     }
 
-    private void validateCollectionStatus(JsonNode collectionInfo, String collection) {
-        String collectionStatus = collectionInfo.path("result").path("status").asText(EMPTY_TEXT);
-        if (COLLECTION_STATUS_GREEN.equalsIgnoreCase(collectionStatus)) {
-            return;
-        }
+    private void validateCollectionStatus(JsonNode collectionInfo, String collectionName) {
+        String collectionStatus =
+                collectionInfo.path("result").path("status").asText(EMPTY_TEXT).toLowerCase(Locale.ROOT);
         String optimizerError = collectionInfo
                 .path("result")
                 .path("optimizer_status")
                 .path("error")
                 .asText(EMPTY_TEXT);
-        String optimizerErrorDetails = optimizerError.isBlank() ? EMPTY_TEXT : ": " + optimizerError;
-        throw new IllegalStateException("Qdrant collection '"
-                + collection
-                + "' must be green but status was '"
-                + collectionStatus
-                + "'"
-                + optimizerErrorDetails);
+        if (!optimizerError.isBlank()) {
+            throw new IllegalStateException(
+                    "Qdrant collection '" + collectionName + "' optimizer failed: " + optimizerError);
+        }
+        if (QUERYABLE_COLLECTION_STATUSES.contains(collectionStatus)) {
+            return;
+        }
+        if (COLLECTION_STATUS_RED.equals(collectionStatus)) {
+            throw new IllegalStateException(
+                    "Qdrant collection '" + collectionName + "' is in unrecoverable red status");
+        }
+        throw new IllegalStateException(
+                "Qdrant collection '" + collectionName + "' returned unknown status '" + collectionStatus + "'");
     }
 
     private void validateDenseDistance(JsonNode collectionInfo, String denseVectorName, String collection) {

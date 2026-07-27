@@ -203,6 +203,7 @@ app_jar=$(locate_app_jar)
 log "${YELLOW}Starting document processor...${NC}"
 java -Dspring.profiles.active=cli \
      -jar "$app_jar" \
+     --app.qdrant.ensure-collections=true \
      --spring.main.web-application-type=none \
      --server.port=0 >> "$LOG_FILE" 2>&1 &
 APP_PID=$!

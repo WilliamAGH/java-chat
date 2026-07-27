@@ -280,7 +280,7 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 | `app.qdrant.query-timeout` | `5s` | Timeout for hybrid search fan-out across all collections |
 | `app.qdrant.fail-on-partial-search-error` | `true` | Fail retrieval if any collection query fails |
 | `app.qdrant.ensure-payload-indexes` | `true` | Create payload indexes on startup for metadata filtering |
-| `app.qdrant.ensure-collections` | `true` | Auto-create hybrid collections on startup if missing |
+| `app.qdrant.ensure-collections` | `false` | Validate existing collections without creating missing collections on normal startup |
 
 ### Collections (`app.qdrant.collections.*`)
 

@@ -187,9 +187,9 @@ Each collection has two named vector spaces:
 4. The app merges cross-collection results, deduplicates by point UUID, and returns the top-K by fused score
 5. Results are reranked before being passed to the LLM as retrieval context
 
-### Collection auto-creation
+### Collection startup validation
 
-On startup (non-test profile), `QdrantIndexInitializer` ensures all four collections exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). Reachable schema or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup.
+On normal startup (non-test profile), `QdrantIndexInitializer` requires all four collections to exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). It does not create a missing collection. Reachable absence, schema, or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup. The dedicated full-ingestion command explicitly enables collection creation while it owns population of a new generation.
 
 ### Environment variables
 

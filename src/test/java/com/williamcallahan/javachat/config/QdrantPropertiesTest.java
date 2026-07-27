@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,11 @@ class QdrantPropertiesTest {
     private static final String INITIAL_BOOK_COLLECTION = "books-initial";
     private static final String REPLACEMENT_BOOK_COLLECTION = "books-replacement";
     private static final String DUPLICATE_COLLECTION_NAME = "shared-collection";
+
+    @Test
+    void startupDoesNotCreateMissingCollectionsByDefault() {
+        assertFalse(new QdrantProperties().isEnsureCollections());
+    }
 
     @Test
     void setCollectionsDoesNotRetainCallerOwnedConfiguration() {

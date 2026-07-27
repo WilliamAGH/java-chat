@@ -89,9 +89,10 @@ run_documentation_ingestion --doc-sets=kotlin >/dev/null
 if [ "$(< "$CAPTURED_CHILD_ENVIRONMENT")" != "$DOCS_DIR|local" ]; then
     fail_process_environment_test "DOCS_DIR and SPRING_PROFILE did not reach the child environment"
 fi
-if ! grep -Fxq -- "--spring.main.web-application-type=none" "$CAPTURED_CHILD_ARGUMENTS" \
+if ! grep -Fxq -- "--app.qdrant.ensure-collections=true" "$CAPTURED_CHILD_ARGUMENTS" \
+    || ! grep -Fxq -- "--spring.main.web-application-type=none" "$CAPTURED_CHILD_ARGUMENTS" \
     || ! grep -Fxq -- "--server.port=0" "$CAPTURED_CHILD_ARGUMENTS"; then
-    fail_process_environment_test "CLI child did not preserve non-web startup arguments"
+    fail_process_environment_test "CLI child did not preserve explicit collection creation and non-web startup arguments"
 fi
 if grep -q -- "-DDOCS_DIR" "$CAPTURED_CHILD_ARGUMENTS"; then
     fail_process_environment_test "DOCS_DIR was passed as an ineffective JVM property"

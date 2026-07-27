@@ -27,6 +27,8 @@ import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.actuate.health.Status;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -118,7 +120,7 @@ class QdrantIndexInitializerTest {
     }
 
     @Test
-    void unhealthyCollectionFailsInitialization() {
+    void optimizerFailureFailsInitialization() {
         InitializerHarness initializerHarness = newInitializer(false);
         String firstCollection = initializerHarness.collectionName().getFirst();
         expectCollectionGet(
@@ -134,7 +136,7 @@ class QdrantIndexInitializerTest {
                 IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
 
         assertEquals(
-                "Qdrant collection '" + firstCollection + "' must be green but status was 'red': insufficient disk",
+                "Qdrant collection '" + firstCollection + "' optimizer failed: insufficient disk",
                 initializationFailure.getMessage());
         assertEquals(
                 Status.DOWN,
@@ -146,6 +148,57 @@ class QdrantIndexInitializerTest {
                         .initializationHealth()
                         .getDetails()
                         .get("initialization"));
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void unrecoverableRedCollectionFailsInitialization() {
+        InitializerHarness initializerHarness = newInitializer(false);
+        String firstCollection = initializerHarness.collectionName().getFirst();
+        expectCollectionGet(
+                initializerHarness,
+                QDRANT_REST_BASE_URL,
+                firstCollection,
+                collectionMetadataJson(EMBEDDING_DIMENSIONS).replace("\"status\": \"green\"", "\"status\": \"red\""));
+
+        IllegalStateException initializationFailure = assertThrows(
+                IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
+
+        assertEquals(
+                "Qdrant collection '" + firstCollection + "' is in unrecoverable red status",
+                initializationFailure.getMessage());
+        assertEquals(
+                Status.DOWN,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"yellow", "grey"})
+    void recoverableCollectionStatusRemainsReady(String recoverableCollectionStatus) {
+        InitializerHarness initializerHarness = newInitializer(false);
+        List<String> collectionNames = initializerHarness.collectionName();
+        for (String collectionName : collectionNames) {
+            String collectionMetadata = collectionMetadataJson(EMBEDDING_DIMENSIONS);
+            if (collectionName.equals(collectionNames.getFirst())) {
+                collectionMetadata = collectionMetadata.replace(
+                        "\"status\": \"green\"", "\"status\": \"" + recoverableCollectionStatus + "\"");
+            }
+            expectCollectionGet(initializerHarness, QDRANT_REST_BASE_URL, collectionName, collectionMetadata);
+        }
+        for (String collectionName : collectionNames) {
+            expectCollectionGet(
+                    initializerHarness,
+                    QDRANT_REST_BASE_URL,
+                    collectionName,
+                    collectionMetadataJson(EMBEDDING_DIMENSIONS));
+        }
+
+        initializerHarness.initializer().ensureCollectionsAndIndexes();
+
+        assertEquals(
+                Status.UP,
+                initializerHarness.initializer().initializationHealth().getStatus());
         initializerHarness.qdrantServer().verify();
     }
 
@@ -192,6 +245,35 @@ class QdrantIndexInitializerTest {
                 initializerHarness.initializer().initializationHealth().getStatus());
         assertEquals(
                 "pending",
+                initializerHarness
+                        .initializer()
+                        .initializationHealth()
+                        .getDetails()
+                        .get("initialization"));
+        initializerHarness.qdrantServer().verify();
+    }
+
+    @Test
+    void missingCollectionFailsWithoutCreationWhenEnsureIsDisabled() {
+        InitializerHarness initializerHarness = newInitializer(false);
+        String firstCollection = initializerHarness.collectionName().getFirst();
+        initializerHarness
+                .qdrantServer()
+                .expect(once(), requestTo(collectionUrl(firstCollection)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        IllegalStateException initializationFailure = assertThrows(
+                IllegalStateException.class, initializerHarness.initializer()::ensureCollectionsAndIndexes);
+
+        assertEquals(
+                "Failed to fetch Qdrant collection info for '" + firstCollection + "' (HTTP 404)",
+                initializationFailure.getMessage());
+        assertEquals(
+                Status.DOWN,
+                initializerHarness.initializer().initializationHealth().getStatus());
+        assertEquals(
+                "failed",
                 initializerHarness
                         .initializer()
                         .initializationHealth()
