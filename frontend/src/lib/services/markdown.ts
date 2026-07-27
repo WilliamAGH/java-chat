@@ -606,7 +606,14 @@ function createEnrichmentExtension(
 }
 function createMarkdownParser(isStreaming: boolean): Marked {
   const markdownParser = new Marked({ gfm: true, breaks: true });
-  markdownParser.use({ extensions: [createEnrichmentExtension(isStreaming, markdownParser)] });
+  markdownParser.use({
+    renderer: {
+      html(token: Tokens.HTML | Tokens.Tag): string {
+        return escapeHtml(token.text);
+      },
+    },
+    extensions: [createEnrichmentExtension(isStreaming, markdownParser)],
+  });
   return markdownParser;
 }
 

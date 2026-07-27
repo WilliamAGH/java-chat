@@ -23,11 +23,12 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain("public class Test {}");
   });
 
-  it("sanitizes dangerous HTML", () => {
+  it("escapes dangerous HTML as source text", () => {
     const markdown = '<script>alert("xss")</script>';
     const renderedHtml = parseMarkdown(markdown);
     expect(renderedHtml).not.toContain("<script>");
-    expect(renderedHtml).not.toContain("alert");
+    expect(renderedHtml).toContain("&lt;script&gt;");
+    expect(renderedHtml).toContain("alert(&quot;xss&quot;)");
   });
 
   it("preserves enrichment data attributes", () => {
@@ -213,6 +214,20 @@ describe("parseMarkdown", () => {
 
     expect(renderedHtml).toContain("{{warning: literal");
     expect(renderedHtml).toContain("if (ready) { run(); }");
+  });
+
+  it("preserves unfenced Java generic types instead of treating them as HTML", () => {
+    const renderedHtml = parseMarkdown("Use List<String> for the lesson titles.");
+
+    expect(renderedHtml).toContain("List&lt;String&gt;");
+    expect(renderedHtml).toContain("for the lesson titles.");
+  });
+
+  it("renders raw HTML as source text", () => {
+    const renderedHtml = parseMarkdown("<span>lesson</span>");
+
+    expect(renderedHtml).toContain("&lt;span&gt;lesson&lt;/span&gt;");
+    expect(renderedHtml).not.toContain("<span>lesson</span>");
   });
 
   it("recognizes CommonMark fences with zero through three leading spaces", () => {
