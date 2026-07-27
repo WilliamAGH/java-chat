@@ -39,7 +39,7 @@ This runs `scripts/process_all_to_qdrant.sh`, which:
 - Loads `.env`
 - Requires `SPRING_PROFILE` to be exactly `local`, `dev`, or `prod`
 - Requires readable `DOCS_DIR` and writable generation-specific `DOCS_SNAPSHOT_DIR`, `DOCS_PARSED_DIR`, and `DOCS_INDEX_DIR`
-- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 32 with `X-Tier: batch`
+- Validates Qdrant connectivity and probes gateway embedding batches of 1 and 8 with `X-Tier: batch`
 - Builds the app JAR (`./gradlew buildForScripts`)
 - Runs the `cli` Spring profile (`DocumentProcessor`)
 - Routes each doc set to the appropriate Qdrant collection (`QdrantCollectionRouter`)

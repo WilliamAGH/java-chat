@@ -83,7 +83,7 @@ Environment precedence is universal across Make targets and ingestion scripts:
 
 ### Embedding preflight checks
 
-Before indexing, ingestion scripts verify the model alias through `/v1/models`, then issue `X-Tier: batch` embedding probes with batches of 1 and 32. Each response must preserve input count/order and contain exactly 2,560 numeric values per vector. Any HTTP, model, shape, null-value, or dimension failure stops ingestion.
+Before indexing, ingestion scripts verify the model alias through `/v1/models`, then issue `X-Tier: batch` embedding probes with batches of 1 and 8. Each response must preserve input count/order and contain exactly 2,560 numeric values per vector. Any HTTP, model, shape, null-value, or dimension failure stops ingestion.
 
 ## Qdrant
 

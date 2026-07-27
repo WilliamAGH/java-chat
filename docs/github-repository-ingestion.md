@@ -97,7 +97,7 @@ An embedding or upsert failure leaves the prior complete page and its marker int
 ## Failure diagnostics and retry behavior
 
 - GitHub ingestion fails fast when embedding or vector writes fail.
-- Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 32 before ingestion starts.
+- Preflight validates the gateway model alias and `X-Tier: batch` embedding batches of 1 and 8 before ingestion starts.
 - When null/invalid vectors are detected, diagnostics now state likely causes explicitly:
   - wrong endpoint (must resolve to `/v1/embeddings`)
   - non-embedding model

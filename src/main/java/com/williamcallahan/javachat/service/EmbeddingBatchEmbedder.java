@@ -13,7 +13,7 @@ import org.springframework.ai.document.Document;
  */
 final class EmbeddingBatchEmbedder {
 
-    static final int EMBEDDING_REQUEST_BATCH_SIZE = 32;
+    static final int EMBEDDING_REQUEST_BATCH_SIZE = 8;
 
     private EmbeddingBatchEmbedder() {}
 
