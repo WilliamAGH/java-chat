@@ -22,6 +22,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -198,7 +199,10 @@ public class ChatController extends BaseController {
                             });
                 })
                 .subscribeOn(Schedulers.boundedElastic());
-        return Flux.concat(sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEvents))
+        Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
+                sseSupport.enforceResponsePreparationDeadline(operationEvents);
+        return Flux.concat(
+                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(deadlineBoundOperationEvents))
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =
                             ReportedStreamingFailure.findInCauseChain(error);
@@ -207,6 +211,9 @@ public class ChatController extends BaseController {
                             .orElse(error);
                     if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
                         return sseSupport.configuredProviderUnavailableError();
+                    }
+                    if (terminalFailureContext.isEmpty() && upstreamError instanceof TimeoutException) {
+                        return sseSupport.responsePreparationTimeoutError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
                     String diagnostics = isRetrievalFailure(upstreamError)

@@ -19,6 +19,7 @@ import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -269,7 +270,10 @@ public class GuidedLearningController extends BaseController {
             }
             return streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug);
         });
-        return Flux.concat(sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEvents))
+        Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
+                sseSupport.enforceResponsePreparationDeadline(operationEvents);
+        return Flux.concat(
+                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(deadlineBoundOperationEvents))
                 .onErrorResume(error -> guidedStreamError(error, sessionId, canonicalLessonSlug));
     }
 
@@ -330,6 +334,9 @@ public class GuidedLearningController extends BaseController {
                 .orElse(error);
         if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
             return sseSupport.configuredProviderUnavailableError();
+        }
+        if (terminalFailureContext.isEmpty() && upstreamError instanceof TimeoutException) {
+            return sseSupport.responsePreparationTimeoutError();
         }
         if (terminalFailureContext.isEmpty()) {
             log.atError()

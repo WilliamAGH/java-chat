@@ -1,7 +1,11 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.HEARTBEAT_INTERVAL_SECONDS;
+import static com.williamcallahan.javachat.web.SseConstants.RESPONSE_PREPARATION_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_BACKPRESSURE_BUFFER_CAPACITY;
 import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,6 +17,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +36,7 @@ import reactor.test.subscriber.TestSubscriber;
 class SseSupportTest {
 
     private static final int BACKPRESSURE_OVERFLOW_BUFFER_MULTIPLIER = 2;
+    private static final int DEADLINE_TEST_MULTIPLIER = 2;
     private static final Duration BACKPRESSURE_TEST_COMPLETION_TIMEOUT = Duration.ofSeconds(5);
 
     @Autowired
@@ -112,6 +118,50 @@ class SseSupportTest {
                 .assertNext(heartbeat -> assertTrue(!heartbeat.comment().isBlank()))
                 .thenCancel()
                 .verify();
+    }
+
+    @Test
+    void responsePreparationDeadlineCancelsAnOperationThatNeverEmits() {
+        SseSupport sseSupport = createSseSupport();
+        AtomicInteger operationCancellationCount = new AtomicInteger();
+        Flux<ServerSentEvent<String>> stalledOperationEvents =
+                Flux.<ServerSentEvent<String>>never().doOnCancel(operationCancellationCount::incrementAndGet);
+
+        StepVerifier.withVirtualTime(() -> sseSupport.enforceResponsePreparationDeadline(stalledOperationEvents))
+                .thenAwait(RESPONSE_PREPARATION_TIMEOUT)
+                .expectError(TimeoutException.class)
+                .verify();
+
+        assertEquals(1, operationCancellationCount.get());
+    }
+
+    @Test
+    void responsePreparationDeadlineStopsAfterTheFirstOperationEvent() {
+        SseSupport sseSupport = createSseSupport();
+        ServerSentEvent<String> firstOperationEvent = sseSupport.providerEvent("OpenAI");
+        Flux<ServerSentEvent<String>> operationEvents = Flux.concat(Flux.just(firstOperationEvent), Flux.never());
+
+        StepVerifier.withVirtualTime(() -> sseSupport.enforceResponsePreparationDeadline(operationEvents))
+                .expectNext(firstOperationEvent)
+                .thenAwait(RESPONSE_PREPARATION_TIMEOUT.multipliedBy(DEADLINE_TEST_MULTIPLIER))
+                .thenCancel()
+                .verify();
+    }
+
+    @Test
+    void responsePreparationTimeoutErrorUsesTheStableRetryableContract() throws JsonProcessingException {
+        SseSupport sseSupport = createSseSupport();
+
+        ServerSentEvent<String> timeoutEvent = Objects.requireNonNull(
+                sseSupport.responsePreparationTimeoutError().blockFirst(), "response preparation timeout event");
+        SseSupport.SseEventPayload timeoutEventPayload = objectMapper.readValue(
+                Objects.requireNonNull(timeoutEvent.data(), "response preparation timeout event data"),
+                SseSupport.SseEventPayload.class);
+
+        assertEquals(EVENT_ERROR, timeoutEvent.event());
+        assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutEventPayload.code());
+        assertEquals(STATUS_STAGE_RETRIEVAL, timeoutEventPayload.stage());
+        assertEquals(Boolean.TRUE, timeoutEventPayload.retryable());
     }
 
     @Test

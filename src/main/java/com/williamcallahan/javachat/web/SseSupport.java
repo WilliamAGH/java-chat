@@ -18,6 +18,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * Shared SSE support utilities for streaming controllers.
@@ -200,6 +201,20 @@ public class SseSupport {
     }
 
     /**
+     * Reports that retrieval or reranking exceeded the response-preparation deadline.
+     *
+     * @return one retryable retrieval-timeout error event
+     */
+    public Flux<ServerSentEvent<String>> responsePreparationTimeoutError() {
+        return sseError(SseEventPayload.builder("Response preparation timed out")
+                .details("Java documentation retrieval did not complete in time. Please retry.")
+                .code(STATUS_CODE_RETRIEVAL_TIMEOUT)
+                .stage(STATUS_STAGE_RETRIEVAL)
+                .retryable(true)
+                .build());
+    }
+
+    /**
      * Creates a heartbeat Flux that emits SSE comments at regular intervals.
      * Heartbeats keep connections alive through proxies and load balancers.
      *
@@ -228,6 +243,17 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> withHeartbeats(Flux<ServerSentEvent<String>> operationEvents) {
         return operationEvents.publish(
                 sharedOperationEvents -> Flux.merge(sharedOperationEvents, heartbeats(sharedOperationEvents)));
+    }
+
+    /**
+     * Bounds retrieval and reranking without imposing this deadline on model text generation.
+     *
+     * @param operationEvents operation that first emits provider metadata or a terminal error
+     * @return operation events with a first-event preparation deadline
+     */
+    public Flux<ServerSentEvent<String>> enforceResponsePreparationDeadline(
+            Flux<ServerSentEvent<String>> operationEvents) {
+        return operationEvents.timeout(Mono.delay(RESPONSE_PREPARATION_TIMEOUT), ignoredOperationEvent -> Mono.never());
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {

@@ -1,5 +1,7 @@
 package com.williamcallahan.javachat.web;
 
+import java.time.Duration;
+
 /**
  * Canonical SSE event types and streaming configuration constants.
  *
@@ -35,6 +37,9 @@ public final class SseConstants {
     /** Stable status code emitted when a response stream begins retrieval preparation. */
     public static final String STATUS_CODE_STREAM_PREPARING = "stream.preparing";
 
+    /** Stable error code emitted when retrieval preparation exceeds its deadline. */
+    public static final String STATUS_CODE_RETRIEVAL_TIMEOUT = "retrieval.timeout";
+
     /** Processing stage label for stream-provider diagnostics. */
     public static final String STATUS_STAGE_STREAM = "stream";
 
@@ -46,6 +51,9 @@ public final class SseConstants {
 
     /** Heartbeat interval in seconds to keep SSE connections alive through proxies. */
     public static final int HEARTBEAT_INTERVAL_SECONDS = 20;
+
+    /** Maximum time from preparation status to the first provider or terminal event. */
+    public static final Duration RESPONSE_PREPARATION_TIMEOUT = Duration.ofSeconds(20);
 
     /** Max number of raw model chunks to coalesce into one SSE text event. */
     public static final int STREAM_CHUNK_COALESCE_MAX_ITEMS = 24;
