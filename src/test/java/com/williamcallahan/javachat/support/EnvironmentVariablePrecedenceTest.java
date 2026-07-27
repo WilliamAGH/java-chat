@@ -25,7 +25,8 @@ class EnvironmentVariablePrecedenceTest {
     void processEnvironmentOverridesDotEnvThenDefaultsApply() throws IOException, InterruptedException {
         Path environmentFilePath = temporaryDirectoryPath.resolve("embedding-test.env");
         Files.writeString(environmentFilePath, """
-                REMOTE_EMBEDDING_API_KEY=dotenv-remote-api-key
+                OPENAI_API_KEY=dotenv-gateway-api-key
+                OPENAI_BASE_URL=https://dotenv-gateway.example/v1
                 QDRANT_API_KEY=dotenv-qdrant-api-key
                 """, StandardCharsets.UTF_8);
 
@@ -41,9 +42,11 @@ class EnvironmentVariablePrecedenceTest {
                 set -euo pipefail
                 source "$SCRIPT_PATH"
                 export QDRANT_API_KEY="process-qdrant-api-key"
+                export OPENAI_BASE_URL="https://process-gateway.example/v1"
                 preserve_process_env_then_source_file "$ENV_FILE_PATH"
-                printf '%s|%s|%s' \
-                  "$REMOTE_EMBEDDING_API_KEY" \
+                printf '%s|%s|%s|%s' \
+                  "$OPENAI_API_KEY" \
+                  "$OPENAI_BASE_URL" \
                   "$QDRANT_API_KEY" \
                   "${APP_EMBEDDING_TIMEOUT_SECONDS:-fallback-default}"
                 """;
@@ -56,7 +59,8 @@ class EnvironmentVariablePrecedenceTest {
         // Remove variables under test from the inherited parent environment so that
         // only values explicitly exported in the shell script or sourced from the
         // .env file participate in the precedence check.
-        shellEnvironmentMap.remove("REMOTE_EMBEDDING_API_KEY");
+        shellEnvironmentMap.remove("OPENAI_API_KEY");
+        shellEnvironmentMap.remove("OPENAI_BASE_URL");
         shellEnvironmentMap.remove("QDRANT_API_KEY");
         shellEnvironmentMap.remove("APP_EMBEDDING_TIMEOUT_SECONDS");
 
@@ -66,7 +70,9 @@ class EnvironmentVariablePrecedenceTest {
         String shellErrorOutput = readStream(shellProcess.getErrorStream()).trim();
 
         assertEquals(0, shellExitCode, shellErrorOutput);
-        assertEquals("dotenv-remote-api-key|process-qdrant-api-key|fallback-default", shellOutput);
+        assertEquals(
+                "dotenv-gateway-api-key|https://process-gateway.example/v1|process-qdrant-api-key|fallback-default",
+                shellOutput);
     }
 
     private static String readStream(java.io.InputStream inputStream) throws IOException {

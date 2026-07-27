@@ -376,8 +376,57 @@ describe("LearnView guided chat streaming stability", () => {
 
     guidedStreamFailure.reject(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
 
-    expect(await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE)).toBeInTheDocument();
+    expect(await learnView.findByText("Incomplete guided response")).toBeInTheDocument();
+    expect(await learnView.findByRole("alert")).toHaveTextContent(
+      TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE,
+    );
     expect(learnView.queryByRole("status", { name: "Citation warning" })).toBeNull();
+  });
+
+  it("renders a visible guided error bubble when the stream fails before text", async () => {
+    streamGuidedChatMock.mockRejectedValue(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    const errorMessage = await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+  });
+
+  it("treats invisible guided chunks as an empty failed response", async () => {
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        callbacks.onChunk(" \t\n\u200B\uFEFF\u2060");
+        throw new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    const errorMessage = await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+    expect(learnView.container.querySelector(".stream-error")).toBeNull();
+  });
+
+  it("keeps guided connecting indicators active for an unresolved invisible chunk", async () => {
+    streamGuidedChatMock.mockImplementation(
+      async (_sessionId, _lessonSlug, _message, callbacks) => {
+        callbacks.onChunk("\u200B\uFEFF\u2060");
+        return new Promise<void>(() => {});
+      },
+    );
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    await vi.waitFor(() =>
+      expect(
+        learnView.container.querySelector(
+          '.chat-panel--desktop .thinking-indicator[data-phase="connecting"]',
+        ),
+      ).not.toBeNull(),
+    );
   });
 
   it("shows the provider selected for the active guided stream", async () => {

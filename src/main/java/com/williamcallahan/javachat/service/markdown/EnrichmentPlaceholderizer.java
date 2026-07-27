@@ -3,8 +3,6 @@ package com.williamcallahan.javachat.service.markdown;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog.EnrichmentPresentation;
 import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import java.util.List;
 import java.util.Map;
@@ -22,19 +20,34 @@ class EnrichmentPlaceholderizer {
     private static final String MARKER_START = "{{";
     private static final String MARKER_END = "}}";
     private static final String PLACEHOLDER_PREFIX = "ENRICHMENT_";
+    private static final Map<String, EnrichmentPresentation> ENRICHMENT_PRESENTATIONS = Map.of(
+            "hint",
+            new EnrichmentPresentation(
+                    "Helpful Hints",
+                    "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z\"/></svg>"),
+            "background",
+            new EnrichmentPresentation(
+                    "Background Context",
+                    "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M4 6h16v2H4zM4 10h16v2H4zM4 14h16v2H4z\"/></svg>"),
+            "reminder",
+            new EnrichmentPresentation(
+                    "Important Reminders",
+                    "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 22a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-4-5.65V4a2 2 0 0 0-4 0v1.35A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z\"/></svg>"),
+            "warning",
+            new EnrichmentPresentation(
+                    "Warning",
+                    "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2V7h2v7z\"/></svg>"),
+            "example",
+            new EnrichmentPresentation(
+                    "Example",
+                    "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z\"/></svg>"));
 
     private final Parser parser;
     private final HtmlRenderer renderer;
-    private final EnrichmentKindCatalog enrichmentKindCatalog;
 
     EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer) {
-        this(parser, renderer, EnrichmentKindCatalog.load());
-    }
-
-    EnrichmentPlaceholderizer(Parser parser, HtmlRenderer renderer, EnrichmentKindCatalog enrichmentKindCatalog) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.renderer = Objects.requireNonNull(renderer, "renderer");
-        this.enrichmentKindCatalog = Objects.requireNonNull(enrichmentKindCatalog, "enrichmentKindCatalog");
     }
 
     private record EnrichmentContext(
@@ -288,7 +301,7 @@ class EnrichmentPlaceholderizer {
 
     /**
      * Parses an enrichment marker at the given position.
-     * Expects format: {{kind: where kind is an exact canonical manifest token.
+     * Expects format: {{kind: where kind is one of this renderer's supported tokens.
      *
      * @param markdown the markdown text
      * @param markerStart position of the opening {{
@@ -301,9 +314,19 @@ class EnrichmentPlaceholderizer {
         }
 
         String rawToken = markdown.substring(markerStart + MARKER_START.length(), colonIndex);
-        return enrichmentKindCatalog
-                .find(rawToken)
-                .map(presentation -> EnrichmentParseResult.of(presentation, colonIndex + 1))
-                .orElse(EnrichmentParseResult.invalid());
+        EnrichmentPresentation presentation = ENRICHMENT_PRESENTATIONS.get(rawToken);
+        return presentation == null
+                ? EnrichmentParseResult.invalid()
+                : EnrichmentParseResult.of(presentation.withToken(rawToken), colonIndex + 1);
+    }
+
+    private record EnrichmentPresentation(String title, String iconHtml, String token) {
+        EnrichmentPresentation(String title, String iconHtml) {
+            this(title, iconHtml, "");
+        }
+
+        EnrichmentPresentation withToken(String token) {
+            return new EnrichmentPresentation(title, iconHtml, token);
+        }
     }
 }

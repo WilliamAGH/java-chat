@@ -12,7 +12,7 @@ public class QdrantProperties {
     private QdrantCollectionNames collections = new QdrantCollectionNames();
     private String denseVectorName = "dense";
     private String sparseVectorName = "bm25";
-    private boolean ensureCollections = true;
+    private boolean ensureCollections;
     private int prefetchLimit = 20;
     private int rrfK = 60;
     private boolean failOnPartialSearchError = true;

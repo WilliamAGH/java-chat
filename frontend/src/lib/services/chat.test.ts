@@ -8,7 +8,7 @@ vi.mock("./sse", () => {
   return { streamSse: streamSseMock };
 });
 
-import { streamChat } from "./chat";
+import { hasVisibleChatMessageText, streamChat } from "./chat";
 
 describe("streamChat", () => {
   beforeEach(() => {
@@ -120,5 +120,15 @@ describe("streamChat", () => {
 
     expect(onProvider).toHaveBeenCalledOnce();
     expect(onProvider).toHaveBeenCalledWith(selectedProvider);
+  });
+});
+
+describe("hasVisibleChatMessageText", () => {
+  it("rejects whitespace and invisible format characters", () => {
+    expect(hasVisibleChatMessageText(" \t\n\u200B\uFEFF\u2060")).toBe(false);
+  });
+
+  it("accepts a visible code point among invisible characters", () => {
+    expect(hasVisibleChatMessageText("\u200BJava 24\u2060")).toBe(true);
   });
 });

@@ -1,17 +1,19 @@
+name: java-chat-qwen3-embedding-4b-2560
+
 services:
   qdrant:
-    # Pin to v1.13.0 to match io.qdrant:client:1.13.0 from Spring AI 1.1.2 BOM
-    # Upgrading requires Spring AI BOM update to avoid gRPC protocol mismatches
-    # Use GitHub Container Registry to avoid Docker Hub rate limits (per DK1)
-    image: ghcr.io/qdrant/qdrant/qdrant:v1.13.0
-    container_name: qdrant
+    # Pin to v1.18.3 to match the direct io.qdrant:client:1.18.3 dependency.
+    # Parameterized RRF queries require the matching v1.18 protobuf fields.
+    # The official Docker Hub tag publishes native amd64 and arm64 images.
+    image: qdrant/qdrant:v1.18.3
+    container_name: java-chat-qwen3-embedding-4b-2560-qdrant
     ports:
       - "8087:6333"  # REST (mapped into allowed range)
       - "8086:6334"  # gRPC (mapped into allowed range)
     volumes:
-      - qdrant_storage:/qdrant/storage
+      - java_chat_qwen3_embedding_4b_2560_qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
 volumes:
-  qdrant_storage:
-
+  java_chat_qwen3_embedding_4b_2560_qdrant_storage:
+    name: java-chat-qwen3-embedding-4b-2560-qdrant-storage

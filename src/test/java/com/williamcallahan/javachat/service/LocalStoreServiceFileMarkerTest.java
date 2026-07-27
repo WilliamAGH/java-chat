@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.williamcallahan.javachat.service.ingestion.IngestedFilePruneService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,15 +21,27 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class LocalStoreServiceFileMarkerTest {
 
+    private static final String COLLIDING_CHUNK_HASH_PREFIX = "abcdef123456";
+    private static final String STALE_FULL_CHUNK_HASH =
+            "abcdef123456bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private static final String UNRELATED_FULL_CHUNK_HASH =
+            "abcdef123456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    private Path generationStateDirectory(Path temporaryDirectory) {
+        return temporaryDirectory.resolve("qwen3-embedding-4b-2560/local");
+    }
+
     @Test
     void recordsAndReadsFileIngestionRecordWithChunkHashes(@TempDir Path temporaryDirectory) throws IOException {
-        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
-        Path parsedDirectory = temporaryDirectory.resolve("parsed");
-        Path indexDirectory = temporaryDirectory.resolve("index");
+        Path generationStateDirectory = generationStateDirectory(temporaryDirectory);
+        Path snapshotDirectory = generationStateDirectory.resolve("snapshots");
+        Path parsedDirectory = generationStateDirectory.resolve("parsed");
+        Path indexDirectory = generationStateDirectory.resolve("index");
 
         LocalStoreService localStore = new LocalStoreService(
-                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), "local", null);
         localStore.createStoreDirectories();
+        FileIngestionMarkerStore fileIngestionMarkerStore = new FileIngestionMarkerStore(localStore);
 
         String sourceUrl = "https://docs.example.com/reference/page.html";
         long fileSizeBytes = 1234L;
@@ -36,8 +51,7 @@ class LocalStoreServiceFileMarkerTest {
         String collectionName = "java-api-docs";
         List<String> chunkHashes = List.of("a1", "b2", "c3");
 
-        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
-        fileMarkerStore.markFileIngested(
+        fileIngestionMarkerStore.markFileIngested(
                 sourceUrl,
                 new FileIngestionMarkerStore.FileIngestionRecord(
                         fileSizeBytes,
@@ -61,7 +75,7 @@ class LocalStoreServiceFileMarkerTest {
                 Files.readAllLines(markerPath, StandardCharsets.UTF_8));
 
         FileIngestionMarkerStore.FileIngestionRecord persistedIngestionRecord =
-                fileMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
+                fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
         assertEquals(fileSizeBytes, persistedIngestionRecord.fileSizeBytes());
         assertEquals(lastModifiedMillis, persistedIngestionRecord.lastModifiedMillis());
         assertEquals(ingestionFingerprint, persistedIngestionRecord.ingestionFingerprint());
@@ -73,14 +87,14 @@ class LocalStoreServiceFileMarkerTest {
 
     @Test
     void readsFileMarkerWithoutCollectionIdentity(@TempDir Path temporaryDirectory) throws IOException {
-        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
-        Path parsedDirectory = temporaryDirectory.resolve("parsed");
-        Path indexDirectory = temporaryDirectory.resolve("index");
+        Path generationStateDirectory = generationStateDirectory(temporaryDirectory);
+        Path snapshotDirectory = generationStateDirectory.resolve("snapshots");
+        Path parsedDirectory = generationStateDirectory.resolve("parsed");
+        Path indexDirectory = generationStateDirectory.resolve("index");
         LocalStoreService localStore = new LocalStoreService(
-                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), "local", null);
         localStore.createStoreDirectories();
-        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
-
+        FileIngestionMarkerStore fileIngestionMarkerStore = new FileIngestionMarkerStore(localStore);
         String sourceUrl = "https://docs.example.com/reference/unbound.html";
         Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
         Files.writeString(
@@ -89,7 +103,7 @@ class LocalStoreServiceFileMarkerTest {
                 StandardCharsets.UTF_8);
 
         FileIngestionMarkerStore.FileIngestionRecord unboundIngestionRecord =
-                fileMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
+                fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl).orElseThrow();
 
         assertFalse(unboundIngestionRecord.hasCollectionIdentity());
         assertTrue(unboundIngestionRecord.collectionName().isBlank());
@@ -114,14 +128,14 @@ class LocalStoreServiceFileMarkerTest {
 
     @Test
     void deletesParsedChunksForUrlBySafeNamePrefix(@TempDir Path temporaryDirectory) throws IOException {
-        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
-        Path parsedDirectory = temporaryDirectory.resolve("parsed");
-        Path indexDirectory = temporaryDirectory.resolve("index");
+        Path generationStateDirectory = generationStateDirectory(temporaryDirectory);
+        Path snapshotDirectory = generationStateDirectory.resolve("snapshots");
+        Path parsedDirectory = generationStateDirectory.resolve("parsed");
+        Path indexDirectory = generationStateDirectory.resolve("index");
 
         LocalStoreService localStore = new LocalStoreService(
-                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), "local", null);
         localStore.createStoreDirectories();
-
         String sourceUrl = "https://docs.example.com/api/foo.html";
         String safeSourceName = localStore.toSafeName(sourceUrl);
 
@@ -139,21 +153,51 @@ class LocalStoreServiceFileMarkerTest {
     }
 
     @Test
+    void retainsUnrelatedFullHashMarkerWhenLegacyPrefixCollides(@TempDir Path temporaryDirectory) throws IOException {
+        Path generationStateDirectory = generationStateDirectory(temporaryDirectory);
+        Path snapshotDirectory = generationStateDirectory.resolve("snapshots");
+        Path parsedDirectory = generationStateDirectory.resolve("parsed");
+        Path indexDirectory = generationStateDirectory.resolve("index");
+        LocalStoreService localStoreService = new LocalStoreService(
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), "local", null);
+        localStoreService.createStoreDirectories();
+        FileIngestionMarkerStore fileIngestionMarkerStore = new FileIngestionMarkerStore(localStoreService);
+        ContentHasher contentHasher = mock(ContentHasher.class);
+        IngestedFilePruneService pruneService = new IngestedFilePruneService(
+                mock(HybridVectorService.class), localStoreService, fileIngestionMarkerStore, contentHasher);
+
+        String sourceUrl = "https://docs.example.com/reference/page.html";
+        String staleChunkText = "legacy stale member text";
+        String safeSourceName = localStoreService.toSafeName(sourceUrl);
+        Path staleParsedChunk = parsedDirectory.resolve(safeSourceName + "_0_" + COLLIDING_CHUNK_HASH_PREFIX + ".txt");
+        Files.writeString(staleParsedChunk, staleChunkText, StandardCharsets.UTF_8);
+        localStoreService.markHashIngested(STALE_FULL_CHUNK_HASH, "stale", "example.stale");
+        localStoreService.markHashIngested(UNRELATED_FULL_CHUNK_HASH, "unrelated", "example.unrelated");
+        when(contentHasher.generateChunkHash(sourceUrl, 0, staleChunkText)).thenReturn(STALE_FULL_CHUNK_HASH);
+
+        pruneService.pruneObsoleteLocalStateAfterReplacement(sourceUrl, null, List.of());
+
+        assertFalse(Files.exists(staleParsedChunk));
+        assertFalse(Files.exists(indexDirectory.resolve(STALE_FULL_CHUNK_HASH)));
+        assertTrue(Files.exists(indexDirectory.resolve(UNRELATED_FULL_CHUNK_HASH)));
+    }
+
+    @Test
     void throwsWhenFileMarkerIsMalformed(@TempDir Path temporaryDirectory) throws IOException {
-        Path snapshotDirectory = temporaryDirectory.resolve("snapshots");
-        Path parsedDirectory = temporaryDirectory.resolve("parsed");
-        Path indexDirectory = temporaryDirectory.resolve("index");
+        Path generationStateDirectory = generationStateDirectory(temporaryDirectory);
+        Path snapshotDirectory = generationStateDirectory.resolve("snapshots");
+        Path parsedDirectory = generationStateDirectory.resolve("parsed");
+        Path indexDirectory = generationStateDirectory.resolve("index");
 
         LocalStoreService localStore = new LocalStoreService(
-                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), null);
+                snapshotDirectory.toString(), parsedDirectory.toString(), indexDirectory.toString(), "local", null);
         localStore.createStoreDirectories();
-        FileIngestionMarkerStore fileMarkerStore = new FileIngestionMarkerStore(localStore);
-
+        FileIngestionMarkerStore fileIngestionMarkerStore = new FileIngestionMarkerStore(localStore);
         String sourceUrl = "https://docs.example.com/broken.html";
         Path markerPath = indexDirectory.resolve("file_" + localStore.toSafeName(sourceUrl) + ".marker");
         Files.writeString(markerPath, "size=not-a-number\n", StandardCharsets.UTF_8);
 
-        assertThrows(IllegalStateException.class, () -> fileMarkerStore.readFileIngestionRecord(sourceUrl));
+        assertThrows(IllegalStateException.class, () -> fileIngestionMarkerStore.readFileIngestionRecord(sourceUrl));
     }
 
     @Test

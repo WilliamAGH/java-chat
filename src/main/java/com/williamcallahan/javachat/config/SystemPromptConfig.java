@@ -1,6 +1,5 @@
 package com.williamcallahan.javachat.config;
 
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import java.util.Objects;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,11 +15,23 @@ public class SystemPromptConfig {
     private static final String MARKER_PROSE_LINE_PLACEHOLDER = "__MARKER_PROSE_LINE_CLAUSE__";
     private static final String MARKER_CODE_BOUNDARY_PLACEHOLDER = "__MARKER_CODE_BOUNDARY_CLAUSE__";
     private static final String JAVA_FENCE_VALIDITY_PLACEHOLDER = "__JAVA_FENCE_VALIDITY_CLAUSE__";
+    private static final String VIRTUAL_THREAD_SEMANTICS_PLACEHOLDER = "__VIRTUAL_THREAD_SEMANTICS_CLAUSE__";
     static final String MARKER_PROSE_LINE_CLAUSE = "Put each enrichment marker only on its own prose line.";
     static final String MARKER_CODE_BOUNDARY_CLAUSE =
-            "Never place an enrichment marker inside inline code or a fenced code block; put it before or after the fence.";
+            "Never place an enrichment marker inside inline code, a source-code comment, or a fenced code block. "
+                    + "Marker syntax is not valid source code. When a marker explains code, close the fence, put the "
+                    + "marker on its own prose line, and then continue. A fenced block containing marker syntax such "
+                    + "as `{{example:...}}` is invalid and must be corrected before emission.";
     static final String JAVA_FENCE_VALIDITY_CLAUSE =
-            "A fenced `java` block contains syntactically valid Java that compiles with its stated imports and context. Use real APIs appropriate to the response context; never invent API names, method signatures, or type arguments.";
+            "Put every multi-line Java example entirely inside one fenced `java` block. Never emit part of a declaration or method as prose. Finish the complete example before an enrichment marker; any fenced block after that marker must be a separate, complete example. Never split one example across multiple fences. Parameterize generic declarations, signatures, casts, and constructor types; never emit a raw type, while retaining idiomatic diamond inference and legal generic class literals. Resolve every checked exception along every code path: a lambda may throw a checked exception only when its target functional method declares it. When a `Runnable` example calls `Thread.sleep`, catch `InterruptedException`, restore interruption with `Thread.currentThread().interrupt()`, and return. Before emitting the block, perform a final internal consistency check of its delimiters, quotes, declarations, identifiers, imports, type arguments, checked exceptions, and referenced API signatures. The block must contain syntactically valid Java that compiles with its stated context. A standalone program must have a launchable entry point appropriate to the active Java release, for example `public static void main(String[] args)`; never invent an API.";
+    static final String VIRTUAL_THREAD_SEMANTICS_CLAUSE =
+            "Use precise virtual-thread terminology for the active Java release. CPU-bound work keeps a virtual thread mounted and occupies its carrier; that is not pinning. For Java 24 and later, `synchronized` methods and blocks no longer pin virtual threads. Describe pinning only for the remaining cases documented for that release.";
+    private static final String MARKER_USAGE_PROMPT = """
+            - {{hint:Text here}} (Helpful Hints)
+            - {{background:Text here}} (Background Context)
+            - {{reminder:Text here}} (Important Reminders)
+            - {{warning:Text here}} (Warning)
+            - {{example:Text here}} (Example)""";
     private static final String CORE_PROMPT_TEMPLATE = """
             You are a Java learning assistant focused on Java __JDK_VERSION__ and current stable JDK releases.
 
@@ -74,13 +85,14 @@ public class SystemPromptConfig {
             - If a feature became final before the active Java version context, treat it as a standard language feature without version caveats
             - The active Java version context is the user-stated version when provided; otherwise use the default (__JDK_VERSION__)
             - If the user explicitly states an older Java version, apply version-appropriate warnings (e.g., preview features in that version)
+            - __VIRTUAL_THREAD_SEMANTICS_CLAUSE__
             """.replace(
                     MARKER_PROSE_LINE_PLACEHOLDER, MARKER_PROSE_LINE_CLAUSE)
             .replace(MARKER_CODE_BOUNDARY_PLACEHOLDER, MARKER_CODE_BOUNDARY_CLAUSE)
-            .replace(JAVA_FENCE_VALIDITY_PLACEHOLDER, JAVA_FENCE_VALIDITY_CLAUSE);
+            .replace(JAVA_FENCE_VALIDITY_PLACEHOLDER, JAVA_FENCE_VALIDITY_CLAUSE)
+            .replace(VIRTUAL_THREAD_SEMANTICS_PLACEHOLDER, VIRTUAL_THREAD_SEMANTICS_CLAUSE);
 
     private final String jdkVersion;
-    private final String markerUsagePrompt;
 
     /**
      * Creates prompt configuration from the validated application-properties owner.
@@ -90,7 +102,6 @@ public class SystemPromptConfig {
     public SystemPromptConfig(AppProperties appProperties) {
         this.jdkVersion = Integer.toString(
                 Objects.requireNonNull(appProperties, "appProperties").getDocs().getJdkVersion());
-        this.markerUsagePrompt = buildMarkerUsagePrompt(EnrichmentKindCatalog.load());
     }
 
     /**
@@ -99,18 +110,7 @@ public class SystemPromptConfig {
     public String getCoreSystemPrompt() {
         return CORE_PROMPT_TEMPLATE
                 .replace(JDK_VERSION_PLACEHOLDER, jdkVersion)
-                .replace(MARKER_INVENTORY_PLACEHOLDER, markerUsagePrompt);
-    }
-
-    /** Returns marker syntax projected from the canonical enrichment-kind manifest. */
-    public String getMarkerUsagePrompt() {
-        return markerUsagePrompt;
-    }
-
-    private static String buildMarkerUsagePrompt(EnrichmentKindCatalog enrichmentKindCatalog) {
-        return enrichmentKindCatalog.all().stream()
-                .map(presentation -> "- {{" + presentation.token() + ":Text here}} (" + presentation.title() + ")")
-                .collect(java.util.stream.Collectors.joining("\n"));
+                .replace(MARKER_INVENTORY_PLACEHOLDER, MARKER_USAGE_PROMPT);
     }
 
     /**
@@ -128,8 +128,8 @@ public class SystemPromptConfig {
      */
     public String getGuidedLearningPrompt() {
         return """
-            You are in guided learning mode. Structure your response as a step-by-step tutorial.
-            Break down complex concepts into digestible parts and build understanding progressively.
+            You are in guided learning mode. Answer the learner's question directly, then build understanding progressively.
+            Keep the teaching sequence no longer than the question requires.
             Use the default Java environment assumptions unless the user specifies otherwise.
             """;
     }

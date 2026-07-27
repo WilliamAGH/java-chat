@@ -49,9 +49,9 @@ Do not duplicate parser modes, supported constructs, sanitization rules, or enri
 
 Do not describe `MarkdownService` as a legacy regex fallback. It delegates to the unified AST renderer, and there is no alternate server rendering path.
 
-### Enrichment catalog
+### Enrichment behavior
 
-[`src/main/resources/enrichment-kinds.manifest`](../../src/main/resources/enrichment-kinds.manifest) is the single semantic owner for enrichment tokens and presentation metadata. Server and frontend code project that manifest. Documentation must not reproduce its inventory.
+The server and browser renderers own their enrichment parsing and presentation behavior directly. The model prompt owns the marker syntax it teaches. Their behavior tests verify the supported markers at each boundary.
 
 ## Streaming and persistence
 
@@ -74,7 +74,7 @@ When changing Markdown behavior:
 
 1. Change the canonical browser or server owner, not this document.
 2. Update the owning unit tests and any API integration tests.
-3. Keep enrichment names and presentation metadata projected from the manifest.
+3. Keep enrichment behavior explicit in the changed runtime and verify its supported markers through behavior tests.
 4. Verify complete and partial streaming input when browser behavior changes.
 5. Verify raw HTML, malformed Markdown, links, code blocks, and enrichment content remain safely rendered.
 6. Keep server API behavior and Svelte behavior explicit; do not imply that the Svelte stream calls the server Markdown API.

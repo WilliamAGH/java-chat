@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Builds deterministic documentation seeds from manifest-selected structured discovery files."""
+"""Builds deterministic documentation seeds from structured discovery files."""
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 import html.parser
 import ipaddress
 import pathlib
@@ -14,13 +13,7 @@ import urllib.parse
 import xml.etree.ElementTree as element_tree
 
 
-DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG = (
-    pathlib.Path(__file__).resolve().parent.parent
-    / "src"
-    / "main"
-    / "resources"
-    / "documentation-seed-document-types.manifest"
-)
+SUPPORTED_SEED_DOCUMENT_TYPES = ("xml-sitemap", "html-links")
 REMOTE_URL_MINIMUM_PORT = 1
 REMOTE_URL_MAXIMUM_PORT = 65535
 DOCUMENTATION_URL_ASCII_CONTROL_MAXIMUM = 0x1F
@@ -42,6 +35,48 @@ class DocumentationLinkParser(html.parser.HTMLParser):
         for attribute_name, attribute_text in attributes:
             if attribute_name.casefold() == "href" and attribute_text is not None:
                 self.discovered_urls.append(attribute_text)
+
+
+class DocumentationIdentityParser(html.parser.HTMLParser):
+    """Collects visible text and declared documentation versions for publication checks."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.declared_versions: list[str] = []
+        self.visible_text_segments: list[str] = []
+        self.hidden_element_depth = 0
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.casefold()
+        if normalized_tag in ("script", "style"):
+            self.hidden_element_depth += 1
+        if normalized_tag != "meta":
+            return
+        normalized_attributes = {
+            attribute_name.casefold(): attribute_text
+            for attribute_name, attribute_text in attributes
+            if attribute_text is not None
+        }
+        if normalized_attributes.get("name", "").casefold() == "version":
+            metadata_version = normalized_attributes.get("content")
+            if metadata_version:
+                self.declared_versions.append(metadata_version.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in ("script", "style") and self.hidden_element_depth > 0:
+            self.hidden_element_depth -= 1
+
+    def handle_data(self, text: str) -> None:
+        if self.hidden_element_depth == 0 and text.strip():
+            self.visible_text_segments.append(text.strip())
+
+
+def read_documentation_identity(documentation_page: pathlib.Path) -> DocumentationIdentityParser:
+    """Parses one documentation page for structured publication identity signals."""
+    identity_parser = DocumentationIdentityParser()
+    identity_parser.feed(documentation_page.read_text(encoding="utf-8"))
+    identity_parser.close()
+    return identity_parser
 
 
 class SitemapDoctypeRejectingTreeBuilder(element_tree.TreeBuilder):
@@ -84,43 +119,6 @@ def read_html_links_urls(discovery_file: pathlib.Path) -> list[str]:
     link_parser.feed(discovery_file.read_text(encoding="utf-8"))
     link_parser.close()
     return link_parser.discovered_urls
-
-
-def load_seed_document_types(document_type_catalog: pathlib.Path | None = None) -> tuple[str, ...]:
-    """Loads the manifest-owned document types that select implemented discovery readers."""
-    catalog_path = document_type_catalog or DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG
-    seed_document_types = tuple(
-        catalog_path.read_text(encoding="utf-8").splitlines()
-    )
-    if not seed_document_types:
-        raise ValueError("Documentation seed document type catalog has no records")
-    if any(not is_canonical_seed_document_type(seed_document_type) for seed_document_type in seed_document_types):
-        raise ValueError("Documentation seed document type catalog has invalid records")
-    if len(set(seed_document_types)) != len(seed_document_types):
-        raise ValueError("Documentation seed document type catalog has duplicate records")
-    for seed_document_type in seed_document_types:
-        seed_document_reader(seed_document_type)
-    return seed_document_types
-
-
-def is_canonical_seed_document_type(seed_document_type: str) -> bool:
-    """Accepts only lower-case ASCII words separated by single hyphens."""
-    seed_document_type_segments = seed_document_type.split("-")
-    return bool(seed_document_type_segments) and all(
-        seed_document_type_segment
-        and all(character.isascii() and (character.islower() or character.isdigit())
-                for character in seed_document_type_segment)
-        for seed_document_type_segment in seed_document_type_segments
-    )
-
-
-def seed_document_reader(seed_document_type: str) -> Callable[[pathlib.Path], list[str]]:
-    """Resolves the catalog token to its convention-named structured reader."""
-    reader_name = f"read_{seed_document_type.replace('-', '_')}_urls"
-    seed_reader = globals().get(reader_name)
-    if not callable(seed_reader):
-        raise ValueError(f"Documentation seed document type has no reader: {seed_document_type}")
-    return seed_reader
 
 
 def seed_url_to_mirror_path(seed_url: str, cut_directories: int) -> str:
@@ -183,7 +181,7 @@ def require_remote_url(remote_url: str, allow_http: bool, require_trailing_slash
 
 
 def has_ascii_control_character(documentation_url_text: str) -> bool:
-    """Detects the shared C0 and DEL controls prohibited by manifest consumers."""
+    """Detects C0 and DEL controls prohibited in remote documentation URLs."""
     return any(
         ord(remote_character) <= DOCUMENTATION_URL_ASCII_CONTROL_MAXIMUM
         or ord(remote_character) == DOCUMENTATION_URL_ASCII_DELETE_CHARACTER
@@ -285,7 +283,7 @@ def build_seed_urls(
 
 
 def validate_remote_url_command(command_arguments: list[str]) -> int:
-    """Validates one manifest URL for shell consumers without duplicating URL grammar."""
+    """Validates one remote URL for shell consumers without duplicating URL grammar."""
     validation_parser = argparse.ArgumentParser()
     validation_parser.add_argument("remote_url")
     validation_parser.add_argument("--allow-http", action="store_true")
@@ -296,15 +294,6 @@ def validate_remote_url_command(command_arguments: list[str]) -> int:
         allow_http=validation_arguments.allow_http,
         require_trailing_slash=validation_arguments.require_trailing_slash,
     )
-    return 0
-
-
-def validate_seed_document_types_command(command_arguments: list[str]) -> int:
-    """Validates the canonical seed document type catalog for non-Python consumers."""
-    validation_parser = argparse.ArgumentParser()
-    validation_parser.add_argument("--catalog", type=pathlib.Path, default=DOCUMENTATION_SEED_DOCUMENT_TYPE_CATALOG)
-    validation_arguments = validation_parser.parse_args(command_arguments)
-    load_seed_document_types(validation_arguments.catalog)
     return 0
 
 
@@ -320,16 +309,97 @@ def project_mirror_path_command(command_arguments: list[str]) -> int:
     return 0
 
 
+def project_mirror_paths_file_command(command_arguments: list[str]) -> int:
+    """Projects one canonical seed file onto GNU Wget mirror paths in one process."""
+    projection_parser = argparse.ArgumentParser()
+    projection_parser.add_argument("--input", required=True, type=pathlib.Path)
+    projection_parser.add_argument("--output", required=True, type=pathlib.Path)
+    projection_parser.add_argument("--required-prefix", required=True)
+    projection_parser.add_argument("--cut-directories", required=True, type=int)
+    projection_arguments = projection_parser.parse_args(command_arguments)
+    if projection_arguments.cut_directories < 0:
+        projection_parser.error("--cut-directories cannot be negative")
+    require_remote_url(
+        projection_arguments.required_prefix,
+        allow_http=False,
+        require_trailing_slash=True,
+    )
+    seed_urls = projection_arguments.input.read_text(encoding="utf-8").splitlines()
+    if not seed_urls or any(not seed_url for seed_url in seed_urls):
+        raise ValueError("Seed URL file must contain nonempty URL lines")
+    if any(not seed_url.startswith(projection_arguments.required_prefix) for seed_url in seed_urls):
+        raise ValueError("Seed URL file contains a URL outside its required remote prefix")
+    mirror_paths = [
+        seed_url_to_mirror_path(seed_url, projection_arguments.cut_directories)
+        for seed_url in seed_urls
+    ]
+    if len(set(mirror_paths)) != len(mirror_paths):
+        raise ValueError("Seed URL file maps multiple URLs onto one mirror path")
+    projection_arguments.output.write_text(
+        "".join(f"{mirror_path}\n" for mirror_path in mirror_paths),
+        encoding="utf-8",
+    )
+    return 0
+
+
+def validate_published_identity_command(command_arguments: list[str]) -> int:
+    """Rejects a staged mirror unless its structured identity matches the pinned release."""
+    identity_parser = argparse.ArgumentParser()
+    identity_parser.add_argument("--root", required=True, type=pathlib.Path)
+    identity_parser.add_argument("--required-page", type=pathlib.PurePosixPath)
+    identity_parser.add_argument("--required-text")
+    identity_parser.add_argument("--expected-meta-version")
+    identity_arguments = identity_parser.parse_args(command_arguments)
+    documentation_root = identity_arguments.root.resolve(strict=True)
+    if not documentation_root.is_dir():
+        raise ValueError(f"Documentation identity root is not a directory: {documentation_root}")
+
+    if (identity_arguments.required_page is None) != (identity_arguments.required_text is None):
+        raise ValueError("--required-page and --required-text must be supplied together")
+    if identity_arguments.required_page is not None:
+        required_page_parts = identity_arguments.required_page.parts
+        if (
+            identity_arguments.required_page.is_absolute()
+            or not required_page_parts
+            or any(page_part in ("", ".", "..") for page_part in required_page_parts)
+        ):
+            raise ValueError("--required-page must be a safe relative path")
+        required_page = (documentation_root / pathlib.Path(*required_page_parts)).resolve(strict=True)
+        if not required_page.is_relative_to(documentation_root) or not required_page.is_file():
+            raise ValueError(f"Required identity page is outside the documentation root: {required_page}")
+        required_identity = read_documentation_identity(required_page)
+        normalized_visible_text = " ".join(" ".join(required_identity.visible_text_segments).split())
+        if identity_arguments.required_text not in normalized_visible_text:
+            raise ValueError(
+                f"Required publication identity text is absent from {identity_arguments.required_page}"
+            )
+
+    if identity_arguments.expected_meta_version is not None:
+        declared_versions: set[str] = set()
+        for documentation_page in sorted(documentation_root.rglob("*.htm*")):
+            if documentation_page.is_file():
+                declared_versions.update(
+                    read_documentation_identity(documentation_page).declared_versions
+                )
+        if declared_versions != {identity_arguments.expected_meta_version}:
+            raise ValueError(
+                "Documentation version metadata must contain only "
+                f"{identity_arguments.expected_meta_version}; found {sorted(declared_versions)}"
+            )
+    return 0
+
+
 def main() -> int:
-    if sys.argv[1:2] == ["--validate-seed-document-types"]:
-        return validate_seed_document_types_command(sys.argv[2:])
     if sys.argv[1:2] == ["--validate-remote-url"]:
         return validate_remote_url_command(sys.argv[2:])
     if sys.argv[1:2] == ["--project-mirror-path"]:
         return project_mirror_path_command(sys.argv[2:])
-    seed_document_types = load_seed_document_types()
+    if sys.argv[1:2] == ["--project-mirror-paths-file"]:
+        return project_mirror_paths_file_command(sys.argv[2:])
+    if sys.argv[1:2] == ["--validate-published-identity"]:
+        return validate_published_identity_command(sys.argv[2:])
     argument_parser = argparse.ArgumentParser()
-    argument_parser.add_argument("--document-type", required=True, choices=seed_document_types)
+    argument_parser.add_argument("--document-type", required=True, choices=SUPPORTED_SEED_DOCUMENT_TYPES)
     argument_parser.add_argument("--input", required=True, type=pathlib.Path)
     argument_parser.add_argument("--discovery-url", required=True)
     argument_parser.add_argument("--source-prefix", required=True)
@@ -342,7 +412,10 @@ def main() -> int:
     if parsed_arguments.cut_directories < 0:
         argument_parser.error("--cut-directories cannot be negative")
 
-    discovered_urls = seed_document_reader(parsed_arguments.document_type)(parsed_arguments.input)
+    if parsed_arguments.document_type == "xml-sitemap":
+        discovered_urls = read_xml_sitemap_urls(parsed_arguments.input)
+    else:
+        discovered_urls = read_html_links_urls(parsed_arguments.input)
     seed_urls = build_seed_urls(
         discovered_urls,
         parsed_arguments.discovery_url,

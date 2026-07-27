@@ -11,12 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 
-/**
- * Persists the canonical file-level ingestion record keyed by source URL.
- *
- * <p>This store owns the marker field inventory and exact serialized representation. Chunk-hash markers and
- * parsed content remain owned by {@link LocalStoreService} because their lifecycle differs from a file record.</p>
- */
+/** Persists file-level ingestion records independently from chunk and snapshot storage. */
 @Service
 public class FileIngestionMarkerStore {
     private static final String FILE_MARKER_PREFIX = "file_";
@@ -32,22 +27,12 @@ public class FileIngestionMarkerStore {
 
     private final LocalStoreService localStoreService;
 
-    /**
-     * Creates the file marker store over the application's canonical local index directory.
-     *
-     * @param localStoreService owner of the configured index root and stable URL filename projection
-     */
+    /** Creates a marker store over the configured local index directory. */
     public FileIngestionMarkerStore(LocalStoreService localStoreService) {
         this.localStoreService = Objects.requireNonNull(localStoreService, "localStoreService");
     }
 
-    /**
-     * Records a canonical file-level ingestion marker keyed by URL.
-     *
-     * @param url authoritative URL used for chunk hashing and citations
-     * @param fileIngestionRecord canonical marker contents
-     * @throws IOException if marker creation or writing fails
-     */
+    /** Records a file-level ingestion marker keyed by its authoritative URL. */
     public void markFileIngested(String url, FileIngestionRecord fileIngestionRecord) throws IOException {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL is required for file ingestion marker");
@@ -59,6 +44,30 @@ public class FileIngestionMarkerStore {
         }
         Path markerPath = fileMarkerPath(url);
         writeFileMarkerAtomically(markerPath, buildFileMarkerPayload(canonicalFileIngestionRecord));
+    }
+
+    /** Loads the file ingestion marker for an authoritative URL. */
+    public Optional<FileIngestionRecord> readFileIngestionRecord(String url) {
+        if (url == null || url.isBlank()) {
+            return Optional.empty();
+        }
+        Path markerPath = fileMarkerPath(url);
+        if (!Files.exists(markerPath)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(readFileMarker(markerPath));
+        } catch (IOException markerReadFailure) {
+            throw new IllegalStateException("Failed to read file ingestion marker for URL: " + url, markerReadFailure);
+        }
+    }
+
+    /** Deletes the file-level ingestion marker for an authoritative URL. */
+    public void deleteFileIngestionRecord(String url) throws IOException {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        Files.deleteIfExists(fileMarkerPath(url));
     }
 
     private void writeFileMarkerAtomically(Path markerPath, String markerPayload) throws IOException {
@@ -79,40 +88,6 @@ public class FileIngestionMarkerStore {
         } finally {
             Files.deleteIfExists(temporaryMarker);
         }
-    }
-
-    /**
-     * Loads the file ingestion marker record for a URL.
-     *
-     * @param url authoritative URL used for chunk hashing and citations
-     * @return ingestion record when a marker exists and is readable
-     */
-    public Optional<FileIngestionRecord> readFileIngestionRecord(String url) {
-        if (url == null || url.isBlank()) {
-            return Optional.empty();
-        }
-        Path markerPath = fileMarkerPath(url);
-        if (!Files.exists(markerPath)) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(readFileMarker(markerPath));
-        } catch (IOException markerReadFailure) {
-            throw new IllegalStateException("Failed to read file ingestion marker for URL: " + url, markerReadFailure);
-        }
-    }
-
-    /**
-     * Deletes the file-level ingestion marker for a URL when present.
-     *
-     * @param url authoritative URL used for chunk hashing and citations
-     * @throws IOException if deletion fails
-     */
-    public void deleteFileIngestionRecord(String url) throws IOException {
-        if (url == null || url.isBlank()) {
-            return;
-        }
-        Files.deleteIfExists(fileMarkerPath(url));
     }
 
     private Path fileMarkerPath(String url) {
@@ -206,16 +181,7 @@ public class FileIngestionMarkerStore {
         return markerPayload.toString();
     }
 
-    /**
-     * Defines every field persisted by a file-level ingestion marker.
-     *
-     * @param fileSizeBytes file size in bytes at ingestion time
-     * @param lastModifiedMillis file last modified timestamp in millis at ingestion time
-     * @param ingestionFingerprint fingerprint of every input whose change requires reingestion
-     * @param extractionSemanticsVersion version of the extraction semantics used to create chunks
-     * @param collectionName exact Qdrant collection that received the file's vectors
-     * @param chunkHashes chunk hashes ingested for the file
-     */
+    /** Defines the persisted file-level ingestion fields. */
     public record FileIngestionRecord(
             long fileSizeBytes,
             long lastModifiedMillis,
@@ -235,13 +201,7 @@ public class FileIngestionMarkerStore {
             return !collectionName.isBlank();
         }
 
-        /**
-         * Binds a marker without collection identity before any destructive migration step.
-         *
-         * @param canonicalCollectionName authoritative collection that received the file vectors
-         * @return this record when already bound, otherwise an equivalent record with collection identity
-         * @throws IllegalArgumentException when the canonical collection is blank or conflicts with this marker
-         */
+        /** Binds a legacy marker to the collection that owns its vectors. */
         public FileIngestionRecord bindCollectionIdentity(String canonicalCollectionName) {
             Objects.requireNonNull(canonicalCollectionName, "canonicalCollectionName");
             if (canonicalCollectionName.isBlank()) {

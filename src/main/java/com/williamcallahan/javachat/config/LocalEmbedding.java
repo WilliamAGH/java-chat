@@ -8,8 +8,8 @@ import java.util.Locale;
 public class LocalEmbedding {
 
     private static final String URL_DEF = "http://127.0.0.1:8088";
-    private static final String MODEL_DEF = "text-embedding-qwen3-embedding-8b";
-    private static final int DIM_DEF = 4_096;
+    private static final String MODEL_DEF = "qwen/qwen3-embedding-4b";
+    private static final int DIM_DEF = 2_560;
     private static final int BATCH_SIZE_DEF = 32;
     private static final int MIN_POSITIVE = 1;
     private static final String URL_KEY = "app.local-embedding.server-url";

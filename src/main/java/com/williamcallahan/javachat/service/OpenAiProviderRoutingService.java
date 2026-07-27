@@ -171,6 +171,9 @@ public final class OpenAiProviderRoutingService {
         if (throwable instanceof RateLimitException) {
             return false;
         }
+        if (throwable instanceof OpenAiResponseStreamException responseStreamFailure) {
+            return responseStreamFailure.isRetryable();
+        }
         if (throwable instanceof OpenAIIoException
                 || throwable instanceof SseException
                 || Exceptions.isOverflow(throwable)) {
@@ -200,7 +203,10 @@ public final class OpenAiProviderRoutingService {
         if (isCallerCancellation(throwable) || containsPermanentProviderFailure(throwable)) {
             return false;
         }
-        return throwable instanceof OpenAIIoException || isServerError(throwable);
+        return throwable instanceof OpenAIIoException
+                || throwable instanceof OpenAiResponseStreamException responseStreamFailure
+                        && responseStreamFailure.startsConfiguredProviderBackoff()
+                || isServerError(throwable);
     }
 
     private OpenAIClient configuredProviderClient(OpenAIClient githubModelsClient, OpenAIClient openAiClient) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -112,6 +113,34 @@ class OpenAIStreamingProviderFailureTest {
 
         verify(githubModelsResponseService, times(2))
                 .create(any(ResponseCreateParams.class), any(RequestOptions.class));
+    }
+
+    @Test
+    void completionPropagatesUnexpectedRateLimitRecordingFailure() {
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+                .thenReturn(true);
+        OpenAIStreamingService streamingService = configuredStreamingService(rateLimitService);
+        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        ResponseService githubModelsResponseService = mock(ResponseService.class);
+        RateLimitException upstreamRateLimitFailure = headerlessRateLimitFailure();
+        IllegalStateException rateLimitStateFailure = new IllegalStateException("rate-limit state unavailable");
+        when(githubModelsClient.responses()).thenReturn(githubModelsResponseService);
+        when(githubModelsResponseService.create(any(ResponseCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(upstreamRateLimitFailure);
+        doThrow(rateLimitStateFailure)
+                .when(rateLimitService)
+                .recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.GITHUB_MODELS, upstreamRateLimitFailure);
+        ReflectionTestUtils.setField(streamingService, "githubModelsClient", githubModelsClient);
+
+        StepVerifier.create(streamingService.complete("test", TEST_TEMPERATURE))
+                .expectErrorSatisfies(completionFailure -> assertSame(rateLimitStateFailure, completionFailure))
+                .verify();
+
+        verify(rateLimitService)
+                .recordRateLimitFromOpenAiServiceException(
+                        RateLimitService.ApiProvider.GITHUB_MODELS, upstreamRateLimitFailure);
     }
 
     @Test

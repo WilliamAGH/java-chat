@@ -94,6 +94,28 @@ def parse_index_files(index_1_html: str) -> set[str]:
     return {m for m in matches if m.startswith("index-") and m.endswith(".html")}
 
 
+def root_pages_for_release(base_url: str) -> tuple[str, ...]:
+    """Returns only root pages published by the standard doclet for the requested release."""
+    common_root_pages = (
+        "index.html",
+        "overview-tree.html",
+        "preview-list.html",
+        "new-list.html",
+        "deprecated-list.html",
+        "search.html",
+        "help-doc.html",
+        "allpackages-index.html",
+        "allclasses-index.html",
+        "constant-values.html",
+        "serialized-form.html",
+        "system-properties.html",
+    )
+    release_match = re.search(r"/java/javase/([0-9]+)/docs/api/?$", urllib.parse.urlsplit(base_url).path)
+    if release_match is None or int(release_match.group(1)) < 22:
+        return common_root_pages
+    return common_root_pages + ("external-specs.html", "restricted-list.html", "search-tags.html")
+
+
 def generate_seed_urls(base_url: str) -> list[str]:
     normalized_base = base_url if base_url.endswith("/") else base_url + "/"
     index_urls = JavadocIndexUrls(normalized_base)
@@ -114,26 +136,9 @@ def generate_seed_urls(base_url: str) -> list[str]:
 
     urls: set[str] = set()
 
-    # Root pages (small but useful, and they link to assets).
-    root_pages = [
-        "index.html",
-        "overview-tree.html",
-        "preview-list.html",
-        "new-list.html",
-        "deprecated-list.html",
-        "search.html",
-        "help-doc.html",
-        "allpackages-index.html",
-        "allclasses-index.html",
-        "allclasses.html",
-        "constant-values.html",
-        "serialized-form.html",
-        "external-specs.html",
-        "restricted-list.html",
-        "search-tags.html",
-        "system-properties.html",
-    ]
-    for page in root_pages:
+    # Root pages vary with the standard-doclet release. Legacy allclasses.html is
+    # not emitted by the modern releases governed by this repository.
+    for page in root_pages_for_release(normalized_base):
         urls.add(urllib.parse.urljoin(normalized_base, page))
 
     # Index pages (A..Z.._).
@@ -167,7 +172,6 @@ def generate_seed_urls(base_url: str) -> list[str]:
         type_file = f"{type_name}.html"
         type_dir = f"{module}/{package_path(package)}"
         urls.add(urllib.parse.urljoin(normalized_base, f"{type_dir}/{type_file}"))
-        urls.add(urllib.parse.urljoin(normalized_base, f"{type_dir}/class-use/{type_file}"))
 
     if missing_modules > 0:
         # Keep output deterministic but surface the warning on stderr.

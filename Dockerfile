@@ -26,8 +26,6 @@ COPY frontend/ .
 COPY .gitignore /app/.ignore
 COPY Dockerfile /app/Dockerfile
 COPY docs/getting-started.md /app/docs/getting-started.md
-COPY src/main/resources/enrichment-kinds.manifest /app/src/main/resources/enrichment-kinds.manifest
-COPY src/main/resources/sse-status-contracts.json /app/src/main/resources/sse-status-contracts.json
 RUN npm run validate && npm run test && npm run build
 
 # ================================
@@ -79,16 +77,24 @@ RUN useradd -u 1001 -m -s /bin/bash appuser
 WORKDIR /app
 
 # 3. Create writable data directories (rarely changes)
-RUN mkdir -p logs /app/data/snapshots /app/data/parsed /app/data/index
+RUN mkdir -p logs \
+    /app/data/qwen3-embedding-4b-2560/local/snapshots \
+    /app/data/qwen3-embedding-4b-2560/local/parsed \
+    /app/data/qwen3-embedding-4b-2560/local/index \
+    /app/data/qwen3-embedding-4b-2560/dev/snapshots \
+    /app/data/qwen3-embedding-4b-2560/dev/parsed \
+    /app/data/qwen3-embedding-4b-2560/dev/index \
+    /app/data/qwen3-embedding-4b-2560/prod/snapshots \
+    /app/data/qwen3-embedding-4b-2560/prod/parsed \
+    /app/data/qwen3-embedding-4b-2560/prod/index
 
 # 4. Environment variables (rarely changes)
 ENV PORT=8085
-ENV QDRANT_INIT_SCHEMA=false
+ENV SPRING_PROFILE=prod
 ENV APP_LOCAL_EMBEDDING_ENABLED=false
-ENV APP_KILL_ON_CONFLICT=false
-ENV DOCS_SNAPSHOT_DIR=/app/data/snapshots
-ENV DOCS_PARSED_DIR=/app/data/parsed
-ENV DOCS_INDEX_DIR=/app/data/index
+ENV DOCS_SNAPSHOT_DIR=/app/data/qwen3-embedding-4b-2560/prod/snapshots
+ENV DOCS_PARSED_DIR=/app/data/qwen3-embedding-4b-2560/prod/parsed
+ENV DOCS_INDEX_DIR=/app/data/qwen3-embedding-4b-2560/prod/index
 ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 
 # 5. Application JAR (changes every build) - LAST for optimal caching
@@ -100,7 +106,7 @@ USER appuser
 
 EXPOSE 8085
 
-# Gate Coolify's rolling cutover on the JVM accepting traffic; external dependencies report separately.
+# Gate Coolify's rolling cutover on the JVM accepting traffic with a valid Qdrant generation.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:${PORT:-8085}/actuator/health/readiness || exit 1
 

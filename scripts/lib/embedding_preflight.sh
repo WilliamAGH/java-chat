@@ -6,21 +6,52 @@
 #   - Color constants from common_qdrant.sh: RED, GREEN, YELLOW, BLUE, NC
 #   - Environment variables loaded before invocation
 
-normalize_embedding_probe_endpoint() {
-    local raw_base_url="$1"
-    local trimmed_base_url="${raw_base_url%/}"
-    case "$trimmed_base_url" in
-        */v1) echo "$trimmed_base_url/embeddings" ;;
-        */embeddings) echo "$trimmed_base_url" ;;
-        *) echo "$trimmed_base_url/v1/embeddings" ;;
-    esac
-}
+if [[ "${GATEWAY_EMBEDDING_MODEL:-}" != "qwen/qwen3-embedding-4b" ]]; then
+    GATEWAY_EMBEDDING_MODEL="qwen/qwen3-embedding-4b"
+fi
+readonly GATEWAY_EMBEDDING_MODEL
+if [[ "${GATEWAY_EMBEDDING_DIMENSIONS:-}" != "2560" ]]; then
+    GATEWAY_EMBEDDING_DIMENSIONS=2560
+fi
+readonly GATEWAY_EMBEDDING_DIMENSIONS
+if [[ "${GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS:-}" != "1" ]]; then
+    GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS=1
+fi
+readonly GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS
+if [[ "${GATEWAY_MAX_RETRY_AFTER_SECONDS:-}" != "86400" ]]; then
+    GATEWAY_MAX_RETRY_AFTER_SECONDS=86400
+fi
+readonly GATEWAY_MAX_RETRY_AFTER_SECONDS
 
 trim_embedding_credential() {
     local embedding_credential="$1"
     embedding_credential="${embedding_credential#"${embedding_credential%%[![:space:]]*}"}"
     embedding_credential="${embedding_credential%"${embedding_credential##*[![:space:]]}"}"
     printf '%s' "$embedding_credential"
+}
+
+retry_after_delay_seconds() {
+    local retry_after_field="$1"
+    if [[ "$retry_after_field" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$retry_after_field"
+        return 0
+    fi
+    python3 - "$retry_after_field" <<'PY'
+import math
+import sys
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
+retry_after_text = sys.argv[1]
+try:
+    retry_after_time = parsedate_to_datetime(retry_after_text)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if retry_after_time.tzinfo is None:
+    retry_after_time = retry_after_time.replace(tzinfo=timezone.utc)
+delay_seconds = max(0, math.ceil((retry_after_time - datetime.now(timezone.utc)).total_seconds()))
+print(delay_seconds)
+PY
 }
 
 # Reads a non-secret embedding setting from the application configuration that owns it.
@@ -58,34 +89,19 @@ resolve_embedding_probe_configuration() {
     local resolved_endpoint=""
     local resolved_model_name=""
     local resolved_api_key=""
-    local remote_embedding_server_url
-    local remote_embedding_model
-    local open_ai_embedding_base_url
-    local open_ai_embedding_model
-    local remote_embedding_api_key
+    local configured_embedding_model
     local open_ai_api_key
 
-    if ! remote_embedding_server_url="$(read_embedding_application_property "app.remote-embedding.server-url")" \
-        || ! remote_embedding_model="$(read_embedding_application_property "app.remote-embedding.model")" \
-        || ! open_ai_embedding_base_url="$(read_embedding_application_property "app.embeddings.open-ai-base-url")" \
-        || ! open_ai_embedding_model="$(read_embedding_application_property "app.embeddings.open-ai-model")"; then
+    if ! configured_embedding_model="$(read_embedding_application_property "app.embeddings.model")"; then
         return 1
     fi
 
-    remote_embedding_api_key="$(trim_embedding_credential "${REMOTE_EMBEDDING_API_KEY:-}")"
     open_ai_api_key="$(trim_embedding_credential "${OPENAI_API_KEY:-}")"
 
-    if [ -n "$remote_embedding_api_key" ]; then
-        resolved_provider_label="remote_openai_compatible"
-        if [ -n "$remote_embedding_server_url" ]; then
-            resolved_endpoint="$(normalize_embedding_probe_endpoint "$remote_embedding_server_url")"
-        fi
-        resolved_model_name="$remote_embedding_model"
-        resolved_api_key="$remote_embedding_api_key"
-    elif [ -n "$open_ai_api_key" ]; then
-        resolved_provider_label="openai_embeddings"
-        resolved_endpoint="$(normalize_embedding_probe_endpoint "$open_ai_embedding_base_url")"
-        resolved_model_name="$open_ai_embedding_model"
+    if [ -n "$open_ai_api_key" ] && [[ "${OPENAI_BASE_URL:-}" == */v1 ]]; then
+        resolved_provider_label="llm_gateway"
+        resolved_endpoint="${OPENAI_BASE_URL}/embeddings"
+        resolved_model_name="$configured_embedding_model"
         resolved_api_key="$open_ai_api_key"
     fi
 
@@ -102,6 +118,8 @@ validate_embedding_probe_payload() {
     local probe_text="$4"
     local probe_label="$5"
     local log_fn="$6"
+    local probe_count="$7"
+    local expected_dimensions="$8"
 
     local max_attempts=3
     local retry_delay_seconds=1
@@ -111,7 +129,8 @@ validate_embedding_probe_payload() {
         probe_body="$(jq -n \
             --arg model "$embedding_model" \
             --arg text "$probe_text" \
-            '{model:$model,input:[$text]}')"
+            --argjson count "$probe_count" \
+            '{model:$model,input:[range(0; $count) | $text]}')"
 
         local response_body_file
         response_body_file="$(mktemp)"
@@ -124,6 +143,7 @@ validate_embedding_probe_payload() {
             -w "%{http_code}" \
             -H "Authorization: Bearer $embedding_key" \
             -H "Content-Type: application/json" \
+            -H "X-Tier: batch" \
             --data "$probe_body" \
             "$embedding_endpoint" || true)"
         if [ -z "$http_status_code" ]; then
@@ -133,28 +153,29 @@ validate_embedding_probe_payload() {
         local probe_ok="false"
         local failure_reason=""
         if [ "$http_status_code" = "200" ]; then
-            local embedding_dimensions
-            embedding_dimensions="$(jq -r '.data[0].embedding|length // 0' "$response_body_file" 2>/dev/null || echo "0")"
-            local null_value_count
-            null_value_count="$(jq -r '[.data[0].embedding[]|select(.==null)]|length' "$response_body_file" 2>/dev/null || echo "-1")"
-            local non_numeric_value_count
-            non_numeric_value_count="$(jq -r '[.data[0].embedding[]|select((.!=null) and (type!="number"))]|length' "$response_body_file" 2>/dev/null || echo "-1")"
+            local response_entry_count
+            response_entry_count="$(jq -r '.data | length // 0' "$response_body_file" 2>/dev/null || echo "0")"
+            local invalid_entry_count
+            invalid_entry_count="$(jq -r --argjson count "$probe_count" --argjson dimensions "$expected_dimensions" \
+                '[.data | to_entries[] | select(
+                    .key != .value.index
+                    or (.value.embedding | length) != $dimensions
+                    or ([.value.embedding[] | select(type != "number")] | length) != 0
+                )] | length' "$response_body_file" 2>/dev/null || echo "-1")"
 
-            if [ "$embedding_dimensions" -le 0 ]; then
-                failure_reason="missing embedding vector in response payload"
-            elif [ "$null_value_count" -gt 0 ]; then
-                failure_reason="embedding payload contains $null_value_count null value(s) out of $embedding_dimensions"
-            elif [ "$non_numeric_value_count" -gt 0 ]; then
-                failure_reason="embedding payload contains $non_numeric_value_count non-numeric value(s)"
+            if [ "$response_entry_count" -ne "$probe_count" ]; then
+                failure_reason="embedding response count mismatch: expected $probe_count but received $response_entry_count"
+            elif [ "$invalid_entry_count" -ne 0 ]; then
+                failure_reason="embedding response failed ordering, numeric-value, or exact ${expected_dimensions}-dimension validation"
             else
                 probe_ok="true"
             fi
         else
             failure_reason="HTTP $http_status_code"
-            local rate_limit_header
-            rate_limit_header="$(grep -i '^retry-after:' "$response_headers_file" | tail -n 1 | tr -d '\r' || true)"
-            if [ -n "$rate_limit_header" ]; then
-                failure_reason="$failure_reason ($rate_limit_header)"
+            local retry_after_header
+            retry_after_header="$(grep -i '^retry-after:' "$response_headers_file" | tail -n 1 | tr -d '\r' || true)"
+            if [ -n "$retry_after_header" ]; then
+                failure_reason="$failure_reason ($retry_after_header)"
             fi
         fi
 
@@ -164,8 +185,26 @@ validate_embedding_probe_payload() {
         fi
 
         if [ "$attempt_number" -lt "$max_attempts" ]; then
-            $log_fn "${YELLOW}Embedding probe '$probe_label' failed on attempt $attempt_number/$max_attempts; retrying in ${retry_delay_seconds}s (${failure_reason})${NC}"
-            sleep "$retry_delay_seconds"
+            local next_retry_delay_seconds="$retry_delay_seconds"
+            if { [ "$http_status_code" = "429" ] || [ "$http_status_code" = "503" ]; } \
+                && [ -n "${retry_after_header:-}" ]; then
+                local retry_after_seconds
+                retry_after_seconds="${retry_after_header#*:}"
+                retry_after_seconds="$(trim_embedding_credential "$retry_after_seconds")"
+                if ! retry_after_seconds="$(retry_after_delay_seconds "$retry_after_seconds")" \
+                    || [ "${#retry_after_seconds}" -gt "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
+                    || { [ "${#retry_after_seconds}" -eq "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
+                        && [[ "$retry_after_seconds" > "$GATEWAY_MAX_RETRY_AFTER_SECONDS" ]]; }; then
+                    rm -f "$response_body_file" "$response_headers_file"
+                    $log_fn "${RED}Embedding probe '$probe_label' received an invalid or excessive Retry-After value; refusing an early retry${NC}"
+                    return 1
+                fi
+                if [ "$retry_after_seconds" -gt "$next_retry_delay_seconds" ]; then
+                    next_retry_delay_seconds="$retry_after_seconds"
+                fi
+            fi
+            $log_fn "${YELLOW}Embedding probe '$probe_label' failed on attempt $attempt_number/$max_attempts; retrying in ${next_retry_delay_seconds}s (${failure_reason})${NC}"
+            sleep "$next_retry_delay_seconds"
             retry_delay_seconds=$((retry_delay_seconds * 2))
             rm -f "$response_body_file" "$response_headers_file"
             continue
@@ -218,14 +257,35 @@ check_embedding_server() {
 
     if [ -z "$embedding_endpoint" ] || [ -z "$embedding_model" ] || [ -z "$embedding_key" ]; then
         $log_fn "${RED}Remote embedding provider not fully configured${NC}"
-        $log_fn "${YELLOW}Configure app.remote-embedding.server-url plus REMOTE_EMBEDDING_API_KEY, or OPENAI_API_KEY plus app.embeddings.open-ai-model${NC}"
+        $log_fn "${YELLOW}Configure OPENAI_BASE_URL ending in /v1, OPENAI_API_KEY, and app.embeddings.model${NC}"
         return 1
     fi
-    if [[ "$embedding_endpoint" == *"models.github.ai"* ]]; then
-        $log_fn "${RED}Invalid embedding endpoint: GitHub Models does not provide embeddings API${NC}"
-        $log_fn "${YELLOW}Use app.remote-embedding.server-url or app.embeddings.open-ai-base-url for a provider that supports /v1/embeddings${NC}"
+    local expected_dimensions
+    if ! expected_dimensions="$(read_embedding_application_property "app.embeddings.dimensions")" \
+        || ! [[ "$expected_dimensions" =~ ^[1-9][0-9]*$ ]]; then
+        $log_fn "${RED}Embedding dimension configuration is unavailable or invalid${NC}"
         return 1
     fi
+    if [ "$embedding_model" != "$GATEWAY_EMBEDDING_MODEL" ] \
+        || [ "$expected_dimensions" -ne "$GATEWAY_EMBEDDING_DIMENSIONS" ]; then
+        $log_fn "${RED}Embedding configuration must remain ${GATEWAY_EMBEDDING_MODEL} at ${GATEWAY_EMBEDDING_DIMENSIONS} dimensions${NC}"
+        return 1
+    fi
+
+    local model_list_body_file
+    model_list_body_file="$(mktemp)"
+    local model_list_status
+    model_list_status="$(curl -sS --connect-timeout 5 --max-time 30 -o "$model_list_body_file" -w "%{http_code}" \
+        -H "Authorization: Bearer $embedding_key" \
+        -H "X-Tier: batch" \
+        "${OPENAI_BASE_URL}/models" || true)"
+    if [ "$model_list_status" != "200" ] \
+        || ! jq -e --arg model "$embedding_model" 'any(.data[]?; .id == $model)' "$model_list_body_file" >/dev/null; then
+        rm -f "$model_list_body_file"
+        $log_fn "${RED}Gateway model list does not expose required embedding alias '$embedding_model'${NC}"
+        return 1
+    fi
+    rm -f "$model_list_body_file"
 
     $log_fn "${BLUE}Using remote embedding provider ($provider_label)${NC}"
     $log_fn "${BLUE}Embedding endpoint: $embedding_endpoint${NC}"
@@ -237,29 +297,25 @@ check_embedding_server() {
         "$embedding_model" \
         "embedding preflight health check" \
         "plain-text" \
-        "$log_fn"; then
+        "$log_fn" \
+        1 \
+        "$expected_dimensions"; then
         return 1
     fi
 
+    sleep "$GATEWAY_BATCH_REQUEST_INTERVAL_SECONDS"
     if validate_embedding_probe_payload \
         "$embedding_endpoint" \
         "$embedding_key" \
         "$embedding_model" \
         $'public class ProbeExample {\n  private int count = 1;\n  public void increment() { count++; }\n}' \
-        "code-like" \
-        "$log_fn"; then
+        "code-like batch" \
+        "$log_fn" \
+        32 \
+        "$expected_dimensions"; then
         $log_fn "${GREEN}Remote embedding endpoint probes passed${NC}"
         return 0
     fi
-
-    local probe_mode="${EMBEDDING_CODE_PROBE_MODE:-strict}"
-    if [ "$probe_mode" = "warn" ]; then
-        $log_fn "${YELLOW}Warning: remote embedding endpoint failed code-like probe; source ingestion may fail on some files${NC}"
-        $log_fn "${YELLOW}Continuing because EMBEDDING_CODE_PROBE_MODE=warn was set explicitly.${NC}"
-        return 0
-    fi
-
-    $log_fn "${RED}Remote embedding endpoint failed code-like probe; refusing ingestion (strict mode)${NC}"
-    $log_fn "${YELLOW}If you intentionally want to continue despite this risk, set EMBEDDING_CODE_PROBE_MODE=warn for this run.${NC}"
+    $log_fn "${RED}Remote embedding endpoint failed code-like batch probe; refusing ingestion${NC}"
     return 1
 }

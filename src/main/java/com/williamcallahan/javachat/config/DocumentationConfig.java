@@ -7,11 +7,11 @@ import java.util.Locale;
  */
 public class DocumentationConfig {
 
-    private static final String ROOT_URL_DEF = "https://docs.oracle.com/en/java/javase/25/";
-    private static final int JDK_DEF = 25;
-    private static final String SNAP_DIR_DEF = "data/snapshots";
-    private static final String PARSED_DIR_DEF = "data/parsed";
-    private static final String INDEX_DIR_DEF = "data/index";
+    private static final String ROOT_URL_DEFAULT = "https://docs.oracle.com/en/java/javase/25/";
+    private static final int JDK_VERSION_DEFAULT = 25;
+    private static final String SNAPSHOT_DIRECTORY_DEFAULT = "/app/data/qwen3-embedding-4b-2560/prod/snapshots";
+    private static final String PARSED_DIRECTORY_DEFAULT = "/app/data/qwen3-embedding-4b-2560/prod/parsed";
+    private static final String INDEX_DIRECTORY_DEFAULT = "/app/data/qwen3-embedding-4b-2560/prod/index";
     private static final int MIN_POSITIVE = 1;
     private static final String ROOT_URL_KEY = "app.docs.root-url";
     private static final String JDK_KEY = "app.docs.jdk-version";
@@ -23,11 +23,11 @@ public class DocumentationConfig {
     private static final String BLANK_ROOT_MSG = "Documentation root URL must not be blank.";
     private static final String POSITIVE_FMT = "%s must be greater than 0.";
 
-    private String rootUrl = ROOT_URL_DEF;
-    private int jdkVersion = JDK_DEF;
-    private String snapshotDir = SNAP_DIR_DEF;
-    private String parsedDir = PARSED_DIR_DEF;
-    private String indexDir = INDEX_DIR_DEF;
+    private String rootUrl = ROOT_URL_DEFAULT;
+    private int jdkVersion = JDK_VERSION_DEFAULT;
+    private String snapshotDir = SNAPSHOT_DIRECTORY_DEFAULT;
+    private String parsedDir = PARSED_DIRECTORY_DEFAULT;
+    private String indexDir = INDEX_DIRECTORY_DEFAULT;
 
     /**
      * Creates documentation configuration.

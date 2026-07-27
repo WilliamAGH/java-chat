@@ -5,15 +5,20 @@ import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
 import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.ResponsesModel;
+import com.openai.models.responses.EasyInputMessage;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
+import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,9 +37,9 @@ public final class OpenAiRequestFactory {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRequestFactory.class);
 
     private static final String REASONING_EFFORT_PROPERTY = "app.llm.reasoning-effort";
-    private static final String KNOWN_OPENAI_REASONING_EFFORTS = Arrays.stream(ReasoningEffort.Known.values())
-            .map(knownReasoningEffort -> AsciiTextNormalizer.toLowerAscii(knownReasoningEffort.name()))
-            .collect(Collectors.joining(", "));
+    private static final Set<String> SUPPORTED_REASONING_EFFORTS =
+            Set.of("none", "minimal", "low", "medium", "high", "xhigh");
+    private static final String SUPPORTED_REASONING_EFFORT_DESCRIPTION = "none, minimal, low, medium, high, xhigh";
 
     /** Prefix matching gpt-5, gpt-5.2, gpt-5.2-pro, etc. */
     private static final String GPT_5_MODEL_PREFIX = "gpt-5";
@@ -118,8 +123,45 @@ public final class OpenAiRequestFactory {
                     truncatedPrompt.conversationTurnCount());
         }
 
-        ResponseCreateParams responseParams = buildResponseParams(truncatedPrompt.render(), temperature, modelId);
-        return new OpenAiPreparedRequest(responseParams, modelId);
+        List<ResponseInputItem> responseInputItems =
+                buildResponseInputItems(truncatedPrompt, githubModelsGpt5Constrained);
+        ResponseCreateParams responseParams = buildResponseParams(responseInputItems, temperature, modelId).toBuilder()
+                .instructions(truncatedPrompt.prompt().system().content())
+                .build();
+        return new OpenAiPreparedRequest(responseParams, modelId, truncatedPrompt.prompt());
+    }
+
+    /**
+     * Preserves each structured prompt segment's native Responses API role.
+     *
+     * <p>Retrieved context remains developer-owned, prior conversation turns retain their
+     * user or assistant identity, and the active question is always the final user message.</p>
+     */
+    private static List<ResponseInputItem> buildResponseInputItems(
+            PromptTruncator.TruncatedPrompt truncatedPrompt, boolean githubModelsGpt5Constrained) {
+        StructuredPrompt prompt = truncatedPrompt.prompt();
+        List<ResponseInputItem> responseInputItems = new ArrayList<>();
+        if (truncatedPrompt.wasTruncated()) {
+            String truncationNotice = githubModelsGpt5Constrained ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, truncationNotice.strip()));
+        }
+        for (ContextDocumentSegment contextDocument : prompt.contextDocuments()) {
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, contextDocument.content()));
+        }
+        for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
+            EasyInputMessage.Role role =
+                    conversationTurn.isAssistantTurn() ? EasyInputMessage.Role.ASSISTANT : EasyInputMessage.Role.USER;
+            responseInputItems.add(textInputItem(role, conversationTurn.messageText()));
+        }
+        responseInputItems.add(
+                textInputItem(EasyInputMessage.Role.USER, prompt.currentQuery().queryText()));
+        return List.copyOf(responseInputItems);
+    }
+
+    private static ResponseInputItem textInputItem(EasyInputMessage.Role role, String messageText) {
+        EasyInputMessage inputMessage =
+                EasyInputMessage.builder().role(role).content(messageText).build();
+        return ResponseInputItem.ofEasyInputMessage(inputMessage);
     }
 
     /**
@@ -202,13 +244,12 @@ public final class OpenAiRequestFactory {
         return prompt;
     }
 
-    private ResponseCreateParams buildResponseParams(String prompt, double temperature, String normalizedModelId) {
-        return buildResponseParams(prompt, temperature, normalizedModelId, null);
-    }
-
     private ResponseCreateParams buildResponseParams(
-            String prompt, double temperature, String normalizedModelId, Integer maximumOutputTokens) {
-        return buildResponseParams(prompt, temperature, normalizedModelId, maximumOutputTokens, false);
+            List<ResponseInputItem> responseInputItems, double temperature, String normalizedModelId) {
+        ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
+                .inputOfResponse(responseInputItems)
+                .model(ResponsesModel.ofString(normalizedModelId));
+        return configureResponseParams(builder, temperature, normalizedModelId, null, false);
     }
 
     private ResponseCreateParams buildResponseParams(
@@ -217,13 +258,20 @@ public final class OpenAiRequestFactory {
             String normalizedModelId,
             Integer maximumOutputTokens,
             boolean requireJsonObject) {
+        ResponseCreateParams.Builder builder =
+                ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
+        return configureResponseParams(builder, temperature, normalizedModelId, maximumOutputTokens, requireJsonObject);
+    }
+
+    private ResponseCreateParams configureResponseParams(
+            ResponseCreateParams.Builder builder,
+            double temperature,
+            String normalizedModelId,
+            Integer maximumOutputTokens,
+            boolean requireJsonObject) {
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel =
                 gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
-
-        ResponseCreateParams.Builder builder =
-                ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
-
         if (requireJsonObject) {
             builder.text(ResponseTextConfig.builder()
                     .format(ResponseFormatJsonObject.builder().build())
@@ -282,20 +330,29 @@ public final class OpenAiRequestFactory {
             return Optional.empty();
         }
 
-        ReasoningEffort configuredReasoningEffort =
-                ReasoningEffort.of(AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim()));
+        String normalizedReasoningEffort = AsciiTextNormalizer.toLowerAscii(reasoningEffortSetting.trim());
+        ReasoningEffort configuredReasoningEffort = ReasoningEffort.of(normalizedReasoningEffort);
         try {
             configuredReasoningEffort.known();
         } catch (OpenAIInvalidDataException e) {
-            throw new IllegalArgumentException(
-                    "Invalid "
-                            + REASONING_EFFORT_PROPERTY
-                            + " value '"
-                            + reasoningEffortSetting
-                            + "'. Valid values: "
-                            + KNOWN_OPENAI_REASONING_EFFORTS,
-                    e);
+            throw invalidReasoningEffort(reasoningEffortSetting, e);
+        }
+        if (!SUPPORTED_REASONING_EFFORTS.contains(normalizedReasoningEffort)) {
+            throw invalidReasoningEffort(reasoningEffortSetting, null);
         }
         return Optional.of(configuredReasoningEffort);
+    }
+
+    private static IllegalArgumentException invalidReasoningEffort(
+            String reasoningEffortSetting, RuntimeException invalidSdkReasoningEffort) {
+        String configurationMessage = "Invalid "
+                + REASONING_EFFORT_PROPERTY
+                + " value '"
+                + reasoningEffortSetting
+                + "'. Valid values: "
+                + SUPPORTED_REASONING_EFFORT_DESCRIPTION;
+        return invalidSdkReasoningEffort == null
+                ? new IllegalArgumentException(configurationMessage)
+                : new IllegalArgumentException(configurationMessage, invalidSdkReasoningEffort);
     }
 }

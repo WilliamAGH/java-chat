@@ -10,6 +10,7 @@ import com.williamcallahan.javachat.config.QdrantRestConnection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.ClientRequest;
@@ -167,6 +168,12 @@ class ExternalServiceHealthTest {
                 "a completion from the pre-reset connectivity probe must not overwrite current collection health");
     }
 
+    @Test
+    void connectivityProbeUsesHealthzEndpointForPlainAndTlsQdrantConnections() {
+        assertConnectivityProbeEndpoint(false, "http");
+        assertConnectivityProbeEndpoint(true, "https");
+    }
+
     private static void markUnhealthy(ExternalServiceHealth.ServiceStatus serviceStatus) {
         ExternalServiceHealth.HealthCheckToken checkToken =
                 serviceStatus.startCheck(Instant.now()).orElseThrow();
@@ -182,11 +189,27 @@ class ExternalServiceHealthTest {
         assertEquals(healthSnapshot.isHealthy(), healthSnapshot.message().startsWith("Healthy"));
     }
 
+    private static void assertConnectivityProbeEndpoint(boolean qdrantUsesTls, String expectedScheme) {
+        CapturingConnectivityExchange capturingConnectivityExchange = new CapturingConnectivityExchange();
+        ExternalServiceHealth externalServiceHealth = new ExternalServiceHealth(
+                WebClient.builder().exchangeFunction(capturingConnectivityExchange),
+                new QdrantRestConnection(new QdrantConnectionProperties(
+                        "qdrant.test", QDRANT_GRPC_PORT, qdrantUsesTls, "qdrant-health-test-key")),
+                new AppProperties());
+
+        externalServiceHealth.init();
+
+        ClientRequest qdrantHealthRequest = capturingConnectivityExchange.qdrantHealthRequest();
+        assertEquals("/healthz", qdrantHealthRequest.url().getPath());
+        assertEquals(expectedScheme, qdrantHealthRequest.url().getScheme());
+        assertEquals("qdrant-health-test-key", qdrantHealthRequest.headers().getFirst("api-key"));
+    }
+
     /**
      * Delays only the connectivity response so test order exactly models the startup race.
      */
     private static final class DeferredConnectivityExchange implements ExchangeFunction {
-        private static final String CONNECTIVITY_PATH = "/health";
+        private static final String CONNECTIVITY_PATH = "/healthz";
         private static final String COLLECTION_PATH_PREFIX = "/collections/";
 
         private final Sinks.One<ClientResponse> pendingConnectivityResponse = Sinks.one();
@@ -211,6 +234,21 @@ class ExternalServiceHealthTest {
             assertTrue(pendingConnectivityResponse
                     .tryEmitError(new IllegalStateException("delayed connectivity failure"))
                     .isSuccess());
+        }
+    }
+
+    /** Captures an immediate connectivity probe for endpoint and authentication assertions. */
+    private static final class CapturingConnectivityExchange implements ExchangeFunction {
+        private final AtomicReference<ClientRequest> capturedQdrantHealthRequest = new AtomicReference<>();
+
+        @Override
+        public Mono<ClientResponse> exchange(ClientRequest qdrantHealthRequest) {
+            capturedQdrantHealthRequest.set(qdrantHealthRequest);
+            return Mono.just(ClientResponse.create(HttpStatus.OK).build());
+        }
+
+        ClientRequest qdrantHealthRequest() {
+            return capturedQdrantHealthRequest.get();
         }
     }
 }

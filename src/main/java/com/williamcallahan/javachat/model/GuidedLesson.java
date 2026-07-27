@@ -130,21 +130,21 @@ public class GuidedLesson {
     }
 
     /**
-     * Returns the manifest identities associated with this lesson before source-scope projection.
+     * Returns the official source identities associated with this lesson before source-scope projection.
      *
      * <p>This intentionally is not a JavaBean getter: source references configure the packaged
      * TOC and never form part of the public lesson API.</p>
      *
-     * @return canonical manifest identities in lesson order
+     * @return official source identities in lesson order
      */
     public List<String> sourceReferences() {
         return List.copyOf(sourceReferences);
     }
 
     /**
-     * Sets canonical manifest identities read from the packaged TOC.
+     * Sets official source identities read from the packaged TOC.
      *
-     * @param sourceReferences exact source identities owned by the manifests
+     * @param sourceReferences exact official source identities
      */
     @JsonProperty(value = "sourceReferences", access = JsonProperty.Access.WRITE_ONLY)
     public void setSourceReferences(List<String> sourceReferences) {
@@ -173,7 +173,7 @@ public class GuidedLesson {
     }
 
     /**
-     * Enforces the manifest-reference metadata required before source-scope projection.
+     * Enforces the source-reference metadata required before source-scope projection.
      *
      * @throws IllegalStateException when source references are absent or malformed
      */

@@ -17,7 +17,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
@@ -129,9 +128,8 @@ class SseSupportTest {
     }
 
     @Test
-    void citationPartialFailureStatusFluxOwnsTheCanonicalNonRetryableWarning() throws JsonProcessingException {
-        SseStatusContractCatalog statusContractCatalog = createStatusContractCatalog();
-        SseSupport sseSupport = new SseSupport(objectMapper, statusContractCatalog);
+    void citationPartialFailureStatusFluxEmitsTheNonRetryableWarning() throws JsonProcessingException {
+        SseSupport sseSupport = createSseSupport();
 
         List<ServerSentEvent<String>> citationStatusEvents = Objects.requireNonNull(
                 sseSupport.citationPartialFailureStatusFlux(2).collectList().block(), "citation status events");
@@ -142,12 +140,11 @@ class SseSupportTest {
         SseSupport.SseEventPayload citationPartialFailureStatus = objectMapper.readValue(
                 Objects.requireNonNull(citationStatusEvent.data(), "citation status data"),
                 SseSupport.SseEventPayload.class);
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         assertEquals("Some citations could not be loaded (2 failed)", citationPartialFailureStatus.message());
         assertEquals("Citations could not be loaded", citationPartialFailureStatus.details());
-        assertEquals(citationContract.code(), citationPartialFailureStatus.code());
-        assertEquals(citationContract.retryable(), citationPartialFailureStatus.retryable());
-        assertEquals(citationContract.stage(), citationPartialFailureStatus.stage());
+        assertEquals("citation.partial-failure", citationPartialFailureStatus.code());
+        assertEquals(Boolean.FALSE, citationPartialFailureStatus.retryable());
+        assertEquals("citation", citationPartialFailureStatus.stage());
     }
 
     @Test
@@ -158,10 +155,6 @@ class SseSupportTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper, createStatusContractCatalog());
-    }
-
-    private SseStatusContractCatalog createStatusContractCatalog() {
-        return new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"));
+        return new SseSupport(objectMapper);
     }
 }

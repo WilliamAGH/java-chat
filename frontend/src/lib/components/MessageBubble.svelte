@@ -71,6 +71,9 @@
       <p class="user-text">{message.messageText}</p>
     {:else}
       <AssistantMarkdownBody markdown={message.messageText} {isStreaming} />
+      {#if message.streamErrorMessage}
+        <p class="stream-error" role="alert">{message.streamErrorMessage}</p>
+      {/if}
       {#if showCsrfRefreshButton}
         <button type="button" class="csrf-refresh-btn" onclick={reloadCurrentPage}>
           Refresh and retry
@@ -169,6 +172,12 @@
     background: rgba(196, 93, 93, 0.1);
     border-color: rgba(196, 93, 93, 0.2);
     color: var(--color-error);
+  }
+
+  .stream-error {
+    margin: var(--space-3) 0 0;
+    color: var(--color-error);
+    font-size: var(--text-sm);
   }
 
   /* Wrap long unbroken user strings such as URLs. */

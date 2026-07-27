@@ -3,7 +3,7 @@ id: no-domain-record-cast
 language: tsx
 severity: warning
 message: |
-  [CV1h/LNT1c] Casting values to Record<string, ...> bypasses the canonical typed contract.
+  [CV1h/LNT1c] Casting values to Record<string, ...> bypasses the boundary's owned type.
 
   Import and use the real domain type or parse the unknown value once at the trust boundary.
 

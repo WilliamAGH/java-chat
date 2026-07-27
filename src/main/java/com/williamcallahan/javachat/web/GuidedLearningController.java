@@ -282,16 +282,23 @@ public class GuidedLearningController extends BaseController {
                     GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
                             guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
 
-                    RetrievalService.CitationOutcome citationOutcome =
-                            guidedService.citationOutcomeForContextDocuments(promptOutcome.lessonContextDocuments());
-                    List<Citation> finalCitations = citationOutcome.citations();
-
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService
                             .streamResponse(
                                     promptOutcome.structuredPrompt(),
                                     appProperties.getLlm().getTemperature())
                             .flatMapMany(streamingResult -> {
+                                List<org.springframework.ai.document.Document> retainedLessonContextDocuments =
+                                        promptOutcome.lessonContextDocuments().stream()
+                                                .filter(document -> streamingResult
+                                                        .contextDocumentIds()
+                                                        .contains(document.getId()))
+                                                .toList();
+                                RetrievalService.CitationOutcome citationOutcome =
+                                        guidedService.citationOutcomeForContextDocuments(
+                                                retainedLessonContextDocuments);
+                                List<Citation> finalCitations = citationOutcome.citations();
+
                                 // Provider event first - surfaces which LLM is handling this request
                                 ServerSentEvent<String> providerEvent =
                                         sseSupport.providerEvent(streamingResult.providerDisplayName());

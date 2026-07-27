@@ -45,11 +45,10 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(
         properties = {
             "management.endpoint.health.probes.enabled=true",
-            "management.endpoint.health.group.readiness.include=readinessState",
+            "management.endpoint.health.group.readiness.include=readinessState,qdrant",
             "management.endpoint.health.group.dependencies.include=qdrant,embeddingModelKeepAlive",
             "spring.ai.vectorstore.qdrant.host=localhost",
-            "spring.ai.vectorstore.qdrant.use-tls=false",
-            "spring.ai.vectorstore.qdrant.port=8086"
+            "spring.ai.vectorstore.qdrant.use-tls=false"
         })
 @AutoConfigureMockMvc
 @AutoConfigureObservability
@@ -57,6 +56,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class JavaChatApplicationTests {
 
     private static final String TEST_SOURCE_COMMIT = "java-chat-test-source-commit";
+    private static final int UNAVAILABLE_QDRANT_TEST_PORT = 1;
     private static final Logger EXTERNAL_SERVICE_HEALTH_LOGGER =
             (Logger) LoggerFactory.getLogger(ExternalServiceHealth.class);
     private static final AtomicReference<ExpectedLogEvents> EXTERNAL_SERVICE_HEALTH_LOG_EVENTS =
@@ -68,6 +68,7 @@ class JavaChatApplicationTests {
     @DynamicPropertySource
     static void configureDeploymentIdentity(DynamicPropertyRegistry propertyRegistry) {
         propertyRegistry.add("SOURCE_COMMIT", () -> TEST_SOURCE_COMMIT);
+        propertyRegistry.add("spring.ai.vectorstore.qdrant.port", () -> UNAVAILABLE_QDRANT_TEST_PORT);
     }
 
     @MockitoBean(answers = Answers.RETURNS_MOCKS)
@@ -106,10 +107,10 @@ class JavaChatApplicationTests {
     }
 
     @Test
-    void externalDependencyFailuresRemainObservableWithoutBlockingReadiness() throws Exception {
+    void qdrantFailureBlocksReadinessAndAllDependencyFailuresRemainObservable() throws Exception {
         assertEquals(Status.DOWN, embeddingModelKeepAlive.health().getStatus());
         assertEquals(Status.DOWN, qdrantHealthIndicator.health().getStatus());
-        mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+        mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isServiceUnavailable());
         mockMvc.perform(get("/actuator/health/dependencies")).andExpect(status().isServiceUnavailable());
     }
 

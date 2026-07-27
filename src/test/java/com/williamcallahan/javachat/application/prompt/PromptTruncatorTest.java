@@ -10,6 +10,7 @@ import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
+import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
@@ -36,7 +37,7 @@ class PromptTruncatorTest {
     void noTruncationWhenWithinLimit() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System instructions", 50),
-                List.of(new ContextDocumentSegment(1, "url1", "content1", 100)),
+                List.of(new ContextDocumentSegment(1, "document-1", "url1", "content1", 100)),
                 List.of(new ConversationTurnSegment("user", "Hello", 10)),
                 new CurrentQuerySegment("What is Java?", 20));
 
@@ -52,9 +53,9 @@ class PromptTruncatorTest {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),
                 List.of(
-                        new ContextDocumentSegment(1, "url1", "doc1", 200),
-                        new ContextDocumentSegment(2, "url2", "doc2", 200),
-                        new ContextDocumentSegment(3, "url3", "doc3", 200)),
+                        new ContextDocumentSegment(1, "document-1", "url1", "doc1", 200),
+                        new ContextDocumentSegment(2, "document-2", "url2", "doc2", 200),
+                        new ContextDocumentSegment(3, "document-3", "url3", "doc3", 200)),
                 List.of(new ConversationTurnSegment("user", "history", 50)),
                 new CurrentQuerySegment("query", 50));
 
@@ -96,10 +97,66 @@ class PromptTruncatorTest {
     }
 
     @Test
+    void retainsHighPriorityContextBeforeConversationHistory() {
+        ContextDocumentSegment canonicalLesson = new ContextDocumentSegment(
+                        1, "curated-lesson:records", "curated-lesson:records", "canonical records lesson", 150)
+                .withPriority(PromptSegmentPriority.HIGH);
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        canonicalLesson,
+                        new ContextDocumentSegment(2, "official-records", "official", "official records context", 100)),
+                List.of(new ConversationTurnSegment("assistant", "long prior answer", 150)),
+                new CurrentQuerySegment("Explain shallow immutability", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(1, truncationOutcome.contextDocumentCount());
+        assertEquals(0, truncationOutcome.conversationTurnCount());
+        ContextDocumentSegment retainedLesson =
+                truncationOutcome.prompt().contextDocuments().getFirst();
+        assertEquals("curated-lesson:records", retainedLesson.documentId());
+        assertEquals(1, retainedLesson.index());
+        assertEquals(PromptSegmentPriority.HIGH, retainedLesson.priority());
+    }
+
+    @Test
+    void retainsMultipleHighPriorityDocumentsInSourceOrderAheadOfLowContext() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        new ContextDocumentSegment(1, "low-first", "low-first", "ordinary context", 100),
+                        new ContextDocumentSegment(2, "high-first", "high-first", "canonical lesson", 80)
+                                .withPriority(PromptSegmentPriority.HIGH),
+                        new ContextDocumentSegment(3, "low-second", "low-second", "ordinary context", 100),
+                        new ContextDocumentSegment(4, "high-second", "high-second", "required example", 70)
+                                .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(new ConversationTurnSegment("assistant", "recent answer", 50)),
+                new CurrentQuerySegment("Current question", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(2, truncationOutcome.contextDocumentCount());
+        assertEquals(1, truncationOutcome.conversationTurnCount());
+        assertEquals(
+                List.of("high-first", "high-second"),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::documentId)
+                        .toList());
+        assertEquals(
+                List.of(1, 2),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::index)
+                        .toList());
+    }
+
+    @Test
     void neverTruncatesSystemPromptOrCurrentQuery() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("Critical system instructions", 200),
-                List.of(new ContextDocumentSegment(1, "url", "doc", 100)),
+                List.of(new ContextDocumentSegment(1, "document-1", "url", "doc", 100)),
                 List.of(new ConversationTurnSegment("user", "history", 100)),
                 new CurrentQuerySegment("Important question", 200));
 
@@ -121,10 +178,15 @@ class PromptTruncatorTest {
         assertEquals(0, truncationOutcome.contextDocumentCount());
         assertEquals(0, truncationOutcome.conversationTurnCount());
 
-        // System and query must be present
+        // The legacy rendering stays complete while the Responses API input is separated.
         String rendered = truncationOutcome.render();
+        assertEquals(
+                "Critical system instructions",
+                truncationOutcome.prompt().system().content());
         assertTrue(rendered.contains("Critical system instructions"));
         assertTrue(rendered.contains("Important question"));
+        assertFalse(truncationOutcome.renderInput().contains("Critical system instructions"));
+        assertTrue(truncationOutcome.renderInput().contains("Important question"));
     }
 
     @Test
@@ -132,8 +194,8 @@ class PromptTruncatorTest {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),
                 List.of(
-                        new ContextDocumentSegment(1, "url1", "doc1", 500),
-                        new ContextDocumentSegment(2, "url2", "doc2", 500)),
+                        new ContextDocumentSegment(1, "document-1", "url1", "doc1", 500),
+                        new ContextDocumentSegment(2, "document-2", "url2", "doc2", 500)),
                 List.of(),
                 new CurrentQuerySegment("query", 50));
 
@@ -147,7 +209,7 @@ class PromptTruncatorTest {
     void prependsGenericTruncationNoticeForOtherModels() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100),
-                List.of(new ContextDocumentSegment(1, "url1", "doc1", 500)),
+                List.of(new ContextDocumentSegment(1, "document-1", "url1", "doc1", 500)),
                 List.of(),
                 new CurrentQuerySegment("query", 50));
 
@@ -163,9 +225,9 @@ class PromptTruncatorTest {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 50),
                 List.of(
-                        new ContextDocumentSegment(1, "url1", "doc1", 100),
-                        new ContextDocumentSegment(2, "url2", "doc2", 100),
-                        new ContextDocumentSegment(3, "url3", "doc3", 100)),
+                        new ContextDocumentSegment(1, "document-1", "url1", "doc1", 100),
+                        new ContextDocumentSegment(2, "document-2", "url2", "doc2", 100),
+                        new ContextDocumentSegment(3, "document-3", "url3", "doc3", 100)),
                 List.of(),
                 new CurrentQuerySegment("query", 50));
 
@@ -186,6 +248,27 @@ class PromptTruncatorTest {
     }
 
     @Test
+    void oversizedContextDocumentDoesNotBlockLaterDocumentsThatFit() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 50),
+                List.of(
+                        new ContextDocumentSegment(1, "oversized-document", "oversized", "large lesson", 500),
+                        new ContextDocumentSegment(2, "fitting-document", "fitting", "official context", 100)),
+                List.of(),
+                new CurrentQuerySegment("query", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 250, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(1, truncationOutcome.contextDocumentCount());
+        ContextDocumentSegment retainedContextDocument =
+                truncationOutcome.prompt().contextDocuments().getFirst();
+        assertEquals(1, retainedContextDocument.index());
+        assertEquals("fitting", retainedContextDocument.sourceUrl());
+        assertEquals("official context", retainedContextDocument.documentContent());
+    }
+
+    @Test
     void handlesEmptyContextAndHistory() {
         StructuredPrompt prompt = new StructuredPrompt(
                 new SystemSegment("System", 100), List.of(), List.of(), new CurrentQuerySegment("query", 50));
@@ -197,8 +280,10 @@ class PromptTruncatorTest {
         assertEquals(0, result.conversationTurnCount());
 
         String rendered = result.render();
+        assertEquals("System", result.prompt().system().content());
         assertTrue(rendered.contains("System"));
         assertTrue(rendered.contains("query"));
+        assertEquals("query", result.renderInput());
     }
 
     @Test

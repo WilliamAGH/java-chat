@@ -79,12 +79,11 @@ public class GuidedTOCProvider {
     /**
      * Resolves each lesson's canonical source references into its retrieval-facing docSet projection.
      *
-     * <p>The source manifests own source identities and documentation metadata. The TOC only relates
-     * a lesson to those identities, while the public lesson shape receives the exact docSet values
-     * projected from the manifests.</p>
+     * <p>The documentation source configuration owns source identities and metadata. The TOC relates
+     * a lesson to those identities, while the public lesson shape receives the exact docSet values.</p>
      *
      * @param guidedLessons deserialized lesson metadata
-     * @return immutable lessons with manifest-projected source scopes
+     * @return immutable lessons with resolved official source scopes
      */
     static List<GuidedLesson> projectOfficialSourceScopes(List<GuidedLesson> guidedLessons) {
         if (guidedLessons == null) {

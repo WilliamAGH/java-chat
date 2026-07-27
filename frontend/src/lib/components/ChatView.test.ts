@@ -258,8 +258,51 @@ describe("ChatView streaming stability", () => {
 
     failResponseStream();
 
-    expect(await renderedChatView.findByText(TERMINAL_STREAM_FAILURE_MESSAGE)).toBeTruthy();
+    expect(await renderedChatView.findByText("Incomplete response")).toBeTruthy();
+    expect(await renderedChatView.findByRole("alert")).toHaveTextContent(
+      TERMINAL_STREAM_FAILURE_MESSAGE,
+    );
     expect(renderedChatView.queryByRole("status", { name: "Citation warning" })).toBeNull();
+  });
+
+  it("renders a visible error bubble when the stream fails before text", async () => {
+    streamChatMock.mockRejectedValue(new Error(TERMINAL_STREAM_FAILURE_MESSAGE));
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    const errorMessage = await renderedChatView.findByText(TERMINAL_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+  });
+
+  it("treats invisible streamed characters as an empty failed response", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
+      onChunk(" \t\n\u200B\uFEFF\u2060");
+      throw new Error(TERMINAL_STREAM_FAILURE_MESSAGE);
+    });
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    const errorMessage = await renderedChatView.findByText(TERMINAL_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+    expect(renderedChatView.container.querySelector(".stream-error")).toBeNull();
+  });
+
+  it("keeps the connecting indicator active for an unresolved invisible chunk", async () => {
+    streamChatMock.mockImplementation(async (_sessionId, _message, onChunk) => {
+      onChunk("\u200B\uFEFF\u2060");
+      return new Promise<void>(() => {});
+    });
+
+    const renderedChatView = await renderChatView();
+    await sendChatMessage(renderedChatView, "Explain records");
+
+    await vi.waitFor(() =>
+      expect(
+        renderedChatView.container.querySelector('.thinking-indicator[data-phase="connecting"]'),
+      ).not.toBeNull(),
+    );
   });
 
   it("shows the provider selected for the active stream", async () => {

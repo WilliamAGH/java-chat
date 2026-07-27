@@ -21,8 +21,8 @@ class QdrantHealthIndicatorTest {
     @Test
     void health_triggersRetryEvaluationBeforeSnapshotRendering() {
         ExternalServiceHealth externalServiceHealth = mock(ExternalServiceHealth.class);
-        QdrantHealthIndicator qdrantHealthIndicator =
-                new QdrantHealthIndicator(externalServiceHealth, absentIndexInitializerProvider());
+        QdrantHealthIndicator qdrantHealthIndicator = new QdrantHealthIndicator(
+                externalServiceHealth, absentIndexInitializerProvider(), absentDiscoveryProvider());
 
         ExternalServiceHealth.HealthSnapshot unhealthySnapshot = new ExternalServiceHealth.HealthSnapshot(
                 ExternalServiceHealth.SERVICE_QDRANT, false, "Unhealthy (checking now...)", Duration.ZERO);
@@ -42,14 +42,31 @@ class QdrantHealthIndicatorTest {
         when(indexInitializer.initializationHealth())
                 .thenReturn(
                         Health.down().withDetail("initialization", "pending").build());
-        QdrantHealthIndicator qdrantHealthIndicator =
-                new QdrantHealthIndicator(externalServiceHealth, indexInitializerProvider(indexInitializer));
+        QdrantHealthIndicator qdrantHealthIndicator = new QdrantHealthIndicator(
+                externalServiceHealth, indexInitializerProvider(indexInitializer), absentDiscoveryProvider());
 
         Health health = qdrantHealthIndicator.health();
 
         assertEquals(Status.DOWN, health.getStatus());
         assertEquals("pending", health.getDetails().get("initialization"));
         verify(externalServiceHealth, times(1)).triggerRetryIfDue(ExternalServiceHealth.SERVICE_QDRANT);
+    }
+
+    @Test
+    void healthRemainsDownWhenGovernedGitHubDiscoveryFails() {
+        ExternalServiceHealth externalServiceHealth = mock(ExternalServiceHealth.class);
+        QdrantGitHubCollectionDiscovery discovery = mock(QdrantGitHubCollectionDiscovery.class);
+        when(discovery.discoveryHealth())
+                .thenReturn(Health.down()
+                        .withDetail("githubCollectionDiscovery", "failed")
+                        .build());
+        QdrantHealthIndicator qdrantHealthIndicator = new QdrantHealthIndicator(
+                externalServiceHealth, absentIndexInitializerProvider(), discoveryProvider(discovery));
+
+        Health health = qdrantHealthIndicator.health();
+
+        assertEquals(Status.DOWN, health.getStatus());
+        assertEquals("failed", health.getDetails().get("githubCollectionDiscovery"));
     }
 
     private ObjectProvider<QdrantIndexInitializer> absentIndexInitializerProvider() {
@@ -66,6 +83,25 @@ class QdrantHealthIndicatorTest {
             @Override
             public QdrantIndexInitializer getIfAvailable() {
                 return indexInitializer;
+            }
+        };
+    }
+
+    private ObjectProvider<QdrantGitHubCollectionDiscovery> absentDiscoveryProvider() {
+        return new ObjectProvider<>() {
+            @Override
+            public QdrantGitHubCollectionDiscovery getIfAvailable() {
+                return null;
+            }
+        };
+    }
+
+    private ObjectProvider<QdrantGitHubCollectionDiscovery> discoveryProvider(
+            QdrantGitHubCollectionDiscovery discovery) {
+        return new ObjectProvider<>() {
+            @Override
+            public QdrantGitHubCollectionDiscovery getIfAvailable() {
+                return discovery;
             }
         };
     }

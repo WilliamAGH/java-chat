@@ -84,6 +84,8 @@ public class GitHubRepoProcessor {
     private static final String ENV_GITHUB_REPO_COMMIT = "GITHUB_REPO_COMMIT";
     private static final String ENV_GITHUB_REPO_LICENSE = "GITHUB_REPO_LICENSE";
     private static final String ENV_GITHUB_REPO_DESCRIPTION = "GITHUB_REPO_DESCRIPTION";
+    private static final String GITHUB_COLLECTION_GENERATION = "qwen3-embedding-4b-2560";
+    private static final String GITHUB_COLLECTION_PREFIX = "github-" + GITHUB_COLLECTION_GENERATION + "-";
 
     private final SourceCodeFileIngestionProcessor fileProcessor;
     private final HybridVectorService hybridVectorService;
@@ -293,6 +295,7 @@ public class GitHubRepoProcessor {
                 repositoryIdentityResolver.resolve(owner, repositoryName, repositoryUrl);
 
         String collectionName = requireEnv(ENV_GITHUB_COLLECTION_NAME);
+        requireGenerationGitHubCollection(collectionName);
 
         return new GitHubRepoMetadata(
                 repoPath,
@@ -302,6 +305,13 @@ public class GitHubRepoProcessor {
                 envOrEmpty(ENV_GITHUB_REPO_COMMIT),
                 envOrEmpty(ENV_GITHUB_REPO_LICENSE),
                 envOrEmpty(ENV_GITHUB_REPO_DESCRIPTION));
+    }
+
+    static void requireGenerationGitHubCollection(String collectionName) {
+        if (!collectionName.startsWith(GITHUB_COLLECTION_PREFIX)
+                || collectionName.length() == GITHUB_COLLECTION_PREFIX.length()) {
+            throw new GitHubRepoProcessingException("GitHub collection must match the shared 4B/2560 generation");
+        }
     }
 
     private static String requireEnv(String key) {

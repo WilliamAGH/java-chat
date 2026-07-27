@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import com.vladsch.flexmark.ast.Code;
 import com.vladsch.flexmark.ast.Link;
 import com.vladsch.flexmark.ast.Text;
 import com.vladsch.flexmark.util.ast.Node;
@@ -105,6 +106,8 @@ public class CitationProcessor {
             while (child != null) {
                 if (child instanceof Text textNode) {
                     titleBuilder.append(textNode.getChars());
+                } else if (child instanceof Code codeNode) {
+                    titleBuilder.append(codeNode.getText());
                 }
                 child = child.getNext();
             }

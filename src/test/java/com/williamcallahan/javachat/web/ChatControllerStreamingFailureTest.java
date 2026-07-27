@@ -9,6 +9,7 @@ import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_P
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
+import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,12 +41,13 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -64,7 +66,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Disposable;
@@ -152,6 +153,50 @@ class ChatControllerStreamingFailureTest {
     }
 
     @Test
+    void retrievalFailuresExplainThemselvesWithoutLeakingTheExceptionClassName() throws JsonProcessingException {
+        HybridSearchPartialFailureException retrievalFailure = new HybridSearchPartialFailureException(
+                "Qdrant retrieval failed for 4 collection(s)",
+                List.of(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-chat-dev-docs", "Timeout", "Qdrant query exceeded timeout 5000ms")));
+
+        List<ServerSentEvent<String>> streamEvents = streamFailure(retrievalFailure, false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload retrievalErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertFalse(
+                retrievalErrorEvent.message().contains(HybridSearchPartialFailureException.class.getSimpleName()),
+                "user-facing message must not leak the exception class name");
+        assertTrue(retrievalErrorEvent.message().contains("Java documentation"));
+        assertFalse(serializedError.contains(HybridSearchPartialFailureException.class.getSimpleName()));
+        assertFalse(serializedError.contains("java-chat-dev-docs"));
+    }
+
+    @Test
+    void rerankingFailuresExplainThemselvesWithoutLeakingTheExceptionClassName() throws JsonProcessingException {
+        RerankingFailureException rerankingFailure = new RerankingFailureException("Reranking service unavailable");
+
+        List<ServerSentEvent<String>> streamEvents = streamFailure(rerankingFailure, false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload rerankingErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertFalse(
+                rerankingErrorEvent.message().contains(RerankingFailureException.class.getSimpleName()),
+                "user-facing message must not leak the exception class name");
+        assertFalse(serializedError.contains(RerankingFailureException.class.getSimpleName()));
+        assertFalse(serializedError.contains("Reranking service unavailable"));
+    }
+
+    @Test
     void configuredProviderCooldownEmitsStableRetryableClientError() throws JsonProcessingException {
         ConfiguredProviderTemporarilyUnavailableException configuredProviderFailure =
                 new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.GITHUB_MODELS);
@@ -226,6 +271,7 @@ class ChatControllerStreamingFailureTest {
                 new AppProperties());
         CountDownLatch retrievalStarted = new CountDownLatch(1);
         CountDownLatch releaseRetrieval = new CountDownLatch(1);
+        CountDownLatch retrievalFinished = new CountDownLatch(1);
         CountDownLatch preparationStatusObserved = new CountDownLatch(1);
         AtomicReference<ServerSentEvent<String>> firstStreamEvent = new AtomicReference<>();
         AtomicReference<Throwable> streamFailure = new AtomicReference<>();
@@ -234,16 +280,21 @@ class ChatControllerStreamingFailureTest {
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
             retrievalStarted.countDown();
-            assertTrue(
-                    releaseRetrieval.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
-                    "test should release blocked retrieval");
-            return List.of();
+            try {
+                assertTrue(
+                        releaseRetrieval.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                        "test should release blocked retrieval");
+                return List.of();
+            } finally {
+                retrievalFinished.countDown();
+            }
         });
         when(chatService.buildStructuredPromptWithContextOutcome(
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
-        when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
+        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
                 .thenReturn(Mono.never());
 
@@ -279,6 +330,9 @@ class ChatControllerStreamingFailureTest {
             assertNull(streamFailure.get());
         } finally {
             releaseRetrieval.countDown();
+            assertTrue(
+                    retrievalFinished.await(ASYNC_ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "blocked retrieval should finish before stream cancellation");
             Disposable streamSubscription = activeSubscription.get();
             if (streamSubscription != null) {
                 streamSubscription.dispose();
@@ -406,6 +460,7 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Document officialPromptDocument = mock(Document.class);
+        when(officialPromptDocument.getId()).thenReturn("official-prompt-document");
         Citation officialCitation = new Citation(
                 "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html",
                 "List",
@@ -416,11 +471,12 @@ class ChatControllerStreamingFailureTest {
                         anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(officialPromptDocument)));
-        when(retrievalService.toCitations(List.of(officialPromptDocument)))
+        when(retrievalService.toCitationsForQuery(USER_QUERY, List.of(officialPromptDocument)))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(streamingService.isAvailable()).thenReturn(true);
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("official-prompt-document"))));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -438,7 +494,77 @@ class ChatControllerStreamingFailureTest {
 
         assertEquals(1, streamedCitations.size());
         assertEquals(officialCitation.getUrl(), streamedCitations.getFirst().getUrl());
-        verify(retrievalService).toCitations(List.of(officialPromptDocument));
+        verify(retrievalService).toCitationsForQuery(USER_QUERY, List.of(officialPromptDocument));
+        verify(chatService, never()).citationsFor(anyString());
+    }
+
+    @Test
+    void chatStreamEmitsExactOverloadSelectionFromPromptContext() throws JsonProcessingException {
+        String exactOverloadQuery = "Explain java.util.List.of(E,E)";
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                createSseSupport(),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        Document broadPromptDocument = mock(Document.class);
+        when(broadPromptDocument.getId()).thenReturn("broad-prompt-document");
+        Citation exactOverloadCitation = new Citation(
+                "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html#of(E,E)",
+                "List",
+                "of(E,E)",
+                "Creates an unmodifiable list containing two elements.");
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(chatService.buildStructuredPromptWithContextOutcome(
+                        anyList(), eq(exactOverloadQuery), eq(ModelConfiguration.DEFAULT_MODEL)))
+                .thenReturn(new ChatService.StructuredPromptOutcome(
+                        StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of(broadPromptDocument)));
+        when(retrievalService.toCitationsForQuery(exactOverloadQuery, List.of(broadPromptDocument)))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(exactOverloadCitation), 1));
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("broad-prompt-document"))));
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                chatController.stream(
+                                new ChatStreamRequest(SESSION_ID, exactOverloadQuery), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "chat stream events");
+
+        ServerSentEvent<String> citationEvent = streamEvents.stream()
+                .filter(streamEvent -> EVENT_CITATION.equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        List<Citation> streamedCitations = Arrays.asList(objectMapper.readValue(
+                Objects.requireNonNull(citationEvent.data(), "citation event data"), Citation[].class));
+        long partialFailureStatusCount = streamEvents.stream()
+                .filter(streamEvent -> EVENT_STATUS.equals(streamEvent.event()))
+                .map(ServerSentEvent::data)
+                .filter(Objects::nonNull)
+                .map(statusJson -> {
+                    try {
+                        return objectMapper.readValue(statusJson, SseSupport.SseEventPayload.class);
+                    } catch (JsonProcessingException exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                })
+                .filter(statusPayload -> "citation.partial-failure".equals(statusPayload.code()))
+                .count();
+
+        assertEquals(1, streamedCitations.size());
+        assertEquals(
+                exactOverloadCitation.getUrl(), streamedCitations.getFirst().getUrl());
+        assertEquals("of(E,E)", streamedCitations.getFirst().getAnchor());
+        assertEquals(1, partialFailureStatusCount);
+        verify(retrievalService).toCitationsForQuery(exactOverloadQuery, List.of(broadPromptDocument));
         verify(chatService, never()).citationsFor(anyString());
     }
 
@@ -448,13 +574,12 @@ class ChatControllerStreamingFailureTest {
         ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         RetrievalService retrievalService = mock(RetrievalService.class);
-        SseStatusContractCatalog statusContractCatalog = createStatusContractCatalog();
         ChatController chatController = new ChatController(
                 chatService,
                 chatMemoryService,
                 streamingService,
                 retrievalService,
-                new SseSupport(objectMapper, statusContractCatalog),
+                new SseSupport(objectMapper),
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
@@ -463,11 +588,12 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitations(anyList()))
+        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 2));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of())));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -475,7 +601,6 @@ class ChatControllerStreamingFailureTest {
                         .block(),
                 "chat stream events");
 
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         int citationPartialFailureIndex = -1;
         int citationEventIndex = -1;
         for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
@@ -489,10 +614,10 @@ class ChatControllerStreamingFailureTest {
             }
             SseSupport.SseEventPayload chatStatus = objectMapper.readValue(
                     Objects.requireNonNull(streamEvent.data(), "chat status data"), SseSupport.SseEventPayload.class);
-            if (citationContract.code().equals(chatStatus.code())) {
+            if ("citation.partial-failure".equals(chatStatus.code())) {
                 citationPartialFailureIndex = eventIndex;
-                assertEquals(Boolean.valueOf(citationContract.retryable()), chatStatus.retryable());
-                assertEquals(citationContract.stage(), chatStatus.stage());
+                assertEquals(Boolean.FALSE, chatStatus.retryable());
+                assertEquals("citation", chatStatus.stage());
             }
         }
 
@@ -515,8 +640,9 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
-        Flux<String> partialAnswerThenOverflow = Flux.just("partial answer")
-                .concatWith(Mono.delay(Duration.ofMillis(50)).thenMany(Flux.error(streamBufferOverflowFailure)));
+        Flux<String> partialAnswerThenOverflow = Flux.range(0, STREAM_CHUNK_COALESCE_MAX_ITEMS)
+                .map(chunkIndex -> "partial answer " + chunkIndex)
+                .concatWith(Flux.error(streamBufferOverflowFailure));
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(chatService.buildStructuredPromptWithContextOutcome(
@@ -524,10 +650,11 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
+        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(
-                        Mono.just(new StreamingResult(partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))
                 .thenReturn(true);
 
@@ -545,6 +672,7 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
         assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
+        assertFalse(streamEvents.stream().anyMatch(streamEvent -> EVENT_CITATION.equals(streamEvent.event())));
         verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
     }
 
@@ -568,10 +696,11 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(streamingService.isAvailable()).thenReturn(true);
-        when(retrievalService.toCitations(anyList())).thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
+        when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
+                .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamingFailure)).thenReturn(retryable);
 
         return chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -586,11 +715,7 @@ class ChatControllerStreamingFailureTest {
     }
 
     private SseSupport createSseSupport() {
-        return new SseSupport(objectMapper, createStatusContractCatalog());
-    }
-
-    private SseStatusContractCatalog createStatusContractCatalog() {
-        return new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"));
+        return new SseSupport(objectMapper);
     }
 }
 

@@ -14,18 +14,25 @@ import org.springframework.ai.document.Document;
  * Orders sparse citation candidates using explicit Java API selector evidence.
  *
  * <p>Qdrant remains the sole retrieval authority. This ranker only reorders its bounded candidate
- * list before citation URL deduplication and truncation, so exact Javadoc type pages win over
- * accidental lexical matches without an additional RPC, embedding request, or model call.</p>
+ * list before citation URL deduplication and truncation. When one learner selector includes an
+ * unambiguous Java type signature, it retains only existing members whose stored source anchor
+ * exactly matches; it never derives an overload from retrieved text.</p>
  */
 final class CitationCandidateRanker {
+
+    private static final int TYPE_AND_METHOD_RELEVANCE_TIER = 0;
+    private static final int TYPE_PAGE_RELEVANCE_TIER = 1;
+    private static final int METHOD_DECLARATION_RELEVANCE_TIER = 2;
+    private static final int NON_MATCHING_RELEVANCE_TIER = 3;
 
     private CitationCandidateRanker() {}
 
     /**
      * Orders a Qdrant candidate list by explicit Javadoc type-page and method-declaration evidence.
      *
-     * <p>When the query names no Java API selector, this returns the original Qdrant order. Equal
-     * relevance tiers retain that order deterministically.</p>
+     * <p>A sole exact source-anchor signature is an eligibility gate over persisted Java API
+     * metadata. Value expressions, incomplete signatures, and multi-selector queries use broad
+     * relevance tiers, whose ties retain Qdrant order deterministically.</p>
      *
      * @param citationQuery learner query used for sparse citation retrieval
      * @param citationCandidates Qdrant-ranked citation candidates
@@ -34,9 +41,35 @@ final class CitationCandidateRanker {
     static List<Document> orderForCitationQuery(String citationQuery, List<Document> citationCandidates) {
         Objects.requireNonNull(citationQuery, "citationQuery");
         Objects.requireNonNull(citationCandidates, "citationCandidates");
-        return JavaApiMethodSelector.fromQuery(citationQuery)
-                .map(selector -> reorderForSelector(selector, citationCandidates))
-                .orElseGet(() -> List.copyOf(citationCandidates));
+        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+                .map(selector -> exactOverloadCandidates(selector, citationCandidates))
+                .orElseGet(() -> JavaApiMethodSelector.fromQuery(citationQuery)
+                        .map(selector -> reorderForSelector(selector, citationCandidates))
+                        .orElseGet(() -> List.copyOf(citationCandidates)));
+    }
+
+    /** Narrows prompt context to authoritative source-anchor matches for a sole exact overload query. */
+    static List<Document> selectPromptContextForCitationQuery(String citationQuery, List<Document> promptDocuments) {
+        Objects.requireNonNull(citationQuery, "citationQuery");
+        Objects.requireNonNull(promptDocuments, "promptDocuments");
+        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(citationQuery)
+                .map(selector -> exactOverloadCandidates(selector, promptDocuments))
+                .orElseGet(() -> List.copyOf(promptDocuments));
+    }
+
+    private static List<Document> exactOverloadCandidates(
+            JavaApiMethodSelector selector, List<Document> citationCandidates) {
+        String expectedAnchor = selector.exactOverloadAnchor()
+                .orElseThrow(() -> new IllegalArgumentException("Exact overload candidates require a source anchor"));
+        List<Document> exactCandidates = new ArrayList<>(citationCandidates.size());
+        for (int candidatePosition = 0; candidatePosition < citationCandidates.size(); candidatePosition++) {
+            Document citationCandidate = Objects.requireNonNull(
+                    citationCandidates.get(candidatePosition), "citationCandidates[" + candidatePosition + "]");
+            if (matchesExactOverloadMetadata(selector, expectedAnchor, citationCandidate)) {
+                exactCandidates.add(citationCandidate);
+            }
+        }
+        return List.copyOf(exactCandidates);
     }
 
     private static List<Document> reorderForSelector(
@@ -57,20 +90,20 @@ final class CitationCandidateRanker {
 
     private static int relevanceTier(JavaApiMethodSelector selector, Document citationCandidate) {
         if (!hasApiDocumentationType(citationCandidate)) {
-            return 3;
+            return NON_MATCHING_RELEVANCE_TIER;
         }
         boolean matchesTypePage = matchesTypePage(selector, citationCandidate);
         boolean hasMethodDeclaration = hasMethodDeclarationEvidence(selector, citationCandidate);
         if (matchesTypePage && hasMethodDeclaration) {
-            return 0;
+            return TYPE_AND_METHOD_RELEVANCE_TIER;
         }
         if (matchesTypePage) {
-            return 1;
+            return TYPE_PAGE_RELEVANCE_TIER;
         }
         if (hasMethodDeclaration) {
-            return 2;
+            return METHOD_DECLARATION_RELEVANCE_TIER;
         }
-        return 3;
+        return NON_MATCHING_RELEVANCE_TIER;
     }
 
     private static boolean hasApiDocumentationType(Document citationCandidate) {
@@ -89,6 +122,31 @@ final class CitationCandidateRanker {
         }
         String candidatePackageName = JavaPackageExtractor.extractJavaApiPackage(sourceUrl);
         return selector.matchesJavadocPath(documentPath, candidatePackageName);
+    }
+
+    private static boolean matchesExactOverloadMetadata(
+            JavaApiMethodSelector selector, String expectedAnchor, Document citationCandidate) {
+        if (!matchesSelectorTypePageMetadata(selector, citationCandidate)) {
+            return false;
+        }
+        Object rawAnchor = citationCandidate.getMetadata().get(QdrantPayloadFieldSchema.ANCHOR_FIELD);
+        return rawAnchor instanceof String candidateAnchor && expectedAnchor.equals(candidateAnchor);
+    }
+
+    private static boolean matchesSelectorTypePageMetadata(JavaApiMethodSelector selector, Document citationCandidate) {
+        if (!hasApiDocumentationType(citationCandidate)) {
+            return false;
+        }
+        if (!selector.packageName().isBlank()) {
+            Object rawPackageName = citationCandidate.getMetadata().get(QdrantPayloadFieldSchema.PACKAGE_FIELD);
+            if (!(rawPackageName instanceof String candidatePackageName)
+                    || !selector.packageName().equals(candidatePackageName)) {
+                return false;
+            }
+        }
+        Object rawTypePage = citationCandidate.getMetadata().get(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD);
+        return rawTypePage instanceof String candidateTypePage
+                && selector.typePageFileName().equals(candidateTypePage);
     }
 
     private static boolean hasMethodDeclarationEvidence(JavaApiMethodSelector selector, Document citationCandidate) {
@@ -116,17 +174,17 @@ final class CitationCandidateRanker {
         return false;
     }
 
-    private static boolean hasIdentifierBoundaryBefore(String text, int index) {
-        return index == 0 || !Character.isJavaIdentifierPart(text.charAt(index - 1));
+    private static boolean hasIdentifierBoundaryBefore(String documentText, int index) {
+        return index == 0 || !Character.isJavaIdentifierPart(documentText.charAt(index - 1));
     }
 
-    private static boolean hasIdentifierBoundaryAfter(String text, int index) {
-        return index == text.length() || !Character.isJavaIdentifierPart(text.charAt(index));
+    private static boolean hasIdentifierBoundaryAfter(String documentText, int index) {
+        return index == documentText.length() || !Character.isJavaIdentifierPart(documentText.charAt(index));
     }
 
-    private static int skipWhitespace(String text, int startIndex) {
+    private static int skipWhitespace(String documentText, int startIndex) {
         int currentIndex = startIndex;
-        while (currentIndex < text.length() && Character.isWhitespace(text.charAt(currentIndex))) {
+        while (currentIndex < documentText.length() && Character.isWhitespace(documentText.charAt(currentIndex))) {
             currentIndex++;
         }
         return currentIndex;

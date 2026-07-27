@@ -49,6 +49,24 @@ describe("MessageBubble", () => {
     expect(getByRole("button", { name: /refresh and retry/i })).toBeInTheDocument();
   });
 
+  it("renders partial assistant text with a distinct stream error alert", () => {
+    const { getByRole, getByText } = render(MessageBubble, {
+      props: {
+        message: {
+          messageId: "msg-test-partial-stream-error",
+          role: "assistant",
+          messageText: "Partial response",
+          streamErrorMessage: "The provider ended the stream",
+          timestamp: 1,
+        },
+        index: 0,
+      },
+    });
+
+    expect(getByText("Partial response")).toBeInTheDocument();
+    expect(getByRole("alert")).toHaveTextContent("The provider ended the stream");
+  });
+
   it("does not expose a Unicode-blank enrichment marker as fallback text", () => {
     const { container } = render(MessageBubble, {
       props: {

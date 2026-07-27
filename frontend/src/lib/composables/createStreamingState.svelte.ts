@@ -6,7 +6,7 @@
  */
 
 import {
-  CITATION_PARTIAL_FAILURE_STATUS_CONTRACT,
+  CITATION_PARTIAL_FAILURE_STATUS_CODE,
   type CitationPartialFailureStatus,
   type ProviderEvent,
   type StreamStatus,
@@ -137,7 +137,7 @@ export function createStreamingState(options: StreamingStateOptions = {}): Strea
   function isCitationPartialFailureStatus(
     streamStatus: StreamStatus,
   ): streamStatus is CitationPartialFailureStatus {
-    return streamStatus.code === CITATION_PARTIAL_FAILURE_STATUS_CONTRACT.code;
+    return streamStatus.code === CITATION_PARTIAL_FAILURE_STATUS_CODE;
   }
 
   return {

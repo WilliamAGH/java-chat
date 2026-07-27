@@ -38,6 +38,8 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class AuditService {
     private static final Logger log = LoggerFactory.getLogger(AuditService.class);
+    private static final int LEGACY_CHUNK_HASH_LENGTH = 12;
+    private static final int SHA_256_HEX_LENGTH = 64;
 
     private final QdrantRestConnection qdrantRestConnection;
     private final Function<String, String> safeNameResolver;
@@ -103,9 +105,7 @@ public class AuditService {
             throw new IllegalStateException("Parsed chunk directory not available: " + parsedRoot);
         }
 
-        // pattern: <safeBase><index>_<hash12>.txt
-        Pattern chunkPattern =
-                Pattern.compile(Pattern.quote(safeName) + "_" + "(\\d+)" + "_" + "([0-9a-f]{12})" + "\\.txt");
+        Pattern chunkPattern = parsedChunkPattern(safeName);
 
         List<Path> parsedFiles = new ArrayList<>();
         try (var stream = Files.walk(parsedRoot)) {
@@ -134,6 +134,15 @@ public class AuditService {
             expectedHashes.add(fullHash);
         }
         return expectedHashes;
+    }
+
+    static Pattern parsedChunkPattern(String safeName) {
+        return Pattern.compile(Pattern.quote(safeName)
+                + "_(\\d+)_([0-9a-f]{"
+                + LEGACY_CHUNK_HASH_LENGTH
+                + "}|[0-9a-f]{"
+                + SHA_256_HEX_LENGTH
+                + "})\\.txt");
     }
 
     private AuditReport compareAndReport(String url, Set<String> expectedHashes, List<String> qdrantHashList) {

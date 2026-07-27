@@ -1,7 +1,0 @@
-{
-  "citationPartialFailure": {
-    "code": "citation.partial-failure",
-    "stage": "citation",
-    "retryable": false
-  }
-}

@@ -13,7 +13,6 @@
 # (e.g., v1/entities endpoint types like SearchAggregatedEntity).
 #
 # @see AGENTS.md [DM1f], [DM1g], [DM1n]
-# @see docs/contracts/clean-code-project-structure.md Section 4
 id: domain-types-in-schemas
 language: tsx
 severity: warning

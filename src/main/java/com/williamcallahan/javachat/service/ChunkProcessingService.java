@@ -1,9 +1,11 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +19,8 @@ public class ChunkProcessingService {
     private static final int DEFAULT_CHUNK_SIZE = 900;
     private static final int DEFAULT_CHUNK_OVERLAP = 150;
     private static final int PDF_PAGE_CHUNK_OVERLAP = 0;
+    private static final String JAVADOC_MEMBER_CHUNK_HASH_VERSION = "java-api-member-chunk-v2";
+    private static final char JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR = '\u0000';
 
     private final Chunker chunker;
     private final ContentHasher hasher;
@@ -66,38 +70,8 @@ public class ChunkProcessingService {
      */
     public ChunkProcessingOutcome processAndStoreChunks(String text, String url, String title, String packageName)
             throws IOException {
-
-        // Chunk the text with standard parameters
-        List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
-        List<Document> documents = new ArrayList<>();
-        List<String> allChunkHashes = new ArrayList<>(Math.max(0, chunks.size()));
-        int skipped = 0;
-
-        for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
-            String chunkText = chunks.get(chunkIndex);
-
-            // Generate standardized hash
-            String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
-            allChunkHashes.add(hash);
-
-            // Skip if already processed (deduplication)
-            boolean hashAlreadyIngested = hashIngestionLookup.isHashIngested(hash);
-            if (hashAlreadyIngested && !hashIngestionLookup.hasMetadataChanged(hash, title, packageName)) {
-                skipped++;
-                continue;
-            }
-
-            // Create document with standardized metadata
-            Document document = documentFactory.createDocument(chunkText, url, title, chunkIndex, packageName, hash);
-
-            documents.add(document);
-
-            // Store chunk text but DON'T mark as ingested yet
-            // Will be marked after successful vector store addition
-            chunkTextStore.saveChunkText(url, chunkIndex, chunkText, hash);
-        }
-
-        return new ChunkProcessingOutcome(List.copyOf(documents), List.copyOf(allChunkHashes), chunks.size(), skipped);
+        return processAndStoreSegmentBatch(
+                url, title, packageName, List.of(ChunkSegment.withoutJavadocAnchor(text)), false);
     }
 
     /**
@@ -116,21 +90,45 @@ public class ChunkProcessingService {
      */
     public ChunkProcessingOutcome processAndStoreChunksForce(String text, String url, String title, String packageName)
             throws IOException {
+        return processAndStoreSegmentBatch(
+                url, title, packageName, List.of(ChunkSegment.withoutJavadocAnchor(text)), true);
+    }
 
-        List<String> chunks = chunker.chunkByTokens(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
-        List<Document> documents = new ArrayList<>();
-        List<String> allChunkHashes = new ArrayList<>(Math.max(0, chunks.size()));
+    /**
+     * Processes a Javadoc page's overview and member sections into page-wide indexed chunks.
+     *
+     * <p>Each section retains the page URL for stable hashing and stale-vector pruning. Member sections carry
+     * their exact DOM identifier as separate metadata so retrieval can construct a precise citation fragment.</p>
+     *
+     * @param javaApiPage page and section contract produced by the Java API extractor
+     * @return chunk processing outcome including dedup skip counts
+     * @throws IOException when parsed chunk text cannot be persisted
+     */
+    public ChunkProcessingOutcome processAndStoreJavaApiPage(JavaApiPage javaApiPage) throws IOException {
+        JavaApiPage requiredPage = Objects.requireNonNull(javaApiPage, "javaApiPage");
+        return processAndStoreSegmentBatch(
+                requiredPage.sourceUrl(),
+                requiredPage.title(),
+                requiredPage.packageName(),
+                requiredPage.toChunkSegments(),
+                false);
+    }
 
-        for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
-            String chunkText = chunks.get(chunkIndex);
-            String hash = hasher.generateChunkHash(url, chunkIndex, chunkText);
-            allChunkHashes.add(hash);
-            Document document = documentFactory.createDocument(chunkText, url, title, chunkIndex, packageName, hash);
-            documents.add(document);
-            chunkTextStore.saveChunkText(url, chunkIndex, chunkText, hash);
-        }
-
-        return new ChunkProcessingOutcome(List.copyOf(documents), List.copyOf(allChunkHashes), chunks.size(), 0);
+    /**
+     * Processes a Javadoc page while ignoring prior chunk markers after its vectors were pruned.
+     *
+     * @param javaApiPage page and section contract produced by the Java API extractor
+     * @return chunk processing outcome containing every generated chunk
+     * @throws IOException when parsed chunk text cannot be persisted
+     */
+    public ChunkProcessingOutcome processAndStoreJavaApiPageForce(JavaApiPage javaApiPage) throws IOException {
+        JavaApiPage requiredPage = Objects.requireNonNull(javaApiPage, "javaApiPage");
+        return processAndStoreSegmentBatch(
+                requiredPage.sourceUrl(),
+                requiredPage.title(),
+                requiredPage.packageName(),
+                requiredPage.toChunkSegments(),
+                true);
     }
 
     /**
@@ -157,6 +155,71 @@ public class ChunkProcessingService {
         }
 
         return documents;
+    }
+
+    private ChunkProcessingOutcome processAndStoreSegmentBatch(
+            String url, String title, String packageName, List<ChunkSegment> chunkSegments, boolean force)
+            throws IOException {
+        List<Document> documents = new ArrayList<>();
+        List<String> allChunkHashes = new ArrayList<>();
+        int skippedChunks = 0;
+        int globalChunkIndex = 0;
+
+        for (ChunkSegment chunkSegment : chunkSegments) {
+            List<String> segmentChunks =
+                    chunker.chunkByTokens(chunkSegment.text(), DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
+            for (String chunkText : segmentChunks) {
+                String contentHash = generateChunkContentHash(chunkSegment, url, globalChunkIndex, chunkText);
+                allChunkHashes.add(contentHash);
+                boolean alreadyIngested = !force && hashIngestionLookup.isHashIngested(contentHash);
+                boolean metadataChanged =
+                        alreadyIngested && hashIngestionLookup.hasMetadataChanged(contentHash, title, packageName);
+                if (!force && alreadyIngested && !metadataChanged) {
+                    skippedChunks++;
+                    globalChunkIndex++;
+                    continue;
+                }
+
+                DocumentFactory.ChunkDocumentMetadata chunkDocumentMetadata =
+                        chunkSegment.toDocumentMetadata(url, title, globalChunkIndex, packageName, contentHash);
+                documents.add(documentFactory.createDocument(chunkText, chunkDocumentMetadata));
+                chunkTextStore.saveChunkText(url, globalChunkIndex, chunkText, contentHash);
+                globalChunkIndex++;
+            }
+        }
+
+        return new ChunkProcessingOutcome(
+                List.copyOf(documents), List.copyOf(allChunkHashes), globalChunkIndex, skippedChunks);
+    }
+
+    private String generateChunkContentHash(
+            ChunkSegment chunkSegment, String sourceUrl, int chunkIndex, String chunkText) {
+        JavadocMemberAnchor memberAnchor = chunkSegment.javadocMemberAnchor();
+        if (memberAnchor == null) {
+            return hasher.generateChunkHash(sourceUrl, chunkIndex, chunkText);
+        }
+        return hasher.sha256(javadocMemberChunkHashInput(sourceUrl, chunkIndex, chunkText, memberAnchor));
+    }
+
+    private static String javadocMemberChunkHashInput(
+            String sourceUrl, int chunkIndex, String chunkText, JavadocMemberAnchor memberAnchor) {
+        String anchorIdentifier = memberAnchor.domIdentifier();
+        return new StringBuilder(JAVADOC_MEMBER_CHUNK_HASH_VERSION)
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(sourceUrl.length())
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(sourceUrl)
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(chunkIndex)
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(anchorIdentifier.length())
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(anchorIdentifier)
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(chunkText.length())
+                .append(JAVADOC_MEMBER_CHUNK_HASH_FIELD_SEPARATOR)
+                .append(chunkText)
+                .toString();
     }
 
     /**
@@ -276,6 +339,97 @@ public class ChunkProcessingService {
     }
 
     /**
+     * Describes a canonical Java API page and the independent sections that compose it.
+     *
+     * <p>The source URL must not include a fragment because local storage, deterministic hashes, and stale vector
+     * deletion are all keyed by the page. Individual member identifiers belong to
+     * {@link JavaApiPageSegment}.</p>
+     *
+     * @param sourceUrl fragmentless canonical Java API page URL
+     * @param title human-readable page title
+     * @param packageName Java package name represented by the page
+     * @param segments overview and member sections in source order
+     */
+    public record JavaApiPage(String sourceUrl, String title, String packageName, List<JavaApiPageSegment> segments) {
+
+        /** Validates the page identity and defensively copies its ordered sections. */
+        public JavaApiPage {
+            sourceUrl = requireFragmentlessSourceUrl(sourceUrl);
+            title = Objects.requireNonNull(title, "title");
+            packageName = Objects.requireNonNull(packageName, "packageName");
+            segments = List.copyOf(Objects.requireNonNull(segments, "segments"));
+        }
+
+        private List<ChunkSegment> toChunkSegments() {
+            return segments.stream().map(JavaApiPageSegment::toChunkSegment).toList();
+        }
+    }
+
+    /**
+     * Describes one independently chunked Javadoc page section.
+     *
+     * <p>Overview sections have no member anchor. Member sections require the exact DOM identifier from the
+     * source page, preserving precise citations without fragmenting the page's storage identity.</p>
+     *
+     */
+    public static final class JavaApiPageSegment {
+
+        private final String text;
+        private final JavadocMemberAnchor javadocMemberAnchor;
+
+        private JavaApiPageSegment(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            this.text = Objects.requireNonNull(text, "text");
+            this.javadocMemberAnchor = javadocMemberAnchor;
+        }
+
+        /**
+         * Creates a page-overview section that cites the containing page.
+         *
+         * @param text extracted overview text
+         * @return an unanchored page section
+         */
+        public static JavaApiPageSegment overview(String text) {
+            return new JavaApiPageSegment(text, null);
+        }
+
+        /**
+         * Creates a member section from the canonical exact DOM identifier.
+         *
+         * @param text extracted member-section text
+         * @param javadocMemberAnchor exact validated DOM member identifier
+         * @return an anchored member section
+         */
+        public static JavaApiPageSegment member(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            return new JavaApiPageSegment(text, Objects.requireNonNull(javadocMemberAnchor, "javadocMemberAnchor"));
+        }
+
+        /**
+         * Returns the extracted section text.
+         *
+         * @return section text supplied to the named factory
+         */
+        public String text() {
+            return text;
+        }
+
+        /**
+         * Returns the typed member anchor associated with this section.
+         *
+         * @return member anchor, or empty for a page overview
+         */
+        public Optional<JavadocMemberAnchor> javadocMemberAnchor() {
+            return Optional.ofNullable(javadocMemberAnchor);
+        }
+
+        private ChunkSegment toChunkSegment() {
+            if (javadocMemberAnchor == null) {
+                return ChunkSegment.withoutJavadocAnchor(text);
+            }
+            return ChunkSegment.withJavadocAnchor(text, javadocMemberAnchor);
+        }
+    }
+
+    /**
      * Reads whether a chunk hash has already been indexed.
      */
     private interface HashIngestionLookup {
@@ -299,5 +453,38 @@ public class ChunkProcessingService {
          * Saves parsed chunk text with deterministic chunk metadata.
          */
         void saveChunkText(String url, int index, String text, String hash) throws IOException;
+    }
+
+    private record ChunkSegment(String text, JavadocMemberAnchor javadocMemberAnchor) {
+
+        private ChunkSegment {
+            Objects.requireNonNull(text, "text");
+        }
+
+        private static ChunkSegment withoutJavadocAnchor(String text) {
+            return new ChunkSegment(text, null);
+        }
+
+        private static ChunkSegment withJavadocAnchor(String text, JavadocMemberAnchor javadocMemberAnchor) {
+            return new ChunkSegment(text, Objects.requireNonNull(javadocMemberAnchor, "javadocMemberAnchor"));
+        }
+
+        private DocumentFactory.ChunkDocumentMetadata toDocumentMetadata(
+                String url, String title, int chunkIndex, String packageName, String contentHash) {
+            if (javadocMemberAnchor == null) {
+                return DocumentFactory.ChunkDocumentMetadata.withoutAnchor(
+                        url, title, chunkIndex, packageName, contentHash);
+            }
+            return DocumentFactory.ChunkDocumentMetadata.withAnchor(
+                    url, title, chunkIndex, packageName, contentHash, javadocMemberAnchor);
+        }
+    }
+
+    private static String requireFragmentlessSourceUrl(String sourceUrl) {
+        String requiredUrl = Objects.requireNonNull(sourceUrl, "sourceUrl");
+        if (requiredUrl.isBlank() || !requiredUrl.equals(requiredUrl.trim()) || requiredUrl.indexOf('#') >= 0) {
+            throw new IllegalArgumentException("sourceUrl must be an unpadded URL without a fragment");
+        }
+        return requiredUrl;
     }
 }

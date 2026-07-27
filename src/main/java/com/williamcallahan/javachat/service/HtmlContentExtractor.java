@@ -1,6 +1,8 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import com.williamcallahan.javachat.support.JavaApiPageExtractor;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.jsoup.nodes.Document;
@@ -19,11 +21,9 @@ public class HtmlContentExtractor {
     private static final int MIN_MAIN_CONTENT_TEXT_LENGTH = 500;
     private static final int MAX_ALLOWED_NOISE_PATTERN_COUNT = 3;
     private static final int MAX_SHORT_TEXT_LINE_LENGTH = 3;
-    private static final int MIN_JAVA_API_CONTENT_LENGTH = 100;
     private static final String CODE_FENCE_MARKER = "```";
     private static final int CODE_FENCE_LENGTH = CODE_FENCE_MARKER.length();
     private static final int MAX_CONSECUTIVE_NEWLINES = 2;
-
     // Common noise patterns to filter out
     private static final Set<String> NOISE_PATTERNS = Set.of(
             "JavaScript is disabled",
@@ -76,20 +76,37 @@ public class HtmlContentExtractor {
         ".summary" // Summary sections
     };
 
+    private final JavaApiPageExtractor javaApiPageExtractor;
+
+    /**
+     * Creates the generic extractor and its focused Java API page collaborator.
+     */
+    public HtmlContentExtractor() {
+        this.javaApiPageExtractor = new JavaApiPageExtractor(
+                this::extractCleanContentFromClone,
+                this::removeNonContentElements,
+                this::filterNoise,
+                this::containsExcessiveNoise);
+    }
+
     /**
      * Extract clean content from HTML document, filtering out navigation
      * and JavaScript warnings.
      */
-    public String extractCleanContent(Document doc) {
+    public String extractCleanContent(Document document) {
+        Document extractionDocument =
+                Objects.requireNonNull(document, "document").clone();
+        return extractCleanContentFromClone(extractionDocument);
+    }
+
+    private String extractCleanContentFromClone(Document extractionDocument) {
         // First, remove all non-content elements
-        for (String selector : REMOVE_SELECTORS) {
-            doc.select(selector).remove();
-        }
+        removeNonContentElements(extractionDocument);
 
         // Try to find main content area
-        Element contentElement = findMainContent(doc);
+        Element contentElement = findMainContent(extractionDocument);
         if (contentElement == null) {
-            contentElement = doc.body();
+            contentElement = extractionDocument.body();
         }
 
         // Extract and clean the text
@@ -99,12 +116,18 @@ public class HtmlContentExtractor {
         return filterNoise(text);
     }
 
+    private void removeNonContentElements(Element extractionElement) {
+        for (String selector : REMOVE_SELECTORS) {
+            extractionElement.select(selector).remove();
+        }
+    }
+
     /**
      * Find the main content element in the document.
      */
-    private Element findMainContent(Document doc) {
+    private Element findMainContent(Document document) {
         for (String selector : CONTENT_SELECTORS) {
-            Elements elements = doc.select(selector);
+            Elements elements = document.select(selector);
             if (!elements.isEmpty()) {
                 // Return the largest content area if multiple found
                 return elements.stream()
@@ -115,7 +138,7 @@ public class HtmlContentExtractor {
         }
 
         // Fallback: look for divs with significant text content
-        Elements divs = doc.select("div");
+        Elements divs = document.select("div");
         return divs.stream()
                 .filter(div -> {
                     String text = div.text();
@@ -334,65 +357,18 @@ public class HtmlContentExtractor {
     }
 
     /**
-     * Extract Java API-specific content with focus on class/method documentation.
+     * Extracts one Java API page into page-level and exact member-level documentation.
+     *
+     * <p>Modern Javadoc emits a stable {@code section.detail[id]} DOM identity for each member.
+     * The extraction retains that identity rather than deriving a fragment from a later retrieved
+     * prose chunk. Class-use pages have a different semantic purpose and are excluded before they
+     * can become citation candidates.</p>
+     *
+     * @param document parsed Java API HTML document
+     * @return typed extraction that retains ordered member anchors or explicitly excludes class-use
+     *     pages
      */
-    public String extractJavaApiContent(Document doc) {
-        // For Java API docs, focus on specific content areas
-        StringBuilder content = new StringBuilder();
-
-        // Class/Interface name and description
-        Elements classHeaders = doc.select(".header h1, .header h2, .title");
-        classHeaders.forEach(header -> content.append(header.text()).append("\n\n"));
-
-        // Package info
-        Elements packageInfo = doc.select(".subTitle, .package");
-        packageInfo.forEach(pkgElement ->
-                content.append("Package: ").append(pkgElement.text()).append("\n"));
-
-        // Main description
-        Elements descriptions = doc.select(".description, .block");
-        descriptions.forEach(descElement -> {
-            String text = descElement.text();
-            if (!containsExcessiveNoise(text)) {
-                content.append("\n").append(text).append("\n");
-            }
-        });
-
-        // Method summaries
-        Elements methodSummaries = doc.select(".summary .memberSummary");
-        if (!methodSummaries.isEmpty()) {
-            content.append("\n\nMethod Summary:\n");
-            methodSummaries.forEach(methodSummary ->
-                    content.append("• ").append(methodSummary.text()).append("\n"));
-        }
-
-        // Method details
-        Elements methodDetails = doc.select(".details .memberDetails");
-        if (!methodDetails.isEmpty()) {
-            content.append("\n\nMethod Details:\n");
-            methodDetails.forEach(methodDetail -> {
-                String text = methodDetail.text();
-                if (!containsExcessiveNoise(text)) {
-                    content.append(text).append("\n\n");
-                }
-            });
-        }
-
-        // Code examples
-        Elements codeExamples = doc.select("pre.code, pre.prettyprint");
-        if (!codeExamples.isEmpty()) {
-            content.append("\n\nCode Examples:\n");
-            codeExamples.forEach(
-                    code -> content.append("```java\n").append(code.text()).append("\n```\n\n"));
-        }
-
-        String result = content.toString().trim();
-
-        // If we didn't get much content, fall back to general extraction
-        if (result.length() < MIN_JAVA_API_CONTENT_LENGTH) {
-            return extractCleanContent(doc);
-        }
-
-        return filterNoise(result);
+    public JavaApiPageExtraction extractJavaApiPage(Document document) {
+        return javaApiPageExtractor.extract(document);
     }
 }

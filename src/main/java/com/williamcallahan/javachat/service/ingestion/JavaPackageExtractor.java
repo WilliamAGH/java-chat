@@ -12,7 +12,7 @@ import java.util.Optional;
 /**
  * Extracts Java package names for ingestion metadata.
  *
- * <p>Manifest-governed Java API URLs yield package paths directly; other documents fall back to their
+ * <p>Configured Java API URLs yield package paths directly; other documents fall back to their
  * extracted "Package ..." heading.</p>
  */
 public final class JavaPackageExtractor {
@@ -24,7 +24,7 @@ public final class JavaPackageExtractor {
     /**
      * Identifies URLs whose paths point to Java API documentation.
      *
-     * <p>The canonical Java API manifest owns matching source bases. Only a URL's scheme, authority, and
+     * <p>The Java API source configuration owns matching source bases. Only a URL's scheme, authority, and
      * path participate in classification, so query and fragment text cannot select structured extraction.</p>
      *
      * @param url source URL
@@ -36,7 +36,7 @@ public final class JavaPackageExtractor {
     }
 
     /**
-     * Derives the Java package encoded by a manifest-governed Java API source URL.
+     * Derives the Java package encoded by a configured Java API source URL.
      *
      * <p>URL consumers use this projection instead of persisted package metadata so package
      * identity follows the canonical source path across ingestion generations.</p>

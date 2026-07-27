@@ -156,7 +156,7 @@ describe("LearnView async request ownership", () => {
     expect(citationAbortSignal()?.aborted).toBe(true);
   });
 
-  it("reserves mobile chat FAB clearance below the scrollable lesson panel", async () => {
+  it("reserves mobile chat FAB clearance for manual and programmatic lesson scrolling", async () => {
     const learnView = await renderSelectedLesson();
     const lessonContentPanel =
       learnView.container.querySelector<HTMLElement>(".lesson-content-panel");
@@ -168,5 +168,6 @@ describe("LearnView async request ownership", () => {
     expect(learnViewSource).toContain(
       "padding-bottom: var(--lesson-content-panel-mobile-reading-inset)",
     );
+    expect(learnViewSource).toContain("scroll-padding-bottom: var(");
   });
 });

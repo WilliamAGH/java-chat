@@ -60,7 +60,7 @@ import reactor.core.publisher.Mono;
  * {@code [1]} instead of emitting structured citation payloads.</p>
  */
 @WebMvcTest(controllers = GuidedLearningController.class)
-@Import({AppProperties.class, WebMvcConfig.class, SseStatusContractCatalog.class, SseSupport.class})
+@Import({AppProperties.class, WebMvcConfig.class, SseSupport.class})
 @org.springframework.security.test.context.support.WithMockUser
 class GuidedSseCitationEventTest {
 
@@ -75,9 +75,6 @@ class GuidedSseCitationEventTest {
 
     @Autowired
     ObjectMapper objectMapper;
-
-    @Autowired
-    SseStatusContractCatalog statusContractCatalog;
 
     @MockitoBean
     GuidedLearningService guidedLearningService;
@@ -101,14 +98,23 @@ class GuidedSseCitationEventTest {
                 .text("Official lesson context")
                 .metadata(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "official")
                 .build();
+        Document truncatedLessonContextDocument = Document.builder()
+                .id("truncated-guided-context")
+                .text("Context removed by provider-specific truncation")
+                .metadata(QdrantPayloadFieldSchema.SOURCE_KIND_FIELD, "official")
+                .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .willReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .willReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"),
+                        RateLimitService.ApiProvider.OPENAI,
+                        List.of(lessonContextDocument.getId()))));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
-                        StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
+                        StructuredPrompt.fromRawPrompt("test", 1),
+                        List.of(lessonContextDocument, truncatedLessonContextDocument)));
         given(guidedLearningService.citationOutcomeForContextDocuments(eq(List.of(lessonContextDocument))))
                 .willReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 0));
@@ -145,7 +151,10 @@ class GuidedSseCitationEventTest {
         given(openAIStreamingService.isAvailable()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         given(openAIStreamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .willReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .willReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"),
+                        RateLimitService.ApiProvider.OPENAI,
+                        List.of(lessonContextDocument.getId()))));
         given(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), anyString(), anyString()))
                 .willReturn(new GuidedLearningService.GuidedChatPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument)));
@@ -162,7 +171,6 @@ class GuidedSseCitationEventTest {
 
         int citationPartialFailureStatusIndex = -1;
         int citationEventIndex = -1;
-        SseStatusContractCatalog.SseStatusContract citationContract = statusContractCatalog.citationPartialFailure();
         for (int eventIndex = 0; eventIndex < streamEvents.size(); eventIndex++) {
             ServerSentEvent<String> streamEvent = streamEvents.get(eventIndex);
             if (EVENT_CITATION.equals(streamEvent.event())) {
@@ -174,10 +182,10 @@ class GuidedSseCitationEventTest {
             }
             SseSupport.SseEventPayload guidedStatus = objectMapper.readValue(
                     Objects.requireNonNull(streamEvent.data(), "guided status data"), SseSupport.SseEventPayload.class);
-            if (citationContract.code().equals(guidedStatus.code())) {
+            if ("citation.partial-failure".equals(guidedStatus.code())) {
                 citationPartialFailureStatusIndex = eventIndex;
-                assertEquals(Boolean.valueOf(citationContract.retryable()), guidedStatus.retryable());
-                assertEquals(citationContract.stage(), guidedStatus.stage());
+                assertEquals(Boolean.FALSE, guidedStatus.retryable());
+                assertEquals("citation", guidedStatus.stage());
             }
         }
 

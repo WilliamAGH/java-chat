@@ -29,7 +29,7 @@ import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
 
-/** Verifies guided source references remain manifest-owned and project into the public lesson contract. */
+/** Verifies guided source references resolve into the public lesson contract. */
 @JsonTest
 class GuidedTOCProviderTest {
     private static final String CANONICAL_SOURCE_REFERENCE_TEST_SLUG = "strings";
@@ -43,7 +43,7 @@ class GuidedTOCProviderTest {
     ObjectMapper objectMapper;
 
     @Test
-    void projectsManifestOwnedSourceReferencesIntoThePublicDocSetContract() throws JsonProcessingException {
+    void projectsOfficialSourceReferencesIntoThePublicDocSetContract() throws JsonProcessingException {
         GuidedLesson listedLesson = new GuidedTOCProvider(objectMapper)
                 .findBySlug(CANONICAL_SOURCE_REFERENCE_TEST_SLUG)
                 .orElseThrow();

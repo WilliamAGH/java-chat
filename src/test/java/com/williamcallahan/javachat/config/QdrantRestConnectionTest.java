@@ -1,9 +1,7 @@
 package com.williamcallahan.javachat.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -39,32 +37,6 @@ class QdrantRestConnectionTest {
     void restBaseUrl_withUnknownPort_passesPortThrough() {
         QdrantRestConnection connection = newConnection("custom-host", 9999, false);
         assertEquals("http://custom-host:9999", connection.restBaseUrl());
-    }
-
-    @Test
-    void candidateRestBaseUrls_withTls_returnsSingleCanonicalUrl() {
-        QdrantRestConnection connection = newConnection("cloud.qdrant.io", 6334, true);
-        assertIterableEquals(List.of("https://cloud.qdrant.io:6333"), connection.candidateRestBaseUrls());
-    }
-
-    @Test
-    void candidateRestBaseUrls_withoutTlsAndDefaultPort_returnsDeduplicated() {
-        QdrantRestConnection connection = newConnection("localhost", 6334, false);
-        assertIterableEquals(List.of("http://localhost:6333"), connection.candidateRestBaseUrls());
-    }
-
-    @Test
-    void candidateRestBaseUrls_withDockerPort_excludesGrpcEndpoint() {
-        QdrantRestConnection connection = newConnection("localhost", 8086, false);
-        assertIterableEquals(
-                List.of("http://localhost:6333", "http://localhost:8087"), connection.candidateRestBaseUrls());
-    }
-
-    @Test
-    void candidateRestBaseUrls_withConfiguredRestPort_keepsRestFallback() {
-        QdrantRestConnection connection = newConnection("localhost", 7444, false);
-        assertIterableEquals(
-                List.of("http://localhost:6333", "http://localhost:7444"), connection.candidateRestBaseUrls());
     }
 
     @Test

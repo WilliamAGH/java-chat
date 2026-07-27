@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.web;
 
+import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
@@ -47,7 +48,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.publisher.Flux;
@@ -84,9 +84,7 @@ class GuidedLearningControllerStreamingFailureTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(
-                        objectMapper,
-                        new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"))),
+                new SseSupport(objectMapper),
                 new AppProperties());
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
     }
@@ -107,8 +105,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(
@@ -126,6 +124,8 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(Boolean.TRUE, streamError.retryable());
         assertEquals(STATUS_STAGE_STREAM, streamError.stage());
         assertFalse(serializedStreamError.contains(IllegalStateException.class.getSimpleName()));
+        assertFalse(streamEvents.stream().anyMatch(streamEvent -> EVENT_CITATION.equals(streamEvent.event())));
+        verify(chatMemoryService, never()).addExchange(eq(SESSION_ID), eq(USER_QUERY), any());
         assertEquals(0, controllerErrorCount());
     }
 
@@ -143,8 +143,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 guidedController.stream(
@@ -234,8 +234,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(upstreamFailure)).thenReturn(false);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(

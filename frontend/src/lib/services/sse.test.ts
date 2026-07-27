@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CITATION_PARTIAL_FAILURE_STATUS_CONTRACT } from "../validation/schemas";
 import { streamSse, streamSseGet } from "./sse";
 
 const SSE_STREAM_RESPONSE_STATUS = 200;
@@ -9,11 +8,9 @@ const STREAM_READ_FAILURE_MESSAGE = "Unable to read the SSE stream";
 const SERVER_EVENT_ERROR_MESSAGE = "The provider ended the stream";
 const CITATION_WARNING_MESSAGE = "Some citations could not be loaded";
 const CITATION_WARNING_DETAILS = "Citations could not be loaded";
-const {
-  code: CITATION_WARNING_CODE,
-  retryable: CITATION_WARNING_RETRYABLE,
-  stage: CITATION_WARNING_STAGE,
-} = CITATION_PARTIAL_FAILURE_STATUS_CONTRACT;
+const CITATION_WARNING_CODE = "citation.partial-failure";
+const CITATION_WARNING_RETRYABLE = false;
+const CITATION_WARNING_STAGE = "citation";
 const SELECTED_PROVIDER_NAME = "OpenAI";
 const MISSING_STREAM_BODY_MESSAGE = "No response body";
 
@@ -270,10 +267,16 @@ describe("streamSse payload validation", () => {
   });
 
   it.each([
-    { retryable: !CITATION_WARNING_RETRYABLE, stage: CITATION_WARNING_STAGE },
-    { retryable: CITATION_WARNING_RETRYABLE, stage: "unexpected-stage" },
+    {
+      retryable: !CITATION_WARNING_RETRYABLE,
+      stage: CITATION_WARNING_STAGE,
+    },
+    {
+      retryable: CITATION_WARNING_RETRYABLE,
+      stage: "unexpected-stage",
+    },
   ])(
-    "rejects citation partial-failure status fields that violate the specialized contract",
+    "rejects a citation partial-failure status with invalid required fields",
     async ({ retryable, stage }) => {
       vi.spyOn(console, "error").mockImplementation(() => undefined);
       vi.stubGlobal(

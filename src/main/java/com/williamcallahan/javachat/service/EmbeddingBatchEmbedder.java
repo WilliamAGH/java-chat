@@ -13,7 +13,7 @@ import org.springframework.ai.document.Document;
  */
 final class EmbeddingBatchEmbedder {
 
-    private static final int EMBEDDING_REQUEST_BATCH_SIZE = 1;
+    static final int EMBEDDING_REQUEST_BATCH_SIZE = 32;
 
     private EmbeddingBatchEmbedder() {}
 
@@ -25,14 +25,20 @@ final class EmbeddingBatchEmbedder {
             return List.of();
         }
 
+        int expectedEmbeddingDimensions = embeddingClient.dimensions();
+        if (expectedEmbeddingDimensions <= 0) {
+            throw new EmbeddingServiceUnavailableException(
+                    "Embedding dimensions must be positive but were " + expectedEmbeddingDimensions);
+        }
+
         List<float[]> allEmbeddings = new ArrayList<>(documents.size());
         for (int batchStartIndex = 0;
                 batchStartIndex < documents.size();
                 batchStartIndex += EMBEDDING_REQUEST_BATCH_SIZE) {
             int batchEndIndex = Math.min(batchStartIndex + EMBEDDING_REQUEST_BATCH_SIZE, documents.size());
             List<Document> documentBatch = documents.subList(batchStartIndex, batchEndIndex);
-            List<float[]> batchEmbeddings =
-                    embedSingleBatch(embeddingClient, documentBatch, batchStartIndex, batchEndIndex);
+            List<float[]> batchEmbeddings = embedSingleBatch(
+                    embeddingClient, documentBatch, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
             allEmbeddings.addAll(batchEmbeddings);
         }
         return List.copyOf(allEmbeddings);
@@ -45,7 +51,11 @@ final class EmbeddingBatchEmbedder {
      * callers can identify which documents caused the failure.</p>
      */
     private static List<float[]> embedSingleBatch(
-            EmbeddingClient embeddingClient, List<Document> documentBatch, int batchStartIndex, int batchEndIndex) {
+            EmbeddingClient embeddingClient,
+            List<Document> documentBatch,
+            int batchStartIndex,
+            int batchEndIndex,
+            int expectedEmbeddingDimensions) {
 
         List<String> textBatch = documentBatch.stream()
                 .map(document -> {
@@ -73,6 +83,10 @@ final class EmbeddingBatchEmbedder {
                     embeddingFailure);
         }
 
+        if (batchEmbeddings == null) {
+            throw new EmbeddingServiceUnavailableException(
+                    "Embedding response was null for batch [" + batchStartIndex + ".." + (batchEndIndex - 1) + "]");
+        }
         if (batchEmbeddings.size() != textBatch.size()) {
             throw new EmbeddingServiceUnavailableException("Embedding response count mismatch: expected "
                     + textBatch.size()
@@ -84,7 +98,27 @@ final class EmbeddingBatchEmbedder {
                     + (batchEndIndex - 1)
                     + "]");
         }
+        validateEmbeddingDimensions(batchEmbeddings, batchStartIndex, batchEndIndex, expectedEmbeddingDimensions);
         return batchEmbeddings;
+    }
+
+    private static void validateEmbeddingDimensions(
+            List<float[]> batchEmbeddings, int batchStartIndex, int batchEndIndex, int expectedEmbeddingDimensions) {
+        for (int batchEmbeddingIndex = 0; batchEmbeddingIndex < batchEmbeddings.size(); batchEmbeddingIndex++) {
+            float[] embeddingVector = batchEmbeddings.get(batchEmbeddingIndex);
+            int documentIndex = batchStartIndex + batchEmbeddingIndex;
+            if (embeddingVector == null) {
+                throw new EmbeddingServiceUnavailableException(
+                        "Embedding response contained a null vector at document index " + documentIndex + " for batch ["
+                                + batchStartIndex + ".." + (batchEndIndex - 1) + "]");
+            }
+            if (embeddingVector.length != expectedEmbeddingDimensions) {
+                throw new EmbeddingServiceUnavailableException("Embedding dimension mismatch at document index "
+                        + documentIndex + ": expected " + expectedEmbeddingDimensions + " but received "
+                        + embeddingVector.length + " for batch [" + batchStartIndex + ".." + (batchEndIndex - 1)
+                        + "]");
+            }
+        }
     }
 
     private static String extractDocumentUrl(Document document, int fallbackIndex) {

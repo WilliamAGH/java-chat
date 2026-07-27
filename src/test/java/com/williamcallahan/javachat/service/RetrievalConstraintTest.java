@@ -7,9 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 
-/** Verifies retrieval constraints retain immutable, normalized documentation-set ownership. */
+/** Verifies retrieval constraints retain immutable, normalized version and documentation-set ownership. */
 class RetrievalConstraintTest {
 
     @Test
@@ -41,17 +42,44 @@ class RetrievalConstraintTest {
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(List.of("dev-java", "java/java17-complete"));
 
-        RetrievalConstraint combinedConstraint = officialDocumentationConstraint.withDocVersion("17");
+        RetrievalConstraint combinedConstraint = officialDocumentationConstraint.withDocVersions(List.of("17"));
 
-        assertEquals("17", combinedConstraint.docVersion());
+        assertEquals(List.of("17"), combinedConstraint.docVersions());
         assertEquals("official", combinedConstraint.sourceKind());
         assertEquals(officialDocumentationConstraint.docSet(), combinedConstraint.docSet());
     }
 
     @Test
     void rejectsConflictingDocumentVersions() {
-        RetrievalConstraint java17Constraint = RetrievalConstraint.forDocVersion("17");
+        RetrievalConstraint java17Constraint = RetrievalConstraint.forDocVersions(List.of("17"));
 
-        assertThrows(IllegalArgumentException.class, () -> java17Constraint.withDocVersion("25"));
+        assertThrows(IllegalArgumentException.class, () -> requireDocumentVersion(java17Constraint, "25"));
+    }
+
+    @Test
+    void normalizesPluralDocumentVersionsWithoutChangingEncounterOrder() {
+        List<String> requestedVersions = new ArrayList<>(List.of(" 21 ", "24", "21", ""));
+
+        RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersions(requestedVersions);
+        requestedVersions.clear();
+
+        assertEquals(List.of("21", "24"), retrievalConstraint.docVersions());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> retrievalConstraint.docVersions().add("25"));
+    }
+
+    @Test
+    void intersectsExistingAndRequiredDocumentVersions() {
+        RetrievalConstraint allowedVersions = RetrievalConstraint.forDocVersions(List.of("21", "24", "25"));
+
+        RetrievalConstraint intersectedVersions = allowedVersions.withDocVersions(List.of("24", "21"));
+
+        assertEquals(List.of("24", "21"), intersectedVersions.docVersions());
+    }
+
+    private static void requireDocumentVersion(
+            RetrievalConstraint retrievalConstraint, String requiredDocumentVersion) {
+        Objects.requireNonNull(retrievalConstraint.withDocVersions(List.of(requiredDocumentVersion)));
     }
 }

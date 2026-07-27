@@ -1,12 +1,10 @@
 package com.williamcallahan.javachat.config;
 
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 /**
- * Projects shared Qdrant connection settings into REST URLs and authentication.
+ * Provides Qdrant REST URLs and authentication from the configured connection settings.
  *
  * <p>Spring AI configures the gRPC port (6334 default, 8086 in docker-compose),
  * but health checks, auditing, and index management require the REST port
@@ -58,25 +56,6 @@ public class QdrantRestConnection {
         String urlScheme = connectionProperties.useTls() ? HTTPS_SCHEME : HTTP_SCHEME;
         int restPort = mapGrpcPortToRestPort(connectionProperties.grpcPort());
         return buildBaseUrl(urlScheme, restPort);
-    }
-
-    /**
-     * Returns candidate REST base URLs ordered by likelihood, for discovery scenarios.
-     *
-     * <p>Under TLS the canonical URL is sufficient. Without TLS the list includes the
-     * default REST port and the mapped REST port. The raw configured port is excluded
-     * when it is a gRPC endpoint because REST probes cannot establish collection state there.
-     *
-     * @return ordered, deduplicated list of candidate base URLs
-     */
-    public List<String> candidateRestBaseUrls() {
-        if (connectionProperties.useTls()) {
-            return List.of(restBaseUrl());
-        }
-        LinkedHashSet<String> candidateBaseUrls = new LinkedHashSet<>();
-        candidateBaseUrls.add(buildBaseUrl(HTTP_SCHEME, QDRANT_REST_PORT));
-        candidateBaseUrls.add(buildBaseUrl(HTTP_SCHEME, mapGrpcPortToRestPort(connectionProperties.grpcPort())));
-        return List.copyOf(candidateBaseUrls);
     }
 
     /**

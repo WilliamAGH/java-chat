@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service.markdown;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.data.MutableDataSet;
-import com.williamcallahan.javachat.domain.markdown.EnrichmentKindCatalog;
 import com.williamcallahan.javachat.domain.markdown.MarkdownEnrichment;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -67,8 +67,8 @@ class EnrichmentPlaceholderizerTest {
 
     @Test
     void shouldRejectNoncanonicalTokenCaseWithoutAliases() {
-        String canonicalToken = EnrichmentKindCatalog.load().all().getFirst().token();
-        String noncanonicalToken = canonicalToken.toUpperCase(Locale.ROOT);
+        String supportedToken = "hint";
+        String noncanonicalToken = supportedToken.toUpperCase(Locale.ROOT);
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
         Map<String, String> placeholders = new HashMap<>();
 
@@ -165,24 +165,120 @@ class EnrichmentPlaceholderizerTest {
         assertTrue(placeholders.isEmpty(), unicodeDescription + " should not create a placeholder");
     }
 
-    @ParameterizedTest(name = "{0} is mapped from the canonical catalog")
-    @MethodSource("canonicalEnrichmentPresentations")
-    void shouldRenderEveryCanonicalCatalogPresentation(String token, String expectedTitle, String expectedIconHtml) {
+    @Test
+    void shouldRenderPresentationOwnedByServerRenderer() {
         List<MarkdownEnrichment> enrichments = new ArrayList<>();
         Map<String, String> placeholders = new HashMap<>();
 
-        String processedMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(
-                "{{" + token + ": visible}}", enrichments, placeholders);
+        String processedMarkdown =
+                placeholderizer.extractAndPlaceholderizeEnrichments("{{hint: visible}}", enrichments, placeholders);
 
         assertTrue(processedMarkdown.contains("ENRICHMENT_"));
         assertEquals(1, enrichments.size());
         assertEquals(1, placeholders.size());
         String renderedEnrichment = placeholders.values().iterator().next();
-        assertTrue(renderedEnrichment.contains(expectedTitle));
-        Element expectedIconPath = Jsoup.parseBodyFragment(expectedIconHtml).selectFirst("path");
+        assertTrue(renderedEnrichment.contains("Helpful Hints"));
         Element renderedIconPath =
                 Jsoup.parseBodyFragment(renderedEnrichment).selectFirst(".inline-enrichment-header path");
-        assertEquals(expectedIconPath.attr("d"), renderedIconPath.attr("d"));
+        assertEquals(
+                "M12 2a7 7 0 0 0-7 7c0 2.59 1.47 4.84 3.63 6.02L9 18h6l.37-2.98A7.01 7.01 0 0 0 19 9a7 7 0 0 0-7-7zm-3 19h6v1H9v-1z",
+                renderedIconPath.attr("d"));
+    }
+
+    @Test
+    void shouldPlaceholderizeAndRenderBackgroundEnrichment() {
+        String sourceMarkdown = "{{background: Records make immutable data carriers concise.}}";
+        List<MarkdownEnrichment> detectedEnrichments = new ArrayList<>();
+        Map<String, String> placeholderHtmlByIdentifier = new HashMap<>();
+
+        String placeholderMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(
+                sourceMarkdown, detectedEnrichments, placeholderHtmlByIdentifier);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(
+                placeholderMarkdown, placeholderHtmlByIdentifier);
+
+        assertAll(
+                () -> assertEquals(1, detectedEnrichments.size()),
+                () -> assertEquals("background", detectedEnrichments.getFirst().type()),
+                () -> assertEquals(
+                        "Records make immutable data carriers concise.",
+                        detectedEnrichments.getFirst().content()),
+                () -> assertTrue(renderedHtml.contains("inline-enrichment background")),
+                () -> assertTrue(renderedHtml.contains("data-enrichment-type=\"background\"")),
+                () -> assertTrue(renderedHtml.contains("Background Context")),
+                () -> assertTrue(renderedHtml.contains("Records make immutable data carriers concise.")),
+                () -> assertFalse(renderedHtml.contains("{{background:")));
+    }
+
+    @Test
+    void shouldPlaceholderizeAndRenderReminderEnrichment() {
+        String sourceMarkdown = "{{reminder: Close resources with try-with-resources.}}";
+        List<MarkdownEnrichment> detectedEnrichments = new ArrayList<>();
+        Map<String, String> placeholderHtmlByIdentifier = new HashMap<>();
+
+        String placeholderMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(
+                sourceMarkdown, detectedEnrichments, placeholderHtmlByIdentifier);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(
+                placeholderMarkdown, placeholderHtmlByIdentifier);
+
+        assertAll(
+                () -> assertEquals(1, detectedEnrichments.size()),
+                () -> assertEquals("reminder", detectedEnrichments.getFirst().type()),
+                () -> assertEquals(
+                        "Close resources with try-with-resources.",
+                        detectedEnrichments.getFirst().content()),
+                () -> assertTrue(renderedHtml.contains("inline-enrichment reminder")),
+                () -> assertTrue(renderedHtml.contains("data-enrichment-type=\"reminder\"")),
+                () -> assertTrue(renderedHtml.contains("Important Reminders")),
+                () -> assertTrue(renderedHtml.contains("Close resources with try-with-resources.")),
+                () -> assertFalse(renderedHtml.contains("{{reminder:")));
+    }
+
+    @Test
+    void shouldPlaceholderizeAndRenderWarningEnrichment() {
+        String sourceMarkdown = "{{warning: Do not return null from public methods.}}";
+        List<MarkdownEnrichment> detectedEnrichments = new ArrayList<>();
+        Map<String, String> placeholderHtmlByIdentifier = new HashMap<>();
+
+        String placeholderMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(
+                sourceMarkdown, detectedEnrichments, placeholderHtmlByIdentifier);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(
+                placeholderMarkdown, placeholderHtmlByIdentifier);
+
+        assertAll(
+                () -> assertEquals(1, detectedEnrichments.size()),
+                () -> assertEquals("warning", detectedEnrichments.getFirst().type()),
+                () -> assertEquals(
+                        "Do not return null from public methods.",
+                        detectedEnrichments.getFirst().content()),
+                () -> assertTrue(renderedHtml.contains("inline-enrichment warning")),
+                () -> assertTrue(renderedHtml.contains("data-enrichment-type=\"warning\"")),
+                () -> assertTrue(renderedHtml.contains("Warning")),
+                () -> assertTrue(renderedHtml.contains("Do not return null from public methods.")),
+                () -> assertFalse(renderedHtml.contains("{{warning:")));
+    }
+
+    @Test
+    void shouldPlaceholderizeAndRenderExampleEnrichment() {
+        String sourceMarkdown = "{{example: Use try-with-resources for files.}}";
+        List<MarkdownEnrichment> detectedEnrichments = new ArrayList<>();
+        Map<String, String> placeholderHtmlByIdentifier = new HashMap<>();
+
+        String placeholderMarkdown = placeholderizer.extractAndPlaceholderizeEnrichments(
+                sourceMarkdown, detectedEnrichments, placeholderHtmlByIdentifier);
+        String renderedHtml = placeholderizer.renderEnrichmentBlocksFromPlaceholders(
+                placeholderMarkdown, placeholderHtmlByIdentifier);
+
+        assertAll(
+                () -> assertEquals(1, detectedEnrichments.size()),
+                () -> assertEquals("example", detectedEnrichments.getFirst().type()),
+                () -> assertEquals(
+                        "Use try-with-resources for files.",
+                        detectedEnrichments.getFirst().content()),
+                () -> assertTrue(renderedHtml.contains("inline-enrichment example")),
+                () -> assertTrue(renderedHtml.contains("data-enrichment-type=\"example\"")),
+                () -> assertTrue(renderedHtml.contains("Example")),
+                () -> assertTrue(renderedHtml.contains("Use try-with-resources for files.")),
+                () -> assertFalse(renderedHtml.contains("{{example:")));
     }
 
     private static Stream<Arguments> markdownCodeBlocksAtEveryIndentation() {
@@ -208,10 +304,5 @@ class EnrichmentPlaceholderizerTest {
                 Arguments.of("U+FEFF ZERO WIDTH NO-BREAK SPACE", "\uFEFF"),
                 Arguments.of("U+200B ZERO WIDTH SPACE", "\u200B"),
                 Arguments.of("U+2060 WORD JOINER", "\u2060"));
-    }
-
-    private static Stream<Arguments> canonicalEnrichmentPresentations() {
-        return EnrichmentKindCatalog.load().all().stream()
-                .map(presentation -> Arguments.of(presentation.token(), presentation.title(), presentation.iconHtml()));
     }
 }

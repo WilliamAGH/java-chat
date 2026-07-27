@@ -3,7 +3,7 @@
 
 include config/make/common.mk
 
-.PHONY: all help clean build test lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo update-github-repos full-pipeline frontend-install frontend-build
+.PHONY: all help clean build test test-shell test-qdrant-integration lint lint-ast lint-frontend format hooks run dev dev-backend compose-up compose-down compose-logs compose-ps health ingest citations fetch-all fetch-force fetch-quick process-all process-doc-sets process-github-repo full-pipeline frontend-install frontend-build
 
 all: help ## Default target (alias)
 
@@ -19,9 +19,22 @@ build: ## Build the project (skip tests)
 build-with-lock: frontend-build-with-lock
 	$(GRADLEW) build -x test
 
-test: ## Run tests (loads .env if present)
+test: test-shell ## Run tests (loads .env if present)
 	@$(call load_env); \
 	  $(LOCKED_GRADLEW) test
+
+test-shell: ## Run deterministic ingestion and fetch shell contract tests
+	bash scripts/test_documentation_fetch_projection.sh
+	bash scripts/test_documentation_fetch_publication.sh
+	bash scripts/test_embedding_preflight.sh
+	bash scripts/test_github_sync_failure_contract.sh
+	bash scripts/test_make_local_qdrant_bootstrap.sh
+	bash scripts/test_process_all_to_qdrant_environment.sh
+	bash scripts/test_process_all_to_qdrant_postconditions.sh
+	bash scripts/test_prune_retired_java_api_vectors.sh
+
+test-qdrant-integration: ## Run synthetic hybrid-contract checks against local Qdrant 1.18.3
+	bash scripts/test_qdrant_1_18_integration.sh
 
 lint: lint-ast lint-frontend ## Run static analysis (Java + Frontend)
 	$(LOCKED_GRADLEW) spotbugsMain spotbugsTest pmdMain pmdTest
@@ -49,6 +62,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  $(call free_port,$$SERVER_PORT); \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
+	  $(call append_local_qdrant_bootstrap_argument); \
 	  JAVA_OPTS="$${JAVA_OPTS:- $(DEFAULT_JAVA_OPTS)}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
@@ -63,6 +77,7 @@ dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
 	  ($(call load_env); \
 	   $(call build_app_args,$(DEFAULT_PORT)); \
+	   $(call append_local_qdrant_bootstrap_argument); \
 	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	   --args="$${APP_ARGS[*]}" \
 	   -Dorg.gradle.jvmargs="$(GRADLE_JVM_ARGS)" 2>&1 \
@@ -79,6 +94,7 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 	  $(call free_port,$$LIVERELOAD_PORT); \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
+	  $(call append_local_qdrant_bootstrap_argument); \
 	  APP_ARGS+=(--spring.devtools.livereload.port=$$LIVERELOAD_PORT); \
 	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	    --args="$${APP_ARGS[*]}" \
@@ -139,9 +155,6 @@ process-github-repo: ## Ingest GitHub repo by local path or URL, or sync existin
 		exit 1; \
 	fi
 	./scripts/process_github_repo.sh
-
-update-github-repos: ## Check all GitHub repo collections for updates and re-ingest changed ones
-	./scripts/update_all_github_repos.sh
 
 full-pipeline: ## Complete pipeline: fetch docs, then process into Qdrant
 	@echo "Starting full documentation pipeline..."

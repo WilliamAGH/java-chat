@@ -32,12 +32,14 @@ class RetrievalServiceCitationTest {
     ObjectMapper objectMapper;
 
     @Test
-    void collapsesDocumentsResolvedToTheSameJavadocMemberAnchor() {
+    void collapsesDocumentsWithTheSameExactJavadocMemberAnchor() {
         String stringJavadocUrl = javaLangStringJavadocUrl();
         RetrievalService.CitationOutcome citationOutcome = citationService()
                 .toCitations(List.of(
-                        javadocCitationDocument("first-substring-chunk", "substring(int,int)"),
-                        javadocCitationDocument("duplicate-substring-chunk", "substring(int,int)")));
+                        javadocMemberCitationDocument(
+                                "first-substring-chunk", "substring(int,int)", "substring(int,int)"),
+                        javadocMemberCitationDocument(
+                                "duplicate-substring-chunk", "substring(int,int)", "substring(int,int)")));
 
         assertEquals(
                 List.of(stringJavadocUrl),
@@ -52,8 +54,8 @@ class RetrievalServiceCitationTest {
         String stringJavadocUrl = javaLangStringJavadocUrl();
         RetrievalService.CitationOutcome citationOutcome = citationService()
                 .toCitations(List.of(
-                        javadocCitationDocument("substring-chunk", "substring(int,int)"),
-                        javadocCitationDocument("char-at-chunk", "charAt(int)")));
+                        javadocMemberCitationDocument("substring-chunk", "substring(int,int)", "substring(int,int)"),
+                        javadocMemberCitationDocument("char-at-chunk", "charAt(int)", "charAt(int)")));
 
         assertEquals(
                 List.of(stringJavadocUrl, stringJavadocUrl),
@@ -65,14 +67,15 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
-    void derivesMemberAnchorPackageFromCanonicalUrlInsteadOfLegacyMetadata() {
+    void exactJavadocAnchorOverridesLegacyMetadataAndNestedTypeText() {
         String mapJavadocUrl = javaUtilMapJavadocUrl();
+        String exactAnchor = "computeIfAbsent(K,java.util.function.Function%3C? super K,? extends V%3E)//opaque#suffix";
         Document legacyMapDocument = Document.builder()
-                .id("legacy-map-package")
-                .text("copyOf(Map.Entry entry)")
-                .metadata(QdrantPayloadFieldSchema.URL_FIELD, mapJavadocUrl)
+                .id("exact-map-anchor")
+                .text("Map.Entry and mapToDouble() appear elsewhere in this chunk")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, mapJavadocUrl + "#legacy-anchor")
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.base.java.util")
-                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
                 .build();
 
         Citation citation = citationService()
@@ -80,7 +83,8 @@ class RetrievalServiceCitationTest {
                 .citations()
                 .getFirst();
 
-        assertEquals("copyOf(java.util.Map.Entry)", citation.getAnchor());
+        assertEquals(mapJavadocUrl, citation.getUrl());
+        assertEquals(exactAnchor, citation.getAnchor());
     }
 
     @Test
@@ -103,6 +107,20 @@ class RetrievalServiceCitationTest {
 
         assertEquals(citationPageUrl, citationJson.path("url").textValue());
         assertEquals(encodedCitationAnchor, citationJson.path("anchor").textValue());
+    }
+
+    @Test
+    void doesNotSynthesizeJavadocMemberAnchorFromChunkText() {
+        String stringJavadocUrl = javaLangStringJavadocUrl();
+        Document stringMemberTextDocument = javadocCitationDocument("substring-member-text", "substring(int,int)");
+
+        Citation citation = citationService()
+                .toCitations(List.of(stringMemberTextDocument))
+                .citations()
+                .getFirst();
+
+        assertEquals(stringJavadocUrl, citation.getUrl());
+        assertEquals("", citation.getAnchor());
     }
 
     @Test
@@ -146,19 +164,19 @@ class RetrievalServiceCitationTest {
     }
 
     @Test
-    void doesNotRefineNestedTypeUrlsOutsideApiDocs() {
+    void retainsCanonicalIngestedUrlForUnanchoredApiDocs() {
         String mapJavadocUrl =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
                         + "java.base/java/util/Map.html";
-        Document tutorialDocument = Document.builder()
-                .id("tutorial-map-entry-chunk")
+        Document mapOverviewDocument = Document.builder()
+                .id("map-overview-chunk")
                 .text("Map.Entry")
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, mapJavadocUrl)
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
-                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
                 .build();
 
-        RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(tutorialDocument));
+        RetrievalService.CitationOutcome citationOutcome = citationService().toCitations(List.of(mapOverviewDocument));
 
         assertEquals(
                 List.of(mapJavadocUrl),
@@ -254,6 +272,78 @@ class RetrievalServiceCitationTest {
         assertEquals(1, conversionFailure.failedConversionCount());
     }
 
+    @Test
+    void exactOverloadQueryConvertsOnlyTheMatchingPromptDocument() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+        Document twoArgumentOverload = listOverloadDocument("two-argument", "of(E,E)");
+
+        RetrievalService.CitationOutcome citationOutcome = citationService()
+                .toCitationsForQuery(
+                        "Explain java.util.List.of(E,E)", List.of(threeArgumentOverload, twoArgumentOverload));
+
+        assertEquals(
+                List.of("of(E,E)"),
+                citationOutcome.citations().stream().map(Citation::getAnchor).toList());
+    }
+
+    @Test
+    void exactOverloadQueryEmitsNothingWhenPromptContextHasOnlyWrongAnchors() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+
+        RetrievalService.CitationOutcome citationOutcome =
+                citationService().toCitationsForQuery("Explain java.util.List.of(E,E)", List.of(threeArgumentOverload));
+
+        assertTrue(citationOutcome.citations().isEmpty());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void exactOverloadQueryEmitsNothingWithoutMatchingJavaApiMetadata() {
+        Document tutorialDocument = Document.builder()
+                .id("list-tutorial")
+                .text("List.of accepts elements")
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, "https://example.test/list-tutorial")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, "tutorial")
+                .build();
+
+        RetrievalService.CitationOutcome citationOutcome =
+                citationService().toCitationsForQuery("Explain java.util.List.of(E,E)", List.of(tutorialDocument));
+
+        assertTrue(citationOutcome.citations().isEmpty());
+        assertEquals(0, citationOutcome.failedConversionCount());
+    }
+
+    @Test
+    void nonexactQueriesPreservePromptDocumentCitationOrder() {
+        Document threeArgumentOverload = listOverloadDocument("three-argument", "of(E,E,E)");
+        Document twoArgumentOverload = listOverloadDocument("two-argument", "of(E,E)");
+        List<Document> promptDocuments = List.of(threeArgumentOverload, twoArgumentOverload);
+
+        List<String> ordinaryAnchors =
+                citationService().toCitationsForQuery("Explain immutable lists", promptDocuments).citations().stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+        List<String> runtimeValueAnchors =
+                citationService()
+                        .toCitationsForQuery("Explain List.of(firstValue, secondValue)", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+        List<String> multipleSelectorAnchors =
+                citationService()
+                        .toCitationsForQuery("Compare List.of(E,E) with Set.of(E,E)", promptDocuments)
+                        .citations()
+                        .stream()
+                        .map(Citation::getAnchor)
+                        .toList();
+
+        List<String> expectedAnchors = List.of("of(E,E,E)", "of(E,E)");
+        assertEquals(expectedAnchors, ordinaryAnchors);
+        assertEquals(expectedAnchors, runtimeValueAnchors);
+        assertEquals(expectedAnchors, multipleSelectorAnchors);
+    }
+
     private static RetrievalService citationService() {
         return new RetrievalService(
                 mock(HybridSearchService.class),
@@ -269,6 +359,32 @@ class RetrievalServiceCitationTest {
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl())
                 .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
                 .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .build();
+    }
+
+    private static Document javadocMemberCitationDocument(String documentId, String sourceText, String exactAnchor) {
+        return Document.builder()
+                .id(documentId)
+                .text(sourceText)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaLangStringJavadocUrl())
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.lang")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
+                .build();
+    }
+
+    private static Document listOverloadDocument(String documentId, String exactAnchor) {
+        String listJavadocUrl =
+                DocsSourceRegistry.javaApiDocumentationSources().getFirst().remoteBaseUrl()
+                        + "java.base/java/util/List.html";
+        return Document.builder()
+                .id(documentId)
+                .text(exactAnchor)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, listJavadocUrl)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, "java.util")
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, "List.html")
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, exactAnchor)
                 .build();
     }
 

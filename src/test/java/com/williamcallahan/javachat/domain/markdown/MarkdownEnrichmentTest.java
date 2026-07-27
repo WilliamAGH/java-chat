@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** Verifies the shared text invariant for manifest-backed enrichments. */
+/** Verifies the shared enrichment invariants. */
 class MarkdownEnrichmentTest {
 
     private static final List<UnicodeBlankText> UNICODE_BLANK_ENRICHMENT_TEXTS = List.of(
@@ -27,16 +28,15 @@ class MarkdownEnrichmentTest {
     void rejectsUnicodeBlankText(String unicodeDescription, String blankEnrichmentText) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new MarkdownEnrichment("manifest-token", blankEnrichmentText, 0),
+                () -> new MarkdownEnrichment("hint", blankEnrichmentText, 0),
                 unicodeDescription);
     }
 
-    @ParameterizedTest(name = "accepts manifest token {0}")
-    @MethodSource("canonicalTokens")
-    void acceptsEveryManifestToken(String canonicalToken) {
-        MarkdownEnrichment enrichment = new MarkdownEnrichment(canonicalToken, "Visible enrichment", 0);
+    @Test
+    void retainsVisibleTypeAndContent() {
+        MarkdownEnrichment enrichment = new MarkdownEnrichment("hint", "Visible enrichment", 0);
 
-        assertEquals(canonicalToken, enrichment.type());
+        assertEquals("hint", enrichment.type());
         assertEquals("Visible enrichment", enrichment.content());
     }
 
@@ -44,10 +44,6 @@ class MarkdownEnrichmentTest {
         return UNICODE_BLANK_ENRICHMENT_TEXTS.stream()
                 .map(unicodeBlankText ->
                         Arguments.of(unicodeBlankText.unicodeDescription(), unicodeBlankText.enrichmentText()));
-    }
-
-    private static Stream<String> canonicalTokens() {
-        return EnrichmentKindCatalog.load().all().stream().map(EnrichmentKindCatalog.EnrichmentPresentation::token);
     }
 
     private record UnicodeBlankText(String unicodeDescription, String enrichmentText) {}

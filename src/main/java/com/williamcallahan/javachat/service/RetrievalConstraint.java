@@ -6,58 +6,39 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Describes optional metadata constraints that can be pushed into Qdrant queries.
+ * Describes optional metadata constraints pushed into Qdrant queries.
  *
- * <p>Pushing constraints down to the vector database improves relevance and reduces
- * candidate waste versus filtering only after retrieval.</p>
- *
- * @param docVersion document version token (for example {@code 25}) or empty
- * @param sourceKind source kind token (for example {@code official}) or empty
- * @param docType document type token (for example {@code api-docs}) or empty
- * @param sourceName source name token (for example {@code oracle}) or empty
+ * @param docVersions document version tokens matched with any-of semantics, or empty
+ * @param sourceKind source kind token, or empty
+ * @param docType document type token, or empty
+ * @param sourceName source name token, or empty
  * @param docSet documentation-set tokens matched with any-of semantics, or empty
  */
 public record RetrievalConstraint(
-        String docVersion, String sourceKind, String docType, String sourceName, List<String> docSet) {
+        List<String> docVersions, String sourceKind, String docType, String sourceName, List<String> docSet) {
 
-    /**
-     * Creates a normalized retrieval constraint.
-     */
+    /** Creates a normalized immutable retrieval constraint. */
     public RetrievalConstraint {
-        docVersion = sanitize(docVersion);
+        docVersions = List.copyOf(sanitizeTokens(docVersions));
         sourceKind = sanitize(sourceKind);
         docType = sanitize(docType);
         sourceName = sanitize(sourceName);
-        docSet = List.copyOf(sanitizeDocSets(docSet));
+        docSet = List.copyOf(sanitizeTokens(docSet));
     }
 
-    /**
-     * Returns an unconstrained retrieval constraint.
-     *
-     * @return unconstrained retrieval constraint
-     */
+    /** Returns an unconstrained retrieval constraint. */
     public static RetrievalConstraint none() {
-        return new RetrievalConstraint("", "", "", "", List.of());
+        return new RetrievalConstraint(List.of(), "", "", "", List.of());
     }
 
-    /**
-     * Returns a version-only retrieval constraint.
-     *
-     * @param docVersion document version token
-     * @return retrieval constraint containing only doc version
-     */
-    public static RetrievalConstraint forDocVersion(String docVersion) {
-        return new RetrievalConstraint(docVersion, "", "", "", List.of());
+    /** Returns a constraint limited to the supplied document versions. */
+    public static RetrievalConstraint forDocVersions(List<String> docVersions) {
+        return new RetrievalConstraint(docVersions, "", "", "", List.of());
     }
 
-    /**
-     * Returns a constraint limited to the official documentation sets allowed by a guided lesson.
-     *
-     * @param docSet canonical documentation-set tokens
-     * @return official-source retrieval constraint
-     */
+    /** Returns a constraint limited to official documentation sets. */
     public static RetrievalConstraint forOfficialDocSets(List<String> docSet) {
-        RetrievalConstraint officialDocSetConstraint = new RetrievalConstraint("", "official", "", "", docSet);
+        RetrievalConstraint officialDocSetConstraint = new RetrievalConstraint(List.of(), "official", "", "", docSet);
         if (officialDocSetConstraint.docSet().isEmpty()) {
             throw new IllegalArgumentException("Official docSet constraint cannot be empty");
         }
@@ -65,59 +46,58 @@ public record RetrievalConstraint(
     }
 
     /**
-     * Returns this constraint combined with an exact document-version requirement.
+     * Intersects this constraint with required document versions.
      *
-     * @param requiredDocumentVersion document version token extracted from the query
-     * @return constraint retaining every existing field plus the required version
-     * @throws IllegalArgumentException when an existing version conflicts with the required version
+     * @throws IllegalArgumentException when existing and required versions do not overlap
      */
-    public RetrievalConstraint withDocVersion(String requiredDocumentVersion) {
-        String sanitizedRequiredDocumentVersion = sanitize(requiredDocumentVersion);
-        if (sanitizedRequiredDocumentVersion.isBlank()) {
+    public RetrievalConstraint withDocVersions(List<String> requiredDocumentVersions) {
+        List<String> sanitizedRequiredVersions = sanitizeTokens(requiredDocumentVersions);
+        if (sanitizedRequiredVersions.isEmpty()) {
             return this;
         }
-        if (!docVersion.isBlank() && !docVersion.equals(sanitizedRequiredDocumentVersion)) {
+        if (docVersions.isEmpty()) {
+            return new RetrievalConstraint(sanitizedRequiredVersions, sourceKind, docType, sourceName, docSet);
+        }
+        List<String> intersectedVersions =
+                sanitizedRequiredVersions.stream().filter(docVersions::contains).toList();
+        if (intersectedVersions.isEmpty()) {
             throw new IllegalArgumentException("Conflicting document version constraints");
         }
-        if (docVersion.equals(sanitizedRequiredDocumentVersion)) {
+        if (docVersions.equals(intersectedVersions)) {
             return this;
         }
-        return new RetrievalConstraint(sanitizedRequiredDocumentVersion, sourceKind, docType, sourceName, docSet);
+        return new RetrievalConstraint(intersectedVersions, sourceKind, docType, sourceName, docSet);
     }
 
-    /**
-     * Returns true when at least one server-side filter can be applied.
-     *
-     * @return true when the constraint has one or more non-empty fields
-     */
+    /** Returns true when at least one server-side filter can be applied. */
     public boolean hasServerSideConstraint() {
-        return !docVersion.isBlank()
+        return !docVersions.isEmpty()
                 || !sourceKind.isBlank()
                 || !docType.isBlank()
                 || !sourceName.isBlank()
                 || !docSet.isEmpty();
     }
 
-    private static String sanitize(String rawValue) {
-        if (rawValue == null) {
+    private static String sanitize(String rawToken) {
+        if (rawToken == null) {
             return "";
         }
-        String trimmedValue = rawValue.trim();
-        return trimmedValue.isBlank() ? "" : trimmedValue;
+        String trimmedToken = rawToken.trim();
+        return trimmedToken.isBlank() ? "" : trimmedToken;
     }
 
-    private static List<String> sanitizeDocSets(List<String> rawDocSets) {
-        if (rawDocSets == null || rawDocSets.isEmpty()) {
+    private static List<String> sanitizeTokens(List<String> rawTokens) {
+        if (rawTokens == null || rawTokens.isEmpty()) {
             return List.of();
         }
-        Set<String> retainedDocSets = new HashSet<>();
-        List<String> sanitizedDocSets = new ArrayList<>();
-        for (String rawDocSet : rawDocSets) {
-            String sanitizedDocSet = sanitize(rawDocSet);
-            if (!sanitizedDocSet.isBlank() && retainedDocSets.add(sanitizedDocSet)) {
-                sanitizedDocSets.add(sanitizedDocSet);
+        Set<String> retainedTokens = new HashSet<>();
+        List<String> sanitizedTokens = new ArrayList<>();
+        for (String rawToken : rawTokens) {
+            String sanitizedToken = sanitize(rawToken);
+            if (!sanitizedToken.isBlank() && retainedTokens.add(sanitizedToken)) {
+                sanitizedTokens.add(sanitizedToken);
             }
         }
-        return sanitizedDocSets;
+        return sanitizedTokens;
     }
 }

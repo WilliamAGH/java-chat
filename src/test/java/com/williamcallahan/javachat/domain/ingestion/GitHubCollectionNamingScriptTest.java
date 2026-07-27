@@ -13,23 +13,26 @@ import org.junit.jupiter.api.Test;
  * Verifies the shell pipeline that owns canonical GitHub collection naming.
  */
 class GitHubCollectionNamingScriptTest {
+    private static final String GENERATION_PREFIX = "github-qwen3-embedding-4b-2560-";
 
     @Test
     void separatesHyphenatedOwnerAndRepositoryBoundaries() throws IOException, InterruptedException {
         String hyphenatedOwnerCollection = resolveCanonicalCollectionName("https://github.com/a-b/c");
         String hyphenatedRepositoryCollection = resolveCanonicalCollectionName("https://github.com/a/b-c");
 
-        assertEquals("github-a-b_c", hyphenatedOwnerCollection);
-        assertEquals("github-a-b-c", hyphenatedRepositoryCollection);
+        assertEquals(GENERATION_PREFIX + "a-b_c", hyphenatedOwnerCollection);
+        assertEquals(GENERATION_PREFIX + "a-b-c", hyphenatedRepositoryCollection);
         assertNotEquals(hyphenatedOwnerCollection, hyphenatedRepositoryCollection);
     }
 
     @Test
     void preservesExistingCollectionNamesForSimpleOwners() throws IOException, InterruptedException {
         assertEquals(
-                "github-williamagh-apple-maps-java",
+                GENERATION_PREFIX + "williamagh-apple-maps-java",
                 resolveCanonicalCollectionName("https://github.com/williamagh/apple-maps-java"));
-        assertEquals("github-williamagh-tui4j", resolveCanonicalCollectionName("https://github.com/williamagh/tui4j"));
+        assertEquals(
+                GENERATION_PREFIX + "williamagh-tui4j",
+                resolveCanonicalCollectionName("https://github.com/williamagh/tui4j"));
     }
 
     @Test
@@ -48,19 +51,20 @@ class GitHubCollectionNamingScriptTest {
     }
 
     @Test
-    void acceptsExistingCanonicalCollectionDuringBatchSync() throws IOException, InterruptedException {
+    void acceptsActiveGenerationCollection() throws IOException, InterruptedException {
         ShellInvocation shellInvocation =
-                validateCollectionName("github-williamagh-tui4j", "https://github.com/williamagh/tui4j");
+                validateCollectionName(GENERATION_PREFIX + "williamagh-tui4j", "https://github.com/williamagh/tui4j");
 
         assertEquals(0, shellInvocation.exitCode(), shellInvocation.standardOutput());
     }
 
     @Test
-    void rejectsAmbiguousLegacyCollectionBeforeBatchSync() throws IOException, InterruptedException {
-        ShellInvocation shellInvocation = validateCollectionName("github-a-b-c", "https://github.com/a-b/c");
+    void rejectsCollectionOutsideActiveGeneration() throws IOException, InterruptedException {
+        ShellInvocation shellInvocation =
+                validateCollectionName(GENERATION_PREFIX + "a-b-c", "https://github.com/a-b/c");
 
         assertNotEquals(0, shellInvocation.exitCode(), shellInvocation.standardOutput());
-        assertTrue(shellInvocation.standardOutput().contains("canonical name 'github-a-b_c'"));
+        assertTrue(shellInvocation.standardOutput().contains("canonical name '" + GENERATION_PREFIX + "a-b_c'"));
     }
 
     private String resolveCanonicalCollectionName(String repositoryUrl) throws IOException, InterruptedException {

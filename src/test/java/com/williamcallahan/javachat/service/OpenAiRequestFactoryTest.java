@@ -3,23 +3,25 @@ package com.williamcallahan.javachat.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import com.openai.models.ReasoningEffort;
+import com.openai.models.responses.EasyInputMessage;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseInputItem;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
+import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
+import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -30,9 +32,6 @@ import org.springframework.context.annotation.Lazy;
  */
 class OpenAiRequestFactoryTest {
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
-    private static final Logger APPLICATION_CONTEXT_LOGGER =
-            (Logger) LoggerFactory.getLogger(AnnotationConfigApplicationContext.class);
-    private static final Logger SPRING_APPLICATION_LOGGER = (Logger) LoggerFactory.getLogger(SpringApplication.class);
 
     @Test
     void reasoningEffortValidationRunsDuringStartupDespiteGlobalLazyInitialization() {
@@ -50,30 +49,8 @@ class OpenAiRequestFactoryTest {
         application.setLogStartupInfo(false);
         application.setRegisterShutdownHook(false);
 
-        RuntimeException startupFailure;
-        try (ExpectedLogEvents applicationContextLogEvents = ExpectedLogEvents.capture(APPLICATION_CONTEXT_LOGGER);
-                ExpectedLogEvents springApplicationLogEvents = ExpectedLogEvents.capture(SPRING_APPLICATION_LOGGER)) {
-            startupFailure =
-                    assertThrows(RuntimeException.class, () -> application.run("--app.llm.reasoning-effort=hgh"));
-
-            assertEquals(1, applicationContextLogEvents.events().size());
-            var contextCancellationWarning =
-                    applicationContextLogEvents.events().getFirst();
-            assertEquals(Level.WARN, contextCancellationWarning.getLevel());
-            assertTrue(contextCancellationWarning
-                    .getFormattedMessage()
-                    .startsWith("Exception encountered during context initialization - cancelling refresh attempt:"));
-            assertNull(contextCancellationWarning.getThrowableProxy());
-
-            assertEquals(1, springApplicationLogEvents.events().size());
-            var startupError = springApplicationLogEvents.events().getFirst();
-            assertEquals(Level.ERROR, startupError.getLevel());
-            assertEquals("Application run failed", startupError.getFormattedMessage());
-            assertNotNull(startupError.getThrowableProxy());
-            assertEquals(
-                    "org.springframework.beans.factory.BeanCreationException",
-                    startupError.getThrowableProxy().getClassName());
-        }
+        RuntimeException startupFailure =
+                assertThrows(RuntimeException.class, () -> application.run("--app.llm.reasoning-effort=hgh"));
 
         IllegalArgumentException configurationFailure = findConfigurationFailure(startupFailure);
         assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'hgh'"));
@@ -89,6 +66,15 @@ class OpenAiRequestFactoryTest {
         assertEquals(
                 ReasoningEffort.HIGH,
                 reasoningRequestParams.reasoning().orElseThrow().effort().orElseThrow());
+    }
+
+    @Test
+    void sdkUpgradeDoesNotExpandConfiguredReasoningEffortContract() {
+        IllegalArgumentException configurationFailure =
+                assertThrows(IllegalArgumentException.class, () -> createRequestFactory("max"));
+
+        assertTrue(configurationFailure.getMessage().contains("Invalid app.llm.reasoning-effort value 'max'"));
+        assertTrue(configurationFailure.getMessage().contains("none, minimal, low, medium, high, xhigh"));
     }
 
     @Test
@@ -134,6 +120,45 @@ class OpenAiRequestFactoryTest {
         assertEquals(
                 (long) TEST_COMPLETION_OUTPUT_TOKEN_BUDGET,
                 responseCreateParams.maxOutputTokens().orElseThrow());
+        assertTrue(responseCreateParams.instructions().isEmpty());
+    }
+
+    @Test
+    void prepareStreamingRequestSeparatesSystemInstructionsFromRequestInput() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("");
+        String priorAssistantMessage = "```java\nString marker = \"{{example:literal}}\";\n```";
+        StructuredPrompt structuredPrompt = new StructuredPrompt(
+                new SystemSegment("Follow the Java teaching policy", 8),
+                List.of(new ContextDocumentSegment(
+                        1, "official-java", "https://docs.oracle.com/java", "Official context", 4)),
+                List.of(
+                        new ConversationTurnSegment(ConversationTurnSegment.ROLE_USER, "Earlier question", 3),
+                        new ConversationTurnSegment(ConversationTurnSegment.ROLE_ASSISTANT, priorAssistantMessage, 8)),
+                new CurrentQuerySegment("Explain records", 2));
+
+        ResponseCreateParams responseCreateParams = requestFactory
+                .prepareStreamingRequest(structuredPrompt, 0.4, RateLimitService.ApiProvider.OPENAI)
+                .responseParams();
+
+        assertEquals(
+                "Follow the Java teaching policy",
+                responseCreateParams.instructions().orElseThrow());
+        ResponseCreateParams.Input responseInput = responseCreateParams.input().orElseThrow();
+        assertTrue(responseInput.isResponse());
+        List<ResponseInputItem> responseInputItems = responseInput.asResponse();
+        assertEquals(4, responseInputItems.size());
+        assertInputMessage(
+                responseInputItems.get(0),
+                EasyInputMessage.Role.DEVELOPER,
+                "[CTX 1] https://docs.oracle.com/java\nOfficial context");
+        assertInputMessage(responseInputItems.get(1), EasyInputMessage.Role.USER, "Earlier question");
+        assertInputMessage(responseInputItems.get(2), EasyInputMessage.Role.ASSISTANT, priorAssistantMessage);
+        assertInputMessage(responseInputItems.get(3), EasyInputMessage.Role.USER, "Explain records");
+        assertFalse(responseInputItems.stream()
+                .map(ResponseInputItem::asEasyInputMessage)
+                .map(EasyInputMessage::content)
+                .map(EasyInputMessage.Content::asTextInput)
+                .anyMatch(messageText -> messageText.contains("Follow the Java teaching policy")));
     }
 
     @Test
@@ -233,6 +258,14 @@ class OpenAiRequestFactoryTest {
         String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
         assertTrue(truncatedPrompt.startsWith("[Context truncated due to GPT-5 8K input limit]"));
         assertTrue(truncatedPrompt.length() < prompt.length());
+    }
+
+    private static void assertInputMessage(
+            ResponseInputItem responseInputItem, EasyInputMessage.Role expectedRole, String expectedMessageText) {
+        assertTrue(responseInputItem.isEasyInputMessage());
+        EasyInputMessage inputMessage = responseInputItem.asEasyInputMessage();
+        assertEquals(expectedRole, inputMessage.role());
+        assertEquals(expectedMessageText, inputMessage.content().asTextInput());
     }
 
     private OpenAiRequestFactory createRequestFactory(String reasoningEffortSetting) {

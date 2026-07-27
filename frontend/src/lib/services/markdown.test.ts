@@ -23,11 +23,12 @@ describe("parseMarkdown", () => {
     expect(renderedHtml).toContain("public class Test {}");
   });
 
-  it("sanitizes dangerous HTML", () => {
+  it("escapes dangerous HTML as source text", () => {
     const markdown = '<script>alert("xss")</script>';
     const renderedHtml = parseMarkdown(markdown);
     expect(renderedHtml).not.toContain("<script>");
-    expect(renderedHtml).not.toContain("alert");
+    expect(renderedHtml).toContain("&lt;script&gt;");
+    expect(renderedHtml).toContain("alert(&quot;xss&quot;)");
   });
 
   it("preserves enrichment data attributes", () => {
@@ -36,6 +37,44 @@ describe("parseMarkdown", () => {
 
     expect(renderedHtml).toContain('data-enrichment-type="hint"');
     expect(renderedHtml).toContain("Helpful Hints");
+  });
+
+  it("renders completed background enrichments as context cards", () => {
+    const renderedHtml = parseMarkdown(
+      "{{background: Records make immutable data carriers concise.}}",
+    );
+
+    expect(renderedHtml).toContain('data-enrichment-type="background"');
+    expect(renderedHtml).toContain("Background Context");
+    expect(renderedHtml).toContain("Records make immutable data carriers concise.");
+    expect(renderedHtml).not.toContain("{{background:");
+  });
+
+  it("renders completed reminder enrichments as reminder cards", () => {
+    const renderedHtml = parseMarkdown("{{reminder: Close resources with try-with-resources.}}");
+
+    expect(renderedHtml).toContain('data-enrichment-type="reminder"');
+    expect(renderedHtml).toContain("Important Reminders");
+    expect(renderedHtml).toContain("Close resources with try-with-resources.");
+    expect(renderedHtml).not.toContain("{{reminder:");
+  });
+
+  it("renders completed warning enrichments as warning cards", () => {
+    const renderedHtml = parseMarkdown("{{warning: Do not return null from public methods.}}");
+
+    expect(renderedHtml).toContain('data-enrichment-type="warning"');
+    expect(renderedHtml).toContain("Warning");
+    expect(renderedHtml).toContain("Do not return null from public methods.");
+    expect(renderedHtml).not.toContain("{{warning:");
+  });
+
+  it("renders completed example enrichments as example cards", () => {
+    const renderedHtml = parseMarkdown("{{example: Use try-with-resources for files.}}");
+
+    expect(renderedHtml).toContain('data-enrichment-type="example"');
+    expect(renderedHtml).toContain("Example");
+    expect(renderedHtml).toContain("Use try-with-resources for files.");
+    expect(renderedHtml).not.toContain("{{example:");
   });
 
   it("does not render cards for Unicode-whitespace-only enrichment text", () => {
@@ -175,6 +214,20 @@ describe("parseMarkdown", () => {
 
     expect(renderedHtml).toContain("{{warning: literal");
     expect(renderedHtml).toContain("if (ready) { run(); }");
+  });
+
+  it("preserves unfenced Java generic types instead of treating them as HTML", () => {
+    const renderedHtml = parseMarkdown("Use List<String> for the lesson titles.");
+
+    expect(renderedHtml).toContain("List&lt;String&gt;");
+    expect(renderedHtml).toContain("for the lesson titles.");
+  });
+
+  it("renders raw HTML as source text", () => {
+    const renderedHtml = parseMarkdown("<span>lesson</span>");
+
+    expect(renderedHtml).toContain("&lt;span&gt;lesson&lt;/span&gt;");
+    expect(renderedHtml).not.toContain("<span>lesson</span>");
   });
 
   it("recognizes CommonMark fences with zero through three leading spaces", () => {

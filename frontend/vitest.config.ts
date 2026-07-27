@@ -6,11 +6,6 @@ const COMPONENT_TEST_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
   plugins: [svelte({ hot: !process.env.VITEST }), svelteTesting()],
-  server: {
-    fs: {
-      allow: [".."],
-    },
-  },
   test: {
     environment: "jsdom",
     globals: true,

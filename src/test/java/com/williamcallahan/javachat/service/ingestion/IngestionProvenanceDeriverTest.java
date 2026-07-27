@@ -10,7 +10,7 @@ import com.williamcallahan.javachat.service.ingestion.IngestionProvenanceDeriver
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
-/** Verifies that manifest-governed mirrors retain their declared ingestion provenance. */
+/** Verifies that configured official mirrors retain their declared ingestion provenance. */
 class IngestionProvenanceDeriverTest {
 
     private static final String FINGERPRINT_TEST_DOCUMENT_PATH = "gamma";
@@ -18,7 +18,7 @@ class IngestionProvenanceDeriverTest {
     private static final String FINGERPRINT_TEST_SOURCE_KIND = "official";
 
     @Test
-    void usesCanonicalManifestMetadataForEveryDocumentationSource() {
+    void usesConfiguredMetadataForEveryDocumentationSource() {
         IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
         Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
 
@@ -52,6 +52,46 @@ class IngestionProvenanceDeriverTest {
                 documentationRoot, javaApiDocument, javaApiDocumentationSource.remoteBaseUrl());
 
         assertEquals(DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE, provenance.docType());
+    }
+
+    @Test
+    void usesCanonicalJavaApiProvenanceWhenIngestionStartsBelowMirrorRoot() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path documentationRoot = Path.of("data", "docs").toAbsolutePath().normalize();
+
+        for (DocsSourceRegistry.JavaApiDocumentationSource javaApiDocumentationSource :
+                DocsSourceRegistry.javaApiDocumentationSources()) {
+            Path targetedIngestionRoot = documentationRoot
+                    .resolve(javaApiDocumentationSource.relativeMirrorPath())
+                    .resolve("api/java.base/java/util");
+            Path javaApiDocument = targetedIngestionRoot.resolve("List.html");
+
+            IngestionProvenance provenance = provenanceDeriver.derive(
+                    targetedIngestionRoot,
+                    javaApiDocument,
+                    javaApiDocumentationSource.remoteBaseUrl() + "java.base/java/util/List.html");
+
+            assertEquals(javaApiDocumentationSource.relativeMirrorPath(), provenance.docSet());
+            assertEquals("api/java.base/java/util/List.html", provenance.docPath());
+            assertEquals("oracle", provenance.sourceName());
+            assertEquals("official", provenance.sourceKind());
+            assertEquals(javaApiDocumentationSource.javaRelease(), provenance.docVersion());
+            assertEquals(DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE, provenance.docType());
+        }
+    }
+
+    @Test
+    void usesSelectedBoundaryRootForUnregisteredDocumentationSets() {
+        IngestionProvenanceDeriver provenanceDeriver = new IngestionProvenanceDeriver();
+        Path selectedBooksRoot =
+                Path.of("arbitrary", "mirror", "books").toAbsolutePath().normalize();
+        Path selectedBook = selectedBooksRoot.resolve("ThinkJava.pdf");
+
+        IngestionProvenance provenance =
+                provenanceDeriver.derive(selectedBooksRoot, selectedBook, "https://javachat.ai/pdfs/ThinkJava.pdf");
+
+        assertEquals("books", provenance.docSet());
+        assertEquals("ThinkJava.pdf", provenance.docPath());
     }
 
     @Test

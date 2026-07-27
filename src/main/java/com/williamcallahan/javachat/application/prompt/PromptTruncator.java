@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.application.prompt;
 
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
+import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,8 +16,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>Truncation strategy prioritizes content by importance:
  * <ol>
- *   <li>Remove oldest context documents first (LOW priority)</li>
- *   <li>Remove oldest conversation turns (MEDIUM priority)</li>
+ *   <li>Retain lesson-owned HIGH context before conversation history</li>
+ *   <li>Retain newest conversation turns next (MEDIUM priority)</li>
+ *   <li>Use remaining space for ordinary retrieval context (LOW priority)</li>
  *   <li>Never truncate system prompt or current query (CRITICAL/HIGH priority)</li>
  * </ol>
  *
@@ -37,9 +39,8 @@ public class PromptTruncator {
     /**
      * Truncates a structured prompt to fit within the specified token limit.
      *
-     * <p>Removes segments from lowest to highest priority until the prompt fits.
-     * Context documents are removed first (oldest first), then conversation history
-     * (oldest first). System prompt and current query are never removed.</p>
+     * <p>Retains HIGH authoritative context first, then the newest contiguous conversation history,
+     * then LOW retrieval context in relevance order. System prompt and current query are never removed.</p>
      *
      * @param prompt the structured prompt to truncate
      * @param maxTokens maximum allowed tokens
@@ -67,6 +68,10 @@ public class PromptTruncator {
         int originalDocCount = prompt.contextDocuments().size();
         int originalTurnCount = prompt.conversationHistory().size();
 
+        List<ContextDocumentSegment> fittingHighPriorityDocuments =
+                fitDocumentsByPriority(prompt.contextDocuments(), available, PromptSegmentPriority.HIGH);
+        available -= sumTokens(fittingHighPriorityDocuments);
+
         // Fit conversation history (newest first - reverse to prioritize recent)
         List<ConversationTurnSegment> fittingTurns = fitSegmentsNewestFirst(prompt.conversationHistory(), available);
         int turnsTokens = sumTokens(fittingTurns);
@@ -77,16 +82,21 @@ public class PromptTruncator {
             log.debug("Truncated conversation history from {} to {} turns", originalTurnCount, fittingTurns.size());
         }
 
-        // Fit context documents with remaining budget (most relevant first)
-        List<ContextDocumentSegment> fittingDocs = fitDocumentsByRelevance(prompt.contextDocuments(), available);
+        List<ContextDocumentSegment> fittingLowPriorityDocuments =
+                fitDocumentsByPriority(prompt.contextDocuments(), available, PromptSegmentPriority.LOW);
+        List<ContextDocumentSegment> fittingDocs =
+                new ArrayList<>(fittingHighPriorityDocuments.size() + fittingLowPriorityDocuments.size());
+        fittingDocs.addAll(fittingHighPriorityDocuments);
+        fittingDocs.addAll(fittingLowPriorityDocuments);
+        List<ContextDocumentSegment> reindexedDocuments = reindexDocuments(fittingDocs);
 
-        if (fittingDocs.size() < prompt.contextDocuments().size()) {
+        if (reindexedDocuments.size() < prompt.contextDocuments().size()) {
             wasTruncated = true;
             log.debug("Truncated context documents from {} to {}", originalDocCount, fittingDocs.size());
         }
 
         StructuredPrompt truncated =
-                new StructuredPrompt(prompt.system(), fittingDocs, fittingTurns, prompt.currentQuery());
+                new StructuredPrompt(prompt.system(), reindexedDocuments, fittingTurns, prompt.currentQuery());
 
         if (wasTruncated) {
             log.info(
@@ -139,8 +149,8 @@ public class PromptTruncator {
      * matching the output order from reranking. Documents that fit are kept in
      * their original order and re-indexed with sequential [CTX N] markers.</p>
      */
-    private List<ContextDocumentSegment> fitDocumentsByRelevance(
-            List<ContextDocumentSegment> docs, int availableTokens) {
+    private List<ContextDocumentSegment> fitDocumentsByPriority(
+            List<ContextDocumentSegment> docs, int availableTokens, PromptSegmentPriority retentionPriority) {
 
         if (docs.isEmpty()) {
             return List.of();
@@ -151,22 +161,29 @@ public class PromptTruncator {
         int usedTokens = 0;
 
         for (ContextDocumentSegment doc : docs) {
+            if (doc.priority() != retentionPriority) {
+                continue;
+            }
             if (usedTokens + doc.estimatedTokens() <= availableTokens) {
                 fitting.add(doc);
                 usedTokens += doc.estimatedTokens();
-            } else {
-                break;
             }
         }
+        return List.copyOf(fitting);
+    }
 
-        // Re-index sequentially to maintain [CTX N] markers
+    private List<ContextDocumentSegment> reindexDocuments(List<ContextDocumentSegment> retainedDocuments) {
         List<ContextDocumentSegment> reindexed = new ArrayList<>();
-        for (int newIndex = 0; newIndex < fitting.size(); newIndex++) {
-            ContextDocumentSegment original = fitting.get(newIndex);
+        for (int newIndex = 0; newIndex < retainedDocuments.size(); newIndex++) {
+            ContextDocumentSegment original = retainedDocuments.get(newIndex);
             reindexed.add(new ContextDocumentSegment(
-                    newIndex + 1, original.sourceUrl(), original.documentContent(), original.estimatedTokens()));
+                            newIndex + 1,
+                            original.documentId(),
+                            original.sourceUrl(),
+                            original.documentContent(),
+                            original.estimatedTokens())
+                    .withPriority(original.priority()));
         }
-
         return List.copyOf(reindexed);
     }
 
@@ -187,16 +204,32 @@ public class PromptTruncator {
      */
     public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGpt5Family) {
         /**
-         * Renders the prompt to a string, prepending truncation notice if needed.
+         * Renders the complete prompt, prepending the truncation notice when needed.
          *
-         * @return final prompt string ready for LLM submission
+         * @return final complete prompt string
          */
         public String render() {
+            return prependTruncationNotice(prompt.render());
+        }
+
+        /**
+         * Renders non-system request input, prepending the truncation notice when needed.
+         *
+         * <p>The system segment remains available through {@link #prompt()} so the request
+         * boundary can submit it as system-level instructions.</p>
+         *
+         * @return final non-system input string ready for LLM submission
+         */
+        public String renderInput() {
+            return prependTruncationNotice(prompt.renderInput());
+        }
+
+        private String prependTruncationNotice(String renderedPrompt) {
             if (!wasTruncated) {
-                return prompt.render();
+                return renderedPrompt;
             }
             String notice = isGpt5Family ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
-            return notice + prompt.render();
+            return notice + renderedPrompt;
         }
 
         /**

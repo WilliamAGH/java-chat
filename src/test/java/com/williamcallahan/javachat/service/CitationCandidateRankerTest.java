@@ -14,6 +14,174 @@ class CitationCandidateRankerTest {
     private static final String TUTORIAL_DOCUMENT_TYPE = "tutorial";
 
     @Test
+    void retainsOnlyTheExactSourceAnchorWithMatchingStoredMetadata() {
+        Document oneArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "one-argument", "Returns one element.", javaUtilJavadocPage("List.html"), "List.html", "of(E)");
+        Document threeArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "three-argument",
+                "Returns three elements.",
+                javaUtilJavadocPage("List.html"),
+                "List.html",
+                "of(E,E,E)");
+        Document unanchoredTextCandidate = javaApiJavadocCandidate(
+                "unanchored-text", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
+        Document wrongTypePageCandidate = javaApiJavadocExactOverloadCandidate(
+                "wrong-type-page", "Returns two elements.", javaUtilJavadocPage("List.html"), "Set.html", "of(E,E)");
+        Document twoArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "two-argument", "Returns two elements.", javaUtilJavadocPage("List.html"), "List.html", "of(E,E)");
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does List.of(E, E) return?",
+                List.of(
+                        oneArgumentCandidate,
+                        threeArgumentCandidate,
+                        unanchoredTextCandidate,
+                        wrongTypePageCandidate,
+                        twoArgumentCandidate));
+
+        assertEquals(
+                List.of("two-argument"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void prioritizesTheZeroArgumentOverloadWhenTheQueryUsesEmptyInvocationParentheses() {
+        Document oneArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "one-argument", "Returns one element.", javaUtilJavadocPage("List.html"), "List.html", "of(E)");
+        Document zeroArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "zero-argument", "Returns zero elements.", javaUtilJavadocPage("List.html"), "List.html", "of()");
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does List.of() return?", List.of(oneArgumentCandidate, zeroArgumentCandidate));
+
+        assertEquals(
+                List.of("zero-argument"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void requiresStoredPackageMetadataForAQualifiedExactOverload() {
+        Document sqlDateCandidate = javaApiJavadocExactOverloadCandidate(
+                "sql-date", "SQL date text.", javadocPage("java.sql", "Date.html"), "Date.html", "toString()");
+        Document utilDateCandidate = javaApiJavadocExactOverloadCandidate(
+                "util-date", "Utility date text.", javaUtilJavadocPage("Date.html"), "Date.html", "toString()");
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does java.util.Date.toString() return?", List.of(sqlDateCandidate, utilDateCandidate));
+
+        assertEquals(
+                List.of("util-date"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void distinguishesSameArityStringValueOfOverloadsByTheirStoredAnchor() {
+        Document charCandidate = javaApiJavadocExactOverloadCandidate(
+                "char",
+                "Returns one character.",
+                javadocPage("java.lang", "String.html"),
+                "String.html",
+                "valueOf(char)");
+        Document charArrayCandidate = javaApiJavadocExactOverloadCandidate(
+                "char-array",
+                "Returns a character array.",
+                javadocPage("java.lang", "String.html"),
+                "String.html",
+                "valueOf(char[])");
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does String.valueOf(char[]) return?", List.of(charCandidate, charArrayCandidate));
+
+        assertEquals(
+                List.of("char-array"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void distinguishesAListVarargsOverloadByItsStoredAnchor() {
+        Document oneArgumentCandidate = javaApiJavadocExactOverloadCandidate(
+                "one-argument", "Returns one element.", javaUtilJavadocPage("List.html"), "List.html", "of(E)");
+        Document varargsCandidate = javaApiJavadocExactOverloadCandidate(
+                "varargs", "Returns many elements.", javaUtilJavadocPage("List.html"), "List.html", "of(E...)");
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does List.of(E...) return?", List.of(oneArgumentCandidate, varargsCandidate));
+
+        assertEquals(
+                List.of("varargs"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void retainsBroadOrderingForRuntimeValueArguments() {
+        Document oneArgumentCandidate = javaApiJavadocCandidate(
+                "one-argument", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
+        Document twoArgumentCandidate = javaApiJavadocCandidate(
+                "two-argument", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does List.of(firstValue, secondValue) return?",
+                List.of(oneArgumentCandidate, twoArgumentCandidate));
+
+        assertEquals(
+                List.of("one-argument", "two-argument"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void retainsFirstSelectorBroadRelevanceForMultiSelectorComparisons() {
+        Document setCandidate = javaApiJavadocCandidate(
+                "set", "static <E> Set<E> of(E first, E second)", javaUtilJavadocPage("Set.html"));
+        Document listCandidate = javaApiJavadocCandidate(
+                "list", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "Compare List.of(E, E) with Set.of(E, E)", List.of(setCandidate, listCandidate));
+
+        assertEquals(
+                List.of("list", "set"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void retainsBroadOrderingForIncompleteAndUnsupportedSignatures() {
+        Document oneArgumentCandidate = javaApiJavadocCandidate(
+                "one-argument", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
+        Document twoArgumentCandidate = javaApiJavadocCandidate(
+                "two-argument", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
+        List<Document> citationCandidates = List.of(oneArgumentCandidate, twoArgumentCandidate);
+
+        List<Document> incompleteSignatureCandidates =
+                CitationCandidateRanker.orderForCitationQuery("What does List.of(E, return?", citationCandidates);
+        List<Document> genericSignatureCandidates =
+                CitationCandidateRanker.orderForCitationQuery("What does List.of(List<E>) return?", citationCandidates);
+
+        assertEquals(
+                List.of("one-argument", "two-argument"),
+                incompleteSignatureCandidates.stream().map(Document::getId).toList());
+        assertEquals(
+                List.of("one-argument", "two-argument"),
+                genericSignatureCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void preservesQdrantOverloadOrderWhenTheQueryOmitsInvocationParentheses() {
+        Document threeArgumentCandidate = javaApiJavadocCandidate(
+                "three-argument",
+                "static <E> List<E> of(E first, E second, E third)",
+                javaUtilJavadocPage("List.html"));
+        Document oneArgumentCandidate = javaApiJavadocCandidate(
+                "one-argument", "static <E> List<E> of(E element)", javaUtilJavadocPage("List.html"));
+
+        List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
+                "What does List.of return?", List.of(threeArgumentCandidate, oneArgumentCandidate));
+
+        assertEquals(
+                List.of("three-argument", "one-argument"),
+                orderedCandidates.stream().map(Document::getId).toList());
+    }
+
+    @Test
     void prioritizesExactJavadocTypePagesOverHigherRankedMethodOnlyMatches() {
         Document classFileCandidate = javaApiJavadocCandidate(
                 "class-file",
@@ -25,8 +193,7 @@ class CitationCandidateRankerTest {
                 "list-second", "static <E> List<E> of(E first, E second)", javaUtilJavadocPage("List.html"));
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
-                "What does Java List.of() return?",
-                List.of(classFileCandidate, firstListCandidate, secondListCandidate));
+                "What does Java List.of return?", List.of(classFileCandidate, firstListCandidate, secondListCandidate));
 
         assertEquals(
                 List.of("list-first", "list-second", "class-file"),
@@ -49,7 +216,7 @@ class CitationCandidateRankerTest {
                 "java.base.java.util");
 
         List<Document> orderedCandidates = CitationCandidateRanker.orderForCitationQuery(
-                "What does Java List.of() return?",
+                "What does Java List.of return?",
                 List.of(classUseCandidate, rootPageCandidate, canonicalListCandidate));
 
         assertEquals(
@@ -166,6 +333,23 @@ class CitationCandidateRankerTest {
     private static Document javaApiJavadocCandidate(String documentId, String documentText, JavadocPage javadocPage) {
         return javadocCandidateWithDocumentType(
                 documentId, documentText, javadocPage, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE);
+    }
+
+    private static Document javaApiJavadocExactOverloadCandidate(
+            String documentId,
+            String documentText,
+            JavadocPage javadocPage,
+            String typePageFilename,
+            String memberAnchor) {
+        return Document.builder()
+                .id(documentId)
+                .text(documentText)
+                .metadata(QdrantPayloadFieldSchema.URL_FIELD, javaApiJavadocUrl(javadocPage))
+                .metadata(QdrantPayloadFieldSchema.DOC_TYPE_FIELD, DocsSourceRegistry.JAVA_API_DOCUMENT_TYPE)
+                .metadata(QdrantPayloadFieldSchema.PACKAGE_FIELD, javadocPage.packageName())
+                .metadata(QdrantPayloadFieldSchema.JAVA_API_TYPE_PAGE_FIELD, typePageFilename)
+                .metadata(QdrantPayloadFieldSchema.ANCHOR_FIELD, memberAnchor)
+                .build();
     }
 
     private static Document javaApiJavadocCandidateWithPackageMetadata(

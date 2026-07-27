@@ -10,7 +10,9 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.StructuredLogValue;
@@ -55,6 +57,12 @@ public class ChatController extends BaseController {
     private static final String SESSION_FOUND_EMPTY_MESSAGE = "Session found but empty";
     private static final String PIPELINE_LOG_SEPARATOR = "============================================";
     private static final int MAX_STREAM_LOG_SESSION_ID_LENGTH = 128;
+    private static final String RETRIEVAL_UNAVAILABLE_MESSAGE =
+            "Could not search the Java documentation for this question. Please try again.";
+    private static final String RETRIEVAL_UNAVAILABLE_DETAILS =
+            "Java documentation retrieval failed before response generation.";
+    private static final String GENERIC_STREAMING_FAILURE_MESSAGE =
+            "Something went wrong while generating this response. Please try again.";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -146,18 +154,23 @@ public class ChatController extends BaseController {
                                             "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
                                             requestToken);
 
-                                    // Cite the exact official documents supplied to the model so source attribution
-                                    // cannot drift from the answer context. Conversion failures remain observable.
-                                    RetrievalService.CitationOutcome citationOutcome =
-                                            retrievalService.toCitations(promptOutcome.documents());
-                                    final List<Citation> finalCitations = citationOutcome.citations();
-
                                     // Stream with provider transparency - surfaces which LLM is responding
                                     return openAIStreamingService
                                             .streamResponse(
                                                     promptOutcome.structuredPrompt(),
                                                     appProperties.getLlm().getTemperature())
                                             .flatMapMany(streamingResult -> {
+                                                List<org.springframework.ai.document.Document>
+                                                        retainedContextDocuments = promptOutcome.documents().stream()
+                                                                .filter(document -> streamingResult
+                                                                        .contextDocumentIds()
+                                                                        .contains(document.getId()))
+                                                                .toList();
+                                                RetrievalService.CitationOutcome citationOutcome =
+                                                        retrievalService.toCitationsForQuery(
+                                                                latest, retainedContextDocuments);
+                                                List<Citation> finalCitations = citationOutcome.citations();
+
                                                 // Provider event first - surfaces which LLM is handling this request
                                                 ServerSentEvent<String> providerEvent =
                                                         sseSupport.providerEvent(streamingResult.providerDisplayName());
@@ -215,9 +228,11 @@ public class ChatController extends BaseController {
                         return sseSupport.configuredProviderUnavailableError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
-                    String diagnostics = upstreamError instanceof Exception exception
-                            ? describeException(exception)
-                            : upstreamError.getClass().getName();
+                    String diagnostics = isRetrievalFailure(upstreamError)
+                            ? RETRIEVAL_UNAVAILABLE_DETAILS
+                            : upstreamError instanceof Exception exception
+                                    ? describeException(exception)
+                                    : upstreamError.getClass().getName();
                     if (terminalFailureContext.isEmpty()) {
                         PIPELINE_LOG
                                 .atError()
@@ -241,16 +256,16 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/diagnostics/retrieval")
     public RetrievalDiagnosticsResponse retrievalDiagnostics(@RequestParam("q") String query) {
-        // Mirror token-constrained model constraints used in buildPromptWithContext
-        RetrievalService.RetrievalOutcome outcome = retrievalService.retrieveWithLimitOutcome(
-                query, ModelConfiguration.RAG_LIMIT_CONSTRAINED, ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                chatService.retrieveTokenConstrainedOfficialDocumentation(query);
         // Normalize URLs the same way as citations so we never emit file:// links
-        List<Citation> citations =
-                retrievalService.toCitations(outcome.documents()).citations();
-        if (outcome.notices().isEmpty()) {
+        List<Citation> citations = retrievalService
+                .toCitationsForQuery(query, retrievalOutcome.documents())
+                .citations();
+        if (retrievalOutcome.notices().isEmpty()) {
             return RetrievalDiagnosticsResponse.success(citations);
         }
-        String noticeDetails = outcome.notices().stream()
+        String noticeDetails = retrievalOutcome.notices().stream()
                 .map(notice -> notice.summary() + ": " + notice.details())
                 .reduce((first, second) -> first + "; " + second)
                 .orElse("Retrieval warnings present");
@@ -387,7 +402,14 @@ public class ChatController extends BaseController {
             return error.getMessage();
         }
 
-        // Default: include exception type for debugging
-        return "Streaming error: " + error.getClass().getSimpleName();
+        if (isRetrievalFailure(error)) {
+            return RETRIEVAL_UNAVAILABLE_MESSAGE;
+        }
+
+        return GENERIC_STREAMING_FAILURE_MESSAGE;
+    }
+
+    private static boolean isRetrievalFailure(Throwable error) {
+        return error instanceof HybridSearchPartialFailureException || error instanceof RerankingFailureException;
     }
 }

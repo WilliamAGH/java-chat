@@ -24,7 +24,6 @@ public class AppProperties {
     private static final String NULL_SECT_FMT = "Configuration section %s must not be null.";
     private static final String RAG_KEY = "app.rag";
     private static final String LOCAL_EMBED_KEY = "app.local-embedding";
-    private static final String REMOTE_EMB_KEY = "app.remote-embedding";
     private static final String DOCS_KEY = "app.docs";
     private static final String DIAG_KEY = "app.diagnostics";
     private static final String QDRANT_KEY = "app.qdrant";
@@ -44,7 +43,6 @@ public class AppProperties {
 
     private RetrievalAugmentationConfig rag = new RetrievalAugmentationConfig();
     private LocalEmbedding localEmbedding = new LocalEmbedding();
-    private RemoteEmbedding remoteEmbedding = new RemoteEmbedding();
     private DocumentationConfig docs = new DocumentationConfig();
     private Diagnostics diagnostics = new Diagnostics();
     private QdrantProperties qdrant = new QdrantProperties();
@@ -68,7 +66,6 @@ public class AppProperties {
     void validateConfiguration() {
         requireConfiguredSection(rag, RAG_KEY).validateConfiguration();
         requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY).validateConfiguration();
-        requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY).validateConfiguration();
         requireConfiguredSection(docs, DOCS_KEY).validateConfiguration();
         requireConfiguredSection(diagnostics, DIAG_KEY).validateConfiguration();
         requireConfiguredSection(qdrant, QDRANT_KEY).validateConfiguration();
@@ -179,14 +176,6 @@ public class AppProperties {
 
     public void setLocalEmbedding(LocalEmbedding localEmbedding) {
         this.localEmbedding = requireConfiguredSection(localEmbedding, LOCAL_EMBED_KEY);
-    }
-
-    public RemoteEmbedding getRemoteEmbedding() {
-        return remoteEmbedding;
-    }
-
-    public void setRemoteEmbedding(RemoteEmbedding remoteEmbedding) {
-        this.remoteEmbedding = requireConfiguredSection(remoteEmbedding, REMOTE_EMB_KEY);
     }
 
     public DocumentationConfig getDocs() {
@@ -305,12 +294,18 @@ public class AppProperties {
 
     /** Embedding vector configuration. */
     public static class Embeddings {
-        private static final String OPENAI_BASE_URL_KEY = "app.embeddings.open-ai-base-url";
-        private static final String OPENAI_MODEL_KEY = "app.embeddings.open-ai-model";
+        private static final String MODEL_KEY = "app.embeddings.model";
+        private static final String LIVE_MAX_CONCURRENT_REQUESTS_KEY = "app.embeddings.live-max-concurrent-requests";
+        private static final String BATCH_MAX_CONCURRENT_REQUESTS_KEY = "app.embeddings.batch-max-concurrent-requests";
+        private static final String LIVE_REQUESTS_PER_SECOND_KEY = "app.embeddings.live-requests-per-second";
+        private static final String BATCH_REQUESTS_PER_SECOND_KEY = "app.embeddings.batch-requests-per-second";
 
-        private int dimensions = 4096;
-        private String openAiBaseUrl;
-        private String openAiModel;
+        private int dimensions = 2_560;
+        private String model = "qwen/qwen3-embedding-4b";
+        private int liveMaxConcurrentRequests = 4;
+        private int batchMaxConcurrentRequests = 1;
+        private double liveRequestsPerSecond = 3.0;
+        private double batchRequestsPerSecond = 1.0;
 
         public int getDimensions() {
             return dimensions;
@@ -320,49 +315,81 @@ public class AppProperties {
             this.dimensions = dimensions;
         }
 
-        /**
-         * Returns the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
-         */
-        public String getOpenAiBaseUrl() {
-            return openAiBaseUrl;
+        /** Returns the embedding model owned independently from the chat model. */
+        public String getModel() {
+            return model;
         }
 
-        /**
-         * Sets the OpenAI-compatible base URL used when the OpenAI embedding credential is selected.
-         *
-         * @param openAiBaseUrl configured endpoint base URL
-         */
-        public void setOpenAiBaseUrl(String openAiBaseUrl) {
-            this.openAiBaseUrl = openAiBaseUrl;
+        /** Sets the embedding model owned independently from the chat model. */
+        public void setModel(String model) {
+            this.model = model;
         }
 
-        /**
-         * Returns the explicit OpenAI embedding model selected for this deployment.
-         */
-        public String getOpenAiModel() {
-            return openAiModel;
+        /** Returns the per-JVM request concurrency reserved for user-facing retrieval embeddings. */
+        public int getLiveMaxConcurrentRequests() {
+            return liveMaxConcurrentRequests;
         }
 
-        /**
-         * Sets the explicit OpenAI embedding model selected for this deployment.
-         *
-         * @param openAiModel embedding model identifier, blank when OpenAI embeddings are not selected
-         */
-        public void setOpenAiModel(String openAiModel) {
-            this.openAiModel = openAiModel;
+        /** Sets the per-JVM request concurrency reserved for user-facing retrieval embeddings. */
+        public void setLiveMaxConcurrentRequests(int liveMaxConcurrentRequests) {
+            this.liveMaxConcurrentRequests = liveMaxConcurrentRequests;
+        }
+
+        /** Returns the per-JVM request concurrency allowed for ingestion and probe embeddings. */
+        public int getBatchMaxConcurrentRequests() {
+            return batchMaxConcurrentRequests;
+        }
+
+        /** Sets the per-JVM request concurrency allowed for ingestion and probe embeddings. */
+        public void setBatchMaxConcurrentRequests(int batchMaxConcurrentRequests) {
+            this.batchMaxConcurrentRequests = batchMaxConcurrentRequests;
+        }
+
+        /** Returns the maximum user-facing embedding request launch rate per JVM. */
+        public double getLiveRequestsPerSecond() {
+            return liveRequestsPerSecond;
+        }
+
+        /** Sets the maximum user-facing embedding request launch rate per JVM. */
+        public void setLiveRequestsPerSecond(double liveRequestsPerSecond) {
+            this.liveRequestsPerSecond = liveRequestsPerSecond;
+        }
+
+        /** Returns the maximum ingestion and probe embedding request launch rate per JVM. */
+        public double getBatchRequestsPerSecond() {
+            return batchRequestsPerSecond;
+        }
+
+        /** Sets the maximum ingestion and probe embedding request launch rate per JVM. */
+        public void setBatchRequestsPerSecond(double batchRequestsPerSecond) {
+            this.batchRequestsPerSecond = batchRequestsPerSecond;
         }
 
         Embeddings validateConfiguration() {
             if (dimensions <= 0) {
                 throw new IllegalArgumentException("app.embeddings.dimensions must be positive, got: " + dimensions);
             }
-            if (openAiBaseUrl == null || openAiBaseUrl.isBlank()) {
-                throw new IllegalArgumentException(OPENAI_BASE_URL_KEY + " must not be blank");
+            if (model == null || model.isBlank()) {
+                throw new IllegalArgumentException(MODEL_KEY + " must not be blank");
             }
-            if (openAiModel == null) {
-                throw new IllegalArgumentException(OPENAI_MODEL_KEY + " must not be null");
+            if (liveMaxConcurrentRequests <= 0) {
+                throw new IllegalArgumentException(
+                        LIVE_MAX_CONCURRENT_REQUESTS_KEY + " must be positive, got: " + liveMaxConcurrentRequests);
             }
+            if (batchMaxConcurrentRequests <= 0) {
+                throw new IllegalArgumentException(
+                        BATCH_MAX_CONCURRENT_REQUESTS_KEY + " must be positive, got: " + batchMaxConcurrentRequests);
+            }
+            validateRequestRate(LIVE_REQUESTS_PER_SECOND_KEY, liveRequestsPerSecond);
+            validateRequestRate(BATCH_REQUESTS_PER_SECOND_KEY, batchRequestsPerSecond);
             return this;
+        }
+
+        private static void validateRequestRate(String propertyKey, double requestsPerSecond) {
+            if (!Double.isFinite(requestsPerSecond) || requestsPerSecond <= 0.0) {
+                throw new IllegalArgumentException(
+                        propertyKey + " must be finite and positive, got: " + requestsPerSecond);
+            }
         }
     }
 

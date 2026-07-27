@@ -8,7 +8,7 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.DocsSourceRegistry.JavaApiDocumentationSource;
 import org.junit.jupiter.api.Test;
 
-/** Verifies manifest-governed Javadoc classification excludes unrelated API URL paths. */
+/** Verifies configured Javadoc classification excludes unrelated API URL paths. */
 class JavaPackageExtractorTest {
     private static final String JAVA_API_CLASS_RELATIVE_PATH = "java.base/java/lang/String.html";
     private static final String SPRING_BOOT_API_URL =
@@ -17,7 +17,7 @@ class JavaPackageExtractorTest {
             "https://docs.spring.io/spring-ai/docs/current/api/org/springframework/ai/chat/model/ChatModel.html";
 
     @Test
-    void classifiesManifestJavaApiPathWhileIgnoringQueryAndFragment() {
+    void classifiesConfiguredJavaApiPathWhileIgnoringQueryAndFragment() {
         JavaApiDocumentationSource javaApiSource =
                 DocsSourceRegistry.javaApiDocumentationSources().getFirst();
         String javadocUrl = javaApiSource.remoteBaseUrl()

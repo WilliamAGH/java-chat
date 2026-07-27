@@ -102,6 +102,14 @@ define build_app_args
 	fi
 endef
 
+# Allows local developer commands to bootstrap only a loopback Qdrant instance.
+# Usage: $(call append_local_qdrant_bootstrap_argument)
+define append_local_qdrant_bootstrap_argument
+	case "$${QDRANT_HOST:-localhost}" in \
+	  localhost|127.0.0.1) APP_ARGS+=(--app.qdrant.ensure-collections=true) ;; \
+	esac
+endef
+
 # ============================================================================
 # JVM Configuration
 # ============================================================================

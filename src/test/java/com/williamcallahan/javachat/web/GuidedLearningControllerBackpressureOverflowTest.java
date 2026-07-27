@@ -5,6 +5,7 @@ import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_TEXT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
+import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,7 +33,6 @@ import com.williamcallahan.javachat.service.RateLimitService;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -42,7 +42,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.web.MockHttpServletResponse;
 import reactor.core.Exceptions;
@@ -87,13 +86,12 @@ class GuidedLearningControllerBackpressureOverflowTest {
                 streamingService,
                 new ExceptionResponseBuilder(),
                 mock(MarkdownService.class),
-                new SseSupport(
-                        objectMapper,
-                        new SseStatusContractCatalog(objectMapper, new ClassPathResource("sse-status-contracts.json"))),
+                new SseSupport(objectMapper),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
-        Flux<String> partialAnswerThenOverflow = Flux.just("partial guided answer")
-                .concatWith(Mono.delay(Duration.ofMillis(50)).thenMany(Flux.error(streamBufferOverflowFailure)));
+        Flux<String> partialAnswerThenOverflow = Flux.range(0, STREAM_CHUNK_COALESCE_MAX_ITEMS)
+                .map(chunkIndex -> "partial guided answer " + chunkIndex)
+                .concatWith(Flux.error(streamBufferOverflowFailure));
 
         when(streamingService.isAvailable()).thenReturn(true);
         when(guidedLearningService.getLesson(LESSON_SLUG)).thenReturn(Optional.of(listedLesson()));
@@ -104,8 +102,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(
-                        Mono.just(new StreamingResult(partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))
                 .thenReturn(true);
 

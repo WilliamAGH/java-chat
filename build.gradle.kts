@@ -240,11 +240,13 @@ tasks.register<JavaExec>("runDocumentProcessor") {
     group = "application"
     mainClass.set("com.williamcallahan.javachat.cli.DocumentProcessor")
     classpath = sourceSets["main"].runtimeClasspath
-    systemProperty("spring.profiles.active", "default")
+    systemProperty("spring.profiles.active", "cli")
     
     // Pass DOCS_DIR from environment or use default
     val docsDir = System.getenv("DOCS_DIR") ?: "${project.rootDir}/data/docs"
-    systemProperty("DOCS_DIR", docsDir)
+    environment("DOCS_DIR", docsDir)
+    environment("SPRING_PROFILE", System.getenv("SPRING_PROFILE") ?: "local")
+    args("--spring.main.web-application-type=none", "--server.port=0")
 }
 
 val bootJarPath = tasks.bootJar.get().outputs.files.singleFile.absolutePath

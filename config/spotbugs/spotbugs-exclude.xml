@@ -367,27 +367,6 @@
     </Match>
 
     <!--
-        Manifest parity tests execute repository-owned scripts with ProcessBuilder argument arrays;
-        they do not invoke a command shell or interpolate external input.
-    -->
-    <Match>
-        <Bug pattern="COMMAND_INJECTION"/>
-        <Class name="com.williamcallahan.javachat.cli.DocumentationSourceCatalogParityTest"/>
-    </Match>
-    <Match>
-        <Bug pattern="COMMAND_INJECTION"/>
-        <Class name="com.williamcallahan.javachat.cli.JavaApiDocumentationSourceParityTest"/>
-    </Match>
-    <Match>
-        <Bug pattern="COMMAND_INJECTION"/>
-        <Class name="com.williamcallahan.javachat.config.DocumentationSourceManifestTest"/>
-    </Match>
-    <Match>
-        <Bug pattern="COMMAND_INJECTION"/>
-        <Class name="com.williamcallahan.javachat.config.JavaApiDocumentationManifestTest"/>
-    </Match>
-
-    <!--
         SecurityConfigTest constructs cookies specifically to verify CSRF cookie attributes and
         rejection behavior; it does not persist application secrets in cookies.
     -->

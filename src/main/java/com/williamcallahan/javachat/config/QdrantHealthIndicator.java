@@ -23,18 +23,22 @@ public class QdrantHealthIndicator implements HealthIndicator {
 
     private final ExternalServiceHealth externalServiceHealth;
     private final ObjectProvider<QdrantIndexInitializer> indexInitializerProvider;
+    private final ObjectProvider<QdrantGitHubCollectionDiscovery> gitHubCollectionDiscoveryProvider;
 
     /**
      * Creates the health indicator with a reference to the external service health monitor.
      *
      * @param externalServiceHealth the service health monitor
      * @param indexInitializerProvider provides initialization state outside the test profile
+     * @param gitHubCollectionDiscoveryProvider provides governed GitHub discovery readiness
      */
     public QdrantHealthIndicator(
             ExternalServiceHealth externalServiceHealth,
-            ObjectProvider<QdrantIndexInitializer> indexInitializerProvider) {
+            ObjectProvider<QdrantIndexInitializer> indexInitializerProvider,
+            ObjectProvider<QdrantGitHubCollectionDiscovery> gitHubCollectionDiscoveryProvider) {
         this.externalServiceHealth = externalServiceHealth;
         this.indexInitializerProvider = indexInitializerProvider;
+        this.gitHubCollectionDiscoveryProvider = gitHubCollectionDiscoveryProvider;
     }
 
     /**
@@ -55,6 +59,14 @@ public class QdrantHealthIndicator implements HealthIndicator {
             Health initializationHealth = indexInitializer.initializationHealth();
             if (!Status.UP.equals(initializationHealth.getStatus())) {
                 return initializationHealth;
+            }
+        }
+
+        QdrantGitHubCollectionDiscovery gitHubCollectionDiscovery = gitHubCollectionDiscoveryProvider.getIfAvailable();
+        if (gitHubCollectionDiscovery != null) {
+            Health discoveryHealth = gitHubCollectionDiscovery.discoveryHealth();
+            if (!Status.UP.equals(discoveryHealth.getStatus())) {
+                return discoveryHealth;
             }
         }
 
