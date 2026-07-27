@@ -160,6 +160,7 @@ jobs:
             --publish 8085:8085 \
             --env GITHUB_TOKEN=ci-smoke-token \
             --env APP_LOCAL_EMBEDDING_ENABLED=true \
+            --env SPRING_PROFILES_ACTIVE=ci \
             --env QDRANT_HOST=qdrant \
             --env QDRANT_PORT=6334 \
             java-chat:ci
