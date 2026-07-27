@@ -9,6 +9,7 @@ import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_P
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_STREAM;
+import static com.williamcallahan.javachat.web.SseConstants.STREAM_CHUNK_COALESCE_MAX_ITEMS;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -47,7 +48,6 @@ import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -635,8 +635,9 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Throwable streamBufferOverflowFailure = Exceptions.failWithOverflow();
-        Flux<String> partialAnswerThenOverflow = Flux.just("partial answer")
-                .concatWith(Mono.delay(Duration.ofMillis(50)).thenMany(Flux.error(streamBufferOverflowFailure)));
+        Flux<String> partialAnswerThenOverflow = Flux.range(0, STREAM_CHUNK_COALESCE_MAX_ITEMS)
+                .map(chunkIndex -> "partial answer " + chunkIndex)
+                .concatWith(Flux.error(streamBufferOverflowFailure));
 
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(chatService.buildStructuredPromptWithContextOutcome(
