@@ -15,7 +15,6 @@ public class QdrantProperties {
     private boolean ensureCollections;
     private int prefetchLimit = 20;
     private int rrfK = 60;
-    private boolean failOnPartialSearchError = true;
     private Duration queryTimeout = Duration.ofSeconds(5);
 
     /**
@@ -169,24 +168,6 @@ public class QdrantProperties {
      */
     public void setRrfK(int rrfK) {
         this.rrfK = rrfK;
-    }
-
-    /**
-     * Indicates whether one failed collection query fails the entire retrieval.
-     *
-     * @return true when partial search failures are fatal
-     */
-    public boolean isFailOnPartialSearchError() {
-        return failOnPartialSearchError;
-    }
-
-    /**
-     * Selects whether one failed collection query fails the entire retrieval.
-     *
-     * @param failOnPartialSearchError true when partial search failures are fatal
-     */
-    public void setFailOnPartialSearchError(boolean failOnPartialSearchError) {
-        this.failOnPartialSearchError = failOnPartialSearchError;
     }
 
     QdrantProperties validateConfiguration() {

@@ -4,11 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -24,9 +21,7 @@ import org.junit.jupiter.api.Test;
  * Verifies provider circuit availability transitions.
  */
 class ProviderCircuitStateTest {
-    private static final int MAX_BACKOFF_MULTIPLIER = 32;
-    private static final int DAILY_REQUEST_LIMIT = 8;
-    private static final int CONCURRENT_RESERVATION_ATTEMPTS = 32;
+    private static final int HIGH_REQUEST_COUNT = 1_000;
     private static final int CONCURRENT_TRANSITION_ITERATIONS = 10_000;
     private static final int CONCURRENT_TEST_TIMEOUT_SECONDS = 10;
     private static final long RATE_LIMIT_RETRY_SECONDS = 60;
@@ -34,67 +29,66 @@ class ProviderCircuitStateTest {
 
     @Test
     void freshCircuitIsAvailable() {
-        ProviderCircuitState circuitState =
-                new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER, InstantSource.fixed(DAILY_WINDOW_START));
+        ProviderCircuitState circuitState = new ProviderCircuitState(InstantSource.fixed(DAILY_WINDOW_START));
 
-        assertTrue(circuitState.isAvailable(DAILY_REQUEST_LIMIT));
+        assertTrue(circuitState.isAvailable());
     }
 
     @Test
     void rateLimitPublishesRetryDeadlineBeforeOpeningCircuit() {
-        ProviderCircuitState circuitState = new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER);
+        ProviderCircuitState circuitState = new ProviderCircuitState();
 
-        circuitState.recordRateLimit(RATE_LIMIT_RETRY_SECONDS);
+        circuitState.recordRateLimit(Instant.now().plusSeconds(RATE_LIMIT_RETRY_SECONDS));
 
-        assertFalse(circuitState.isAvailable(DAILY_REQUEST_LIMIT));
+        assertFalse(circuitState.isAvailable());
     }
 
     @Test
-    void concurrentReservationsNeverExceedDailyRequestLimit()
-            throws ExecutionException, InterruptedException, TimeoutException {
-        ProviderCircuitState circuitState =
-                new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER, InstantSource.fixed(DAILY_WINDOW_START));
+    void localAdmissionDoesNotInventAProviderQuota() {
+        ProviderCircuitState circuitState = new ProviderCircuitState(InstantSource.fixed(DAILY_WINDOW_START));
 
-        int successfulReservationCount = reserveConcurrently(circuitState);
-
-        assertEquals(DAILY_REQUEST_LIMIT, successfulReservationCount);
-        assertFalse(circuitState.tryReserveRequest(DAILY_REQUEST_LIMIT));
+        for (int requestIndex = 0; requestIndex < HIGH_REQUEST_COUNT; requestIndex++) {
+            assertTrue(circuitState.tryReserveRequest());
+        }
+        assertTrue(circuitState.isAvailable());
     }
 
     @Test
-    void expiredDailyWindowResetsAtomicallyBeforeConcurrentReservations()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    void activeRateLimitWindowNeverMovesBackward() {
         AtomicReference<Instant> currentTime = new AtomicReference<>(DAILY_WINDOW_START);
-        ProviderCircuitState circuitState = new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER, currentTime::get);
-        assertTrue(circuitState.tryReserveRequest(DAILY_REQUEST_LIMIT));
-        currentTime.set(DAILY_WINDOW_START.plus(Duration.ofDays(2)));
+        ProviderCircuitState circuitState = new ProviderCircuitState(currentTime::get);
 
-        int successfulReservationCount = reserveConcurrently(circuitState);
+        circuitState.recordRateLimit(DAILY_WINDOW_START.plusSeconds(60));
+        circuitState.recordRateLimit(DAILY_WINDOW_START.plusSeconds(1));
+        currentTime.set(DAILY_WINDOW_START.plusSeconds(2));
 
-        assertEquals(DAILY_REQUEST_LIMIT, successfulReservationCount);
-        assertFalse(circuitState.tryReserveRequest(DAILY_REQUEST_LIMIT));
+        assertFalse(circuitState.isAvailable());
+
+        currentTime.set(DAILY_WINDOW_START.plusSeconds(60));
+        assertTrue(circuitState.isAvailable());
+
+        currentTime.set(DAILY_WINDOW_START.plusSeconds(61));
+        circuitState.recordRateLimit(DAILY_WINDOW_START.plusSeconds(62));
+        circuitState.recordRateLimit(DAILY_WINDOW_START.plusSeconds(121));
+        currentTime.set(DAILY_WINDOW_START.plusSeconds(63));
+
+        assertFalse(circuitState.isAvailable());
     }
 
     @Test
-    void failedRequestAttemptKeepsItsDailyReservation() {
-        ProviderCircuitState circuitState =
-                new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER, InstantSource.fixed(DAILY_WINDOW_START));
+    void olderInFlightSuccessDoesNotEraseNewerRateLimitWindow() {
+        AtomicReference<Instant> currentTime = new AtomicReference<>(DAILY_WINDOW_START);
+        ProviderCircuitState circuitState = new ProviderCircuitState(currentTime::get);
 
-        assertTrue(circuitState.tryReserveRequest(1));
-
-        assertFalse(circuitState.tryReserveRequest(1));
-    }
-
-    @Test
-    void successfulRequestDoesNotConsumeASecondDailyReservation() {
-        ProviderCircuitState circuitState =
-                new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER, InstantSource.fixed(DAILY_WINDOW_START));
-
-        assertTrue(circuitState.tryReserveRequest(2));
+        circuitState.recordRateLimit(DAILY_WINDOW_START.plusSeconds(RATE_LIMIT_RETRY_SECONDS));
         circuitState.recordSuccess();
 
-        assertTrue(circuitState.tryReserveRequest(2));
-        assertFalse(circuitState.tryReserveRequest(2));
+        assertFalse(circuitState.isAvailable());
+
+        currentTime.set(DAILY_WINDOW_START.plusSeconds(RATE_LIMIT_RETRY_SECONDS));
+        circuitState.recordSuccess();
+
+        assertTrue(circuitState.isAvailable());
     }
 
     @Test
@@ -107,16 +101,16 @@ class ProviderCircuitStateTest {
         try {
             Future<?> rateLimitRecordingTask = transitionExecutor.submit(() -> {
                 for (int iteration = 0; iteration < CONCURRENT_TRANSITION_ITERATIONS; iteration++) {
-                    circuitStateReference.set(new ProviderCircuitState(MAX_BACKOFF_MULTIPLIER));
+                    circuitStateReference.set(new ProviderCircuitState());
                     transitionBarrier.await();
-                    circuitStateReference.get().recordRateLimit(RATE_LIMIT_RETRY_SECONDS);
+                    circuitStateReference.get().recordRateLimit(Instant.now().plusSeconds(RATE_LIMIT_RETRY_SECONDS));
                 }
                 return null;
             });
             Future<?> availabilityCheckTask = transitionExecutor.submit(() -> {
                 for (int iteration = 0; iteration < CONCURRENT_TRANSITION_ITERATIONS; iteration++) {
                     transitionBarrier.await();
-                    circuitStateReference.get().isAvailable(DAILY_REQUEST_LIMIT);
+                    circuitStateReference.get().isAvailable();
                     completedAvailabilityChecks.incrementAndGet();
                 }
                 return null;
@@ -125,34 +119,9 @@ class ProviderCircuitStateTest {
             rateLimitRecordingTask.get(CONCURRENT_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             availabilityCheckTask.get(CONCURRENT_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             assertEquals(CONCURRENT_TRANSITION_ITERATIONS, completedAvailabilityChecks.get());
-            assertFalse(circuitStateReference.get().isAvailable(DAILY_REQUEST_LIMIT));
+            assertFalse(circuitStateReference.get().isAvailable());
         } finally {
             transitionExecutor.shutdownNow();
-        }
-    }
-
-    private static int reserveConcurrently(ProviderCircuitState circuitState)
-            throws ExecutionException, InterruptedException, TimeoutException {
-        ExecutorService reservationExecutor = Executors.newFixedThreadPool(CONCURRENT_RESERVATION_ATTEMPTS);
-        CyclicBarrier reservationBarrier = new CyclicBarrier(CONCURRENT_RESERVATION_ATTEMPTS);
-        List<Future<Boolean>> reservationAttempts = new ArrayList<>(CONCURRENT_RESERVATION_ATTEMPTS);
-        try {
-            for (int attemptIndex = 0; attemptIndex < CONCURRENT_RESERVATION_ATTEMPTS; attemptIndex++) {
-                reservationAttempts.add(reservationExecutor.submit(() -> {
-                    reservationBarrier.await();
-                    return circuitState.tryReserveRequest(DAILY_REQUEST_LIMIT);
-                }));
-            }
-
-            int successfulReservationCount = 0;
-            for (Future<Boolean> reservationAttempt : reservationAttempts) {
-                if (reservationAttempt.get(CONCURRENT_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    successfulReservationCount++;
-                }
-            }
-            return successfulReservationCount;
-        } finally {
-            reservationExecutor.shutdownNow();
         }
     }
 }

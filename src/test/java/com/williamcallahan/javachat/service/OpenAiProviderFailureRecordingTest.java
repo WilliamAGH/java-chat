@@ -20,7 +20,7 @@ class OpenAiProviderFailureRecordingTest {
     @Test
     void rateLimitDecisionFailurePropagatesWithoutStartingConfiguredProviderCooldown() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
         RateLimitException headerlessRateLimitFailure =
                 RateLimitException.builder().headers(Headers.builder().build()).build();
@@ -29,23 +29,22 @@ class OpenAiProviderFailureRecordingTest {
         doThrow(rateLimitDecisionFailure)
                 .when(rateLimitService)
                 .recordRateLimitFromOpenAiServiceException(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure);
+                        RateLimitService.ApiProvider.OPENAI, headerlessRateLimitFailure);
         OpenAiProviderRoutingService routingService = configuredProviderRoutingService(rateLimitService);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         RateLimitDecisionException propagatedFailure = assertThrows(
                 RateLimitDecisionException.class,
                 () -> routingService.recordProviderFailure(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, headerlessRateLimitFailure));
+                        RateLimitService.ApiProvider.OPENAI, headerlessRateLimitFailure));
 
         assertSame(rateLimitDecisionFailure, propagatedFailure);
-        assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+        assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(configuredClient));
     }
 
     private static OpenAiProviderRoutingService configuredProviderRoutingService(RateLimitService rateLimitService) {
         AppProperties appProperties = new AppProperties();
         appProperties.getLlm().setConfiguredProviderBackoffSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS);
-        return new OpenAiProviderRoutingService(
-                rateLimitService, appProperties, RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        return new OpenAiProviderRoutingService(rateLimitService, appProperties);
     }
 }

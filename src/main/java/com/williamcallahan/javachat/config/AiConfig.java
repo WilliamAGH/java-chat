@@ -32,8 +32,7 @@ public class AiConfig {
      */
     @Bean
     public WebClient.Builder webClientBuilder() {
-        // Configure HTTP client with increased timeouts for GitHub Models API
-        // GitHub Models can be slower than OpenAI, especially for complex requests
+        // Configure HTTP client with increased timeouts for complex streaming requests.
         final HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofMinutes(RESPONSE_TIMEOUT_MINUTES))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS);

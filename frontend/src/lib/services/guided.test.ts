@@ -199,7 +199,7 @@ describe("streamGuidedChat", () => {
   });
 
   it("forwards the selected provider event", async () => {
-    const selectedProvider = { provider: "GitHub Models" };
+    const selectedProvider = { provider: "OpenAI" };
     streamSseMock.mockImplementationOnce(async (_url, _body, callbacks) => {
       callbacks.onProvider?.(selectedProvider);
     });

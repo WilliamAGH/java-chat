@@ -1,7 +1,6 @@
 package com.williamcallahan.javachat.config;
 
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
-import com.williamcallahan.javachat.service.OpenAiProviderRoutingService;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,20 +20,15 @@ import org.springframework.context.annotation.Lazy;
 @ConditionalOnWebApplication
 public class RequiredCredentialValidation {
     private static final Logger log = LoggerFactory.getLogger(RequiredCredentialValidation.class);
-    private static final String MISSING_GITHUB_MODELS_API_KEY_MESSAGE =
-            "Selected LLM provider github_models requires GITHUB_TOKEN.";
     private static final String MISSING_OPENAI_API_KEY_MESSAGE =
-            "Selected LLM provider openai requires OPENAI_API_KEY.";
+            "Java Chat requires OPENAI_API_KEY for the shared LLM gateway.";
     private static final String CHAT_CREDENTIAL_VALIDATION_PASSED_MESSAGE =
             "Required chat credential validation passed";
 
     private final OpenAIStreamingService streamingService;
-    private final OpenAiProviderRoutingService providerRoutingService;
 
-    RequiredCredentialValidation(
-            OpenAIStreamingService streamingService, OpenAiProviderRoutingService providerRoutingService) {
+    RequiredCredentialValidation(OpenAIStreamingService streamingService) {
         this.streamingService = streamingService;
-        this.providerRoutingService = providerRoutingService;
     }
 
     /**
@@ -45,17 +39,9 @@ public class RequiredCredentialValidation {
     @PostConstruct
     public void validateRequiredChatCredential() {
         if (!streamingService.isAvailable()) {
-            throw new IllegalStateException(missingSelectedProviderCredentialMessage());
+            throw new IllegalStateException(MISSING_OPENAI_API_KEY_MESSAGE);
         }
 
         log.info(CHAT_CREDENTIAL_VALIDATION_PASSED_MESSAGE);
-    }
-
-    private String missingSelectedProviderCredentialMessage() {
-        return switch (providerRoutingService.configuredProvider()) {
-            case GITHUB_MODELS -> MISSING_GITHUB_MODELS_API_KEY_MESSAGE;
-            case OPENAI -> MISSING_OPENAI_API_KEY_MESSAGE;
-            case LOCAL -> throw new IllegalStateException("Chat API configuration does not support the local provider");
-        };
     }
 }

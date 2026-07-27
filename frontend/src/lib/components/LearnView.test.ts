@@ -432,7 +432,7 @@ describe("LearnView guided chat streaming stability", () => {
   it("shows the provider selected for the active guided stream", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {
-        callbacks.onProvider?.({ provider: "GitHub Models" });
+        callbacks.onProvider?.({ provider: "OpenAI" });
         return new Promise<void>(() => {});
       },
     );
@@ -440,7 +440,7 @@ describe("LearnView guided chat streaming stability", () => {
     const learnView = await renderLearnView();
     await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
 
-    expect(await learnView.findAllByText("Provider: GitHub Models")).not.toHaveLength(0);
+    expect(await learnView.findAllByText("Provider: OpenAI")).not.toHaveLength(0);
   });
 
   it("clears the new-updates indicator when clearing chat", async () => {

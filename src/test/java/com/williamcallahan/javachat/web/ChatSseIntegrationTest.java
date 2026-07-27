@@ -40,7 +40,7 @@ class ChatSseIntegrationTest {
     @Test
     @DisplayName("Chat stream returns SSE events and aggregates to non-empty plain text without keepalive artifacts")
     void chatStreamProducesCleanText() {
-        boolean hasKey = System.getenv("OPENAI_API_KEY") != null || System.getenv("GITHUB_TOKEN") != null;
+        boolean hasKey = System.getenv("OPENAI_API_KEY") != null;
         Assumptions.assumeTrue(hasKey, "Skipping live integration test without API credentials");
 
         Flux<String> body = webTestClient

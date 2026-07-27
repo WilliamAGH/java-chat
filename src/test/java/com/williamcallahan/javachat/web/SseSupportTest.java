@@ -37,7 +37,7 @@ class SseSupportTest {
     ObjectMapper objectMapper;
 
     @Test
-    void prepareDataStreamPublishesAllChunksToBothSubscribers() {
+    void prepareDataStreamPublishesEveryChunkOnce() {
         SseSupport sseSupport = createSseSupport();
 
         List<String> upstreamChunks = List.of("```java\n", "int x = 10;\n", "```");
@@ -45,19 +45,15 @@ class SseSupportTest {
         Flux<String> preparedStream =
                 sseSupport.prepareDataStream(Flux.fromIterable(upstreamChunks), consumedChunks::add);
 
-        List<String> firstSubscriberChunks = new CopyOnWriteArrayList<>();
-        List<String> secondSubscriberChunks = new CopyOnWriteArrayList<>();
+        List<String> emittedChunks = new CopyOnWriteArrayList<>();
 
-        preparedStream.subscribe(firstSubscriberChunks::add);
-        preparedStream.subscribe(secondSubscriberChunks::add);
+        preparedStream.subscribe(emittedChunks::add);
 
         String expectedContent = String.join("", upstreamChunks);
-        String firstSubscriberContent = String.join("", firstSubscriberChunks);
-        String secondSubscriberContent = String.join("", secondSubscriberChunks);
+        String emittedContent = String.join("", emittedChunks);
         String consumedContent = String.join("", consumedChunks);
 
-        assertEquals(expectedContent, firstSubscriberContent, "First subscriber should receive full stream content");
-        assertEquals(expectedContent, secondSubscriberContent, "Second subscriber should receive full stream content");
+        assertEquals(expectedContent, emittedContent, "Subscriber should receive full stream content");
         assertEquals(expectedContent, consumedContent, "Chunk consumer should observe full stream content");
     }
 
@@ -70,25 +66,17 @@ class SseSupportTest {
                 Flux.range(0, rawChunkCount).map(rawChunkIndex -> "chunk-" + rawChunkIndex), ignoredChunk -> {});
         TestSubscriber<String> textSubscriber =
                 TestSubscriber.builder().initialRequest(0).build();
-        TestSubscriber<String> heartbeatSubscriber =
-                TestSubscriber.builder().initialRequest(0).build();
 
         preparedStream.subscribe(textSubscriber);
-        preparedStream.subscribe(heartbeatSubscriber);
 
         textSubscriber.request(Long.MAX_VALUE);
-        heartbeatSubscriber.request(Long.MAX_VALUE);
         textSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
-        heartbeatSubscriber.block(BACKPRESSURE_TEST_COMPLETION_TIMEOUT);
 
         List<String> deliveredChunks = textSubscriber.getReceivedOnNext();
         assertTrue(textSubscriber.isTerminatedError());
-        assertTrue(heartbeatSubscriber.isTerminatedError());
         assertTrue(Exceptions.isOverflow(textSubscriber.expectTerminalError()));
-        assertTrue(Exceptions.isOverflow(heartbeatSubscriber.expectTerminalError()));
         assertEquals(STREAM_BACKPRESSURE_BUFFER_CAPACITY, deliveredChunks.size());
         assertTrue(deliveredChunks.getFirst().startsWith("chunk-0"));
-        assertEquals(deliveredChunks, heartbeatSubscriber.getReceivedOnNext());
     }
 
     @Test
@@ -101,7 +89,7 @@ class SseSupportTest {
                 .doOnCancel(upstreamCancellationCount::incrementAndGet);
         Flux<String> preparedStream = sseSupport.prepareDataStream(upstreamStream, ignoredChunk -> {});
         Flux<ServerSentEvent<String>> sseEventStream =
-                Flux.merge(preparedStream.map(sseSupport::textEvent), sseSupport.heartbeats(preparedStream));
+                sseSupport.withHeartbeats(preparedStream.map(sseSupport::textEvent));
 
         Disposable clientSubscription = sseEventStream.subscribe();
 
@@ -116,9 +104,8 @@ class SseSupportTest {
     @Test
     void heartbeatsDoNotOverflowWhenDownstreamStartsWithZeroDemand() {
         SseSupport sseSupport = createSseSupport();
-        Flux<ServerSentEvent<String>> heartbeatStream = sseSupport.heartbeats(Flux.never());
 
-        StepVerifier.withVirtualTime(() -> heartbeatStream, 0)
+        StepVerifier.withVirtualTime(() -> sseSupport.heartbeats(Flux.never()), 0)
                 .thenAwait(Duration.ofSeconds((long) HEARTBEAT_INTERVAL_SECONDS * 3))
                 .thenRequest(1)
                 .thenAwait(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))

@@ -3,9 +3,8 @@ package com.williamcallahan.javachat.support;
 /**
  * Normalizes base URLs for the OpenAI Java SDK.
  *
- * <p>The SDK expects base URLs to end with the API version prefix (e.g., /v1).
- * Handles provider-specific formats including GitHub Models (/inference) and
- * embedding endpoint suffixes.</p>
+ * <p>The SDK expects base URLs to end with the API version prefix (e.g., /v1)
+ * and does not accept an embedding endpoint suffix as its base URL.</p>
  */
 public final class OpenAiSdkUrlNormalizer {
 
@@ -13,7 +12,7 @@ public final class OpenAiSdkUrlNormalizer {
     private static final String V1_SUFFIX = "/v1";
     private static final String EMBEDDINGS_SUFFIX = "/embeddings";
     private static final String V1_EMBEDDINGS_SUFFIX = V1_SUFFIX + EMBEDDINGS_SUFFIX;
-    private static final String INFERENCE_SUFFIX = "/inference";
+    private static final String SHARED_LLM_GATEWAY_BASE_URL = "https://api.llm-gateway.iocloudhost.net/v1";
 
     private OpenAiSdkUrlNormalizer() {}
 
@@ -28,7 +27,16 @@ public final class OpenAiSdkUrlNormalizer {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalStateException("OpenAI SDK base URL is not configured");
         }
-        return normalizeInternal(baseUrl.trim());
+        String trimmedBaseUrl = baseUrl.trim();
+        String normalizedBaseUrl = normalizeInternal(trimmedBaseUrl);
+        requireGatewayEndpoint(normalizedBaseUrl);
+        return normalizedBaseUrl;
+    }
+
+    private static void requireGatewayEndpoint(String baseUrl) {
+        if (!SHARED_LLM_GATEWAY_BASE_URL.equals(baseUrl)) {
+            throw new IllegalStateException("OPENAI_BASE_URL must be https://api.llm-gateway.iocloudhost.net/v1");
+        }
     }
 
     private static String normalizeInternal(String trimmed) {
@@ -39,9 +47,6 @@ public final class OpenAiSdkUrlNormalizer {
             trimmed = trimmed.substring(0, trimmed.length() - EMBEDDINGS_SUFFIX.length());
         } else if (trimmed.endsWith(EMBEDDINGS_SUFFIX)) {
             trimmed = trimmed.substring(0, trimmed.length() - EMBEDDINGS_SUFFIX.length());
-        }
-        if (trimmed.endsWith(INFERENCE_SUFFIX)) {
-            return trimmed + V1_SUFFIX;
         }
         if (trimmed.endsWith(V1_SUFFIX)) {
             return trimmed;

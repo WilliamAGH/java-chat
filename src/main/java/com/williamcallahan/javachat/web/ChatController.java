@@ -4,12 +4,12 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.RateLimitException;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.config.AppProperties;
-import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.model.ChatTurn;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.EmbeddingServiceUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RerankingFailureException;
@@ -128,92 +128,77 @@ public class ChatController extends BaseController {
         PIPELINE_LOG.info("[{}] NEW CHAT REQUEST", requestToken);
         PIPELINE_LOG.info("[{}] {}", requestToken, PIPELINE_LOG_SEPARATOR);
 
-        return Flux.concat(
-                        sseSupport.responsePreparationStatus(),
-                        Flux.defer(() -> {
-                                    // Avoid reading session state or performing retrieval when the configured provider
-                                    // cannot stream.
-                                    if (!openAIStreamingService.isAvailable()) {
-                                        PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
-                                        return sseSupport.configuredProviderConfigurationError();
-                                    }
+        Flux<ServerSentEvent<String>> operationEvents = Flux.defer(() -> {
+                    // Avoid reading session state or performing retrieval when the configured provider
+                    // cannot stream.
+                    if (!openAIStreamingService.isAvailable()) {
+                        PIPELINE_LOG.warn("[{}] OpenAI streaming service unavailable", requestToken);
+                        return sseSupport.configuredProviderConfigurationError();
+                    }
+                    if (!openAIStreamingService.canAttemptRequest()) {
+                        PIPELINE_LOG.warn("[{}] Configured provider temporarily unavailable", requestToken);
+                        return sseSupport.configuredProviderUnavailableError();
+                    }
 
-                                    List<Message> history = chatMemory.getHistory(sessionId);
-                                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
+                    List<Message> history = chatMemory.getHistory(sessionId);
+                    PIPELINE_LOG.info("[{}] Chat history loaded", requestToken);
 
-                                    // Build structured prompt for intelligent truncation
-                                    // Pass model hint to optimize RAG for token-constrained models
-                                    ChatService.StructuredPromptOutcome promptOutcome =
-                                            chatService.buildStructuredPromptWithContextOutcome(
-                                                    history, latest, ModelConfiguration.DEFAULT_MODEL);
+                    // Build structured prompt for intelligent truncation.
+                    ChatService.StructuredPromptOutcome promptOutcome =
+                            chatService.buildStructuredPromptWithContextOutcome(history, latest);
 
-                                    // Use OpenAI streaming only (legacy fallback removed)
-                                    StringBuilder fullResponse = new StringBuilder();
-                                    AtomicInteger chunkCount = new AtomicInteger(0);
-                                    PIPELINE_LOG.info(
-                                            "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
-                                            requestToken);
+                    // Use OpenAI streaming only (legacy fallback removed)
+                    StringBuilder fullResponse = new StringBuilder();
+                    AtomicInteger chunkCount = new AtomicInteger(0);
+                    PIPELINE_LOG.info("[{}] Using OpenAI Java SDK for streaming (structured prompt)", requestToken);
 
-                                    // Stream with provider transparency - surfaces which LLM is responding
-                                    return openAIStreamingService
-                                            .streamResponse(
-                                                    promptOutcome.structuredPrompt(),
-                                                    appProperties.getLlm().getTemperature())
-                                            .flatMapMany(streamingResult -> {
-                                                RetrievalService.CitationOutcome citationOutcome =
-                                                        chatService.citationOutcomeForRetainedContext(
-                                                                latest,
-                                                                promptOutcome,
-                                                                streamingResult.contextDocumentIds());
-                                                List<Citation> finalCitations = citationOutcome.citations();
+                    // Stream with provider transparency - surfaces which LLM is responding
+                    return openAIStreamingService
+                            .streamResponse(
+                                    promptOutcome.structuredPrompt(),
+                                    appProperties.getLlm().getTemperature())
+                            .flatMapMany(streamingResult -> {
+                                RetrievalService.CitationOutcome citationOutcome =
+                                        chatService.citationOutcomeForRetainedContext(
+                                                latest, promptOutcome, streamingResult.contextDocumentIds());
+                                List<Citation> finalCitations = citationOutcome.citations();
 
-                                                // Provider event first - surfaces which LLM is handling this request
-                                                ServerSentEvent<String> providerEvent =
-                                                        sseSupport.providerEvent(streamingResult.providerDisplayName());
+                                // Provider event first - surfaces which LLM is handling this request
+                                ServerSentEvent<String> providerEvent =
+                                        sseSupport.providerEvent(streamingResult.providerDisplayName());
 
-                                                // Stream with structure-aware truncation - preserves semantic
-                                                // boundaries
-                                                Flux<String> dataStream = sseSupport.prepareDataStream(
-                                                        streamingResult.textChunks(), chunk -> {
-                                                            fullResponse.append(chunk);
-                                                            chunkCount.incrementAndGet();
-                                                        });
+                                // Stream with structure-aware truncation - preserves semantic
+                                // boundaries
+                                Flux<String> dataStream =
+                                        sseSupport.prepareDataStream(streamingResult.textChunks(), chunk -> {
+                                            fullResponse.append(chunk);
+                                            chunkCount.incrementAndGet();
+                                        });
 
-                                                // Heartbeats terminate when data stream completes (success or error)
-                                                Flux<ServerSentEvent<String>> heartbeats =
-                                                        sseSupport.heartbeats(dataStream);
+                                // Surface retrieval and citation-conversion notices before response
+                                // content.
+                                Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(promptOutcome.notices())
+                                        .map(notice -> sseSupport.statusEvent(notice.summary(), notice.details()));
+                                statusEvents = statusEvents.concatWith(sseSupport.citationPartialFailureStatusFlux(
+                                        citationOutcome.failedConversionCount()));
 
-                                                // Surface retrieval and citation-conversion notices before response
-                                                // content.
-                                                Flux<ServerSentEvent<String>> statusEvents = Flux.fromIterable(
-                                                                promptOutcome.notices())
-                                                        .map(notice -> sseSupport.statusEvent(
-                                                                notice.summary(), notice.details()));
-                                                statusEvents = statusEvents.concatWith(
-                                                        sseSupport.citationPartialFailureStatusFlux(
-                                                                citationOutcome.failedConversionCount()));
+                                // Wrap chunks in JSON to preserve whitespace
+                                Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
 
-                                                // Wrap chunks in JSON to preserve whitespace
-                                                Flux<ServerSentEvent<String>> dataEvents =
-                                                        dataStream.map(sseSupport::textEvent);
+                                Flux<ServerSentEvent<String>> citationEvent =
+                                        Flux.just(sseSupport.citationEvent(finalCitations));
 
-                                                Flux<ServerSentEvent<String>> citationEvent =
-                                                        Flux.just(sseSupport.citationEvent(finalCitations));
-
-                                                // Start selected-provider and status events before the ref-counted data
-                                                // stream.
-                                                return Flux.concat(
-                                                        Flux.just(providerEvent),
-                                                        statusEvents,
-                                                        Flux.merge(dataEvents, heartbeats),
-                                                        citationEvent);
-                                            })
-                                            .doOnComplete(() -> {
-                                                chatMemory.addExchange(sessionId, latest, fullResponse.toString());
-                                                PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
-                                            });
-                                })
-                                .subscribeOn(Schedulers.boundedElastic()))
+                                // Start selected-provider and status events before the ref-counted data
+                                // stream.
+                                return Flux.concat(Flux.just(providerEvent), statusEvents, dataEvents, citationEvent);
+                            })
+                            .doOnComplete(() -> {
+                                chatMemory.addExchange(sessionId, latest, fullResponse.toString());
+                                PIPELINE_LOG.info("[{}] STREAMING COMPLETE", requestToken);
+                            });
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+        return Flux.concat(sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEvents))
                 .onErrorResume(error -> {
                     Optional<ReportedStreamingFailure> terminalFailureContext =
                             ReportedStreamingFailure.findInCauseChain(error);
@@ -406,6 +391,8 @@ public class ChatController extends BaseController {
     }
 
     private static boolean isRetrievalFailure(Throwable error) {
-        return error instanceof HybridSearchPartialFailureException || error instanceof RerankingFailureException;
+        return error instanceof EmbeddingServiceUnavailableException
+                || error instanceof HybridSearchPartialFailureException
+                || error instanceof RerankingFailureException;
     }
 }

@@ -106,6 +106,7 @@ class GuidedSseCitationEventTest {
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
+        given(openAIStreamingService.canAttemptRequest()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1),
@@ -154,6 +155,7 @@ class GuidedSseCitationEventTest {
                 .build();
         given(guidedLearningService.getLesson("intro")).willReturn(Optional.of(listedLesson("intro")));
         given(openAIStreamingService.isAvailable()).willReturn(true);
+        given(openAIStreamingService.canAttemptRequest()).willReturn(true);
         given(chatMemoryService.getHistory(anyString())).willReturn(List.of());
         GuidedLearningService.GuidedChatPromptOutcome promptOutcome = new GuidedLearningService.GuidedChatPromptOutcome(
                 StructuredPrompt.fromRawPrompt("test", 1), List.of(lessonContextDocument));

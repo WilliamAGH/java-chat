@@ -1,7 +1,8 @@
 package com.williamcallahan.javachat.cli;
 
-import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.IngestionAlreadyRunningException;
+import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
@@ -118,7 +119,7 @@ public class DocumentProcessor {
     private static final String FILE_ENUMERATION_FAILURE_TEMPLATE =
             "Failed to enumerate files in %s - check directory permissions";
 
-    private final DocumentationIngestionUseCase ingestionService;
+    private final LocalDocumentationIngestionUseCase ingestionService;
     private final ProgressTracker progressTracker;
 
     /**
@@ -128,7 +129,7 @@ public class DocumentProcessor {
      * @param progressTracker tracker for monitoring ingestion progress
      */
     public DocumentProcessor(
-            final DocumentationIngestionUseCase ingestionService, final ProgressTracker progressTracker) {
+            final LocalDocumentationIngestionUseCase ingestionService, final ProgressTracker progressTracker) {
         this.ingestionService = ingestionService;
         this.progressTracker = progressTracker;
     }
@@ -229,16 +230,21 @@ public class DocumentProcessor {
         try {
             final IngestionLocalOutcome outcome =
                     ingestionService.ingestLocalDirectory(docsPath.toString(), CLI_FILE_LIMIT);
-            final int processed = outcome.processed();
+            final int processed = outcome.backlog().processedFiles();
             final long elapsedMillis = System.currentTimeMillis() - startMillis;
             logProcessingStats(processed, elapsedMillis);
 
-            final int failureCount = outcome.failures().size();
-            final long duplicates = fileCount - processed - failureCount;
+            final int failureCount = outcome.backlog().failedFiles();
+            final long duplicates = outcome.backlog().skippedFiles();
             if (duplicates > 0) {
                 if (LOGGER.isInfoEnabled()) {
                     LOGGER.info(LOG_DUPLICATES_SKIPPED, duplicates);
                 }
+            }
+            if (outcome.backlog().pendingFiles() > 0 && LOGGER.isWarnEnabled()) {
+                LOGGER.warn(
+                        "Ingestion stopped with {} pending file(s)",
+                        outcome.backlog().pendingFiles());
             }
             if (failureCount > 0) {
                 logFileFailures(outcome);
@@ -247,17 +253,20 @@ public class DocumentProcessor {
                 }
                 return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
             }
+            if (outcome.backlog().pendingFiles() > 0) {
+                return new ProcessingOutcome.Failed(docSet.displayName(), processed, duplicates);
+            }
             String safeDocumentationSet =
                     docSet.indexedDocSet().replace('\r', '?').replace('\n', '?');
             LOGGER.info(LOG_DOCSET_POSTCONDITION, safeDocumentationSet);
             return new ProcessingOutcome.Success(processed, duplicates);
 
-        } catch (IOException ioException) {
+        } catch (IOException | IngestionAlreadyRunningException processingFailure) {
             if (LOGGER.isErrorEnabled()) {
-                LOGGER.error(LOG_PROCESSING_FAILED, ioException.getClass().getSimpleName());
+                LOGGER.error(LOG_PROCESSING_FAILED, processingFailure.getClass().getSimpleName());
             }
             if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug(LOG_STACK_TRACE, ioException);
+                LOGGER.debug(LOG_STACK_TRACE, processingFailure);
             }
             return new ProcessingOutcome.Failed(docSet.displayName(), 0, 0);
         }

@@ -11,9 +11,11 @@ import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.IngestionAlreadyRunningException;
+import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
+import com.williamcallahan.javachat.domain.ingestion.IngestionBacklogStatus;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
-import com.williamcallahan.javachat.service.DocsIngestionService;
 import com.williamcallahan.javachat.service.ProgressTracker;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
 import java.io.IOException;
@@ -63,18 +65,39 @@ class DocumentProcessorFailureContractTest {
         createEligibleDocument(successfulDocumentationDirectory, "processed.html");
         createEligibleDocument(successfulDocumentationDirectory, "duplicate.html");
 
-        DocsIngestionService ingestionService = mock(DocsIngestionService.class);
+        LocalDocumentationIngestionUseCase ingestionService = mock(LocalDocumentationIngestionUseCase.class);
         ProgressTracker progressTracker = mock(ProgressTracker.class);
         when(progressTracker.formatPercent()).thenReturn("0%");
         when(ingestionService.ingestLocalDirectory(failedDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT))
-                .thenReturn(IngestionLocalOutcome.success(
-                        1,
+                .thenReturn(IngestionLocalOutcome.fromBacklog(
+                        new IngestionBacklogStatus(
+                                IngestionBacklogStatus.Lifecycle.PARTIAL,
+                                3,
+                                2,
+                                1,
+                                0,
+                                1,
+                                1,
+                                0,
+                                failedDocumentationDirectory.toString()),
                         failedDocumentationDirectory.toString(),
                         List.of(new IngestionLocalFailure(
                                 hostileFailurePath, FAILURE_PHASE, SENSITIVE_FAILURE_DETAILS))));
         when(ingestionService.ingestLocalDirectory(
                         successfulDocumentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT))
-                .thenReturn(IngestionLocalOutcome.success(1, successfulDocumentationDirectory.toString(), List.of()));
+                .thenReturn(IngestionLocalOutcome.fromBacklog(
+                        new IngestionBacklogStatus(
+                                IngestionBacklogStatus.Lifecycle.COMPLETE,
+                                2,
+                                2,
+                                1,
+                                1,
+                                0,
+                                0,
+                                0,
+                                successfulDocumentationDirectory.toString()),
+                        successfulDocumentationDirectory.toString(),
+                        List.of()));
 
         DocumentProcessor documentProcessor = new DocumentProcessor(ingestionService, progressTracker);
         String failedDocumentationDirectoryName = Objects.requireNonNull(
@@ -108,6 +131,33 @@ class DocumentProcessorFailureContractTest {
         assertFalse(containsPhysicalLineBreakInLogMessages());
         assertFalse(containsLogMessage(DOCUMENT_PROCESSING_COMPLETE));
         assertFalse(containsLogText(SENSITIVE_FAILURE_DETAILS));
+    }
+
+    @Test
+    void failsCliWhenAnotherProcessOwnsTheIngestionRun(@TempDir Path temporaryDirectory) throws IOException {
+        Path documentationDirectory = temporaryDirectory.resolve("owned-documentation-set");
+        createEligibleDocument(documentationDirectory, "owned.html");
+        LocalDocumentationIngestionUseCase ingestionService = mock(LocalDocumentationIngestionUseCase.class);
+        ProgressTracker progressTracker = mock(ProgressTracker.class);
+        when(progressTracker.formatPercent()).thenReturn("0%");
+        when(ingestionService.ingestLocalDirectory(documentationDirectory.toString(), EXPECTED_CLI_FILE_LIMIT))
+                .thenThrow(new IngestionAlreadyRunningException());
+        DocumentProcessor documentProcessor = new DocumentProcessor(ingestionService, progressTracker);
+        String documentationDirectoryName = Objects.requireNonNull(
+                        documentationDirectory.getFileName(), "documentationDirectory file name")
+                .toString();
+
+        DocumentProcessor.DocumentProcessingException thrown = assertThrows(
+                DocumentProcessor.DocumentProcessingException.class,
+                () -> documentProcessor.processDocumentationSets(
+                        temporaryDirectory,
+                        List.of(new DocumentationSet(
+                                "Owned documentation set", documentationDirectoryName, documentationDirectoryName))));
+
+        assertEquals("Document processing completed with 1 failed documentation set(s)", thrown.getMessage());
+        assertTrue(containsLogMessage(
+                "Failed to process documentation set (exceptionType=IngestionAlreadyRunningException)"));
+        assertFalse(containsLogMessage(DOCUMENT_PROCESSING_COMPLETE));
     }
 
     private boolean containsLogMessage(final String expectedMessage) {

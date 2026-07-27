@@ -97,6 +97,7 @@ class GuidedLearningControllerStreamingFailureTest {
     @Test
     void guidedChatKeepsTerminalExceptionTypeOutOfRetryableClientError() throws JsonProcessingException {
         ReportedTerminalStreamingFailure terminalFailure = terminalFailure();
+        when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
@@ -133,9 +134,10 @@ class GuidedLearningControllerStreamingFailureTest {
     @Test
     void configuredProviderCooldownUsesTheSharedRetryableClientError() throws JsonProcessingException {
         ConfiguredProviderTemporarilyUnavailableException configuredProviderFailure =
-                new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.GITHUB_MODELS);
+                new ConfiguredProviderTemporarilyUnavailableException(RateLimitService.ApiProvider.OPENAI);
         ReportedTerminalStreamingFailure terminalFailure =
                 new ReportedTerminalStreamingFailure(configuredProviderFailure);
+        when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))
@@ -166,7 +168,7 @@ class GuidedLearningControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_STREAM, streamError.stage());
         assertFalse(serializedStreamError.contains(
                 ConfiguredProviderTemporarilyUnavailableException.class.getSimpleName()));
-        assertFalse(serializedStreamError.contains(RateLimitService.ApiProvider.GITHUB_MODELS.getName()));
+        assertFalse(serializedStreamError.contains(RateLimitService.ApiProvider.OPENAI.getName()));
         assertEquals(0, controllerErrorCount());
     }
 
@@ -190,8 +192,9 @@ class GuidedLearningControllerStreamingFailureTest {
     }
 
     @Test
-    void unavailableProviderEmitsPreparationStatusBeforeTheFatalConfigurationError() throws JsonProcessingException {
-        when(streamingService.isAvailable()).thenReturn(false);
+    void providerCooldownEmitsPreparationStatusBeforeTheRetryableAdmissionError() throws JsonProcessingException {
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(streamingService.canAttemptRequest()).thenReturn(false);
         MockHttpServletResponse streamingResponse = new MockHttpServletResponse();
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
@@ -213,10 +216,10 @@ class GuidedLearningControllerStreamingFailureTest {
         SseSupport.SseEventPayload terminalError = objectMapper.readValue(
                 Objects.requireNonNull(terminalErrorEvent.data(), "terminal error data"),
                 SseSupport.SseEventPayload.class);
-        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_MESSAGE, terminalError.message());
-        assertEquals(SseSupport.CONFIGURED_PROVIDER_CONFIGURATION_DETAILS, terminalError.details());
-        assertEquals(STATUS_CODE_STREAM_PROVIDER_FATAL_ERROR, terminalError.code());
-        assertEquals(Boolean.FALSE, terminalError.retryable());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_MESSAGE, terminalError.message());
+        assertEquals(SseSupport.CONFIGURED_PROVIDER_UNAVAILABLE_DETAILS, terminalError.details());
+        assertEquals(STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR, terminalError.code());
+        assertEquals(Boolean.TRUE, terminalError.retryable());
         assertEquals(STATUS_STAGE_STREAM, terminalError.stage());
         assertEquals("no", streamingResponse.getHeader("X-Accel-Buffering"));
         assertEquals("no-cache, no-transform", streamingResponse.getHeader("Cache-Control"));
@@ -228,6 +231,7 @@ class GuidedLearningControllerStreamingFailureTest {
     @Test
     void guidedChatKeepsNonTerminalExceptionTypeInStructuredLogOnly() throws JsonProcessingException {
         IllegalStateException upstreamFailure = new IllegalStateException(UPSTREAM_SECRET_MESSAGE);
+        when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
         when(guidedLearningService.buildStructuredGuidedPromptWithContext(anyList(), eq(LESSON_SLUG), eq(USER_QUERY)))

@@ -15,7 +15,7 @@ Request body:
 SSE event types (see `SseConstants`):
 
 - `status` → shared status/error payload, used for progress and non-terminal warnings
-- `provider` → `{"provider":"GitHub Models"}` (the one configured provider selected for this request)
+- `provider` → `{"provider":"OpenAI"}` (the shared LLM gateway selected for this request)
 - `text` → `{"text":"..."}`
 - `citation` → JSON array of citations
 - `error` → shared status/error payload for a terminal stream failure
@@ -40,9 +40,8 @@ The first event for `POST /api/chat/stream` and `POST /api/guided/stream` is a `
 before history and retrieval work begin; a later dependency failure still emits a terminal `error`
 event.
 
-Chat uses exactly one provider selected by `LLM_PRIMARY_PROVIDER` (`github_models` or `openai`).
-The request never falls back to the other provider: an unavailable, rate-limited, or failed configured
-provider terminates the stream with an `error` event.
+Chat uses the shared OpenAI-compatible gateway with GPT-5.4. An unavailable, rate-limited,
+or failed gateway request terminates the stream with an `error` event; no alternate provider exists.
 
 Example:
 

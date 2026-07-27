@@ -6,6 +6,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
  * Bridges Qdrant's Guava futures into CompletableFuture for fan-out orchestration.
@@ -61,5 +62,23 @@ final class QdrantListenableFutureBridge {
                 },
                 MoreExecutors.directExecutor());
         return completableFuture;
+    }
+
+    /**
+     * Transforms a Guava future before exposing it to completion-stage orchestration.
+     *
+     * @param qdrantQueryFuture asynchronous Qdrant query future
+     * @param successfulQueryTransform lightweight successful-result transform
+     * @param <T> Qdrant completion type
+     * @param <R> transformed completion type
+     * @return completable future that mirrors failures and transformed success
+     */
+    static <T, R> CompletableFuture<R> transformToCompletableFuture(
+            ListenableFuture<T> qdrantQueryFuture, Function<? super T, ? extends R> successfulQueryTransform) {
+        Objects.requireNonNull(qdrantQueryFuture, "qdrantQueryFuture");
+        Objects.requireNonNull(successfulQueryTransform, "successfulQueryTransform");
+        ListenableFuture<R> transformedFuture =
+                Futures.transform(qdrantQueryFuture, successfulQueryTransform::apply, MoreExecutors.directExecutor());
+        return toCompletableFuture(transformedFuture);
     }
 }

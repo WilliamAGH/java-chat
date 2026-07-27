@@ -4,11 +4,17 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,22 +33,32 @@ import org.springframework.stereotype.Component;
 @Component
 public class RateLimitState {
     private static final Logger log = LoggerFactory.getLogger(RateLimitState.class);
-    private static final String STATE_FILE = "./data/rate-limit-state.json";
+    private static final Path DEFAULT_STATE_FILE = Path.of("./data/rate-limit-state.json");
+    private static final String RATE_LIMIT_TEMPORARY_FILE_PREFIX = "rate-limit-state.";
 
     private final ObjectMapper objectMapper;
     private final RateLimitHeaderParser headerParser;
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final Path stateFile;
     private final Object saveLock = new Object();
 
     private Map<String, ProviderState> providerStates = new ConcurrentHashMap<>();
+    private volatile boolean persistenceHealthy = true;
+    /** Starts only after persisted state loads successfully, preventing failed-start thread leaks. */
+    private ScheduledExecutorService persistenceScheduler;
 
-    // Prefer Spring Boot's auto-configured ObjectMapper (with modules) and fall back to a local one.
     /**
-     * Creates persistent rate limit state storage using the provided ObjectMapper configuration when available.
+     * Creates persistent rate limit state storage from Spring Boot's configured JSON mapper.
      */
+    @Autowired
     public RateLimitState(ObjectMapper objectMapper) {
+        this(objectMapper, DEFAULT_STATE_FILE);
+    }
+
+    RateLimitState(ObjectMapper objectMapper, Path stateFile) {
         this.objectMapper = objectMapper.copy();
         this.headerParser = new RateLimitHeaderParser();
+        this.stateFile =
+                Objects.requireNonNull(stateFile, "stateFile").toAbsolutePath().normalize();
     }
 
     /**
@@ -50,9 +67,9 @@ public class RateLimitState {
     @PostConstruct
     public void init() {
         loadState();
-        // Periodically save state every 5 minutes
-        scheduler.scheduleAtFixedRate(this::safeSaveState, 5, 5, TimeUnit.MINUTES);
-        log.info("RateLimitState initialized with persistent storage at: {}", STATE_FILE);
+        persistenceScheduler = Executors.newSingleThreadScheduledExecutor();
+        persistenceScheduler.scheduleAtFixedRate(this::safeSaveState, 5, 5, TimeUnit.MINUTES);
+        log.info("RateLimitState initialized with persistent storage at: {}", stateFile);
     }
 
     /**
@@ -72,7 +89,10 @@ public class RateLimitState {
             System.err.println(
                     "[RateLimitState] Classloader issue during shutdown (expected): " + classLoadError.getMessage());
         }
-        scheduler.shutdown();
+        ScheduledExecutorService activePersistenceScheduler = persistenceScheduler;
+        if (activePersistenceScheduler != null) {
+            activePersistenceScheduler.shutdown();
+        }
     }
 
     /**
@@ -109,6 +129,9 @@ public class RateLimitState {
      * Check if a provider is currently available
      */
     public boolean isAvailable(String provider) {
+        if (!persistenceHealthy) {
+            return false;
+        }
         ProviderState state = providerStates.get(provider);
         if (state == null) {
             return true;
@@ -120,7 +143,7 @@ public class RateLimitState {
             safeSaveState();
         }
 
-        return rateLimitWindowEvaluation != ProviderState.RateLimitWindowEvaluation.RATE_LIMITED;
+        return persistenceHealthy && rateLimitWindowEvaluation != ProviderState.RateLimitWindowEvaluation.RATE_LIMITED;
     }
 
     /**
@@ -149,36 +172,29 @@ public class RateLimitState {
     }
 
     /**
-     * Loads persisted state from disk. Returns false if loading fails, allowing caller to decide
-     * whether to proceed with empty state or surface the error.
-     *
-     * @return true if state was loaded successfully or file doesn't exist, false on parse/IO error
+     * Loads persisted state from disk and fails closed when an existing state file is unreadable.
      */
-    private boolean loadState() {
-        File file = new File(STATE_FILE);
-        if (!file.exists()) {
+    private void loadState() {
+        if (Files.notExists(stateFile)) {
             log.info("No persisted rate limit state found, starting fresh");
-            return true;
+            return;
         }
 
         try {
-            PersistedState persistedState = objectMapper.readValue(file, PersistedState.class);
+            PersistedState persistedState = objectMapper.readValue(stateFile.toFile(), PersistedState.class);
             if (persistedState != null && persistedState.getProviders() != null) {
                 providerStates = new ConcurrentHashMap<>(persistedState.getProviders());
                 log.info("Loaded rate limit state for {} providers", providerStates.size());
                 logCurrentRateLimitStatus();
             }
-            return true;
         } catch (IOException exception) {
             String safeMessage = sanitizeLogValue(exception.getMessage());
             log.error(
                     "Failed to load rate limit state from {}: {} - {}",
-                    STATE_FILE,
+                    stateFile,
                     exception.getClass().getSimpleName(),
                     safeMessage);
-            log.warn(
-                    "Continuing with empty rate limit state; previously rate-limited providers may be retried prematurely");
-            return false;
+            throw new IllegalStateException("Existing rate limit state is unreadable", exception);
         }
     }
 
@@ -200,16 +216,19 @@ public class RateLimitState {
     private boolean trySaveState() {
         try {
             saveState();
+            persistenceHealthy = true;
             return true;
         } catch (IOException ioException) {
+            persistenceHealthy = false;
             String safeMessage = sanitizeLogValue(ioException.getMessage());
             log.error(
                     "Failed to persist rate limit state to {}: {} - {}",
-                    STATE_FILE,
+                    stateFile,
                     ioException.getClass().getSimpleName(),
                     safeMessage);
             return false;
         } catch (RuntimeException runtimeException) {
+            persistenceHealthy = false;
             String safeMessage = sanitizeLogValue(runtimeException.getMessage());
             log.error(
                     "Unexpected error persisting rate limit state: {} - {}",
@@ -220,28 +239,45 @@ public class RateLimitState {
     }
 
     /**
-     * Saves state without throwing. Used for scheduled/lifecycle saves where failures are non-fatal.
-     * Logs errors with full context but continues execution.
+     * Saves state without throwing and closes provider admission until persistence recovers.
      */
     private void safeSaveState() {
         if (!trySaveState()) {
-            log.warn("Rate limit state not persisted; will be rebuilt from scratch on next startup");
+            log.warn("Rate limit state persistence is unhealthy; provider admission remains closed");
         }
     }
 
     private void saveState() throws IOException {
         synchronized (saveLock) {
-            File file = new File(STATE_FILE);
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                throw new IOException("Failed to create state directory: " + parent);
-            }
+            Path stateDirectory = Objects.requireNonNull(stateFile.getParent(), "stateFile parent");
+            Files.createDirectories(stateDirectory);
 
             PersistedState persistedState = new PersistedState();
             persistedState.setProviders(new ConcurrentHashMap<>(providerStates));
             persistedState.setSavedAt(Instant.now());
 
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(file, persistedState);
+            Path temporaryStateFile = Files.createTempFile(stateDirectory, RATE_LIMIT_TEMPORARY_FILE_PREFIX, ".tmp");
+            try {
+                byte[] serializedState =
+                        objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(persistedState);
+                try (FileChannel stateOutputChannel = FileChannel.open(temporaryStateFile, StandardOpenOption.WRITE)) {
+                    ByteBuffer serializedStateBuffer = ByteBuffer.wrap(serializedState);
+                    while (serializedStateBuffer.hasRemaining()) {
+                        stateOutputChannel.write(serializedStateBuffer);
+                    }
+                    stateOutputChannel.force(true);
+                }
+                Files.move(
+                        temporaryStateFile,
+                        stateFile,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+                try (FileChannel stateDirectoryChannel = FileChannel.open(stateDirectory, StandardOpenOption.READ)) {
+                    stateDirectoryChannel.force(true);
+                }
+            } finally {
+                Files.deleteIfExists(temporaryStateFile);
+            }
         }
     }
 
@@ -313,7 +349,10 @@ public class RateLimitState {
         private final AtomicLong totalFailures = new AtomicLong(0);
 
         synchronized void recordRateLimit(Instant rateLimitDeadline, Instant failedAt) {
-            rateLimitedUntil = rateLimitDeadline;
+            boolean activeWindow = rateLimitedUntil != null && failedAt.isBefore(rateLimitedUntil);
+            if (!activeWindow || rateLimitDeadline.isAfter(rateLimitedUntil)) {
+                rateLimitedUntil = rateLimitDeadline;
+            }
             consecutiveFailures.incrementAndGet();
             totalFailures.incrementAndGet();
             lastFailure = failedAt;

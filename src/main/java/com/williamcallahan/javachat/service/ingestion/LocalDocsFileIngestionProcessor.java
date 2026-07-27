@@ -557,14 +557,20 @@ public class LocalDocsFileIngestionProcessor {
             log.error(
                     "Embedding service unavailable during combined upsert (exception type: {})",
                     embeddingException.getClass().getSimpleName());
-            DocumentProcessingRequest failedRequest = preparedFiles.getFirst();
-            outcomes.add(LocalDocsFileOutcome.failedFile(failureFactory.failure(
-                    failedRequest.markerContext().file(), "embedding-unavailable", embeddingException)));
+            preparedFiles.stream()
+                    .map(DocumentProcessingRequest::markerContext)
+                    .map(MarkerContext::file)
+                    .map(documentationFile -> LocalDocsFileOutcome.failedFile(
+                            failureFactory.failure(documentationFile, "embedding-unavailable", embeddingException)))
+                    .forEach(outcomes::add);
             return false;
         } catch (RuntimeException vectorStorageException) {
-            DocumentProcessingRequest failedRequest = preparedFiles.getFirst();
-            outcomes.add(LocalDocsFileOutcome.failedFile(failureFactory.failure(
-                    failedRequest.markerContext().file(), "qdrant-replacement", vectorStorageException)));
+            preparedFiles.stream()
+                    .map(DocumentProcessingRequest::markerContext)
+                    .map(MarkerContext::file)
+                    .map(documentationFile -> LocalDocsFileOutcome.failedFile(
+                            failureFactory.failure(documentationFile, "qdrant-replacement", vectorStorageException)))
+                    .forEach(outcomes::add);
             return false;
         }
 

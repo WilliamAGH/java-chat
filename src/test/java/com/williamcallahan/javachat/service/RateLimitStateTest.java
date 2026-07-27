@@ -1,17 +1,23 @@
 package com.williamcallahan.javachat.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -19,8 +25,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Verifies rate-limit counters and backoff state transitions.
@@ -37,11 +45,81 @@ class RateLimitStateTest {
 
     private RateLimitState rateLimitState;
 
+    @TempDir
+    Path stateDirectory;
+
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        rateLimitState = new RateLimitState(objectMapper);
+        rateLimitState = new RateLimitState(objectMapper, stateDirectory.resolve("rate-limit-state.json"));
+    }
+
+    @Test
+    void initFailsClosedWhenExistingStateIsCorrupt() throws IOException {
+        Path stateFile = stateDirectory.resolve("rate-limit-state.json");
+        Files.writeString(stateFile, "{\"providers\":");
+
+        assertThrows(IllegalStateException.class, rateLimitState::init);
+    }
+
+    @Test
+    void repeatedPersistenceLeavesOnlyAParseableAtomicStateFile() throws IOException {
+        rateLimitState.recordRateLimit(PROVIDER_NAME, REPLACEMENT_RATE_LIMIT_DEADLINE, "1m");
+        rateLimitState.recordSuccess(PROVIDER_NAME);
+
+        Path stateFile = stateDirectory.resolve("rate-limit-state.json");
+        ObjectMapper verificationMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        RateLimitState.PersistedState persistedState =
+                verificationMapper.readValue(stateFile.toFile(), RateLimitState.PersistedState.class);
+
+        assertTrue(persistedState.getProviders().containsKey(PROVIDER_NAME));
+        assertEquals(
+                REPLACEMENT_RATE_LIMIT_DEADLINE,
+                persistedState.getProviders().get(PROVIDER_NAME).getRateLimitedUntil());
+        try (Stream<Path> stateFiles = Files.list(stateDirectory)) {
+            assertFalse(stateFiles.anyMatch(path -> Objects.requireNonNull(path.getFileName(), "state file name")
+                    .toString()
+                    .endsWith(".tmp")));
+        }
+    }
+
+    @Test
+    void persistenceFailureClosesProviderAdmission() throws IOException {
+        Path directoryInsteadOfStateFile = stateDirectory.resolve("state-directory");
+        Files.createDirectory(directoryInsteadOfStateFile);
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        RateLimitState failingRateLimitState = new RateLimitState(objectMapper, directoryInsteadOfStateFile);
+
+        failingRateLimitState.recordRateLimit(PROVIDER_NAME, Instant.now().plusSeconds(60), "1m");
+
+        assertFalse(failingRateLimitState.isAvailable(PROVIDER_NAME));
+    }
+
+    @Test
+    void expiredWindowPersistenceFailureDoesNotLeakOneAdmission() throws IOException {
+        Path stateFile = stateDirectory.resolve("rate-limit-state.json");
+        rateLimitState.recordRateLimit(PROVIDER_NAME, Instant.EPOCH, "1m");
+        Files.delete(stateFile);
+        Files.createDirectory(stateFile);
+
+        assertFalse(rateLimitState.isAvailable(PROVIDER_NAME));
+    }
+
+    @Test
+    void successfulPersistenceAfterFailureReopensUnrestrictedProviderAdmission() throws IOException {
+        Path directoryInsteadOfStateFile = stateDirectory.resolve("state-directory");
+        Files.createDirectory(directoryInsteadOfStateFile);
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        RateLimitState recoveringRateLimitState = new RateLimitState(objectMapper, directoryInsteadOfStateFile);
+
+        recoveringRateLimitState.recordRateLimit(PROVIDER_NAME, Instant.now().plusSeconds(60), "1m");
+        assertFalse(recoveringRateLimitState.isAvailable("unrestricted-provider"));
+
+        Files.delete(directoryInsteadOfStateFile);
+        recoveringRateLimitState.recordRateLimit("recovery-provider", Instant.EPOCH, "1m");
+
+        assertTrue(recoveringRateLimitState.isAvailable("unrestricted-provider"));
     }
 
     @Test
@@ -167,6 +245,25 @@ class RateLimitStateTest {
         RateLimitState.ProviderState providerState = providerState(PROVIDER_NAME);
         assertEquals(providerResetTime, providerState.getRateLimitedUntil());
         assertEquals(2, providerState.getConsecutiveFailures());
+    }
+
+    @Test
+    void providerState_activeRateLimitDeadlineNeverMovesBackward() {
+        RateLimitState.ProviderState providerState = new RateLimitState.ProviderState();
+        Instant failedAt = RATE_LIMIT_CHECK_TIME;
+        Instant laterDeadline = failedAt.plusSeconds(60);
+        Instant earlierDeadline = failedAt.plusSeconds(1);
+
+        providerState.recordRateLimit(laterDeadline, failedAt);
+        providerState.recordRateLimit(earlierDeadline, failedAt);
+
+        assertEquals(laterDeadline, providerState.getRateLimitedUntil());
+
+        RateLimitState.ProviderState reverseOrderState = new RateLimitState.ProviderState();
+        reverseOrderState.recordRateLimit(earlierDeadline, failedAt);
+        reverseOrderState.recordRateLimit(laterDeadline, failedAt);
+
+        assertEquals(laterDeadline, reverseOrderState.getRateLimitedUntil());
     }
 
     private RateLimitState.ProviderState providerState(String providerName) throws ReflectiveOperationException {

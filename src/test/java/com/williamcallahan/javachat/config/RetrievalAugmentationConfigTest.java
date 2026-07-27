@@ -17,7 +17,7 @@ class RetrievalAugmentationConfigTest {
         RetrievalAugmentationConfig config = new RetrievalAugmentationConfig();
 
         assertDoesNotThrow(config::validateConfiguration);
-        assertEquals(Duration.ofSeconds(30), config.getRerankerTimeout());
+        assertEquals(Duration.ofSeconds(8), config.getRerankerTimeout());
     }
 
     @Test

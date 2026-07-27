@@ -16,7 +16,6 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.williamcallahan.javachat.config.ModelConfiguration;
 import com.williamcallahan.javachat.config.RequiredCredentialValidation;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.service.ChatMemoryService;
@@ -113,6 +112,7 @@ class ChatPreparationSseIntegrationTest {
         AtomicReference<ServerSentEvent<String>> firstSseEvent = new AtomicReference<>();
         AtomicReference<Throwable> clientFailure = new AtomicReference<>();
 
+        when(streamingService.canAttemptRequest()).thenReturn(true);
         when(streamingService.isAvailable()).thenReturn(true);
         when(chatMemoryService.getHistory(SESSION_ID)).thenAnswer(ignoredInvocation -> {
             retrievalStarted.countDown();
@@ -123,8 +123,7 @@ class ChatPreparationSseIntegrationTest {
                 retrievalFinished.countDown();
             }
         });
-        when(chatService.buildStructuredPromptWithContextOutcome(
-                        anyList(), eq(USER_QUERY), eq(ModelConfiguration.DEFAULT_MODEL)))
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
                 .thenReturn(new ChatService.StructuredPromptOutcome(
                         StructuredPrompt.fromRawPrompt("test", 1), List.of(), List.of()));
         when(chatService.citationOutcomeForRetainedContext(

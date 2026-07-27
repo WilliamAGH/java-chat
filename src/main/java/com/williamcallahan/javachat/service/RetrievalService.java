@@ -237,11 +237,14 @@ public class RetrievalService {
                     retrievedDocuments,
                     retrievalNotices);
         } else {
-            for (String requestedVersion : requestedVersions) {
-                RetrievalConstraint exactVersionConstraint =
-                        retrievalConstraint.withDocVersions(List.of(requestedVersion));
-                HybridSearchService.SearchOutcome versionSearchOutcome =
-                        hybridSearchService.searchOutcome(boostedQuery, baseTopK, exactVersionConstraint);
+            List<RetrievalConstraint> versionConstraints = requestedVersions.stream()
+                    .map(requestedVersion -> retrievalConstraint.withDocVersions(List.of(requestedVersion)))
+                    .toList();
+            List<HybridSearchService.SearchOutcome> versionSearchOutcomes =
+                    hybridSearchService.searchOutcomes(boostedQuery, baseTopK, versionConstraints);
+            for (int versionIndex = 0; versionIndex < requestedVersions.size(); versionIndex++) {
+                String requestedVersion = requestedVersions.get(versionIndex);
+                HybridSearchService.SearchOutcome versionSearchOutcome = versionSearchOutcomes.get(versionIndex);
                 requireRequestedVersionEvidence(requestedVersion, versionSearchOutcome.documents());
                 appendSearchOutcome(versionSearchOutcome, retrievedDocuments, retrievalNotices);
             }
@@ -391,14 +394,19 @@ public class RetrievalService {
                     .searchDocumentationCitationsOutcome(query, citationCandidateLimit, retrievalConstraint)
                     .documents();
         }
+        List<RetrievalConstraint> versionConstraints = requestedVersions.stream()
+                .map(requestedVersion -> retrievalConstraint.withDocVersions(List.of(requestedVersion)))
+                .toList();
+        List<HybridSearchService.SearchOutcome> versionCitationOutcomes =
+                hybridSearchService.searchDocumentationCitationsOutcomes(
+                        query, citationCandidateLimit, versionConstraints);
         List<Document> citationCandidates = new ArrayList<>();
-        for (String requestedVersion : requestedVersions) {
-            RetrievalConstraint exactVersionConstraint = retrievalConstraint.withDocVersions(List.of(requestedVersion));
-            List<Document> versionCandidates = hybridSearchService
-                    .searchDocumentationCitationsOutcome(query, citationCandidateLimit, exactVersionConstraint)
-                    .documents();
-            requireRequestedVersionEvidence(requestedVersion, versionCandidates);
-            citationCandidates.addAll(versionCandidates);
+        for (int versionIndex = 0; versionIndex < requestedVersions.size(); versionIndex++) {
+            String requestedVersion = requestedVersions.get(versionIndex);
+            List<Document> versionCitationCandidates =
+                    versionCitationOutcomes.get(versionIndex).documents();
+            requireRequestedVersionEvidence(requestedVersion, versionCitationCandidates);
+            citationCandidates.addAll(versionCitationCandidates);
         }
         return deduplicateByVersionAndContentHashThenHashlessCanonicalUrl(citationCandidates);
     }

@@ -323,7 +323,10 @@ public class LocalStoreService {
         return parsedDir;
     }
 
-    Path indexDirectory() {
+    /**
+     * Returns the root directory for chunk markers and file-level ingestion state.
+     */
+    public Path indexDirectory() {
         return indexDir;
     }
 

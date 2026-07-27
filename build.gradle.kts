@@ -192,7 +192,7 @@ tasks.withType<Test> {
 
 // Unit test task - exclude integration tests
 tasks.test {
-    environment("GITHUB_TOKEN", "test-token")
+    environment("OPENAI_API_KEY", "test-token")
     useJUnitPlatform {
         excludeTags("integration")
     }

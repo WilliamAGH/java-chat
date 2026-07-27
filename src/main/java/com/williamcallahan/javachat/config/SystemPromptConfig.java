@@ -105,7 +105,7 @@ public class SystemPromptConfig {
     }
 
     /**
-     * Core system prompt shared by all models (OpenAI, GitHub Models, etc.)
+     * Core system prompt shared by supported OpenAI models.
      */
     public String getCoreSystemPrompt() {
         return CORE_PROMPT_TEMPLATE

@@ -25,7 +25,8 @@ corpus_indexed_summary() {
         parsed_count=$(find "$parsed_dir" -type f -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
     fi
     if [ -d "$index_dir" ]; then
-        indexed_count=$(find "$index_dir" -maxdepth 1 -type f ! -name "file_*.marker" 2>/dev/null | wc -l | tr -d ' ')
+        indexed_count=$(find "$index_dir" -maxdepth 1 -type f 2>/dev/null \
+            | awk 'BEGIN { count = 0 } /\/[0-9a-f]{64}$/ { count++ } END { print count }')
     fi
 
     echo "${indexed_count} indexed / ${parsed_count} parsed"

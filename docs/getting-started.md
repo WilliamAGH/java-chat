@@ -19,12 +19,8 @@ cp .env.example .env
 `java-chat-qwen3-embedding-4b-2560-*` collection names, and repository-local generation state roots.
 Configure the shared gateway `OPENAI_BASE_URL` and `OPENAI_API_KEY` used by embeddings and gateway chat.
 
-Select one chat provider with its matching chat credential:
-
-- GitHub Models: `LLM_PRIMARY_PROVIDER=github_models` and `GITHUB_TOKEN`
-- OpenAI: `LLM_PRIMARY_PROVIDER=openai` and `OPENAI_API_KEY`
-
-Java Chat does not dispatch a failed request to another provider.
+Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and the fixed `OPENAI_MODEL=gpt-5.4`.
+Java Chat uses the shared gateway only and does not dispatch failed requests to another provider.
 
 3) Start the fresh generation-specific Qdrant 1.18.3 Compose project (optional but required for full RAG):
 

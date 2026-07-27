@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 
 /**
  * OpenAI-compatible embedding client that fails fast on provider errors.
@@ -34,7 +35,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class);
 
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 60;
+    private static final int LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 8;
     private static final int BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 600;
     private static final int MAX_ERROR_SNIPPET = 512;
     private static final String OPENAI_API_VERSION_SUFFIX = "/v1";
@@ -49,6 +50,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private final Semaphore batchRequestPermits;
     private final RequestLaunchPacer liveRequestLaunchPacer;
     private final RequestLaunchPacer batchRequestLaunchPacer;
+    private final RateLimitDecisionResolver rateLimitDecisionResolver;
     private final Duration liveRequestTimeout;
     private final Duration batchRequestTimeout;
     private final AtomicInteger activeForegroundEmbeddingCount = new AtomicInteger();
@@ -110,45 +112,86 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final class RequestLaunchPacer {
         private final Semaphore pacingPermit = new Semaphore(1, true);
         private final long minimumLaunchIntervalNanos;
+        private final EmbeddingProviderCooldown providerCooldown;
         private boolean requestHasLaunched;
         private long previousRequestLaunchNanos;
 
-        private RequestLaunchPacer(double requestsPerSecond) {
+        private RequestLaunchPacer(double requestsPerSecond, EmbeddingProviderCooldown providerCooldown) {
             validateRequestRate(requestsPerSecond);
             minimumLaunchIntervalNanos = Math.max(1L, (long) Math.ceil(NANOSECONDS_PER_SECOND / requestsPerSecond));
+            this.providerCooldown = Objects.requireNonNull(providerCooldown, "providerCooldown");
         }
 
         private CompletableFuture<CreateEmbeddingResponse> dispatch(
                 long requestDeadlineNanos,
                 Supplier<CompletableFuture<CreateEmbeddingResponse>> embeddingRequestDispatch)
                 throws InterruptedException {
+            rejectActiveProviderCooldown();
             if (!pacingPermit.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
-                throw new EmbeddingServiceUnavailableException(
+                throw new EmbeddingServiceTemporarilyUnavailableException(
                         "Gateway embedding request pacing exceeded the request deadline");
             }
             try {
+                rejectActiveProviderCooldown();
                 waitForMinimumLaunchInterval(requestDeadlineNanos);
-                try {
-                    return embeddingRequestDispatch.get();
-                } finally {
-                    previousRequestLaunchNanos = System.nanoTime();
-                    requestHasLaunched = true;
-                }
+                CompletableFuture<CreateEmbeddingResponse> embeddingResponseFuture =
+                        providerCooldown.dispatch(embeddingRequestDispatch);
+                previousRequestLaunchNanos = System.nanoTime();
+                requestHasLaunched = true;
+                return embeddingResponseFuture;
             } finally {
                 pacingPermit.release();
             }
         }
 
         private void waitForMinimumLaunchInterval(long requestDeadlineNanos) throws InterruptedException {
-            while (requestHasLaunched) {
-                long elapsedSincePreviousLaunchNanos = System.nanoTime() - previousRequestLaunchNanos;
-                long remainingLaunchIntervalNanos = minimumLaunchIntervalNanos - elapsedSincePreviousLaunchNanos;
-                if (remainingLaunchIntervalNanos <= 0) {
+            while (true) {
+                long pacingDeadlineNanos =
+                        requestHasLaunched ? saturatedAdd(previousRequestLaunchNanos, minimumLaunchIntervalNanos) : 0;
+                long remainingLaunchDelayNanos = pacingDeadlineNanos - System.nanoTime();
+                if (remainingLaunchDelayNanos <= 0) {
                     return;
                 }
                 long remainingDeadlineNanos = remainingRequestNanos(requestDeadlineNanos);
-                TimeUnit.NANOSECONDS.sleep(Math.min(remainingLaunchIntervalNanos, remainingDeadlineNanos));
+                TimeUnit.NANOSECONDS.sleep(Math.min(remainingLaunchDelayNanos, remainingDeadlineNanos));
             }
+        }
+
+        private void rejectActiveProviderCooldown() {
+            providerCooldown.rejectActive();
+        }
+
+        private void recordProviderCooldown(long retryAfterSeconds) {
+            providerCooldown.record(retryAfterSeconds);
+        }
+    }
+
+    /** Owns the Retry-After window shared by every tier on the embedding endpoint. */
+    private static final class EmbeddingProviderCooldown {
+        private long providerCooldownDeadlineNanos;
+
+        private synchronized CompletableFuture<CreateEmbeddingResponse> dispatch(
+                Supplier<CompletableFuture<CreateEmbeddingResponse>> embeddingRequestDispatch) {
+            rejectActive();
+            return embeddingRequestDispatch.get();
+        }
+
+        private synchronized void rejectActive() {
+            long remainingCooldownNanos = providerCooldownDeadlineNanos - System.nanoTime();
+            if (remainingCooldownNanos > 0) {
+                long retryAfterSeconds = Math.max(1L, TimeUnit.NANOSECONDS.toSeconds(remainingCooldownNanos));
+                throw new EmbeddingServiceTemporarilyUnavailableException(
+                        "Remote embedding provider is rate limited; retry after " + retryAfterSeconds + " seconds");
+            }
+        }
+
+        private synchronized void record(long retryAfterSeconds) {
+            if (retryAfterSeconds <= 0) {
+                return;
+            }
+            long cooldownDurationNanos = TimeUnit.SECONDS.toNanos(retryAfterSeconds);
+            long cooldownDeadlineNanos = saturatedAdd(System.nanoTime(), cooldownDurationNanos);
+            providerCooldownDeadlineNanos = Math.max(providerCooldownDeadlineNanos, cooldownDeadlineNanos);
         }
     }
 
@@ -189,6 +232,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
             boolean closeBatchEmbeddingClient) {
         this.liveEmbeddingClient = Objects.requireNonNull(liveEmbeddingClient, "liveEmbeddingClient");
         this.batchEmbeddingClient = Objects.requireNonNull(batchEmbeddingClient, "batchEmbeddingClient");
+        this.rateLimitDecisionResolver = new RateLimitDecisionResolver(new RateLimitHeaderParser());
         GatewaySettings requiredGatewaySettings = Objects.requireNonNull(gatewaySettings, "gatewaySettings");
         this.modelName = requiredGatewaySettings.modelName();
         this.dimensionsHint = requiredGatewaySettings.dimensions();
@@ -197,8 +241,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         RequestLimits batchLimits = requiredGatewaySettings.batchRequestLimits();
         this.liveRequestPermits = new Semaphore(liveLimits.maxConcurrentRequests(), true);
         this.batchRequestPermits = new Semaphore(batchLimits.maxConcurrentRequests(), true);
-        this.liveRequestLaunchPacer = new RequestLaunchPacer(liveLimits.requestsPerSecond());
-        this.batchRequestLaunchPacer = new RequestLaunchPacer(batchLimits.requestsPerSecond());
+        this.liveRequestLaunchPacer =
+                new RequestLaunchPacer(liveLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
+        this.batchRequestLaunchPacer =
+                new RequestLaunchPacer(batchLimits.requestsPerSecond(), new EmbeddingProviderCooldown());
         this.liveRequestTimeout = liveLimits.totalTimeout();
         this.batchRequestTimeout = batchLimits.totalTimeout();
         log.info(
@@ -257,7 +303,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         boolean requestPermitAcquired = false;
         try {
             if (!requestPermits.tryAcquire(remainingRequestNanos(requestDeadlineNanos), TimeUnit.NANOSECONDS)) {
-                throw new EmbeddingServiceUnavailableException(
+                throw new EmbeddingServiceTemporarilyUnavailableException(
                         "Gateway embedding request concurrency limit exceeded the request deadline");
             }
             requestPermitAcquired = true;
@@ -270,15 +316,19 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
                                     RequestOptions.builder()
                                             .timeout(embeddingTimeout(remainingRequestDuration(requestDeadlineNanos)))
                                             .build()));
-            embeddingResponseFuture.whenComplete(
-                    (completedEmbeddingResponse, embeddingFailure) -> requestPermits.release());
+            CompletableFuture<CreateEmbeddingResponse> accountedEmbeddingResponseFuture =
+                    embeddingResponseFuture.whenComplete((completedEmbeddingResponse, embeddingFailure) -> {
+                        recordProviderCooldownFromFutureFailure(embeddingFailure, requestTier);
+                        requestPermits.release();
+                    });
             requestPermitAcquired = false;
-            return execute(embeddingResponseFuture, texts.size(), requestDeadlineNanos);
+            return execute(accountedEmbeddingResponseFuture, texts.size(), requestDeadlineNanos);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
-            throw new EmbeddingServiceUnavailableException(
+            throw new EmbeddingServiceTemporarilyUnavailableException(
                     "Interrupted during gateway embedding request admission or completion", interruptedException);
         } catch (OpenAIServiceException exception) {
+            recordProviderCooldown(exception, requestTier);
             throw wrapServiceError(exception);
         } catch (OpenAIRetryableException exception) {
             throw wrapRetryableError(exception);
@@ -305,7 +355,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         } catch (InterruptedException interruptedException) {
             throw interruptedException;
         } catch (TimeoutException timeoutException) {
-            throw new EmbeddingServiceUnavailableException(
+            throw new EmbeddingServiceTemporarilyUnavailableException(
                     "Gateway embedding request exceeded the whole-operation deadline", timeoutException);
         } catch (ExecutionException executionException) {
             throw wrapAsyncFailure(executionException.getCause());
@@ -329,23 +379,65 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
         if (providerFailure instanceof RuntimeException runtimeException) {
             return wrapFatalError(runtimeException);
         }
-        return new EmbeddingServiceUnavailableException("Remote embedding request failed", providerFailure);
+        return new EmbeddingServiceTemporarilyUnavailableException("Remote embedding request failed", providerFailure);
     }
 
     private EmbeddingServiceUnavailableException wrapServiceError(OpenAIServiceException exception) {
         int statusCode = exception.statusCode();
+        if (statusCode == HttpStatus.TOO_MANY_REQUESTS.value()) {
+            try {
+                rateLimitDecisionResolver.resolveFromOpenAiRetryAfterHeaders(exception.headers());
+            } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+                rateLimitDecisionFailure.addSuppressed(exception);
+                return new EmbeddingServiceTemporarilyUnavailableException(
+                        "Remote embedding provider returned HTTP 429 without authoritative retry timing",
+                        rateLimitDecisionFailure);
+            }
+        }
         String details = sanitizeMessage(exception.getMessage());
         String failureMessage = details.isBlank()
                 ? "Remote embedding provider returned HTTP " + statusCode
                 : "Remote embedding provider returned HTTP " + statusCode + ": " + details;
+        if (statusCode == HttpStatus.REQUEST_TIMEOUT.value()
+                || statusCode == HttpStatus.CONFLICT.value()
+                || statusCode == HttpStatus.TOO_MANY_REQUESTS.value()
+                || statusCode >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+            return new EmbeddingServiceTemporarilyUnavailableException(failureMessage, exception);
+        }
         return new EmbeddingServiceUnavailableException(failureMessage, exception);
+    }
+
+    private void recordProviderCooldownFromFutureFailure(Throwable embeddingFailure, LlmGatewayTier requestTier) {
+        Throwable providerFailure = embeddingFailure;
+        while (providerFailure instanceof CompletionException && providerFailure.getCause() != null) {
+            providerFailure = providerFailure.getCause();
+        }
+        if (providerFailure instanceof OpenAIServiceException serviceException) {
+            recordProviderCooldown(serviceException, requestTier);
+        }
+    }
+
+    private void recordProviderCooldown(OpenAIServiceException serviceException, LlmGatewayTier requestTier) {
+        if (serviceException.statusCode() != HttpStatus.TOO_MANY_REQUESTS.value()) {
+            return;
+        }
+        try {
+            RateLimitDecision rateLimitDecision =
+                    rateLimitDecisionResolver.resolveFromOpenAiRetryAfterHeaders(serviceException.headers());
+            requestLaunchPacerFor(requestTier).recordProviderCooldown(rateLimitDecision.retryAfterSeconds());
+        } catch (RateLimitDecisionException rateLimitDecisionFailure) {
+            log.warn(
+                    "[EMBEDDING] HTTP 429 omitted authoritative retry timing (tier={})",
+                    requestTier.requestHeader(),
+                    rateLimitDecisionFailure);
+        }
     }
 
     private EmbeddingServiceUnavailableException wrapRetryableError(OpenAIRetryableException exception) {
         String details = sanitizeMessage(exception.getMessage());
         String failureMessage =
                 details.isBlank() ? "Remote embedding request failed" : "Remote embedding request failed: " + details;
-        return new EmbeddingServiceUnavailableException(failureMessage, exception);
+        return new EmbeddingServiceTemporarilyUnavailableException(failureMessage, exception);
     }
 
     private EmbeddingServiceUnavailableException wrapFatalError(RuntimeException exception) {
@@ -533,9 +625,18 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static long remainingRequestNanos(long requestDeadlineNanos) {
         long remainingNanos = requestDeadlineNanos - System.nanoTime();
         if (remainingNanos <= 0) {
-            throw new EmbeddingServiceUnavailableException("Gateway embedding request deadline elapsed locally");
+            throw new EmbeddingServiceTemporarilyUnavailableException(
+                    "Gateway embedding request deadline elapsed locally");
         }
         return remainingNanos;
+    }
+
+    private static long saturatedAdd(long leftOperand, long rightOperand) {
+        long sum = leftOperand + rightOperand;
+        if (((leftOperand ^ sum) & (rightOperand ^ sum)) < 0) {
+            return Long.MAX_VALUE;
+        }
+        return sum;
     }
 
     private static Duration remainingRequestDuration(long requestDeadlineNanos) {

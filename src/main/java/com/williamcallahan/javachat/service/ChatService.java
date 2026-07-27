@@ -141,23 +141,17 @@ public class ChatService {
      *
      * @param history existing chat history
      * @param latestUserMessage user query
-     * @param modelHint optional model hint for RAG optimization
      * @return structured prompt outcome with segments and retrieval metadata
      */
     public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
-            List<Message> history, String latestUserMessage, String modelHint) {
+            List<Message> history, String latestUserMessage) {
 
-        // Use reduced RAG for token-constrained models (GPT-5.x family)
-        RetrievalService.RetrievalOutcome retrievalOutcome;
-        if (ModelConfiguration.isTokenConstrained(modelHint)) {
-            retrievalOutcome = retrieveTokenConstrainedOfficialDocumentation(latestUserMessage);
-            logger.debug(
-                    "Using reduced RAG: {} documents with max {} tokens each",
-                    retrievalOutcome.documents().size(),
-                    ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
-        } else {
-            retrievalOutcome = retrievalService.retrieveOutcome(latestUserMessage, officialDocumentationConstraint());
-        }
+        RetrievalService.RetrievalOutcome retrievalOutcome =
+                retrieveTokenConstrainedOfficialDocumentation(latestUserMessage);
+        logger.debug(
+                "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
+                retrievalOutcome.documents().size(),
+                ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED);
 
         List<Document> contextDocs = retrievalOutcome.documents();
         String searchQualityNote = determineSearchQuality(contextDocs);

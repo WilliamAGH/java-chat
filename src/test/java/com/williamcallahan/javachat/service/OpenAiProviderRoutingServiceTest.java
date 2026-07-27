@@ -24,6 +24,7 @@ import com.openai.errors.UnauthorizedException;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.ConfiguredProviderBackoff;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
+import io.grpc.Status;
 import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -61,8 +62,7 @@ class OpenAiProviderRoutingServiceTest {
 
     private OpenAiProviderRoutingService createRoutingService() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        return new OpenAiProviderRoutingService(
-                rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        return new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
     }
 
     @Test
@@ -98,18 +98,17 @@ class OpenAiProviderRoutingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.OPENAI.getName());
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedCallerInterruption());
 
-        OpenAiProviderCandidate configuredProvider = routingService
-                .admitConfiguredProviderRequest(githubModelsClient, openAiClient)
-                .orElseThrow();
+        OpenAiProviderCandidate configuredProvider =
+                routingService.admitConfiguredProviderRequest(openAiClient).orElseThrow();
         assertEquals(RateLimitService.ApiProvider.OPENAI, configuredProvider.provider());
     }
 
@@ -132,17 +131,17 @@ class OpenAiProviderRoutingServiceTest {
 
         for (RuntimeException permanentProviderFailure : permanentProviderFailures) {
             RateLimitService rateLimitService = mock(RateLimitService.class);
-            when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+            when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                     .thenReturn(true);
             OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
-            OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+            OpenAIClient configuredClient = mock(OpenAIClient.class);
 
-            routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, permanentProviderFailure);
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, permanentProviderFailure);
 
             OpenAiProviderCandidate providerAdmission = routingService
-                    .admitConfiguredProviderRequest(githubModelsClient, null)
+                    .admitConfiguredProviderRequest(configuredClient)
                     .orElseThrow();
-            assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, providerAdmission.provider());
+            assertEquals(RateLimitService.ApiProvider.OPENAI, providerAdmission.provider());
             assertFalse(routingService.shouldBackoffConfiguredProvider(permanentProviderFailure));
             assertFalse(routingService.isRecoverableStreamingFailure(permanentProviderFailure));
         }
@@ -151,24 +150,22 @@ class OpenAiProviderRoutingServiceTest {
     @Test
     void rateLimitFailureUsesRateLimitServiceWithoutStartingFixedCooldown() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
         RateLimitException rateLimitFailure =
                 RateLimitException.builder().headers(Headers.builder().build()).build();
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         assertFalse(routingService.shouldBackoffConfiguredProvider(rateLimitFailure));
 
-        routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, rateLimitFailure);
+        routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, rateLimitFailure);
 
         verify(rateLimitService)
-                .recordRateLimitFromOpenAiServiceException(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, rateLimitFailure);
-        OpenAiProviderCandidate providerAdmission = routingService
-                .admitConfiguredProviderRequest(githubModelsClient, null)
-                .orElseThrow();
-        assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, providerAdmission.provider());
+                .recordRateLimitFromOpenAiServiceException(RateLimitService.ApiProvider.OPENAI, rateLimitFailure);
+        OpenAiProviderCandidate providerAdmission =
+                routingService.admitConfiguredProviderRequest(configuredClient).orElseThrow();
+        assertEquals(RateLimitService.ApiProvider.OPENAI, providerAdmission.provider());
     }
 
     @Test
@@ -203,6 +200,34 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService = createRoutingService();
 
         assertFalse(routingService.isRecoverableStreamingFailure(new IllegalArgumentException("bad request payload")));
+        assertFalse(routingService.isRecoverableStreamingFailure(
+                new EmbeddingServiceUnavailableException("embedding dimension mismatch")));
+    }
+
+    @Test
+    void recoverableStreamingFailureUsesTypedEmbeddingAndQdrantDisposition() {
+        OpenAiProviderRoutingService routingService = createRoutingService();
+        HybridSearchPartialFailureException transientRetrievalFailure = new HybridSearchPartialFailureException(
+                "temporary Qdrant failure",
+                List.of(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-docs",
+                        "StatusRuntimeException",
+                        "unavailable",
+                        HybridSearchPartialFailureException.classifyDependencyFailure(
+                                Status.UNAVAILABLE.asRuntimeException()))));
+        HybridSearchPartialFailureException permanentRetrievalFailure = new HybridSearchPartialFailureException(
+                "permanent Qdrant failure",
+                List.of(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-docs",
+                        "StatusRuntimeException",
+                        "permission denied",
+                        HybridSearchPartialFailureException.classifyDependencyFailure(
+                                Status.PERMISSION_DENIED.asRuntimeException()))));
+
+        assertTrue(routingService.isRecoverableStreamingFailure(
+                new EmbeddingServiceTemporarilyUnavailableException("embedding cooldown")));
+        assertTrue(routingService.isRecoverableStreamingFailure(transientRetrievalFailure));
+        assertFalse(routingService.isRecoverableStreamingFailure(permanentRetrievalFailure));
     }
 
     @Test
@@ -233,8 +258,8 @@ class OpenAiProviderRoutingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.OPENAI.getName());
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
         InternalServerException gatewayTimeout = InternalServerException.builder()
                 .statusCode(504)
@@ -247,7 +272,7 @@ class OpenAiProviderRoutingServiceTest {
 
             temporaryFailure = assertThrows(
                     ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(null, openAiClient));
+                    () -> routingService.admitConfiguredProviderRequest(openAiClient));
 
             assertWarningMessages(
                     expectedLogEvents,
@@ -265,19 +290,19 @@ class OpenAiProviderRoutingServiceTest {
         RateLimitService rateLimitService = mock(RateLimitService.class);
         when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.OPENAI.getName());
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
             routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));
 
             assertThrows(
                     ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, openAiClient));
+                    () -> routingService.admitConfiguredProviderRequest(openAiClient));
 
             assertWarningMessages(
                     expectedLogEvents,
@@ -290,20 +315,23 @@ class OpenAiProviderRoutingServiceTest {
     @Test
     void rateLimitAdmissionDenialIsRetryable() {
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(false);
         OpenAiProviderRoutingService routingService = createRoutingService(rateLimitService);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         ConfiguredProviderTemporarilyUnavailableException temporaryFailure;
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
             temporaryFailure = assertThrows(
                     ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
-            assertWarningMessages(expectedLogEvents, List.of("Configured provider admission denied (providerId=1)"));
+                    () -> routingService.admitConfiguredProviderRequest(configuredClient));
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of("Configured provider admission denied (providerId="
+                            + RateLimitService.ApiProvider.OPENAI.ordinal() + ")"));
         }
 
-        assertEquals(RateLimitService.ApiProvider.GITHUB_MODELS, temporaryFailure.provider());
+        assertEquals(RateLimitService.ApiProvider.OPENAI, temporaryFailure.provider());
         assertTrue(routingService.isRecoverableStreamingFailure(temporaryFailure));
     }
 
@@ -311,34 +339,64 @@ class OpenAiProviderRoutingServiceTest {
     void configuredProviderCooldownExpiresAtItsExactDeadline() {
         AtomicReference<Instant> currentTime = new AtomicReference<>(CONFIGURED_PROVIDER_BACKOFF_START);
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService,
-                configuredAppProperties(),
-                RateLimitService.ApiProvider.GITHUB_MODELS.getName(),
-                currentTime::get);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties(), currentTime::get);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
-            routingService.recordProviderFailure(RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeoutFailure());
             currentTime.set(CONFIGURED_PROVIDER_BACKOFF_START
                     .plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS)
                     .minusNanos(1));
 
             assertThrows(
                     ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+                    () -> routingService.admitConfiguredProviderRequest(configuredClient));
 
             currentTime.set(CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS));
 
-            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(configuredClient));
             assertWarningMessages(
                     expectedLogEvents,
                     List.of(
                             "Configured provider temporarily disabled for 600s due to failure",
-                            "Configured provider unavailable (backoff active, providerId=1)"));
+                            "Configured provider unavailable (backoff active, providerId="
+                                    + RateLimitService.ApiProvider.OPENAI.ordinal() + ")"));
         }
+    }
+
+    @Test
+    void olderInFlightSuccessDoesNotEraseNewerConfiguredProviderCooldown() {
+        AtomicReference<Instant> currentTime = new AtomicReference<>(CONFIGURED_PROVIDER_BACKOFF_START);
+        RateLimitService rateLimitService = mock(RateLimitService.class);
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
+                .thenReturn(true);
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties(), currentTime::get);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
+
+        try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
+            routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeoutFailure());
+            routingService.recordProviderSuccess(RateLimitService.ApiProvider.OPENAI);
+
+            assertThrows(
+                    ConfiguredProviderTemporarilyUnavailableException.class,
+                    () -> routingService.admitConfiguredProviderRequest(configuredClient));
+
+            currentTime.set(CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS));
+
+            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(configuredClient));
+            assertWarningMessages(
+                    expectedLogEvents,
+                    List.of(
+                            "Configured provider temporarily disabled for 600s due to failure",
+                            "Configured provider unavailable (backoff active, providerId="
+                                    + RateLimitService.ApiProvider.OPENAI.ordinal() + ")"));
+        }
+
+        verify(rateLimitService).recordSuccess(RateLimitService.ApiProvider.OPENAI);
     }
 
     @Test
@@ -353,27 +411,22 @@ class OpenAiProviderRoutingServiceTest {
             default -> admissionTime.get();
         };
         RateLimitService rateLimitService = mock(RateLimitService.class);
-        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.GITHUB_MODELS))
+        when(rateLimitService.tryReserveRequest(RateLimitService.ApiProvider.OPENAI))
                 .thenReturn(true);
-        OpenAiProviderRoutingService routingService = new OpenAiProviderRoutingService(
-                rateLimitService,
-                configuredAppProperties(),
-                RateLimitService.ApiProvider.GITHUB_MODELS.getName(),
-                sequencedInstantSource);
-        OpenAIClient githubModelsClient = mock(OpenAIClient.class);
+        OpenAiProviderRoutingService routingService =
+                new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties(), sequencedInstantSource);
+        OpenAIClient configuredClient = mock(OpenAIClient.class);
         ExecutorService failureRecorder = Executors.newFixedThreadPool(CONCURRENT_FAILURE_RECORDERS);
         CyclicBarrier failureStartBarrier = new CyclicBarrier(CONCURRENT_FAILURE_RECORDERS);
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
             Future<?> firstFailureRecording = failureRecorder.submit(() -> {
                 failureStartBarrier.await();
-                routingService.recordProviderFailure(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+                routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeoutFailure());
                 return null;
             });
             Future<?> secondFailureRecording = failureRecorder.submit(() -> {
                 failureStartBarrier.await();
-                routingService.recordProviderFailure(
-                        RateLimitService.ApiProvider.GITHUB_MODELS, gatewayTimeoutFailure());
+                routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, gatewayTimeoutFailure());
                 return null;
             });
 
@@ -382,43 +435,21 @@ class OpenAiProviderRoutingServiceTest {
 
             assertThrows(
                     ConfiguredProviderTemporarilyUnavailableException.class,
-                    () -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+                    () -> routingService.admitConfiguredProviderRequest(configuredClient));
 
             admissionTime.set(CONFIGURED_PROVIDER_BACKOFF_START.plusSeconds(CONFIGURED_PROVIDER_BACKOFF_SECONDS + 1));
 
-            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(githubModelsClient, null));
+            assertDoesNotThrow(() -> routingService.admitConfiguredProviderRequest(configuredClient));
             assertWarningMessages(
                     expectedLogEvents,
                     List.of(
                             "Configured provider temporarily disabled for 600s due to failure",
                             "Configured provider temporarily disabled for 601s due to failure",
-                            "Configured provider unavailable (backoff active, providerId=1)"));
+                            "Configured provider unavailable (backoff active, providerId="
+                                    + RateLimitService.ApiProvider.OPENAI.ordinal() + ")"));
         } finally {
             failureRecorder.shutdownNow();
         }
-    }
-
-    @Test
-    void rejectsBlankProviderConfigurationDuringConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiProviderRoutingService(mock(RateLimitService.class), configuredAppProperties(), "   "));
-
-        assertEquals(
-                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received a blank value.",
-                configurationFailure.getMessage());
-    }
-
-    @Test
-    void rejectsUnknownProviderConfigurationDuringConstruction() {
-        IllegalArgumentException configurationFailure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new OpenAiProviderRoutingService(
-                        mock(RateLimitService.class), configuredAppProperties(), "unsupported-provider"));
-
-        assertEquals(
-                "LLM_PRIMARY_PROVIDER must be 'github_models' or 'openai'; received 'unsupported-provider'.",
-                configurationFailure.getMessage());
     }
 
     @Test
@@ -428,14 +459,12 @@ class OpenAiProviderRoutingServiceTest {
                 () -> new OpenAiProviderRoutingService(
                         mock(RateLimitService.class),
                         configuredAppProperties(0),
-                        RateLimitService.ApiProvider.OPENAI.getName(),
                         InstantSource.fixed(CONFIGURED_PROVIDER_BACKOFF_START)));
         IllegalArgumentException negativeBackoffFailure = assertThrows(
                 IllegalArgumentException.class,
                 () -> new OpenAiProviderRoutingService(
                         mock(RateLimitService.class),
                         configuredAppProperties(-1),
-                        RateLimitService.ApiProvider.OPENAI.getName(),
                         InstantSource.fixed(CONFIGURED_PROVIDER_BACKOFF_START)));
 
         assertEquals(expectedConfiguredProviderBackoffFailureMessage(0), zeroBackoffFailure.getMessage());
@@ -453,8 +482,7 @@ class OpenAiProviderRoutingServiceTest {
     }
 
     private OpenAiProviderRoutingService createRoutingService(RateLimitService rateLimitService) {
-        return new OpenAiProviderRoutingService(
-                rateLimitService, configuredAppProperties(), RateLimitService.ApiProvider.GITHUB_MODELS.getName());
+        return new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
     }
 
     private static InternalServerException gatewayTimeoutFailure() {

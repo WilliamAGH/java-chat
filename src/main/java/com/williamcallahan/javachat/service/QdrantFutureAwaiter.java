@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -31,5 +32,62 @@ final class QdrantFutureAwaiter {
             throw new IllegalStateException(
                     "Qdrant operation timed out after " + timeoutSeconds + "s", timeoutException);
         }
+    }
+
+    static <T> T awaitFuture(CompletableFuture<T> future, long timeoutNanos) {
+        try {
+            return future.get(timeoutNanos, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException interruptedFailure) {
+            Thread.currentThread().interrupt();
+            throw QdrantFutureAwaitException.interrupted(interruptedFailure);
+        } catch (ExecutionException executionFailure) {
+            Throwable dependencyFailure = executionFailure.getCause();
+            throw QdrantFutureAwaitException.dependency(
+                    dependencyFailure == null ? executionFailure : dependencyFailure);
+        } catch (TimeoutException timeoutFailure) {
+            throw QdrantFutureAwaitException.timedOut(timeoutFailure);
+        }
+    }
+
+    static <T> CompletableFuture<T> exhaustedQueryBudgetFuture() {
+        return CompletableFuture.failedFuture(
+                new TimeoutException("Query budget was exhausted before this collection was dispatched"));
+    }
+
+    /** Preserves the typed disposition of a failed CompletableFuture wait. */
+    static final class QdrantFutureAwaitException extends RuntimeException {
+        private final AwaitDisposition awaitDisposition;
+
+        private QdrantFutureAwaitException(AwaitDisposition awaitDisposition, Throwable cause) {
+            super(cause);
+            this.awaitDisposition = awaitDisposition;
+        }
+
+        private static QdrantFutureAwaitException interrupted(Throwable cause) {
+            return new QdrantFutureAwaitException(AwaitDisposition.INTERRUPTED, cause);
+        }
+
+        private static QdrantFutureAwaitException dependency(Throwable cause) {
+            return new QdrantFutureAwaitException(AwaitDisposition.DEPENDENCY_FAILURE, cause);
+        }
+
+        private static QdrantFutureAwaitException timedOut(Throwable cause) {
+            return new QdrantFutureAwaitException(AwaitDisposition.TIMED_OUT, cause);
+        }
+
+        boolean interrupted() {
+            return awaitDisposition == AwaitDisposition.INTERRUPTED;
+        }
+
+        boolean timedOut() {
+            return awaitDisposition == AwaitDisposition.TIMED_OUT;
+        }
+    }
+
+    /** Distinguishes dependency, timeout, and thread-interruption wait outcomes. */
+    private enum AwaitDisposition {
+        INTERRUPTED,
+        DEPENDENCY_FAILURE,
+        TIMED_OUT
     }
 }

@@ -3,6 +3,8 @@
 
 ruleDirs:
   - ast-grep
+testConfigs:
+  - testDir: ast-grep-tests
 languageGlobs:
   tsx:
     - "**/*.tsx"

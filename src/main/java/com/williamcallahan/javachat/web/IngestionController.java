@@ -2,6 +2,7 @@ package com.williamcallahan.javachat.web;
 
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
 import com.williamcallahan.javachat.application.ingestion.FileLimit;
+import com.williamcallahan.javachat.application.ingestion.LocalDocumentationIngestionUseCase;
 import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.domain.ingestion.IngestionErrorResponse;
 import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
@@ -35,14 +36,18 @@ public class IngestionController extends BaseController {
     private static final int MAX_ALLOWED_PAGES = 10000;
 
     private final DocumentationIngestionUseCase documentationIngestionUseCase;
+    private final LocalDocumentationIngestionUseCase localDocumentationIngestionUseCase;
 
     /**
      * Creates the ingestion controller backed by the ingestion service and shared error response builder.
      */
     public IngestionController(
-            DocumentationIngestionUseCase documentationIngestionUseCase, ExceptionResponseBuilder exceptionBuilder) {
+            DocumentationIngestionUseCase documentationIngestionUseCase,
+            LocalDocumentationIngestionUseCase localDocumentationIngestionUseCase,
+            ExceptionResponseBuilder exceptionBuilder) {
         super(exceptionBuilder);
         this.documentationIngestionUseCase = documentationIngestionUseCase;
+        this.localDocumentationIngestionUseCase = localDocumentationIngestionUseCase;
     }
 
     /**
@@ -86,7 +91,8 @@ public class IngestionController extends BaseController {
             @RequestParam(name = "maxFiles", defaultValue = "50000") @Min(1) @Max(1000000) int maxFiles) {
         try {
             FileLimit fileLimit = new FileLimit(maxFiles);
-            IngestionLocalOutcome outcome = documentationIngestionUseCase.ingestLocalDirectory(directory, fileLimit);
+            IngestionLocalOutcome outcome =
+                    localDocumentationIngestionUseCase.ingestLocalDirectory(directory, fileLimit);
             return ResponseEntity.ok(outcome);
         } catch (IllegalArgumentException illegalArgumentException) {
             return buildIngestionValidationError(illegalArgumentException);

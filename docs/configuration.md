@@ -9,24 +9,18 @@ For defaults, see `src/main/resources/application.properties`.
 - `PORT` (default `8085`) is restricted to `8085–8090` (see `server.port` and the app’s port initializer).
 - CLI ingestion profiles (`cli`, `cli-github`) run in non-web mode and do not bind an HTTP port.
 
-## LLM providers (streaming chat)
+## LLM gateway (streaming chat)
 
-Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) and supports:
-
-- **GitHub Models** via `GITHUB_TOKEN`
-- **OpenAI** via `OPENAI_API_KEY`
-
-`LLM_PRIMARY_PROVIDER` selects the only provider used for chat: `github_models` (the default when unset) or `openai`. An explicitly blank or unsupported value fails application startup. Credential, rate-limit, and upstream failures are surfaced; Java Chat never dispatches a request to another provider.
+Streaming uses the OpenAI Java SDK (`OpenAIStreamingService`) against the one explicitly
+shared OpenAI-compatible gateway. Credential, rate-limit, and upstream failures are
+surfaced; Java Chat has no alternate chat provider.
 
 Common variables:
 
-- `GITHUB_TOKEN` (GitHub Models auth)
-- `GITHUB_MODELS_BASE_URL` (default `https://models.github.ai/inference/v1`)
-- `GITHUB_MODELS_CHAT_MODEL` (default `openai/gpt-5`)
-- `OPENAI_API_KEY` (OpenAI auth)
+- `OPENAI_API_KEY` (shared-gateway auth)
 - `OPENAI_BASE_URL` (`https://api.llm-gateway.iocloudhost.net/v1` for Java Chat deployments)
-- `OPENAI_MODEL` (default `gpt-5.2`; chat only)
-- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call while provider gateways own first-output and inter-output deadlines)
+- `OPENAI_MODEL` (required value `gpt-5.4`; any other value fails startup)
+- `OPENAI_STREAMING_REQUEST_TIMEOUT_SECONDS` (default `600`; bounds the complete SDK call)
 
 Non-secret generation policy is owned by `app.llm` in `application.properties`: `temperature`, `reasoning-effort`, `completion-output-token-budget`, `enrichment-output-token-budget`, `reranker-temperature`, `reranker-output-token-budget`, and `configured-provider-backoff-seconds`. Invalid values fail startup. Supported reasoning-effort subsets vary by model, so check the [OpenAI model page](https://developers.openai.com/api/docs/models) for the configured model.
 
@@ -35,24 +29,23 @@ Non-secret generation policy is owned by `app.llm` in `application.properties`: 
 Configure chat through the shared gateway with:
 
 ```dotenv
-LLM_PRIMARY_PROVIDER=openai
 OPENAI_API_KEY=lgw-...
 OPENAI_BASE_URL=https://api.llm-gateway.iocloudhost.net/v1
-OPENAI_MODEL=gpt-5.2
+OPENAI_MODEL=gpt-5.4
 ```
 
-Java Chat sends chat and embedding requests to the same configured gateway URL and credential. `OPENAI_MODEL`, `LLM_PRIMARY_PROVIDER`, and `LLM_GATEWAY_TIER` affect chat only. Embeddings always use the application-owned `app.embeddings.model` and intent-specific tier described below.
+Java Chat sends chat and embedding requests to the same configured gateway URL and credential.
+`OPENAI_MODEL` and `LLM_GATEWAY_TIER` affect chat only. Embeddings always use the
+application-owned `app.embeddings.model` and intent-specific tier described below.
 
-### Provider notes
+### Gateway notes
 
-- GitHub Models uses `https://models.github.ai/inference` (the OpenAI SDK requires `/v1`, so the default is `.../inference/v1`).
-- GitHub Models model IDs should be provider-qualified (for example `openai/gpt-5`, `xai/grok-3-mini`).
 - The configured gateway base URL must end in `/v1`; the SDK appends `/embeddings` for embedding calls.
-- Avoid `azure.com`-style endpoints unless you are explicitly running an Azure OpenAI-compatible gateway; this project does not configure Azure by default.
+- A missing gateway URL fails startup; Java Chat never falls back to `api.openai.com`.
 
 ### Rate limiting
 
-- If GitHub Models returns `429`, wait until the configured provider is available. To use OpenAI instead, explicitly set `LLM_PRIMARY_PROVIDER=openai`, provide `OPENAI_API_KEY`, and restart the application.
+- A gateway `429` opens the provider-declared retry window and prevents new request admission until it expires.
 
 ## Embeddings
 
@@ -64,7 +57,9 @@ and ingestion/retrieval stops so invalid vectors are never cached.
 
 The normal runtime path uses `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `app.embeddings.model=qwen/qwen3-embedding-4b`. The model's native 2,560-dimensional output is required exactly. Retrieval requests send `X-Tier: production-z`; ingestion, probes, and warmups send `X-Tier: batch`. `OPENAI_MODEL` is never used for embeddings.
 
-The local embedding server remains an explicit development-only mode enabled by `APP_LOCAL_EMBEDDING_ENABLED=true`. There is no remote-provider fallback, separate remote credential, endpoint normalization, dimension remapping, padding, or alternate 8B route. `GITHUB_TOKEN` is never used for embeddings.
+The local embedding server remains an explicit development-only mode enabled by
+`APP_LOCAL_EMBEDDING_ENABLED=true`. There is no remote-provider fallback, separate remote
+credential, dimension remapping, padding, or alternate 8B route.
 
 Reprocessing note:
 

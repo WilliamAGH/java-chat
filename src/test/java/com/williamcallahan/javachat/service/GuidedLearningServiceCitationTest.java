@@ -54,7 +54,7 @@ class GuidedLearningServiceCitationTest {
     private static final String CURATED_LESSON_RESOURCE_DIRECTORY = "guided/lessons/";
     private static final String CURATED_LESSON_FILE_SUFFIX = ".md";
     private static final String CURATED_LESSON_IMMUTABILITY_HEADER = "[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]";
-    private static final int GITHUB_MODELS_GPT5_INPUT_TOKEN_LIMIT = 7_000;
+    private static final int GPT54_INPUT_TOKEN_LIMIT = 8_000;
 
     @Autowired
     ObjectMapper objectMapper;
@@ -366,7 +366,7 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
-    void largestPackagedLessonRetainsAuthoritativeSectionsUnderGitHubModelsGpt5InputBudget() throws IOException {
+    void largestPackagedLessonRetainsAuthoritativeSectionsUnderGpt54InputBudget() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
@@ -392,8 +392,8 @@ class GuidedLearningServiceCitationTest {
                         .map(ContextDocumentSegment::documentId)
                         .distinct()
                         .count());
-        PromptTruncator.TruncatedPrompt truncationOutcome = new PromptTruncator()
-                .truncate(promptOutcome.structuredPrompt(), GITHUB_MODELS_GPT5_INPUT_TOKEN_LIMIT, true);
+        PromptTruncator.TruncatedPrompt truncationOutcome =
+                new PromptTruncator().truncate(promptOutcome.structuredPrompt(), GPT54_INPUT_TOKEN_LIMIT);
         assertTrue(truncationOutcome.wasTruncated());
         assertTrue(truncationOutcome.contextDocumentCount() > 0);
         assertTrue(truncationOutcome.contextDocumentCount() < authoritativeLessonSections.size());

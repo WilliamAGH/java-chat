@@ -58,11 +58,11 @@ define load_env
 if [ -f .env ]; then source scripts/lib/env_loader.sh; preserve_process_env_then_source_file .env; fi
 endef
 
-# Validate API keys - exits with error if neither is set
+# Validate the shared-gateway chat credential.
 # Usage: $(call validate_api_keys)
 define validate_api_keys
-if [ -z "$$GITHUB_TOKEN" ] && [ -z "$$OPENAI_API_KEY" ]; then \
-  echo "ERROR: Set GITHUB_TOKEN or OPENAI_API_KEY. See README and docs/configuration.md." >&2; \
+if [ -z "$$OPENAI_API_KEY" ]; then \
+  echo "ERROR: Set OPENAI_API_KEY for the shared LLM gateway. See docs/configuration.md." >&2; \
   exit 1; \
 fi
 endef
@@ -89,17 +89,10 @@ if [ -n "$$PIDS" ]; then \
 fi
 endef
 
-# Build Spring app arguments based on available API keys
-# Sets APP_ARGS array with appropriate --spring.ai.* arguments
+# Build Spring application arguments.
 # Usage: $(call build_app_args,PORT)
 define build_app_args
-	APP_ARGS=(--server.port=$(1)); \
-	if [ -n "$$GITHUB_TOKEN" ]; then \
-	  APP_ARGS+=( \
-	    --spring.ai.openai.base-url="$${GITHUB_MODELS_BASE_URL:-https://models.github.ai/inference}" \
-	    --spring.ai.openai.chat.options.model="$${GITHUB_MODELS_CHAT_MODEL:-gpt-5}" \
-	  ); \
-	fi
+	APP_ARGS=(--server.port=$(1))
 endef
 
 # Allows local developer commands to bootstrap only a loopback Qdrant instance.

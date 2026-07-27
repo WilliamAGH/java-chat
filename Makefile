@@ -45,7 +45,10 @@ lint-frontend: ## Run frontend linting (oxlint + ast-grep + svelte-check)
 lint-ast: ## Run ast-grep rules for Java naming and type safety
 	@$(call require_cmd,ast-grep,brew install ast-grep)
 	@echo "$(CYAN)Running ast-grep rules...$(NC)"
+	@ast-grep test -c config/sgconfig.yml --skip-snapshot-tests
 	@ast-grep scan -c config/sgconfig.yml src/main/java/
+	@ruby scripts/lint/check-chat-model-ssot.rb --self-test
+	@ruby scripts/lint/check-chat-model-ssot.rb
 
 format: ## Apply Java formatting (Palantir via Spotless)
 	$(LOCKED_GRADLEW) spotlessApply

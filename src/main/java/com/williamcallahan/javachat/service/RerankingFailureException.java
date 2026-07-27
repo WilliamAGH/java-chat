@@ -1,7 +1,7 @@
 package com.williamcallahan.javachat.service;
 
 /**
- * Signals that reranking failed and the caller should fall back to original ordering.
+ * Signals that strict LLM reranking failed and retrieval must terminate.
  */
 public class RerankingFailureException extends RuntimeException {
 

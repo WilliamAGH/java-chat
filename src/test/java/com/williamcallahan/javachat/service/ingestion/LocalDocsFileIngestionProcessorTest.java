@@ -141,10 +141,11 @@ class LocalDocsFileIngestionProcessorTest {
                 .ingestionProcessor()
                 .processBatch(selectedDocumentationRoot, List.of(firstDocumentationFile, secondDocumentationFile));
 
-        assertEquals(1, outcomes.size());
-        assertEquals(
-                "embedding-unavailable",
-                outcomes.getFirst().failure().orElseThrow().phase());
+        assertEquals(2, outcomes.size());
+        assertTrue(outcomes.stream()
+                .map(LocalDocsFileOutcome::failure)
+                .map(Optional::orElseThrow)
+                .allMatch(failure -> failure.phase().equals("embedding-unavailable")));
         verify(ingestionFixture.fileIngestionMarkerStore, never())
                 .markFileIngested(anyString(), any(FileIngestionRecord.class));
         verify(ingestionFixture.localStoreService, never()).markHashIngested(anyString(), anyString(), anyString());
@@ -189,10 +190,11 @@ class LocalDocsFileIngestionProcessorTest {
                 .ingestionProcessor()
                 .processBatch(localDocsRoot, List.of(documentationFile, classUseFile));
 
-        assertEquals(1, outcomes.size());
-        assertEquals(
-                "embedding-unavailable",
-                outcomes.getFirst().failure().orElseThrow().phase());
+        assertEquals(2, outcomes.size());
+        assertTrue(outcomes.stream()
+                .map(LocalDocsFileOutcome::failure)
+                .map(Optional::orElseThrow)
+                .allMatch(failure -> failure.phase().equals("embedding-unavailable")));
         verify(ingestionFixture.hybridVectorService, never()).deleteByUrl(any(QdrantCollectionKind.class), anyString());
         verify(ingestionFixture.ingestedFilePruneService, never())
                 .pruneObsoleteLocalStateAfterReplacement(anyString(), any(), any());

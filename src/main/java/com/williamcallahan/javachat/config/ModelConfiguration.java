@@ -3,23 +3,23 @@ package com.williamcallahan.javachat.config;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 
 /**
- * Centralized model configuration constants and detection utilities.
+ * Owns the chat model default and RAG context policy.
  *
- * <p>Provides a single source of truth for model identifiers and family detection,
- * eliminating hardcoded model strings scattered throughout services.</p>
+ * <p>The request factory and normal chat retrieval use the same model identifier so
+ * reranking, final inference, and RAG policy cannot drift to different defaults.</p>
  */
 public final class ModelConfiguration {
-
     /** Default model identifier when none is configured. */
-    public static final String DEFAULT_MODEL = "gpt-5.2";
+    public static final String DEFAULT_MODEL = "gpt-5.4";
 
-    /** Model family prefix for GPT-5.x models with token constraints. */
-    private static final String GPT5_FAMILY_PREFIX = "gpt-5";
+    private static final char MODEL_VERSION_SEPARATOR = '.';
+    private static final String GPT5_FAMILY_PREFIX =
+            DEFAULT_MODEL.substring(0, DEFAULT_MODEL.lastIndexOf(MODEL_VERSION_SEPARATOR));
 
     /** Estimated characters per token for conservative token counting. */
     public static final int ESTIMATED_CHARS_PER_TOKEN = 4;
 
-    /** RAG document limit for token-constrained models like GPT-5.2. */
+    /** RAG document limit for constrained provider tiers. */
     public static final int RAG_LIMIT_CONSTRAINED = 3;
 
     /** Max tokens per RAG document for token-constrained models. */
@@ -30,18 +30,20 @@ public final class ModelConfiguration {
     }
 
     /**
-     * Determines if the given model is token-constrained (requires reduced RAG context).
+     * Determines whether a provider-qualified or bare model identifier belongs to the GPT-5 family.
      *
-     * <p>Currently the GPT-5.x family has an 8K input token limit, requiring reduced RAG context.</p>
-     *
-     * @param modelHint optional model hint from request
-     * @return true if reduced RAG context should be used
+     * @param modelId provider-qualified or bare model identifier
+     * @return true when the canonical model name belongs to the GPT-5 family
      */
-    public static boolean isTokenConstrained(String modelHint) {
-        if (modelHint == null || modelHint.isBlank()) {
+    public static boolean isGpt5Family(String modelId) {
+        if (modelId == null || modelId.isBlank()) {
             return false;
         }
-        String normalized = AsciiTextNormalizer.toLowerAscii(modelHint.trim());
-        return normalized.startsWith(GPT5_FAMILY_PREFIX);
+        String normalizedModelId = AsciiTextNormalizer.toLowerAscii(modelId.trim());
+        int providerSeparatorIndex = normalizedModelId.lastIndexOf('/');
+        String canonicalModelName = providerSeparatorIndex < 0
+                ? normalizedModelId
+                : normalizedModelId.substring(providerSeparatorIndex + 1);
+        return canonicalModelName.startsWith(GPT5_FAMILY_PREFIX);
     }
 }

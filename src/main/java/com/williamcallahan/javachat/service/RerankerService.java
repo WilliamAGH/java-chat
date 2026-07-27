@@ -9,9 +9,13 @@ import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.williamcallahan.javachat.config.AppProperties;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,7 +53,7 @@ public class RerankerService {
      */
     public RerankerService(
             OpenAIStreamingService openAIStreamingService, ObjectMapper objectMapper, AppProperties appProperties) {
-        this.openAIStreamingService = openAIStreamingService;
+        this.openAIStreamingService = Objects.requireNonNull(openAIStreamingService, "openAIStreamingService");
         this.mapper = Objects.requireNonNull(objectMapper, "objectMapper")
                 .copy()
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature());
@@ -70,6 +74,7 @@ public class RerankerService {
      */
     @Cacheable(
             value = "reranker-cache",
+            sync = true,
             key =
                     "#query + ':' + T(com.williamcallahan.javachat.service.RerankerService).computeDocsHash(#documents) + ':' + #returnK")
     public List<Document> rerank(String query, List<Document> documents, int returnK) {
@@ -98,14 +103,9 @@ public class RerankerService {
     /**
      * Calls LLM service to get reranking order.
      *
-     * @return reranking response, or empty if service unavailable or times out
+     * @return reranking response when the configured provider completes within its timeout
      */
     private Optional<String> callLlmForReranking(String query, List<Document> documents) {
-        if (openAIStreamingService == null || !openAIStreamingService.isAvailable()) {
-            log.warn("OpenAIStreamingService unavailable; skipping LLM rerank");
-            throw new RerankingFailureException("Reranking service unavailable");
-        }
-
         String prompt = buildRerankPrompt(query, documents);
 
         try {
@@ -225,21 +225,43 @@ public class RerankerService {
     }
 
     /**
-     * Compute a stable hash of documents for cache key.
-     * Uses URLs as document identity since they are unique in the context of reranking.
+     * Computes a stable cache identity for the complete ordered document inputs.
+     *
+     * <p>The cache returns the original {@link Document} instances in ranked order, so every
+     * downstream-visible identity field must participate. This prevents metadata-only refreshes
+     * from returning stale citation documents.</p>
      */
     public static String computeDocsHash(List<Document> documents) {
         if (documents == null || documents.isEmpty()) {
             return "empty";
         }
-        StringBuilder hashBuilder = new StringBuilder();
-        for (Document document : documents) {
-            Object url = document.getMetadata().get(QdrantPayloadFieldSchema.URL_FIELD);
-            String text = document.getText();
-            hashBuilder.append(url != null ? url.toString() : (text != null ? text.hashCode() : 0));
-            hashBuilder.append("|");
+        try {
+            MessageDigest documentDigest = MessageDigest.getInstance("SHA-256");
+            for (Document document : documents) {
+                updateDigest(documentDigest, document.getId());
+                String documentText = document.getText();
+                updateDigest(documentDigest, documentText == null ? "" : documentText);
+                document.getMetadata().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .forEach(metadataEntry -> {
+                            updateDigest(documentDigest, metadataEntry.getKey());
+                            Object metadataField = metadataEntry.getValue();
+                            updateDigest(documentDigest, metadataField == null ? "" : metadataField.toString());
+                        });
+            }
+            return HexFormat.of().formatHex(documentDigest.digest());
+        } catch (NoSuchAlgorithmException algorithmFailure) {
+            throw new IllegalStateException("SHA-256 is unavailable for reranker cache identity", algorithmFailure);
         }
-        return Integer.toHexString(hashBuilder.toString().hashCode());
+    }
+
+    private static void updateDigest(MessageDigest documentDigest, String documentIdentityPart) {
+        byte[] identityBytes = documentIdentityPart.getBytes(StandardCharsets.UTF_8);
+        documentDigest.update((byte) (identityBytes.length >>> 24));
+        documentDigest.update((byte) (identityBytes.length >>> 16));
+        documentDigest.update((byte) (identityBytes.length >>> 8));
+        documentDigest.update((byte) identityBytes.length);
+        documentDigest.update(identityBytes);
     }
 
     /**

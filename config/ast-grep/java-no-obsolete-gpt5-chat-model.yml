@@ -1,0 +1,18 @@
+# New regression guard: changes require direct verification against [LM1a-c].
+#
+# Obsolete GPT-5 chat-model literals must never re-enter production code.
+
+id: java-no-obsolete-gpt5-chat-model
+language: Java
+severity: error
+message: |
+  [LM1a-c] Obsolete GPT-5 chat-model identifier detected.
+  Use GPT-5.4 through ModelConfiguration; never restore another GPT-5 default.
+files:
+  - 'src/main/java/**'
+rule:
+  kind: string_literal
+  all:
+    - regex: '^"(?i:(?:[^"/]+/)*gpt-5[^"]*)"$'
+    - not:
+        regex: '^"gpt-5\.4"$'

@@ -33,7 +33,6 @@ public class SseSupport {
 
     private static final String RESPONSE_PREPARATION_MESSAGE = "Preparing your response";
     private static final String RESPONSE_PREPARATION_DETAILS = "Finding relevant Java documentation.";
-
     /** Fallback JSON payload when SSE error serialization fails. */
     private static final String ERROR_FALLBACK_JSON =
             "{\"message\":\"Error serialization failed\",\"details\":\"See server logs\"}";
@@ -115,12 +114,7 @@ public class SseSupport {
                         STREAM_BACKPRESSURE_BUFFER_CAPACITY,
                         this::recordCoalescedChunkOverflow,
                         BufferOverflowStrategy.ERROR)
-                .doOnNext(chunk -> chunkConsumer.accept(chunk))
-                // Two subscribers consume this stream in controllers:
-                // 1) text event emission, 2) heartbeat termination signal.
-                // refCount(2) preserves their rendezvous and disconnects upstream when both cancel.
-                .publish()
-                .refCount(2);
+                .doOnNext(chunk -> chunkConsumer.accept(chunk));
     }
 
     /**
@@ -215,10 +209,25 @@ public class SseSupport {
     public Flux<ServerSentEvent<String>> heartbeats(Flux<?> terminateOn) {
         return Flux.interval(Duration.ofSeconds(HEARTBEAT_INTERVAL_SECONDS))
                 .onBackpressureDrop(ignoredTick -> recordDroppedHeartbeat())
-                .takeUntilOther(terminateOn.ignoreElements())
+                .takeUntilOther(terminateOn.ignoreElements().onErrorComplete())
                 .map(tick -> ServerSentEvent.<String>builder()
                         .comment(COMMENT_KEEPALIVE)
                         .build());
+    }
+
+    /**
+     * Keeps an entire SSE operation alive without subscribing to its production work twice.
+     *
+     * <p>The shared response includes preparation, provider selection, model text, and terminal
+     * citation or error events. This makes keepalives cover slow retrieval and reranking instead
+     * of starting only after the provider stream already exists.</p>
+     *
+     * @param operationEvents complete SSE operation after its initial preparation status
+     * @return operation events merged with lifecycle-scoped keepalive comments
+     */
+    public Flux<ServerSentEvent<String>> withHeartbeats(Flux<ServerSentEvent<String>> operationEvents) {
+        return operationEvents.publish(
+                sharedOperationEvents -> Flux.merge(sharedOperationEvents, heartbeats(sharedOperationEvents)));
     }
 
     private void recordCoalescedChunkOverflow(String overflowedChunk) {
@@ -293,7 +302,7 @@ public class SseSupport {
     /**
      * Creates a provider event identifying the LLM provider selected for the request.
      *
-     * @param providerName the name of the LLM provider (e.g., "OpenAI", "GitHub Models")
+     * @param providerName the name of the LLM provider
      * @return ServerSentEvent with provider metadata payload
      */
     public ServerSentEvent<String> providerEvent(String providerName) {

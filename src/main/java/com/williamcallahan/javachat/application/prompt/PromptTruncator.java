@@ -31,11 +31,7 @@ public class PromptTruncator {
 
     private static final Logger log = LoggerFactory.getLogger(PromptTruncator.class);
 
-    /** Truncation notice for GPT-5 family models with 8K input limit. */
-    private static final String TRUNCATION_NOTICE_GPT5 = "[Context truncated due to GPT-5 8K input limit]\n\n";
-
-    /** Truncation notice for other models with larger limits. */
-    private static final String TRUNCATION_NOTICE_GENERIC = "[Context truncated due to model input limit]\n\n";
+    private static final String TRUNCATION_NOTICE = "[Context truncated due to model input limit]\n\n";
 
     /**
      * Truncates a structured prompt to fit within the specified token limit.
@@ -45,11 +41,10 @@ public class PromptTruncator {
      *
      * @param prompt the structured prompt to truncate
      * @param maxTokens maximum allowed tokens
-     * @param isGpt5Family true if targeting GPT-5 family models (affects notice text)
      * @return truncation result with the fitted prompt and truncation metadata
      * @throws AuthoritativeContextDoesNotFitException when no HIGH-priority context segment fits
      */
-    public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens, boolean isGpt5Family) {
+    public TruncatedPrompt truncate(StructuredPrompt prompt, int maxTokens) {
         int reservedTokens =
                 prompt.system().estimatedTokens() + prompt.currentQuery().estimatedTokens();
         List<ContextDocumentSegment> authoritativeContextDocuments = prompt.contextDocuments().stream()
@@ -66,7 +61,7 @@ public class PromptTruncator {
             // Return prompt with only system and query - no room for context or history
             StructuredPrompt minimalPrompt =
                     new StructuredPrompt(prompt.system(), List.of(), List.of(), prompt.currentQuery());
-            return new TruncatedPrompt(minimalPrompt, true, isGpt5Family);
+            return new TruncatedPrompt(minimalPrompt, true);
         }
 
         int available = maxTokens - reservedTokens;
@@ -114,7 +109,7 @@ public class PromptTruncator {
                     maxTokens);
         }
 
-        return new TruncatedPrompt(truncated, wasTruncated, isGpt5Family);
+        return new TruncatedPrompt(truncated, wasTruncated);
     }
 
     /**
@@ -224,9 +219,8 @@ public class PromptTruncator {
      *
      * @param prompt the truncated structured prompt
      * @param wasTruncated true if any segments were removed
-     * @param isGpt5Family true if targeting GPT-5 family models
      */
-    public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGpt5Family) {
+    public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated) {
         /**
          * Renders the complete prompt, prepending the truncation notice when needed.
          *
@@ -252,8 +246,7 @@ public class PromptTruncator {
             if (!wasTruncated) {
                 return renderedPrompt;
             }
-            String notice = isGpt5Family ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
-            return notice + renderedPrompt;
+            return TRUNCATION_NOTICE + renderedPrompt;
         }
 
         /**

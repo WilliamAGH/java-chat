@@ -1,13 +1,10 @@
 package com.williamcallahan.javachat.service;
 
 import com.williamcallahan.javachat.application.ingestion.DocumentationIngestionUseCase;
-import com.williamcallahan.javachat.application.ingestion.FileLimit;
 import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
-import com.williamcallahan.javachat.domain.ingestion.IngestionLocalOutcome;
 import com.williamcallahan.javachat.service.ingestion.JavaPackageExtractor;
-import com.williamcallahan.javachat.service.ingestion.LocalDocsDirectoryIngestionService;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -30,8 +27,7 @@ import org.springframework.stereotype.Service;
 /**
  * Ingests documentation content into Qdrant with chunking and local snapshots.
  *
- * <p>Remote crawling is owned by this service. Local directory ingestion is delegated to
- * {@link LocalDocsDirectoryIngestionService} to keep responsibilities narrow and files small.</p>
+ * <p>Remote crawling is owned by this service.</p>
  */
 @Service
 public class DocsIngestionService implements DocumentationIngestionUseCase {
@@ -52,7 +48,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
     private final ContentHasher contentHasher;
     private final LocalStoreService localStore;
     private final HtmlContentExtractor htmlExtractor;
-    private final LocalDocsDirectoryIngestionService localDirectoryIngestionService;
 
     /**
      * Wires ingestion dependencies.
@@ -63,7 +58,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
      * @param contentHasher derives deterministic point UUIDs from chunk hashes
      * @param localStore local snapshot and chunk storage
      * @param htmlExtractor HTML content extractor
-     * @param localDirectoryIngestionService local directory ingestion delegate
      */
     public DocsIngestionService(
             AppProperties appProperties,
@@ -71,8 +65,7 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             ChunkProcessingService chunkProcessingService,
             ContentHasher contentHasher,
             LocalStoreService localStore,
-            HtmlContentExtractor htmlExtractor,
-            LocalDocsDirectoryIngestionService localDirectoryIngestionService) {
+            HtmlContentExtractor htmlExtractor) {
         AppProperties requiredAppProperties = Objects.requireNonNull(appProperties, "appProperties");
         this.crawlBoundary = CrawlBoundary.from(requiredAppProperties.getDocs().getRootUrl());
         this.hybridVectorService = Objects.requireNonNull(hybridVectorService, "hybridVectorService");
@@ -80,8 +73,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
         this.contentHasher = Objects.requireNonNull(contentHasher, "contentHasher");
         this.localStore = Objects.requireNonNull(localStore, "localStore");
         this.htmlExtractor = Objects.requireNonNull(htmlExtractor, "htmlExtractor");
-        this.localDirectoryIngestionService =
-                Objects.requireNonNull(localDirectoryIngestionService, "localDirectoryIngestionService");
     }
 
     /**
@@ -186,15 +177,6 @@ public class DocsIngestionService implements DocumentationIngestionUseCase {
             }
             replaceAndMarkDocuments(sourceUrl, replacementDocuments);
         }
-    }
-
-    /**
-     * Ingests HTML/PDF files from a local directory mirror (for example, {@code data/docs/**}).
-     */
-    @Override
-    public IngestionLocalOutcome ingestLocalDirectory(String rootDirectory, FileLimit fileLimit) throws IOException {
-        FileLimit requiredFileLimit = Objects.requireNonNull(fileLimit, "fileLimit");
-        return localDirectoryIngestionService.ingestLocalDirectory(rootDirectory, requiredFileLimit.maximumFiles());
     }
 
     private void replaceAndMarkDocuments(

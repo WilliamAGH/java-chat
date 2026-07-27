@@ -53,4 +53,35 @@ class QdrantListenableFutureBridgeTest {
         verify(qdrantQueryFuture).cancel(mayInterruptIfRunning);
         assertTrue(bridgedQueryFuture.isCancelled());
     }
+
+    @Test
+    void transformedBridgePreservesSuccessAndFailureIdentity() {
+        SettableFuture<String> successfulQueryFuture = SettableFuture.create();
+        CompletableFuture<Integer> transformedSuccess =
+                QdrantListenableFutureBridge.transformToCompletableFuture(successfulQueryFuture, String::length);
+        successfulQueryFuture.set("four");
+
+        assertEquals(4, transformedSuccess.join());
+
+        SettableFuture<String> failedQueryFuture = SettableFuture.create();
+        CompletableFuture<Integer> transformedFailure =
+                QdrantListenableFutureBridge.transformToCompletableFuture(failedQueryFuture, String::length);
+        IllegalStateException queryFailure = new IllegalStateException("query failed");
+        failedQueryFuture.setException(queryFailure);
+
+        CompletionException completionFailure = assertThrows(CompletionException.class, transformedFailure::join);
+        assertSame(queryFailure, completionFailure.getCause());
+    }
+
+    @Test
+    void transformedBridgeCancellationReachesOriginalQdrantFuture() {
+        SettableFuture<String> qdrantScrollFuture = spy(SettableFuture.create());
+        CompletableFuture<Integer> transformedScrollFuture =
+                QdrantListenableFutureBridge.transformToCompletableFuture(qdrantScrollFuture, String::length);
+
+        assertTrue(transformedScrollFuture.cancel(true));
+
+        verify(qdrantScrollFuture).cancel(true);
+        assertTrue(qdrantScrollFuture.isCancelled());
+    }
 }

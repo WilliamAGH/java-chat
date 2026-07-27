@@ -1,5 +1,6 @@
 package com.williamcallahan.javachat.service;
 
+import com.williamcallahan.javachat.application.search.JavaApiMethodSelector;
 import com.williamcallahan.javachat.application.search.LexicalSparseVectorEncoder;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
@@ -23,5 +24,13 @@ public record QueryEncodingServices(
         Objects.requireNonNull(embeddingClient, "embeddingClient");
         Objects.requireNonNull(sparseVectorEncoder, "sparseVectorEncoder");
         Objects.requireNonNull(constraintBuilder, "constraintBuilder");
+    }
+
+    boolean hasExactJavaApiOverload(String query) {
+        return JavaApiMethodSelector.uniqueExactOverloadFromQuery(query).isPresent();
+    }
+
+    String expandSparseCitationQuery(String query) {
+        return JavaApiMethodSelector.expandForSparseCitationQuery(query);
     }
 }

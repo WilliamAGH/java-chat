@@ -35,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Exposes guided learning endpoints for lesson metadata, citations, enrichment, and streaming lesson content.
@@ -145,7 +146,7 @@ public class GuidedLearningController extends BaseController {
         sseSupport.configureStreamingHeaders(response);
         return Flux.defer(() -> {
                     Flux<String> dataStream = sseSupport.prepareDataStream(lessonContentStream, ignoredChunk -> {});
-                    return Flux.merge(dataStream.map(sseSupport::textEvent), sseSupport.heartbeats(dataStream));
+                    return sseSupport.withHeartbeats(dataStream.map(sseSupport::textEvent));
                 })
                 .onErrorResume(error -> {
                     if (ReportedStreamingFailure.findInCauseChain(error).isEmpty()) {
@@ -257,13 +258,19 @@ public class GuidedLearningController extends BaseController {
         String canonicalLessonSlug = listedLesson.getSlug();
 
         sseSupport.configureStreamingHeaders(response);
-        return Flux.concat(sseSupport.responsePreparationStatus(), Flux.defer(() -> {
+        Flux<ServerSentEvent<String>> operationEvents = Flux.defer(() -> {
             if (!openAIStreamingService.isAvailable()) {
                 log.warn("OpenAI streaming service unavailable for guided session");
                 return sseSupport.configuredProviderConfigurationError();
             }
+            if (!openAIStreamingService.canAttemptRequest()) {
+                log.warn("Configured provider temporarily unavailable for guided session");
+                return sseSupport.configuredProviderUnavailableError();
+            }
             return streamGuidedResponse(sessionId, userQuery, canonicalLessonSlug);
-        }));
+        });
+        return Flux.concat(sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEvents))
+                .onErrorResume(error -> guidedStreamError(error, sessionId, canonicalLessonSlug));
     }
 
     /**
@@ -300,7 +307,6 @@ public class GuidedLearningController extends BaseController {
                                 Flux<String> dataStream = sseSupport.prepareDataStream(
                                         streamingResult.textChunks(), fullResponse::append);
 
-                                Flux<ServerSentEvent<String>> heartbeats = sseSupport.heartbeats(dataStream);
                                 Flux<ServerSentEvent<String>> dataEvents = dataStream.map(sseSupport::textEvent);
                                 Flux<ServerSentEvent<String>> citationEvent =
                                         Flux.just(sseSupport.citationEvent(finalCitations));
@@ -309,41 +315,39 @@ public class GuidedLearningController extends BaseController {
                                                 citationOutcome.failedConversionCount());
 
                                 // Start the selected-provider event before the ref-counted data stream.
-                                return Flux.concat(
-                                        Flux.just(providerEvent),
-                                        statusEvents,
-                                        Flux.merge(dataEvents, heartbeats),
-                                        citationEvent);
+                                return Flux.concat(Flux.just(providerEvent), statusEvents, dataEvents, citationEvent);
                             })
                             .doOnComplete(() -> chatMemory.addExchange(sessionId, userQuery, fullResponse.toString()));
                 })
-                .onErrorResume(error -> {
-                    Optional<ReportedStreamingFailure> terminalFailureContext =
-                            ReportedStreamingFailure.findInCauseChain(error);
-                    Throwable upstreamError = terminalFailureContext
-                            .map(ReportedStreamingFailure::upstreamFailure)
-                            .orElse(error);
-                    if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
-                        return sseSupport.configuredProviderUnavailableError();
-                    }
-                    if (terminalFailureContext.isEmpty()) {
-                        log.atError()
-                                .setMessage("Guided streaming error")
-                                .addKeyValue(
-                                        "sessionId",
-                                        StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)
-                                                .text())
-                                .addKeyValue(
-                                        "lessonSlug",
-                                        StructuredLogValue.bounded(lessonSlug, MAX_GUIDED_LOG_FIELD_LENGTH)
-                                                .text())
-                                .addKeyValue("exceptionType", error.getClass().getSimpleName())
-                                .log();
-                    }
-                    boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
-                    return sseSupport.streamErrorEvent(
-                            GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable);
-                });
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(error -> guidedStreamError(error, sessionId, lessonSlug));
+    }
+
+    private Flux<ServerSentEvent<String>> guidedStreamError(Throwable error, String sessionId, String lessonSlug) {
+        Optional<ReportedStreamingFailure> terminalFailureContext = ReportedStreamingFailure.findInCauseChain(error);
+        Throwable upstreamError = terminalFailureContext
+                .map(ReportedStreamingFailure::upstreamFailure)
+                .orElse(error);
+        if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
+            return sseSupport.configuredProviderUnavailableError();
+        }
+        if (terminalFailureContext.isEmpty()) {
+            log.atError()
+                    .setMessage("Guided streaming error")
+                    .addKeyValue(
+                            "sessionId",
+                            StructuredLogValue.bounded(sessionId, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue(
+                            "lessonSlug",
+                            StructuredLogValue.bounded(lessonSlug, MAX_GUIDED_LOG_FIELD_LENGTH)
+                                    .text())
+                    .addKeyValue("exceptionType", error.getClass().getSimpleName())
+                    .log();
+        }
+        boolean retryable = openAIStreamingService.isRecoverableStreamingFailure(error);
+        return sseSupport.streamErrorEvent(
+                GUIDED_CHAT_STREAM_ERROR_MESSAGE, GUIDED_CHAT_STREAM_ERROR_DETAILS, retryable);
     }
 
     /**

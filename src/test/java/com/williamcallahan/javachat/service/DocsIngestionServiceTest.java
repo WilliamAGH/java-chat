@@ -18,7 +18,6 @@ import com.williamcallahan.javachat.application.ingestion.PageLimit;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.domain.javaapi.JavadocMemberAnchor;
-import com.williamcallahan.javachat.service.ingestion.LocalDocsDirectoryIngestionService;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -50,7 +49,6 @@ class DocsIngestionServiceTest {
     private ContentHasher contentHasher;
     private LocalStoreService localStoreService;
     private HtmlContentExtractor htmlContentExtractor;
-    private LocalDocsDirectoryIngestionService localDirectoryIngestionService;
 
     @BeforeEach
     void setUp() {
@@ -59,7 +57,6 @@ class DocsIngestionServiceTest {
         contentHasher = new ContentHasher();
         localStoreService = mock(LocalStoreService.class);
         htmlContentExtractor = mock(HtmlContentExtractor.class);
-        localDirectoryIngestionService = mock(LocalDocsDirectoryIngestionService.class);
     }
 
     @Test
@@ -587,8 +584,7 @@ class DocsIngestionServiceTest {
                 chunkProcessingService,
                 contentHasher,
                 localStoreService,
-                htmlContentExtractor,
-                localDirectoryIngestionService);
+                htmlContentExtractor);
     }
 
     private static org.springframework.ai.document.Document replacementDocument(
