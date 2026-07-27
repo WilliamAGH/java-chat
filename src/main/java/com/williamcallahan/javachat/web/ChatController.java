@@ -10,7 +10,9 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
+import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
 import com.williamcallahan.javachat.support.StructuredLogValue;
@@ -55,6 +57,12 @@ public class ChatController extends BaseController {
     private static final String SESSION_FOUND_EMPTY_MESSAGE = "Session found but empty";
     private static final String PIPELINE_LOG_SEPARATOR = "============================================";
     private static final int MAX_STREAM_LOG_SESSION_ID_LENGTH = 128;
+    private static final String RETRIEVAL_UNAVAILABLE_MESSAGE =
+            "Could not search the Java documentation for this question. Please try again.";
+    private static final String RETRIEVAL_UNAVAILABLE_DETAILS =
+            "Java documentation retrieval failed before response generation.";
+    private static final String GENERIC_STREAMING_FAILURE_MESSAGE =
+            "Something went wrong while generating this response. Please try again.";
 
     private final ChatService chatService;
     private final ChatMemoryService chatMemory;
@@ -215,9 +223,11 @@ public class ChatController extends BaseController {
                         return sseSupport.configuredProviderUnavailableError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
-                    String diagnostics = upstreamError instanceof Exception exception
-                            ? describeException(exception)
-                            : upstreamError.getClass().getName();
+                    String diagnostics = isRetrievalFailure(upstreamError)
+                            ? RETRIEVAL_UNAVAILABLE_DETAILS
+                            : upstreamError instanceof Exception exception
+                                    ? describeException(exception)
+                                    : upstreamError.getClass().getName();
                     if (terminalFailureContext.isEmpty()) {
                         PIPELINE_LOG
                                 .atError()
@@ -387,7 +397,14 @@ public class ChatController extends BaseController {
             return error.getMessage();
         }
 
-        // Default: include exception type for debugging
-        return "Streaming error: " + error.getClass().getSimpleName();
+        if (isRetrievalFailure(error)) {
+            return RETRIEVAL_UNAVAILABLE_MESSAGE;
+        }
+
+        return GENERIC_STREAMING_FAILURE_MESSAGE;
+    }
+
+    private static boolean isRetrievalFailure(Throwable error) {
+        return error instanceof HybridSearchPartialFailureException || error instanceof RerankingFailureException;
     }
 }

@@ -40,8 +40,10 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
+import com.williamcallahan.javachat.service.RerankingFailureException;
 import com.williamcallahan.javachat.service.RetrievalService;
 import com.williamcallahan.javachat.service.StreamingResult;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
@@ -148,6 +150,50 @@ class ChatControllerStreamingFailureTest {
         assertLogField(controllerAlert, "exceptionType", AssertionError.class.getSimpleName());
         assertNull(controllerAlert.getThrowableProxy());
         assertFalse(controllerAlert.toString().contains(UPSTREAM_SECRET_MESSAGE));
+    }
+
+    @Test
+    void retrievalFailuresExplainThemselvesWithoutLeakingTheExceptionClassName() throws JsonProcessingException {
+        HybridSearchPartialFailureException retrievalFailure = new HybridSearchPartialFailureException(
+                "Qdrant retrieval failed for 4 collection(s)",
+                List.of(new HybridSearchPartialFailureException.CollectionSearchFailure(
+                        "java-chat-dev-docs", "Timeout", "Qdrant query exceeded timeout 5000ms")));
+
+        List<ServerSentEvent<String>> streamEvents = streamFailure(retrievalFailure, false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload retrievalErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertFalse(
+                retrievalErrorEvent.message().contains(HybridSearchPartialFailureException.class.getSimpleName()),
+                "user-facing message must not leak the exception class name");
+        assertTrue(retrievalErrorEvent.message().contains("Java documentation"));
+        assertFalse(serializedError.contains(HybridSearchPartialFailureException.class.getSimpleName()));
+        assertFalse(serializedError.contains("java-chat-dev-docs"));
+    }
+
+    @Test
+    void rerankingFailuresExplainThemselvesWithoutLeakingTheExceptionClassName() throws JsonProcessingException {
+        RerankingFailureException rerankingFailure = new RerankingFailureException("Reranking service unavailable");
+
+        List<ServerSentEvent<String>> streamEvents = streamFailure(rerankingFailure, false);
+
+        ServerSentEvent<String> errorEvent = streamEvents.stream()
+                .filter(streamEvent -> "error".equals(streamEvent.event()))
+                .findFirst()
+                .orElseThrow();
+        String serializedError = Objects.requireNonNull(errorEvent.data(), "error event data");
+        SseSupport.SseEventPayload rerankingErrorEvent =
+                objectMapper.readValue(serializedError, SseSupport.SseEventPayload.class);
+        assertFalse(
+                rerankingErrorEvent.message().contains(RerankingFailureException.class.getSimpleName()),
+                "user-facing message must not leak the exception class name");
+        assertFalse(serializedError.contains(RerankingFailureException.class.getSimpleName()));
+        assertFalse(serializedError.contains("Reranking service unavailable"));
     }
 
     @Test
