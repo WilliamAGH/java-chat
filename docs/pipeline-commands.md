@@ -189,7 +189,7 @@ Each collection has two named vector spaces:
 
 ### Collection startup validation
 
-On normal startup (non-test profile), `QdrantIndexInitializer` requires all four collections to exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). It does not create a missing collection. Reachable absence, schema, or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup. The dedicated full-ingestion command explicitly enables collection creation while it owns population of a new generation.
+On normal startup (non-test profile), `QdrantIndexInitializer` requires all four collections to exist with the correct dense vector dimensions and sparse vector configuration, and creates payload indexes for filtering fields (`url`, `hash`, `docSet`, `sourceName`, etc.). It does not create a missing collection. Reachable absence, schema, or dimension mismatches cause startup failure; transient Qdrant unavailability (transport errors, `5xx`, `429`) defers initialization to a pending state that is retried without failing startup. The dedicated full-ingestion command explicitly enables collection creation while it owns population of a new generation. Local `make run`, `make dev`, and `make dev-backend` also enable schema creation when `QDRANT_HOST` is loopback; remote connections remain fail-closed.
 
 ### Environment variables
 

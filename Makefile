@@ -28,6 +28,7 @@ test-shell: ## Run deterministic ingestion and fetch shell contract tests
 	bash scripts/test_documentation_fetch_publication.sh
 	bash scripts/test_embedding_preflight.sh
 	bash scripts/test_github_sync_failure_contract.sh
+	bash scripts/test_make_local_qdrant_bootstrap.sh
 	bash scripts/test_process_all_to_qdrant_environment.sh
 	bash scripts/test_process_all_to_qdrant_postconditions.sh
 	bash scripts/test_prune_retired_java_api_vectors.sh
@@ -61,6 +62,7 @@ run: build ## Run the packaged jar (loads .env if present)
 	  $(call free_port,$$SERVER_PORT); \
 	  echo "Binding app to port $$SERVER_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
+	  $(call append_local_qdrant_bootstrap_argument); \
 	  JAVA_OPTS="$${JAVA_OPTS:- $(DEFAULT_JAVA_OPTS)}"; \
 	  java $$JAVA_OPTS -Djava.net.preferIPv4Stack=true -jar $(call get_jar) "$${APP_ARGS[@]}" & disown
 
@@ -75,6 +77,7 @@ dev: frontend-build ## Start both Spring Boot and Vite dev servers (Ctrl+C stops
 	  (cd frontend && npm run dev 2>&1 | awk '{print "\033[36m[vite]\033[0m " $$0; fflush()}') & \
 	  ($(call load_env); \
 	   $(call build_app_args,$(DEFAULT_PORT)); \
+	   $(call append_local_qdrant_bootstrap_argument); \
 	   SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	   --args="$${APP_ARGS[*]}" \
 	   -Dorg.gradle.jvmargs="$(GRADLE_JVM_ARGS)" 2>&1 \
@@ -91,6 +94,7 @@ dev-backend: ## Run only Spring Boot backend (dev profile)
 	  $(call free_port,$$LIVERELOAD_PORT); \
 	  echo "Binding app (dev) to port $$SERVER_PORT, LiveReload on $$LIVERELOAD_PORT" >&2; \
 	  $(call build_app_args,$$SERVER_PORT); \
+	  $(call append_local_qdrant_bootstrap_argument); \
 	  APP_ARGS+=(--spring.devtools.livereload.port=$$LIVERELOAD_PORT); \
 	  SPRING_PROFILES_ACTIVE=dev $(GRADLEW) bootRun \
 	    --args="$${APP_ARGS[*]}" \

@@ -41,6 +41,10 @@ make compose-up
 make dev
 ```
 
+The local `make run`, `make dev`, and `make dev-backend` commands create missing collection schemas only when
+`QDRANT_HOST` is `localhost` or `127.0.0.1`. Any remote Qdrant connection remains fail-closed and requires the
+generation collections to exist before startup.
+
 Open:
 
 - App: `http://localhost:8085/`
@@ -70,8 +74,8 @@ make full-pipeline
 ```
 
 Run this only after the local generation configuration and gateway/Qdrant preflight are valid. It fetches all
-canonical full documentation sources and ingests them with dense + sparse (BM25) vectors across four isolated
-local collections. Quick mirrors remain explicitly opt-in.
+canonical full documentation sources and ingests them with dense + sparse (BM25) vectors across the four
+shared-generation collection names on the local Qdrant instance. Quick mirrors remain explicitly opt-in.
 
 For incremental vs full runs, doc set filtering, and all available flags:
 
