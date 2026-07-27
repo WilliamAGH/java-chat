@@ -9,6 +9,10 @@ DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS=(
     --waitretry=1
     --retry-connrefused
 )
+if [[ "${DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT:-}" != "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ]]; then
+    DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+fi
+readonly DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT
 
 # Validates crawler exit status and the source-specific completeness policy.
 validate_fetch_result() {
@@ -76,7 +80,7 @@ fetch_single_documentation_page() {
         --output-document="$target_page" \
         --max-redirect=0 \
         "${DOCUMENTATION_SEED_NETWORK_POLICY_ARGUMENTS[@]}" \
-        --user-agent="java-chat-doc-fetcher/1.0" \
+        --user-agent="$DOCUMENTATION_SINGLE_PAGE_BROWSER_USER_AGENT" \
         "$url" 2>&1 | tee -a "$LOG_FILE"
     wget_exit_code="${PIPESTATUS[0]}"
     cd - > /dev/null

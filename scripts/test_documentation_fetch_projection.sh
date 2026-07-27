@@ -481,6 +481,39 @@ if ! (
     record_documentation_fetch() {
         printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
     }
+    fetch_named_official_source oracle-java25-release-notes
+); then
+    fail_documentation_fetch_test "governed Oracle Java 25 release-notes dispatch did not complete"
+fi
+
+assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
+    fetch_source \
+    --url \
+    "https://www.oracle.com/java/technologies/javase/25-relnote-issues.html" \
+    --mirror-path \
+    "oracle/javase" \
+    --name \
+    "Java 25 Release Notes Issues" \
+    --source-version \
+    "25-ga" \
+    --identity-regex \
+    'Java.*25|25.*Java' \
+    --cut-directories \
+    3 \
+    --minimum-html-files \
+    1 \
+    --single-page
+
+if ! (
+    set --
+    # shellcheck source=fetch_all_docs.sh
+    source "$FETCH_SCRIPT"
+    log() {
+        :
+    }
+    record_documentation_fetch() {
+        printf '%s\n' "$@" > "$ENVIRONMENT_OVERRIDE_CAPTURE"
+    }
     fetch_named_official_source jetbrains-java25-article
 ); then
     fail_documentation_fetch_test "governed JetBrains article dispatch did not complete"
@@ -505,12 +538,14 @@ assert_captured_arguments "$ENVIRONMENT_OVERRIDE_CAPTURE" \
     --single-page
 
 SINGLE_PAGE_STAGE="$TEST_WORK_DIRECTORY/single-page-stage"
+SINGLE_PAGE_WGET_CAPTURE="$TEST_WORK_DIRECTORY/single-page-wget"
 mkdir -p "$SINGLE_PAGE_STAGE"
 printf '<html><body>stale recursive page</body></html>\n' > "$SINGLE_PAGE_STAGE/unrelated.html"
 LOG_FILE="$TEST_WORK_DIRECTORY/single-page.log"
 wget() {
     local wget_argument
     local output_document=""
+    printf '%s\n' "$@" > "$SINGLE_PAGE_WGET_CAPTURE"
     for wget_argument in "$@"; do
         case "$wget_argument" in
             --output-document=*) output_document="${wget_argument#--output-document=}" ;;
@@ -524,9 +559,9 @@ wget() {
 if ! (
     cd "$TEST_WORK_DIRECTORY"
     fetch_single_documentation_page \
-        "https://blog.jetbrains.com/idea/2025/09/java-25-lts-and-intellij-idea/" \
+        "https://www.oracle.com/java/technologies/javase/25-relnote-issues.html" \
         "$SINGLE_PAGE_STAGE" \
-        "JetBrains Java 25 Blog" \
+        "Java 25 Release Notes Issues" \
         3 \
         1 \
         false
@@ -534,11 +569,14 @@ if ! (
     fail_documentation_fetch_test "governed single-page fetch did not complete"
 fi
 unset -f wget
-if [ ! -f "$SINGLE_PAGE_STAGE/java-25-lts-and-intellij-idea/index.html" ]; then
+if [ ! -f "$SINGLE_PAGE_STAGE/25-relnote-issues.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch used the wrong projected path"
 fi
 if [ -f "$SINGLE_PAGE_STAGE/unrelated.html" ]; then
     fail_documentation_fetch_test "governed single-page fetch retained an unrelated resumed page"
+fi
+if ! grep -Fqx -- "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$SINGLE_PAGE_WGET_CAPTURE"; then
+    fail_documentation_fetch_test "governed single-page fetch did not use the verified browser request identity"
 fi
 
 SPRING_AI_MIXED_STAGE="$TEST_WORK_DIRECTORY/spring-ai-mixed-stage"
