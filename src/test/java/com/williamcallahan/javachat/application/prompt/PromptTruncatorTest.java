@@ -121,10 +121,15 @@ class PromptTruncatorTest {
         assertEquals(0, truncationOutcome.contextDocumentCount());
         assertEquals(0, truncationOutcome.conversationTurnCount());
 
-        // System and query must be present
+        // The legacy rendering stays complete while the Responses API input is separated.
         String rendered = truncationOutcome.render();
+        assertEquals(
+                "Critical system instructions",
+                truncationOutcome.prompt().system().content());
         assertTrue(rendered.contains("Critical system instructions"));
         assertTrue(rendered.contains("Important question"));
+        assertFalse(truncationOutcome.renderInput().contains("Critical system instructions"));
+        assertTrue(truncationOutcome.renderInput().contains("Important question"));
     }
 
     @Test
@@ -197,8 +202,10 @@ class PromptTruncatorTest {
         assertEquals(0, result.conversationTurnCount());
 
         String rendered = result.render();
+        assertEquals("System", result.prompt().system().content());
         assertTrue(rendered.contains("System"));
         assertTrue(rendered.contains("query"));
+        assertEquals("query", result.renderInput());
     }
 
     @Test

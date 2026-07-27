@@ -187,16 +187,32 @@ public class PromptTruncator {
      */
     public record TruncatedPrompt(StructuredPrompt prompt, boolean wasTruncated, boolean isGpt5Family) {
         /**
-         * Renders the prompt to a string, prepending truncation notice if needed.
+         * Renders the complete prompt, prepending the truncation notice when needed.
          *
-         * @return final prompt string ready for LLM submission
+         * @return final complete prompt string
          */
         public String render() {
+            return prependTruncationNotice(prompt.render());
+        }
+
+        /**
+         * Renders non-system request input, prepending the truncation notice when needed.
+         *
+         * <p>The system segment remains available through {@link #prompt()} so the request
+         * boundary can submit it as system-level instructions.</p>
+         *
+         * @return final non-system input string ready for LLM submission
+         */
+        public String renderInput() {
+            return prependTruncationNotice(prompt.renderInput());
+        }
+
+        private String prependTruncationNotice(String renderedPrompt) {
             if (!wasTruncated) {
-                return prompt.render();
+                return renderedPrompt;
             }
             String notice = isGpt5Family ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
-            return notice + prompt.render();
+            return notice + renderedPrompt;
         }
 
         /**

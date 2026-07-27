@@ -10,6 +10,12 @@ import com.openai.models.ReasoningEffort;
 import com.openai.models.responses.ResponseCreateParams;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
+import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
+import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
+import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
+import com.williamcallahan.javachat.domain.prompt.SystemSegment;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
@@ -112,6 +118,30 @@ class OpenAiRequestFactoryTest {
         assertEquals(
                 (long) TEST_COMPLETION_OUTPUT_TOKEN_BUDGET,
                 responseCreateParams.maxOutputTokens().orElseThrow());
+        assertTrue(responseCreateParams.instructions().isEmpty());
+    }
+
+    @Test
+    void prepareStreamingRequestSeparatesSystemInstructionsFromRequestInput() {
+        OpenAiRequestFactory requestFactory = createRequestFactory("");
+        StructuredPrompt structuredPrompt = new StructuredPrompt(
+                new SystemSegment("Follow the Java teaching policy", 8),
+                List.of(new ContextDocumentSegment(1, "https://docs.oracle.com/java", "Official context", 4)),
+                List.of(new ConversationTurnSegment(ConversationTurnSegment.ROLE_ASSISTANT, "Earlier explanation", 3)),
+                new CurrentQuerySegment("Explain records", 2));
+
+        ResponseCreateParams responseCreateParams = requestFactory
+                .prepareStreamingRequest(structuredPrompt, 0.4, RateLimitService.ApiProvider.OPENAI)
+                .responseParams();
+
+        assertEquals(
+                "Follow the Java teaching policy",
+                responseCreateParams.instructions().orElseThrow());
+        assertEquals(
+                "[CTX 1] https://docs.oracle.com/java\nOfficial context\n\n"
+                        + "Assistant: Earlier explanation\n\nExplain records",
+                responseCreateParams.input().orElseThrow().asText());
+        assertFalse(responseCreateParams.input().orElseThrow().asText().contains("Follow the Java teaching policy"));
     }
 
     @Test

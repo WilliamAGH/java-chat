@@ -117,7 +117,10 @@ public final class OpenAiRequestFactory {
                     truncatedPrompt.conversationTurnCount());
         }
 
-        ResponseCreateParams responseParams = buildResponseParams(truncatedPrompt.render(), temperature, modelId);
+        ResponseCreateParams responseParams =
+                buildResponseParams(truncatedPrompt.renderInput(), temperature, modelId).toBuilder()
+                        .instructions(truncatedPrompt.prompt().system().content())
+                        .build();
         return new OpenAiPreparedRequest(responseParams, modelId);
     }
 

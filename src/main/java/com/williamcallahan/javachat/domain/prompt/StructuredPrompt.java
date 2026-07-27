@@ -1,6 +1,7 @@
 package com.williamcallahan.javachat.domain.prompt;
 
 import java.util.List;
+import java.util.StringJoiner;
 
 /**
  * Aggregates all prompt segments for structure-aware truncation and rendering.
@@ -46,37 +47,49 @@ public record StructuredPrompt(
      */
     public int totalEstimatedTokens() {
         int total = system.estimatedTokens() + currentQuery.estimatedTokens();
-        for (ContextDocumentSegment doc : contextDocuments) {
-            total += doc.estimatedTokens();
+        for (ContextDocumentSegment contextDocument : contextDocuments) {
+            total += contextDocument.estimatedTokens();
         }
-        for (ConversationTurnSegment turn : conversationHistory) {
-            total += turn.estimatedTokens();
+        for (ConversationTurnSegment conversationTurn : conversationHistory) {
+            total += conversationTurn.estimatedTokens();
         }
         return total;
     }
 
     /**
-     * Renders the complete prompt to a string for LLM submission.
+     * Renders the complete prompt to a string for consumers that require one text value.
      *
-     * <p>Segments are joined with paragraph separators in order:
-     * system → context documents → conversation history → current query.</p>
+     * <p>Segments are joined with paragraph separators in order: system instructions,
+     * context documents, conversation history, and the current query.</p>
      *
      * @return the fully assembled prompt string
      */
     public String render() {
-        StringBuilder prompt = new StringBuilder(system.content());
+        return system.content() + SEGMENT_SEPARATOR + renderInput();
+    }
 
-        for (ContextDocumentSegment doc : contextDocuments) {
-            prompt.append(SEGMENT_SEPARATOR).append(doc.content());
+    /**
+     * Renders the non-system prompt segments as Responses API input.
+     *
+     * <p>Keeping system instructions separate lets the request boundary submit them through
+     * the API's priority-bearing instructions field without duplicating them in user input.</p>
+     *
+     * @return the assembled context, conversation history, and current query
+     */
+    public String renderInput() {
+        StringJoiner promptInput = new StringJoiner(SEGMENT_SEPARATOR);
+
+        for (ContextDocumentSegment contextDocument : contextDocuments) {
+            promptInput.add(contextDocument.content());
         }
 
-        for (ConversationTurnSegment turn : conversationHistory) {
-            prompt.append(SEGMENT_SEPARATOR).append(turn.content());
+        for (ConversationTurnSegment conversationTurn : conversationHistory) {
+            promptInput.add(conversationTurn.content());
         }
 
-        prompt.append(SEGMENT_SEPARATOR).append(currentQuery.content());
+        promptInput.add(currentQuery.content());
 
-        return prompt.toString();
+        return promptInput.toString();
     }
 
     /**

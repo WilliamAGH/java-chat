@@ -29,7 +29,18 @@ class SystemPromptConfigTest {
         assertAll(
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_PROSE_LINE_CLAUSE)),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_CODE_BOUNDARY_CLAUSE)),
-                () -> assertTrue(corePrompt.contains(SystemPromptConfig.JAVA_FENCE_VALIDITY_CLAUSE)));
+                () -> assertTrue(corePrompt.contains(SystemPromptConfig.JAVA_FENCE_VALIDITY_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("public static void main(String[] args)")));
+    }
+
+    @Test
+    void shouldDistinguishVirtualThreadCarrierOccupancyFromPinning() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains(SystemPromptConfig.VIRTUAL_THREAD_SEMANTICS_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("that is not pinning")),
+                () -> assertTrue(corePrompt.contains("For Java 24 and later")));
     }
 
     @Test
