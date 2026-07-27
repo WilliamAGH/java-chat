@@ -11,6 +11,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.config.DocumentationConfig;
 import com.williamcallahan.javachat.service.ContentHasher;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,12 +41,44 @@ class IngestionQuarantineServiceTest {
     @Test
     void springCliProfileConstructsServiceWithContentHasher() {
         try (AnnotationConfigApplicationContext applicationContext = new AnnotationConfigApplicationContext()) {
+            AppProperties appProperties = mock(AppProperties.class);
+            DocumentationConfig documentationConfig = mock(DocumentationConfig.class);
+            when(appProperties.getDocs()).thenReturn(documentationConfig);
+            when(documentationConfig.getSnapshotDir()).thenReturn("data/snapshots");
             applicationContext.getEnvironment().setActiveProfiles(CLI_PROFILE);
+            applicationContext.registerBean(AppProperties.class, () -> appProperties);
             applicationContext.register(ContentHasher.class, IngestionQuarantineService.class);
             applicationContext.refresh();
 
             assertNotNull(applicationContext.getBean(IngestionQuarantineService.class));
         }
+    }
+
+    @Test
+    void storesInspectionCopiesUnderConfiguredGenerationState(@TempDir Path temporaryDirectory) throws IOException {
+        Path documentationRoot = temporaryDirectory.resolve("read-only-corpus/docs");
+        Path canonicalDocument = documentationRoot.resolve("spring-ai-api-stable/serialized-form.html");
+        byte[] canonicalDocumentBytes = "rejected serialized form".getBytes(StandardCharsets.UTF_8);
+        Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
+        Files.write(canonicalDocument, canonicalDocumentBytes);
+        Path snapshotDirectory = temporaryDirectory.resolve("generation/dev/snapshots");
+        AppProperties appProperties = new AppProperties();
+        appProperties.getDocs().setSnapshotDir(snapshotDirectory.toString());
+        IngestionQuarantineService quarantineService =
+                new IngestionQuarantineService(documentationRoot.toString(), appProperties, new ContentHasher());
+
+        IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(canonicalDocument);
+
+        Path expectedQuarantineRoot = snapshotDirectory
+                .resolve(QUARANTINE_DIRECTORY_NAME)
+                .toAbsolutePath()
+                .normalize();
+        assertTrue(quarantineCopy.quarantined().startsWith(expectedQuarantineRoot));
+        assertFalse(quarantineCopy
+                .quarantined()
+                .startsWith(documentationRoot.toAbsolutePath().normalize()));
+        assertTrue(Files.exists(canonicalDocument));
+        assertArrayEquals(canonicalDocumentBytes, Files.readAllBytes(quarantineCopy.quarantined()));
     }
 
     @Test
@@ -55,12 +89,13 @@ class IngestionQuarantineServiceTest {
         byte[] canonicalDocumentBytes = "canonical streams page".getBytes(StandardCharsets.UTF_8);
         Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
         Files.write(canonicalDocument, canonicalDocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
 
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
         IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(canonicalDocument);
 
-        Path quarantineRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent")
+        Path quarantineRoot = quarantineStorageRoot
                 .resolve(QUARANTINE_DIRECTORY_NAME)
                 .toAbsolutePath()
                 .normalize();
@@ -86,12 +121,13 @@ class IngestionQuarantineServiceTest {
         byte[] outsideDocumentBytes = "external landing page".getBytes(StandardCharsets.UTF_8);
         Files.createDirectories(Objects.requireNonNull(outsideDocument.getParent(), "outside document parent"));
         Files.write(outsideDocument, outsideDocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
 
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
         IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(outsideDocument);
 
-        Path quarantineRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent")
+        Path quarantineRoot = quarantineStorageRoot
                 .resolve(QUARANTINE_DIRECTORY_NAME)
                 .toAbsolutePath()
                 .normalize();
@@ -117,8 +153,9 @@ class IngestionQuarantineServiceTest {
         byte[] canonicalDocumentBytes = "canonical streams page".getBytes(StandardCharsets.UTF_8);
         Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
         Files.write(canonicalDocument, canonicalDocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
 
         IngestionQuarantineService.QuarantineResult firstQuarantineCopy =
                 quarantineService.quarantine(canonicalDocument);
@@ -140,15 +177,16 @@ class IngestionQuarantineServiceTest {
         byte[] malformedUtf8DocumentBytes = HexFormat.of().parseHex(MALFORMED_UTF_8_DOCUMENT_HEX);
         Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
         Files.write(canonicalDocument, malformedUtf8DocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
 
         IngestionQuarantineService.QuarantineResult firstQuarantineCopy =
                 quarantineService.quarantine(canonicalDocument);
         IngestionQuarantineService.QuarantineResult repeatedQuarantineCopy =
                 quarantineService.quarantine(canonicalDocument);
 
-        Path quarantineRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent")
+        Path quarantineRoot = quarantineStorageRoot
                 .resolve(QUARANTINE_DIRECTORY_NAME)
                 .toAbsolutePath()
                 .normalize();
@@ -173,8 +211,9 @@ class IngestionQuarantineServiceTest {
         byte[] changedDocumentBytes = "changed rejected page".getBytes(StandardCharsets.UTF_8);
         Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
         Files.write(canonicalDocument, originalDocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
 
         IngestionQuarantineService.QuarantineResult originalQuarantineCopy =
                 quarantineService.quarantine(canonicalDocument);
@@ -207,7 +246,9 @@ class IngestionQuarantineServiceTest {
             }
             return exactByteHasher.sha256(hashedPath);
         });
-        IngestionQuarantineService quarantineService = new IngestionQuarantineService(documentationRoot, contentHasher);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
+        IngestionQuarantineService quarantineService =
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, contentHasher);
 
         IngestionQuarantineService.QuarantineResult quarantineCopy = quarantineService.quarantine(canonicalDocument);
 
@@ -230,8 +271,9 @@ class IngestionQuarantineServiceTest {
         byte[] corruptedInspectionBytes = "corrupted inspection evidence".getBytes(StandardCharsets.UTF_8);
         Files.createDirectories(Objects.requireNonNull(canonicalDocument.getParent(), "canonical document parent"));
         Files.write(canonicalDocument, canonicalDocumentBytes);
+        Path quarantineStorageRoot = Objects.requireNonNull(documentationRoot.getParent(), "documentation root parent");
         IngestionQuarantineService quarantineService =
-                new IngestionQuarantineService(documentationRoot, new ContentHasher());
+                new IngestionQuarantineService(documentationRoot, quarantineStorageRoot, new ContentHasher());
         IngestionQuarantineService.QuarantineResult firstQuarantineCopy =
                 quarantineService.quarantine(canonicalDocument);
         Files.write(firstQuarantineCopy.quarantined(), corruptedInspectionBytes);

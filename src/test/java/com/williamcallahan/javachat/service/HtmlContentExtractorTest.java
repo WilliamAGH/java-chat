@@ -40,6 +40,48 @@ class HtmlContentExtractorTest {
     }
 
     @Test
+    void extractsSerializedFormDetailsNestedInsideJavadocLists() {
+        Document document = Jsoup.parse("""
+            <html><head><title>Serialized Form (Spring AI Parent 1.1.2 API)</title></head>
+            <body class="serialized-form-page">
+              <main>
+                <div class="header"><h1>Serialized Form</h1></div>
+                <ul class="block-list">
+                  <li>
+                    <section class="serialized-package-container">
+                      <h2>Package org.springframework.ai.mcp</h2>
+                      <ul class="block-list">
+                        <li>
+                          <section class="serialized-class-details">
+                            <h3>Class org.springframework.ai.mcp.McpToolsChangedEvent</h3>
+                            <div class="type-signature">class McpToolsChangedEvent implements Serializable</div>
+                            <section class="detail">
+                              <h4>Serialized Fields</h4>
+                              <ul class="block-list">
+                                <li><h5>connectionName</h5><pre>String connectionName</pre></li>
+                                <li><h5>tools</h5><pre>List&lt;McpSchema.Tool&gt; tools</pre></li>
+                              </ul>
+                            </section>
+                          </section>
+                        </li>
+                      </ul>
+                    </section>
+                  </li>
+                </ul>
+              </main>
+            </body></html>
+            """);
+        HtmlContentExtractor extractor = new HtmlContentExtractor();
+
+        String extractedText = extractor.extractCleanContent(document);
+
+        assertTrue(extractedText.contains("Package org.springframework.ai.mcp"));
+        assertTrue(extractedText.contains("Class org.springframework.ai.mcp.McpToolsChangedEvent"));
+        assertTrue(extractedText.contains("String connectionName"));
+        assertTrue(extractedText.contains("List<McpSchema.Tool> tools"));
+    }
+
+    @Test
     void extractsModernClassMembersWithTheirExactDomAnchorsInSourceOrder() {
         Document document = Jsoup.parse("""
             <html><head><title>Stream</title></head>
