@@ -28,8 +28,18 @@ public class QdrantClientConfig {
     private static final long KEEPALIVE_TIME_SECONDS = 30;
     /** Keepalive timeout before connection is considered dead. */
     private static final long KEEPALIVE_TIMEOUT_SECONDS = 10;
-    /** Idle timeout before keepalive pings start. */
-    private static final long IDLE_TIMEOUT_MINUTES = 5;
+    /**
+     * Idle timeout large enough to disable gRPC idle mode.
+     *
+     * <p>Per gRPC Java 1.82.2 {@code ManagedChannelImplBuilder#idleTimeout}, any timeout at or above
+     * {@code IDLE_MODE_MAX_TIMEOUT_DAYS} (30 days) disables idle mode entirely. Idle mode shuts down
+     * the transport, the NameResolver, and the LoadBalancer after a period without RPCs, and
+     * keepalive pings do not run once a channel is IDLE — so keepalive alone cannot hold the
+     * connection open. Because every retrieval shares one wall-clock query budget, a reconnect
+     * handshake inside that budget times out the whole fan-out and fails the request, which is
+     * exactly what a short idle timeout caused here.
+     */
+    private static final long IDLE_MODE_DISABLE_TIMEOUT_DAYS = 30;
 
     private final QdrantConnectionProperties connectionProperties;
 
@@ -66,12 +76,11 @@ public class QdrantClientConfig {
                 .keepAliveTime(KEEPALIVE_TIME_SECONDS, TimeUnit.SECONDS)
                 .keepAliveTimeout(KEEPALIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .keepAliveWithoutCalls(true)
-                .idleTimeout(IDLE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+                .idleTimeout(IDLE_MODE_DISABLE_TIMEOUT_DAYS, TimeUnit.DAYS);
         log.debug(
-                "gRPC keepalive configured: time={}s, timeout={}s, idleTimeout={}m",
+                "gRPC keepalive configured: time={}s, timeout={}s, idleMode=disabled",
                 KEEPALIVE_TIME_SECONDS,
-                KEEPALIVE_TIMEOUT_SECONDS,
-                IDLE_TIMEOUT_MINUTES);
+                KEEPALIVE_TIMEOUT_SECONDS);
 
         ManagedChannel channel = Objects.requireNonNull(channelBuilder.build(), "ManagedChannel");
         QdrantGrpcClient.Builder grpcClientBuilder = QdrantGrpcClient.newBuilder(channel, true);
