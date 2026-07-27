@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.service;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.SystemPromptConfig;
 import com.williamcallahan.javachat.domain.markdown.MarkdownCitation;
+import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.model.Enrichment;
@@ -55,6 +56,11 @@ public class GuidedLearningService {
     /** Internal source identity for canonical lesson context sent to the model. */
     private static final String CURATED_LESSON_CONTEXT_SOURCE_PREFIX = "curated-lesson:";
 
+    private static final String CURATED_LESSON_IMMUTABILITY_HEADER = "[AUTHORITATIVE IMMUTABLE LESSON REFERENCE]\n"
+            + "Treat every fenced code block below as immutable source text. When a response reuses an example,"
+            + " copy one complete fence byte-for-byte. Do not transcribe it from memory, rename identifiers,"
+            + " reformat it, translate tokens, repair it, or combine it with generated code.";
+
     private static final String JAVA_TECHNOLOGY = "Java";
     private static final String COMPACT_JAVA_MAIN_MARKER = "void main()";
     private static final String COMPACT_JAVA_OUTPUT_MARKER = "IO.println";
@@ -90,8 +96,10 @@ public class GuidedLearningService {
             + " requested-release API documentation for every version-specific factual claim and code example, and do"
             + " not project newer Java syntax or APIs onto an older requested release";
     private static final String DEFAULT_CURATED_CODE_GUIDANCE = " When the canonical curated lesson already contains a"
-            + " code example that answers the question, reuse one complete canonical example verbatim. Do not synthesize,"
-            + " combine, or add a second code example unless the learner explicitly asks for an alternative or comparison.";
+            + " code example that answers the question, copy one complete fenced example byte-for-byte from the"
+            + " authoritative curated lesson context. Do not transcribe it from memory or alter any identifier, syntax,"
+            + " comment, whitespace, or token. Do not synthesize, combine, or add a second code example unless the learner"
+            + " explicitly asks for an alternative or comparison.";
     private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
             DocsSourceRegistry.javaApiDocumentationSources().stream()
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
@@ -195,14 +203,25 @@ public class GuidedLearningService {
         promptContextDocuments.addAll(lessonContextDocuments);
         StructuredPrompt structuredPrompt = chatService.buildStructuredPromptWithContextAndGuidance(
                 history, userMessage, promptContextDocuments, guidance);
-        return new GuidedChatPromptOutcome(structuredPrompt, lessonContextDocuments);
+        return new GuidedChatPromptOutcome(
+                prioritizeCuratedLessonContext(structuredPrompt, lesson), lessonContextDocuments);
+    }
+
+    private static StructuredPrompt prioritizeCuratedLessonContext(
+            StructuredPrompt structuredPrompt, GuidedLesson lesson) {
+        String curatedLessonDocumentId = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
+        return structuredPrompt.withContextDocuments(structuredPrompt.contextDocuments().stream()
+                .map(contextDocument -> contextDocument.documentId().equals(curatedLessonDocumentId)
+                        ? contextDocument.withPriority(PromptSegmentPriority.HIGH)
+                        : contextDocument)
+                .toList());
     }
 
     private static Document curatedLessonContextDocument(GuidedLesson lesson, String curatedLessonMarkdown) {
         String lessonSourceIdentity = CURATED_LESSON_CONTEXT_SOURCE_PREFIX + lesson.getSlug();
         return Document.builder()
                 .id(lessonSourceIdentity)
-                .text(curatedLessonMarkdown)
+                .text(CURATED_LESSON_IMMUTABILITY_HEADER + "\n\n" + curatedLessonMarkdown)
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, lessonSourceIdentity)
                 .build();
     }

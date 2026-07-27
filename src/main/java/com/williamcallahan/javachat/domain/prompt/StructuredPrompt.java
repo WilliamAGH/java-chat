@@ -11,7 +11,7 @@ import java.util.StringJoiner;
  * that respects semantic boundaries rather than cutting mid-segment.</p>
  *
  * @param system system instructions segment (CRITICAL priority)
- * @param contextDocuments retrieved RAG documents (LOW priority, truncated first)
+ * @param contextDocuments authoritative HIGH or ordinary LOW context documents
  * @param conversationHistory past conversation turns (MEDIUM priority)
  * @param currentQuery the user's current question (HIGH priority)
  */

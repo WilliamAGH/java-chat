@@ -10,6 +10,7 @@ import ch.qos.logback.classic.Logger;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.CurrentQuerySegment;
+import com.williamcallahan.javachat.domain.prompt.PromptSegmentPriority;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.prompt.SystemSegment;
 import com.williamcallahan.javachat.support.logging.ExpectedLogEvents;
@@ -93,6 +94,62 @@ class PromptTruncatorTest {
         String rendered = result.render();
         assertTrue(rendered.contains("recent"));
         assertFalse(rendered.contains("old1"));
+    }
+
+    @Test
+    void retainsHighPriorityContextBeforeConversationHistory() {
+        ContextDocumentSegment canonicalLesson = new ContextDocumentSegment(
+                        1, "curated-lesson:records", "curated-lesson:records", "canonical records lesson", 150)
+                .withPriority(PromptSegmentPriority.HIGH);
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        canonicalLesson,
+                        new ContextDocumentSegment(2, "official-records", "official", "official records context", 100)),
+                List.of(new ConversationTurnSegment("assistant", "long prior answer", 150)),
+                new CurrentQuerySegment("Explain shallow immutability", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(1, truncationOutcome.contextDocumentCount());
+        assertEquals(0, truncationOutcome.conversationTurnCount());
+        ContextDocumentSegment retainedLesson =
+                truncationOutcome.prompt().contextDocuments().getFirst();
+        assertEquals("curated-lesson:records", retainedLesson.documentId());
+        assertEquals(1, retainedLesson.index());
+        assertEquals(PromptSegmentPriority.HIGH, retainedLesson.priority());
+    }
+
+    @Test
+    void retainsMultipleHighPriorityDocumentsInSourceOrderAheadOfLowContext() {
+        StructuredPrompt prompt = new StructuredPrompt(
+                new SystemSegment("System", 100),
+                List.of(
+                        new ContextDocumentSegment(1, "low-first", "low-first", "ordinary context", 100),
+                        new ContextDocumentSegment(2, "high-first", "high-first", "canonical lesson", 80)
+                                .withPriority(PromptSegmentPriority.HIGH),
+                        new ContextDocumentSegment(3, "low-second", "low-second", "ordinary context", 100),
+                        new ContextDocumentSegment(4, "high-second", "high-second", "required example", 70)
+                                .withPriority(PromptSegmentPriority.HIGH)),
+                List.of(new ConversationTurnSegment("assistant", "recent answer", 50)),
+                new CurrentQuerySegment("Current question", 50));
+
+        PromptTruncator.TruncatedPrompt truncationOutcome = truncator.truncate(prompt, 350, true);
+
+        assertTrue(truncationOutcome.wasTruncated());
+        assertEquals(2, truncationOutcome.contextDocumentCount());
+        assertEquals(1, truncationOutcome.conversationTurnCount());
+        assertEquals(
+                List.of("high-first", "high-second"),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::documentId)
+                        .toList());
+        assertEquals(
+                List.of(1, 2),
+                truncationOutcome.prompt().contextDocuments().stream()
+                        .map(ContextDocumentSegment::index)
+                        .toList());
     }
 
     @Test

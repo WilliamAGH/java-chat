@@ -42,6 +42,8 @@ class SystemPromptConfigTest {
                 () -> assertTrue(corePrompt.contains("Finish the complete example before an enrichment marker")),
                 () -> assertTrue(corePrompt.contains("Never split one example across multiple fences")),
                 () -> assertTrue(corePrompt.contains("never emit a raw type")),
+                () -> assertTrue(corePrompt.contains("Resolve every checked exception along every code path")),
+                () -> assertTrue(corePrompt.contains("restore interruption with `Thread.currentThread().interrupt()`")),
                 () -> assertTrue(corePrompt.contains("public static void main(String[] args)")));
     }
 
