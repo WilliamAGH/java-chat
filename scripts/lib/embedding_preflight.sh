@@ -30,6 +30,30 @@ trim_embedding_credential() {
     printf '%s' "$embedding_credential"
 }
 
+retry_after_delay_seconds() {
+    local retry_after_field="$1"
+    if [[ "$retry_after_field" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$retry_after_field"
+        return 0
+    fi
+    python3 - "$retry_after_field" <<'PY'
+import math
+import sys
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
+retry_after_text = sys.argv[1]
+try:
+    retry_after_time = parsedate_to_datetime(retry_after_text)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if retry_after_time.tzinfo is None:
+    retry_after_time = retry_after_time.replace(tzinfo=timezone.utc)
+delay_seconds = max(0, math.ceil((retry_after_time - datetime.now(timezone.utc)).total_seconds()))
+print(delay_seconds)
+PY
+}
+
 # Reads a non-secret embedding setting from the application configuration that owns it.
 read_embedding_application_property() {
     local property_name="$1"
@@ -162,16 +186,17 @@ validate_embedding_probe_payload() {
 
         if [ "$attempt_number" -lt "$max_attempts" ]; then
             local next_retry_delay_seconds="$retry_delay_seconds"
-            if [ -n "${retry_after_header:-}" ]; then
+            if { [ "$http_status_code" = "429" ] || [ "$http_status_code" = "503" ]; } \
+                && [ -n "${retry_after_header:-}" ]; then
                 local retry_after_seconds
                 retry_after_seconds="${retry_after_header#*:}"
                 retry_after_seconds="$(trim_embedding_credential "$retry_after_seconds")"
-                if ! [[ "$retry_after_seconds" =~ ^[0-9]+$ ]] \
+                if ! retry_after_seconds="$(retry_after_delay_seconds "$retry_after_seconds")" \
                     || [ "${#retry_after_seconds}" -gt "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
                     || { [ "${#retry_after_seconds}" -eq "${#GATEWAY_MAX_RETRY_AFTER_SECONDS}" ] \
                         && [[ "$retry_after_seconds" > "$GATEWAY_MAX_RETRY_AFTER_SECONDS" ]]; }; then
                     rm -f "$response_body_file" "$response_headers_file"
-                    $log_fn "${RED}Embedding probe '$probe_label' received an unsupported Retry-After value; refusing an early retry${NC}"
+                    $log_fn "${RED}Embedding probe '$probe_label' received an invalid or excessive Retry-After value; refusing an early retry${NC}"
                     return 1
                 fi
                 if [ "$retry_after_seconds" -gt "$next_retry_delay_seconds" ]; then

@@ -93,6 +93,8 @@ curl() {
     local validation_mode="${EMBEDDING_TEST_MODE:-success}"
     if [ "$validation_mode" = "rate_limit_once" ] \
         || [ "$validation_mode" = "rate_limit_oversized" ] \
+        || [ "$validation_mode" = "rate_limit_http_date" ] \
+        || [ "$validation_mode" = "rate_limit_invalid" ] \
         || [ "$validation_mode" = "service_unavailable_once" ]; then
         local rate_limit_attempt_count=0
         if [ -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS" ]; then
@@ -101,11 +103,20 @@ curl() {
         rate_limit_attempt_count=$((rate_limit_attempt_count + 1))
         printf '%s\n' "$rate_limit_attempt_count" > "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
         if [ "$rate_limit_attempt_count" -eq 1 ]; then
-            if [ "$validation_mode" = "rate_limit_oversized" ]; then
-                printf 'Retry-After: 999999999999999999999999999999\r\n' > "$output_headers_file"
-            else
-                printf 'Retry-After: 7\r\n' > "$output_headers_file"
-            fi
+            case "$validation_mode" in
+                rate_limit_oversized)
+                    printf 'Retry-After: 999999999999999999999999999999\r\n' > "$output_headers_file"
+                    ;;
+                rate_limit_http_date)
+                    printf 'Retry-After: Wed, 21 Oct 2015 07:28:00 GMT\r\n' > "$output_headers_file"
+                    ;;
+                rate_limit_invalid)
+                    printf 'Retry-After: not-an-http-date\r\n' > "$output_headers_file"
+                    ;;
+                *)
+                    printf 'Retry-After: 7\r\n' > "$output_headers_file"
+                    ;;
+            esac
             printf '%s\n' '{"error":{"message":"batch capacity is queued"}}' > "$output_body_file"
             if [ "$validation_mode" = "service_unavailable_once" ]; then
                 printf '503'
@@ -151,7 +162,7 @@ if ! jq -e -s '
 ' "$EMBEDDING_TEST_CAPTURE" >/dev/null; then
     fail_embedding_preflight_test "gateway probes did not use the batch tier, model list, and batches 1 and 32"
 fi
-if ! grep -Fqx '1' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "1" ]; then
     fail_embedding_preflight_test "gateway probes were not paced at one request per second"
 fi
 
@@ -169,8 +180,11 @@ if ! EMBEDDING_TEST_MODE=rate_limit_once \
         2560; then
     fail_embedding_preflight_test "rate-limited embedding probe did not recover"
 fi
-if ! grep -Fqx '7' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "7" ]; then
     fail_embedding_preflight_test "gateway Retry-After did not control the next request"
+fi
+if [ "$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")" != "2" ]; then
+    fail_embedding_preflight_test "rate-limited embedding probe did not make exactly two attempts"
 fi
 
 : > "$EMBEDDING_TEST_SLEEP_CAPTURE"
@@ -187,8 +201,53 @@ if ! EMBEDDING_TEST_MODE=service_unavailable_once \
         2560; then
     fail_embedding_preflight_test "service-unavailable embedding probe did not recover"
 fi
-if ! grep -Fqx '7' "$EMBEDDING_TEST_SLEEP_CAPTURE"; then
+if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "7" ]; then
     fail_embedding_preflight_test "non-429 Retry-After did not control the next request"
+fi
+if [ "$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")" != "2" ]; then
+    fail_embedding_preflight_test "service-unavailable embedding probe did not make exactly two attempts"
+fi
+
+: > "$EMBEDDING_TEST_SLEEP_CAPTURE"
+rm -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+if ! EMBEDDING_TEST_MODE=rate_limit_http_date \
+    validate_embedding_probe_payload \
+        "https://gateway.test/v1/embeddings" \
+        "test-gateway-key" \
+        "qwen/qwen3-embedding-4b" \
+        "HTTP-date rate limit probe" \
+        "http-date-rate-limit" \
+        embedding_test_log \
+        1 \
+        2560; then
+    fail_embedding_preflight_test "HTTP-date Retry-After was rejected"
+fi
+if [ "$(cat "$EMBEDDING_TEST_SLEEP_CAPTURE")" != "1" ]; then
+    fail_embedding_preflight_test "past HTTP-date Retry-After did not retain the local retry floor"
+fi
+if [ "$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")" != "2" ]; then
+    fail_embedding_preflight_test "HTTP-date embedding probe did not make exactly two attempts"
+fi
+
+: > "$EMBEDDING_TEST_SLEEP_CAPTURE"
+rm -f "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS"
+if EMBEDDING_TEST_MODE=rate_limit_invalid \
+    validate_embedding_probe_payload \
+        "https://gateway.test/v1/embeddings" \
+        "test-gateway-key" \
+        "qwen/qwen3-embedding-4b" \
+        "invalid rate limit probe" \
+        "invalid-rate-limit" \
+        embedding_test_log \
+        1 \
+        2560; then
+    fail_embedding_preflight_test "invalid Retry-After was accepted"
+fi
+if [ -s "$EMBEDDING_TEST_SLEEP_CAPTURE" ]; then
+    fail_embedding_preflight_test "invalid Retry-After caused an early retry"
+fi
+if [ "$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")" != "1" ]; then
+    fail_embedding_preflight_test "invalid Retry-After was retried"
 fi
 
 : > "$EMBEDDING_TEST_SLEEP_CAPTURE"
@@ -207,6 +266,9 @@ if EMBEDDING_TEST_MODE=rate_limit_oversized \
 fi
 if [ -s "$EMBEDDING_TEST_SLEEP_CAPTURE" ]; then
     fail_embedding_preflight_test "oversized Retry-After caused an early retry"
+fi
+if [ "$(cat "$EMBEDDING_TEST_RATE_LIMIT_ATTEMPTS")" != "1" ]; then
+    fail_embedding_preflight_test "oversized Retry-After was retried"
 fi
 
 for drifted_model_and_dimensions in "qwen/qwen3-embedding-8b 2560" "qwen/qwen3-embedding-4b 4096"; do
