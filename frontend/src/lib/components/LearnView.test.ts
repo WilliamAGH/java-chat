@@ -220,6 +220,35 @@ describe("LearnView guided chat streaming stability", () => {
 
     expect(mobileChatDialog).not.toHaveAttribute("open");
     expect(mobileChatTrigger).toHaveFocus();
+
+    await fireEvent.click(mobileChatTrigger);
+    await tick();
+
+    expect(mobileChatDialog).toHaveAttribute("open");
+  });
+
+  it("closes the modal mobile chat drawer when its parent state closes", async () => {
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const mobileChatTrigger = learnView.getByRole("button", {
+      name: "Ask questions about this lesson",
+    });
+    await fireEvent.click(mobileChatTrigger);
+
+    const mobileChatDialog = await learnView.findByRole("dialog", {
+      name: "Lesson chat",
+    });
+    await fireEvent.click(mobileChatTrigger);
+    await tick();
+
+    expect(mobileChatDialog).not.toHaveAttribute("open");
+    expect(mobileChatTrigger).toHaveFocus();
+
+    await fireEvent.click(mobileChatTrigger);
+    await tick();
+
+    expect(mobileChatDialog).toHaveAttribute("open");
   });
 
   it("restores mobile drawer input focus after a submitted stream completes with focus in the form", async () => {

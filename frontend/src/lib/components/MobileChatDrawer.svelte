@@ -76,7 +76,18 @@
     let chatTrigger: HTMLButtonElement | null = $state(null);
 
     $effect(() => {
-        if (!isOpen || !chatDialog || chatDialog.open) {
+        if (!chatDialog) {
+            return;
+        }
+
+        if (!isOpen) {
+            if (chatDialog.open) {
+                chatDialog.close();
+            }
+            return;
+        }
+
+        if (chatDialog.open) {
             return;
         }
 
