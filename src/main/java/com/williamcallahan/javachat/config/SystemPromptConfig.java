@@ -18,7 +18,10 @@ public class SystemPromptConfig {
     private static final String VIRTUAL_THREAD_SEMANTICS_PLACEHOLDER = "__VIRTUAL_THREAD_SEMANTICS_CLAUSE__";
     static final String MARKER_PROSE_LINE_CLAUSE = "Put each enrichment marker only on its own prose line.";
     static final String MARKER_CODE_BOUNDARY_CLAUSE =
-            "Never place an enrichment marker inside inline code or a fenced code block; put it before or after the fence.";
+            "Never place an enrichment marker inside inline code, a source-code comment, or a fenced code block. "
+                    + "Marker syntax is not valid source code. When a marker explains code, close the fence, put the "
+                    + "marker on its own prose line, and then continue. A fenced block containing marker syntax such "
+                    + "as `{{example:...}}` is invalid and must be corrected before emission.";
     static final String JAVA_FENCE_VALIDITY_CLAUSE =
             "Before emitting a fenced `java` block, perform a final internal consistency check of its delimiters, quotes, declarations, imports, type arguments, and referenced API signatures. The block must contain syntactically valid Java that compiles with its stated context. A standalone program must have a launchable entry point appropriate to the active Java release, for example `public static void main(String[] args)`; never invent an API.";
     static final String VIRTUAL_THREAD_SEMANTICS_CLAUSE =

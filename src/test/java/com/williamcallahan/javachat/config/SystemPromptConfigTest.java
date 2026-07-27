@@ -29,6 +29,8 @@ class SystemPromptConfigTest {
         assertAll(
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_PROSE_LINE_CLAUSE)),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_CODE_BOUNDARY_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("Marker syntax is not valid source code")),
+                () -> assertTrue(corePrompt.contains("A fenced block containing marker syntax")),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.JAVA_FENCE_VALIDITY_CLAUSE)),
                 () -> assertTrue(corePrompt.contains("public static void main(String[] args)")));
     }
