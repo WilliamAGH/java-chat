@@ -107,7 +107,7 @@ QueryPoints {
 }
 ```
 
-All 4 requests fire asynchronously via `qdrantClient.queryAsync()` (returns `ListenableFuture`, converted to `CompletableFuture`). Each future is awaited with the configured timeout (default 5s).
+All 4 requests fire asynchronously via `qdrantClient.queryAsync()` (returns `ListenableFuture`, converted to `CompletableFuture`). Each future is awaited with the configured timeout (default 10s).
 
 The sparse prefetch is skipped if the sparse vector has no indices (empty query after tokenization).
 
@@ -277,7 +277,7 @@ All properties are bound via `AppProperties` (`@ConfigurationProperties(prefix =
 | `app.qdrant.sparse-vector-name` | `bm25` | Named vector key for sparse BM25 tokens |
 | `app.qdrant.prefetch-limit` | `20` | Per-stage candidate count for each dense/sparse prefetch before RRF fusion |
 | `app.qdrant.rrf-k` | `60` | RRF k parameter: `score = Sum(1 / (k + rank))` |
-| `app.qdrant.query-timeout` | `5s` | Timeout for hybrid search fan-out across all collections |
+| `app.qdrant.query-timeout` | `10s` | Timeout for hybrid search fan-out across all collections |
 | `app.qdrant.ensure-payload-indexes` | `true` | Create payload indexes on startup for metadata filtering |
 | `app.qdrant.ensure-collections` | `false` | Validate existing collections without creating missing collections on normal startup |
 
