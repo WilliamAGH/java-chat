@@ -4,6 +4,7 @@ import static com.williamcallahan.javachat.web.SseConstants.EVENT_CITATION;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_STATUS;
 import static com.williamcallahan.javachat.web.SseConstants.EVENT_TEXT;
+import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_RETRIEVAL_TIMEOUT;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PREPARING;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_CODE_STREAM_PROVIDER_RETRYABLE_ERROR;
 import static com.williamcallahan.javachat.web.SseConstants.STATUS_STAGE_RETRIEVAL;
@@ -39,6 +40,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.service.ChatMemoryService;
 import com.williamcallahan.javachat.service.ChatService;
 import com.williamcallahan.javachat.service.ConfiguredProviderTemporarilyUnavailableException;
+import com.williamcallahan.javachat.service.EmbeddingServiceTemporarilyUnavailableException;
 import com.williamcallahan.javachat.service.HybridSearchPartialFailureException;
 import com.williamcallahan.javachat.service.OpenAIStreamingService;
 import com.williamcallahan.javachat.service.RateLimitService;
@@ -218,6 +220,56 @@ class ChatControllerStreamingFailureTest {
         assertEquals(STATUS_STAGE_STREAM, providerCooldownEvent.stage());
         assertFalse(serializedError.contains(ConfiguredProviderTemporarilyUnavailableException.class.getSimpleName()));
         assertFalse(serializedError.contains(RateLimitService.ApiProvider.OPENAI.getName()));
+    }
+
+    @Test
+    void wrappedEmbeddingDeadlineUsesTheRetrievalTimeoutContract() throws JsonProcessingException {
+        ChatService chatService = mock(ChatService.class);
+        ChatMemoryService chatMemoryService = mock(ChatMemoryService.class);
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        RetrievalService retrievalService = mock(RetrievalService.class);
+        ChatController chatController = new ChatController(
+                chatService,
+                chatMemoryService,
+                streamingService,
+                retrievalService,
+                createSseSupport(),
+                new ExceptionResponseBuilder(),
+                new AppProperties());
+        EmbeddingServiceTemporarilyUnavailableException embeddingDeadlineFailure =
+                new EmbeddingServiceTemporarilyUnavailableException(
+                        UPSTREAM_SECRET_MESSAGE, new TimeoutException("embedding request deadline"));
+        when(streamingService.canAttemptRequest()).thenReturn(true);
+        when(streamingService.isAvailable()).thenReturn(true);
+        when(chatMemoryService.getHistory(SESSION_ID)).thenReturn(List.of());
+        when(chatService.buildStructuredPromptWithContextOutcome(anyList(), eq(USER_QUERY)))
+                .thenThrow(embeddingDeadlineFailure);
+
+        List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
+                chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
+                        .collectList()
+                        .block(),
+                "chat stream events");
+
+        assertEquals(2, streamEvents.size());
+        assertEquals(EVENT_STATUS, streamEvents.getFirst().event());
+        ServerSentEvent<String> terminalErrorEvent = streamEvents.getLast();
+        assertEquals(EVENT_ERROR, terminalErrorEvent.event());
+        String serializedTimeoutError =
+                Objects.requireNonNull(terminalErrorEvent.data(), "retrieval timeout error data");
+        SseSupport.SseEventPayload timeoutError =
+                objectMapper.readValue(serializedTimeoutError, SseSupport.SseEventPayload.class);
+        assertEquals("Response preparation timed out", timeoutError.message());
+        assertEquals(STATUS_CODE_RETRIEVAL_TIMEOUT, timeoutError.code());
+        assertEquals(Boolean.TRUE, timeoutError.retryable());
+        assertEquals(STATUS_STAGE_RETRIEVAL, timeoutError.stage());
+        assertFalse(serializedTimeoutError.contains(UPSTREAM_SECRET_MESSAGE));
+        verify(streamingService, never()).streamResponse(any(StructuredPrompt.class), anyDouble());
+        assertEquals(
+                0,
+                pipelineLogEvents.events().stream()
+                        .filter(logEvent -> logEvent.getLevel() == Level.ERROR)
+                        .count());
     }
 
     @Test

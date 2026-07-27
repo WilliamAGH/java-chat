@@ -165,6 +165,15 @@ class SseSupportTest {
     }
 
     @Test
+    void responsePreparationTimeoutDetectionTraversesWrappedFailures() {
+        SseSupport sseSupport = createSseSupport();
+        RuntimeException wrappedTimeout =
+                new RuntimeException("retrieval failed", new TimeoutException("embedding deadline"));
+
+        assertTrue(sseSupport.isResponsePreparationTimeout(wrappedTimeout));
+    }
+
+    @Test
     void citationPartialFailureStatusFluxEmitsTheNonRetryableWarning() throws JsonProcessingException {
         SseSupport sseSupport = createSseSupport();
 

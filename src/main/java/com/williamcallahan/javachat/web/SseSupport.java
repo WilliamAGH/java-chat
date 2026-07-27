@@ -9,6 +9,10 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -212,6 +216,24 @@ public class SseSupport {
                 .stage(STATUS_STAGE_RETRIEVAL)
                 .retryable(true)
                 .build());
+    }
+
+    /**
+     * Detects transport deadlines preserved inside retrieval-specific exceptions.
+     *
+     * @param preparationFailure failure raised before the provider stream starts
+     * @return true when the failure or one of its causes is a timeout
+     */
+    public boolean isResponsePreparationTimeout(Throwable preparationFailure) {
+        Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable currentFailure = preparationFailure;
+        while (currentFailure != null && inspectedFailures.add(currentFailure)) {
+            if (currentFailure instanceof TimeoutException) {
+                return true;
+            }
+            currentFailure = currentFailure.getCause();
+        }
+        return false;
     }
 
     /**

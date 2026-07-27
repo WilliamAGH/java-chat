@@ -19,7 +19,6 @@ import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -335,7 +334,7 @@ public class GuidedLearningController extends BaseController {
         if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
             return sseSupport.configuredProviderUnavailableError();
         }
-        if (terminalFailureContext.isEmpty() && upstreamError instanceof TimeoutException) {
+        if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
             return sseSupport.responsePreparationTimeoutError();
         }
         if (terminalFailureContext.isEmpty()) {

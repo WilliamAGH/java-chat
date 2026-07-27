@@ -22,7 +22,6 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -212,7 +211,7 @@ public class ChatController extends BaseController {
                     if (upstreamError instanceof ConfiguredProviderTemporarilyUnavailableException) {
                         return sseSupport.configuredProviderUnavailableError();
                     }
-                    if (terminalFailureContext.isEmpty() && upstreamError instanceof TimeoutException) {
+                    if (terminalFailureContext.isEmpty() && sseSupport.isResponsePreparationTimeout(upstreamError)) {
                         return sseSupport.responsePreparationTimeoutError();
                     }
                     String errorDetail = buildUserFacingErrorMessage(upstreamError);
