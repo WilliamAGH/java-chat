@@ -205,7 +205,9 @@ public final class LocalIngestionRunStore {
         if (checkpoint.backlog().lifecycle() != IngestionBacklogStatus.Lifecycle.RUNNING) {
             return checkpoint;
         }
-        String progressFileName = progressPath.getFileName().toString();
+        String progressFileName = Objects.requireNonNull(
+                        progressPath.getFileName(), "Progress path must have a file name")
+                .toString();
         String runFileStem = progressFileName.substring(0, progressFileName.length() - RUN_FILE_EXTENSION.length());
         Path lockPath = progressPath.resolveSibling(runFileStem + RUN_LOCK_EXTENSION);
         try (FileChannel lockChannel =
