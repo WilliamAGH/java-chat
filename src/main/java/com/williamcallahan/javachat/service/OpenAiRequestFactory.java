@@ -134,8 +134,9 @@ public final class OpenAiRequestFactory {
     /**
      * Preserves each structured prompt segment's native Responses API role.
      *
-     * <p>Retrieved context remains developer-owned, prior conversation turns retain their
-     * user or assistant identity, and the active question is always the final user message.</p>
+     * <p>Retrieved reference text remains unprivileged user input, prior conversation turns retain
+     * their user or assistant identity, and the active question is always the final user message.
+     * Only application-owned instructions and truncation guidance receive developer authority.</p>
      */
     private static List<ResponseInputItem> buildResponseInputItems(
             PromptTruncator.TruncatedPrompt truncatedPrompt, boolean githubModelsGpt5Constrained) {
@@ -146,7 +147,7 @@ public final class OpenAiRequestFactory {
             responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, truncationNotice.strip()));
         }
         for (ContextDocumentSegment contextDocument : prompt.contextDocuments()) {
-            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, contextDocument.content()));
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.USER, contextDocument.content()));
         }
         for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
             EasyInputMessage.Role role =
