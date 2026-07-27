@@ -226,14 +226,15 @@ public class SseSupport {
      */
     public boolean isResponsePreparationTimeout(Throwable preparationFailure) {
         Set<Throwable> inspectedFailures = Collections.newSetFromMap(new IdentityHashMap<>());
-        Throwable currentFailure = preparationFailure;
-        while (currentFailure != null && inspectedFailures.add(currentFailure)) {
-            if (currentFailure instanceof TimeoutException) {
-                return true;
-            }
-            currentFailure = currentFailure.getCause();
+        return isResponsePreparationTimeout(preparationFailure, inspectedFailures);
+    }
+
+    private boolean isResponsePreparationTimeout(Throwable preparationFailure, Set<Throwable> inspectedFailures) {
+        if (preparationFailure == null || !inspectedFailures.add(preparationFailure)) {
+            return false;
         }
-        return false;
+        return preparationFailure instanceof TimeoutException
+                || isResponsePreparationTimeout(preparationFailure.getCause(), inspectedFailures);
     }
 
     /**
