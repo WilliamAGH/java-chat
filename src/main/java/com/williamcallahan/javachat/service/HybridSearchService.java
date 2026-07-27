@@ -265,11 +265,23 @@ public class HybridSearchService {
         return System.nanoTime() + queryTimeout.toNanos();
     }
 
+    /**
+     * Reports an exhausted query budget as a completed failure rather than a pending future.
+     *
+     * <p>A never-completing future would make the caller wait out the remaining budget and then
+     * report a timeout, which misattributes the failure to Qdrant even though no query was ever
+     * dispatched.
+     */
+    private static CompletableFuture<List<ScoredPoint>> exhaustedQueryBudgetFuture() {
+        return CompletableFuture.failedFuture(
+                new TimeoutException("Query budget was exhausted before this collection was dispatched"));
+    }
+
     private CompletableFuture<List<ScoredPoint>> dispatchQueryBeforeDeadline(
             QueryPoints queryRequest, long queryDeadlineNanos) {
         long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
         if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
-            return new CompletableFuture<>();
+            return exhaustedQueryBudgetFuture();
         }
         Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
         try {
@@ -284,7 +296,7 @@ public class HybridSearchService {
             ScrollPoints scrollRequest, long queryDeadlineNanos) {
         long remainingQueryDurationNanos = queryDeadlineNanos - System.nanoTime();
         if (remainingQueryDurationNanos < MINIMUM_QDRANT_QUERY_DURATION_NANOS) {
-            return new CompletableFuture<>();
+            return exhaustedQueryBudgetFuture();
         }
         Duration remainingQueryDuration = Duration.ofNanos(remainingQueryDurationNanos);
         try {

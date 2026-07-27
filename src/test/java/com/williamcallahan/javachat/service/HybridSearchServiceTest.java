@@ -62,6 +62,8 @@ class HybridSearchServiceTest {
     private static final String VERSIONED_SELECTOR_CITATION_QUERY =
             "Java " + REPRESENTED_JAVA_API_SOURCE.javaRelease() + " List.of(E, E)";
     private static final Duration DISPATCH_BUDGET_TEST_TIMEOUT = Duration.ofMillis(500);
+    private static final Duration EXHAUSTED_DISPATCH_QUERY_TIMEOUT = Duration.ofMillis(5);
+    private static final Duration EXHAUSTED_DISPATCH_BLOCKING_DURATION = Duration.ofMillis(25);
     private static final Duration SHARED_QUERY_TIMEOUT = Duration.ofMillis(150);
     private static final Duration SHARED_DEADLINE_ASSERTION_LIMIT = Duration.ofMillis(450);
     private static final UUID SCORED_POINT_UUID = UUID.fromString("97c1f646-bd04-443e-a29f-e0283fe27e5b");
@@ -358,6 +360,32 @@ class HybridSearchServiceTest {
                 .allMatch(retrievalNotice -> retrievalNotice.details().contains("Qdrant query exceeded timeout")));
         assertEquals(4, stalledQdrantQueryFutures.size());
         assertTrue(stalledQdrantQueryFutures.stream().allMatch(SettableFuture::isCancelled));
+    }
+
+    @Test
+    void exhaustedDispatchBudgetFailsUndispatchedCollectionsImmediately() {
+        appProperties.getQdrant().setFailOnPartialSearchError(false);
+        appProperties.getQdrant().setQueryTimeout(EXHAUSTED_DISPATCH_QUERY_TIMEOUT);
+        when(embeddingClient.embed(HYBRID_QUERY, LlmGatewayTier.LIVE)).thenReturn(new float[] {0.1f, 0.2f, 0.3f});
+        when(sparseEncoder.encode(HYBRID_QUERY))
+                .thenReturn(new LexicalSparseVectorEncoder.SparseVector(List.of(1L), List.of(1.0f)));
+        AtomicInteger dispatchedQueryCount = new AtomicInteger();
+        doAnswer(invocation -> {
+                    dispatchedQueryCount.incrementAndGet();
+                    Thread.sleep(EXHAUSTED_DISPATCH_BLOCKING_DURATION);
+                    return Futures.immediateFuture(List.of());
+                })
+                .when(qdrantClient)
+                .queryAsync(notNull(), notNull());
+
+        HybridSearchService.SearchOutcome searchOutcome =
+                buildSearchService().searchOutcome(HYBRID_QUERY, 5, RetrievalConstraint.none());
+
+        assertEquals(1, dispatchedQueryCount.get());
+        assertFalse(searchOutcome.notices().isEmpty());
+        assertTrue(searchOutcome.notices().stream().allMatch(retrievalNotice -> retrievalNotice
+                .details()
+                .contains("budget was exhausted before this collection was dispatched")));
     }
 
     @Test
