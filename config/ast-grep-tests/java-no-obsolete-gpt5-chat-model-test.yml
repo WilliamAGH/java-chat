@@ -26,6 +26,14 @@ invalid:
           private static final String MODEL = "vendor/gpt-5";
       }
   - |
+      class StaleColonQualifiedChatModelConfig {
+          private static final String MODEL = "vendor:gpt-5.4";
+      }
+  - |
       class StaleUppercaseChatModelConfig {
           private static final String MODEL = "GPT-5";
+      }
+  - |
+      class StaleUppercaseVersionedChatModelConfig {
+          private static final String MODEL = "GPT-5.4";
       }

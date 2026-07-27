@@ -4,8 +4,10 @@
 CANONICAL_MODEL_PATH = "src/main/java/com/williamcallahan/javachat/config/ModelConfiguration.java"
 EXPECTED_CHAT_MODEL = "gpt-5.4"
 SCAN_EXCLUSIONS =
-  %r{\A(?:src/test/|config/ast-grep(?:-tests)?/|scripts/lint/check-chat-model-ssot\.rb\z)}
+  %r{\A(?:AGENTS\.md\z|CLAUDE\.md\z|src/test/|config/ast-grep(?:-tests)?/|scripts/lint/check-chat-model-ssot\.rb\z)}
 OPENAI_MODEL_ASSIGNMENT = /OPENAI_MODEL\s*[:=]\s*([A-Za-z0-9_.\/-]+)/
+GITHUB_MODELS_INFERENCE_MARKER =
+  /(?:GITHUB_MODELS_(?:BASE_URL|CHAT_MODEL)|models\.inference\.ai\.azure\.com|GitHub Models)/i
 
 def violations_for_text(text, canonical_model)
   text.scan(OPENAI_MODEL_ASSIGNMENT)
@@ -20,6 +22,7 @@ def run_self_test
   unless violations_for_text("OPENAI_MODEL=#{qualified_model}", EXPECTED_CHAT_MODEL) == [qualified_model]
     raise "provider-qualified model accepted"
   end
+  raise "GitHub Models inference marker accepted" unless "GitHub Models".match?(GITHUB_MODELS_INFERENCE_MARKER)
 end
 
 if ARGV == ["--self-test"]
@@ -43,9 +46,10 @@ findings = tracked_paths.each_with_object([]) do |tracked_path, tracked_findings
   next unless file_text.valid_encoding?
 
   violations = violations_for_text(file_text, canonical_model)
-  next if violations.empty?
+  provider_markers = file_text.scan(GITHUB_MODELS_INFERENCE_MARKER).uniq
+  next if violations.empty? && provider_markers.empty?
 
-  tracked_findings << "#{tracked_path}: #{violations.uniq.join(", ")}"
+  tracked_findings << "#{tracked_path}: #{(violations + provider_markers).uniq.join(", ")}"
 end
 
 unless findings.empty?

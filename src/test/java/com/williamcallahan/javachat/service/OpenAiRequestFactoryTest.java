@@ -32,6 +32,7 @@ import org.springframework.context.annotation.Lazy;
  * Verifies startup configuration and OpenAI-compatible request construction.
  */
 class OpenAiRequestFactoryTest {
+    private static final int GPT54_TEST_INPUT_TOKEN_BUDGET = 100_000;
     private static final int TEST_COMPLETION_OUTPUT_TOKEN_BUDGET = 768;
 
     @Test
@@ -181,6 +182,24 @@ class OpenAiRequestFactoryTest {
     }
 
     @Test
+    void caseChangedGpt54ModelFailsConstruction() {
+        IllegalArgumentException configurationFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "GPT-5.4", appProperties("")));
+
+        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
+    }
+
+    @Test
+    void paddedGpt54ModelFailsConstruction() {
+        IllegalArgumentException configurationFailure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), " gpt-5.4 ", appProperties("")));
+
+        assertTrue(configurationFailure.getMessage().contains("OPENAI_MODEL must be gpt-5.4"));
+    }
+
+    @Test
     void buildCompletionRequestAppliesCallerOutputBudget() {
         OpenAiRequestFactory requestFactory =
                 new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(""));
@@ -217,8 +236,9 @@ class OpenAiRequestFactoryTest {
 
     @Test
     void buildCompletionRequestTruncatesPromptBeyondGpt54InputBudget() {
+        Chunker chunker = new Chunker();
         OpenAiRequestFactory requestFactory =
-                new OpenAiRequestFactory(new Chunker(), new PromptTruncator(), "gpt-5.4", appProperties(""));
+                new OpenAiRequestFactory(chunker, new PromptTruncator(), "gpt-5.4", appProperties(""));
         String prompt = "context ".repeat(110_000);
 
         ResponseCreateParams responseCreateParams = requestFactory.buildCompletionRequest(prompt, 0.4);
@@ -226,6 +246,7 @@ class OpenAiRequestFactoryTest {
         String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
         assertTrue(truncatedPrompt.startsWith("[Context truncated due to model input limit]"));
         assertTrue(truncatedPrompt.length() < prompt.length());
+        assertTrue(chunker.countTokens(truncatedPrompt) <= GPT54_TEST_INPUT_TOKEN_BUDGET);
     }
 
     private static void assertInputMessage(

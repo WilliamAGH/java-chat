@@ -13,6 +13,6 @@ files:
 rule:
   kind: string_literal
   all:
-    - regex: '^"(?i:(?:[^"/]+/)*gpt-5[^"]*)"$'
+    - regex: '^"(?i:(?:[^"/:]+[/:])*gpt-5[^"]*)"$'
     - not:
         regex: '^"gpt-5\.4"$'

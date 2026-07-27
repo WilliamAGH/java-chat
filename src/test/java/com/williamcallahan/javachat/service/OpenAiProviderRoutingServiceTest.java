@@ -103,7 +103,6 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService =
                 new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
-        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, wrappedCallerInterruption());
 
@@ -295,7 +294,6 @@ class OpenAiProviderRoutingServiceTest {
         OpenAiProviderRoutingService routingService =
                 new OpenAiProviderRoutingService(rateLimitService, configuredAppProperties());
         OpenAIClient openAiClient = mock(OpenAIClient.class);
-        OpenAIClient configuredClient = mock(OpenAIClient.class);
 
         try (ExpectedLogEvents expectedLogEvents = ExpectedLogEvents.capture(PROVIDER_ROUTING_LOGGER)) {
             routingService.recordProviderFailure(RateLimitService.ApiProvider.OPENAI, new OpenAIIoException("io"));

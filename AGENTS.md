@@ -97,8 +97,8 @@ alwaysApply: true
 - [EV1a] **No Secrets In Properties/YAML**: Secrets are PROHIBITED in `.properties` and `.yml/.yaml` (including examples). Do not add secret-looking keys with blank defaults to property files.
 - [EV1b] **Secrets Source Of Truth**: Secrets MUST be provided via `.env` (local) and environment variables (deployment). Deployment uses Coolify containers with BuildKit secrets; keep secrets out of tracked config.
 - [EV1c] **Non-Secret Defaults In Properties**: All non-secret defaults and environment-specific overrides MUST live in Spring property files (`src/main/resources/application*.properties`) and Spring profiles.
-- [EV1d] **Allowed `.env`/Env Vars For External Services**: OpenAI/GitHub Models and Qdrant connectivity MUST come from `.env`/environment variables:
-  - LLM (model/base-url/api-key): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `GITHUB_TOKEN`, `GITHUB_MODELS_BASE_URL`, `GITHUB_MODELS_CHAT_MODEL`
+- [EV1d] **Allowed `.env`/Env Vars For External Services**: Shared-gateway inference and Qdrant connectivity MUST come from `.env`/environment variables:
+  - LLM (model/base-url/api-key): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`
   - Qdrant (host/ports/tls/api-key): `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_REST_PORT`, `QDRANT_SSL`, `QDRANT_API_KEY`
 - [EV1e] **No New Env Var Settings**: Do not introduce any additional env-var-driven settings without explicit written approval.
 - [EV1f] **Dotenv Handling**: `.env` loading MUST remain supported for local development and scripts. Do not add dotenv libraries into the Java runtime; load env vars at the process level (Makefile/scripts/Coolify).
@@ -223,12 +223,13 @@ alwaysApply: true
 
 - [LM1a] **Settings**: Do not change any LLM settings without explicit written approval.
 - [LM1b] **No Fallback**: Do not auto-fallback or regress models across providers; surface error to user.
-- [LM1c] **Config**: OpenAI/GitHub Models model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
+- [LM1c] **Config**: Generative inference MUST use exact `gpt-5.4` through the shared OpenAI-compatible gateway. Its model/base-url/api-key MUST come from `.env`/environment variables (see [EV1d]). All other LLM settings MUST come from Spring property files and `@ConfigurationProperties`.
 - [LM1d] **Behavior**: Allowed: logging diagnostics. Not allowed: silently changing LLM behavior.
 - [LM1e] **Streaming**: TTFB < 200ms, streaming start < 500ms.
 - [LM1f] **Events**: `text`, `citation`, `code`, `enrichment`, `suggestion`, `status`.
 - [LM1g] **Errors**: `onErrorContinue` for partial failures; never drop entire response on single failure.
 - [LM1h] **Heartbeats**: Maintain connection with periodic events during long operations.
+- [LM1i] **GitHub Models Prohibited**: Never add GitHub Models provider selection, endpoints, credentials, SDKs, tests, documentation, or fallback behavior. Preserve unrelated GitHub repository ingestion, citations, source links, and Actions.
 
 ## [MD1] Markdown & Parsing
 

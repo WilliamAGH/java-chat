@@ -51,6 +51,7 @@ public final class OpenAiRequestFactory {
     private final PromptTruncator promptTruncator;
     private final String openaiModel;
     private final int completionOutputTokenBudget;
+    private final int promptContentTokenBudget;
     private final Optional<ReasoningEffort> reasoningEffort;
 
     /**
@@ -70,6 +71,7 @@ public final class OpenAiRequestFactory {
         this.chunker = chunker;
         this.promptTruncator = promptTruncator;
         this.openaiModel = requireUniversalChatModel(openaiModel);
+        this.promptContentTokenBudget = GPT54_INPUT_TOKEN_BUDGET - chunker.countTokens(TRUNCATION_NOTICE_GENERIC);
         AppProperties.Llm llmConfiguration = appProperties.getLlm();
         this.completionOutputTokenBudget = llmConfiguration.getCompletionOutputTokenBudget();
         this.reasoningEffort = resolveReasoningEffort(llmConfiguration.getReasoningEffort());
@@ -86,7 +88,7 @@ public final class OpenAiRequestFactory {
         String modelId = configuredModelId();
 
         PromptTruncator.TruncatedPrompt truncatedPrompt =
-                promptTruncator.truncate(structuredPrompt, GPT54_INPUT_TOKEN_BUDGET);
+                promptTruncator.truncate(structuredPrompt, promptContentTokenBudget);
         if (truncatedPrompt.wasTruncated()) {
             log.info(
                     "[LLM] Prompt truncated for streaming (model={}, contextDocs={}, conversationTurns={})",
@@ -187,7 +189,7 @@ public final class OpenAiRequestFactory {
             return prompt;
         }
 
-        String truncatedPrompt = chunker.keepLastTokens(prompt, GPT54_INPUT_TOKEN_BUDGET);
+        String truncatedPrompt = chunker.keepLastTokens(prompt, promptContentTokenBudget);
 
         if (truncatedPrompt.length() < prompt.length()) {
             return TRUNCATION_NOTICE_GENERIC + truncatedPrompt;
@@ -253,13 +255,11 @@ public final class OpenAiRequestFactory {
     }
 
     private static String requireUniversalChatModel(String configuredModel) {
-        String normalizedConfiguredModel =
-                configuredModel == null ? "" : AsciiTextNormalizer.toLowerAscii(configuredModel.trim());
-        if (!ModelConfiguration.DEFAULT_MODEL.equals(normalizedConfiguredModel)) {
+        if (!ModelConfiguration.DEFAULT_MODEL.equals(configuredModel)) {
             throw new IllegalArgumentException(
                     "OPENAI_MODEL must be " + ModelConfiguration.DEFAULT_MODEL + " for every Java Chat LLM request");
         }
-        return normalizedConfiguredModel;
+        return configuredModel;
     }
 
     private String canonicalModelName(String modelId) {

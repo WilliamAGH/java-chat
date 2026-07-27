@@ -41,6 +41,8 @@ jobs:
           cd ..
           frontend/node_modules/.bin/ast-grep test -c config/sgconfig.yml --skip-snapshot-tests
           frontend/node_modules/.bin/ast-grep scan -c config/sgconfig.yml src/main/java/
+          ruby scripts/lint/check-chat-model-ssot.rb --self-test
+          ruby scripts/lint/check-chat-model-ssot.rb
 
       - name: Validate frontend
         run: npm run validate
