@@ -37,6 +37,11 @@ class SystemPromptConfigTest {
                 () -> assertTrue(corePrompt.contains("Marker syntax is not valid source code")),
                 () -> assertTrue(corePrompt.contains("A fenced block containing marker syntax")),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.JAVA_FENCE_VALIDITY_CLAUSE)),
+                () -> assertTrue(corePrompt.contains("every multi-line Java example entirely inside one fenced")),
+                () -> assertTrue(corePrompt.contains("Never emit part of a declaration or method as prose")),
+                () -> assertTrue(corePrompt.contains("Finish the complete example before an enrichment marker")),
+                () -> assertTrue(corePrompt.contains("Never split one example across multiple fences")),
+                () -> assertTrue(corePrompt.contains("never emit a raw type")),
                 () -> assertTrue(corePrompt.contains("public static void main(String[] args)")));
     }
 
