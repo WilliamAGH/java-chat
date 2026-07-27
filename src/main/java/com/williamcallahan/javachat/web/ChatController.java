@@ -154,18 +154,23 @@ public class ChatController extends BaseController {
                                             "[{}] Using OpenAI Java SDK for streaming (structured prompt)",
                                             requestToken);
 
-                                    // Cite only documents supplied to the model. Exact overload queries narrow this
-                                    // same context by authoritative source-anchor metadata before conversion.
-                                    RetrievalService.CitationOutcome citationOutcome =
-                                            retrievalService.toCitationsForQuery(latest, promptOutcome.documents());
-                                    final List<Citation> finalCitations = citationOutcome.citations();
-
                                     // Stream with provider transparency - surfaces which LLM is responding
                                     return openAIStreamingService
                                             .streamResponse(
                                                     promptOutcome.structuredPrompt(),
                                                     appProperties.getLlm().getTemperature())
                                             .flatMapMany(streamingResult -> {
+                                                List<org.springframework.ai.document.Document>
+                                                        retainedContextDocuments = promptOutcome.documents().stream()
+                                                                .filter(document -> streamingResult
+                                                                        .contextDocumentIds()
+                                                                        .contains(document.getId()))
+                                                                .toList();
+                                                RetrievalService.CitationOutcome citationOutcome =
+                                                        retrievalService.toCitationsForQuery(
+                                                                latest, retainedContextDocuments);
+                                                List<Citation> finalCitations = citationOutcome.citations();
+
                                                 // Provider event first - surfaces which LLM is handling this request
                                                 ServerSentEvent<String> providerEvent =
                                                         sseSupport.providerEvent(streamingResult.providerDisplayName());

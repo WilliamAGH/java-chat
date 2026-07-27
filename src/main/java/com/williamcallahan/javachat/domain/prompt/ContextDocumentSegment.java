@@ -8,11 +8,13 @@ package com.williamcallahan.javachat.domain.prompt;
  * markers for citation reference in the model's response.</p>
  *
  * @param index 1-based document index for [CTX N] marker
+ * @param documentId stable source-document identity for post-truncation citation fidelity
  * @param sourceUrl normalized URL for citation attribution
  * @param documentContent extracted text content from the source
  * @param estimatedTokens approximate token count for budget calculations
  */
-public record ContextDocumentSegment(int index, String sourceUrl, String documentContent, int estimatedTokens)
+public record ContextDocumentSegment(
+        int index, String documentId, String sourceUrl, String documentContent, int estimatedTokens)
         implements PromptSegment {
 
     /** Marker prefix for context document references. */
@@ -26,6 +28,9 @@ public record ContextDocumentSegment(int index, String sourceUrl, String documen
     public ContextDocumentSegment {
         if (index < 1) {
             throw new IllegalArgumentException("Context document index must be at least 1");
+        }
+        if (documentId == null) {
+            documentId = "";
         }
         if (sourceUrl == null) {
             sourceUrl = "";

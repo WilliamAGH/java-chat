@@ -49,8 +49,9 @@ class GuidedLearningServiceCitationTest {
     ObjectMapper objectMapper;
 
     @Test
-    void guidedEnrichmentAndPromptFlowsUseTheLessonOfficialDocSetConstraint() {
+    void guidedEnrichmentAndPromptFlowsUseTheLessonOfficialDocSetConstraint() throws IOException {
         GuidedLesson guidedLesson = guidedLesson();
+        String canonicalStringsMarkdown = readCuratedLessonMarkdown(LESSON_SLUG);
         GuidedTOCProvider tocProvider = mock(GuidedTOCProvider.class);
         when(tocProvider.findBySlug(LESSON_SLUG)).thenReturn(Optional.of(guidedLesson));
 
@@ -70,7 +71,7 @@ class GuidedLearningServiceCitationTest {
         ChatService chatService = mock(ChatService.class);
         StructuredPrompt structuredPrompt = StructuredPrompt.fromRawPrompt("guided", 1);
         when(chatService.buildStructuredPromptWithContextAndGuidance(
-                        eq(List.of()), eq(USER_QUESTION), eq(List.of(officialSourceDocument)), anyString()))
+                        eq(List.of()), eq(USER_QUESTION), any(), anyString()))
                 .thenReturn(structuredPrompt);
 
         GuidedLearningService guidedLearningService = guidedLearningService(
@@ -99,12 +100,23 @@ class GuidedLearningServiceCitationTest {
                 .buildStructuredPromptWithContextAndGuidance(
                         eq(List.of()),
                         eq(USER_QUESTION),
-                        eq(List.of(officialSourceDocument)),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> {
+                            if (promptContextDocuments.size() != 2) {
+                                return false;
+                            }
+                            Document curatedLessonDocument = promptContextDocuments.getFirst();
+                            return curatedLessonDocument.getId().equals("curated-lesson:" + LESSON_SLUG)
+                                    && canonicalStringsMarkdown.equals(curatedLessonDocument.getText())
+                                    && promptContextDocuments.get(1).equals(officialSourceDocument);
+                        }),
                         guidanceCaptor.capture());
         assertTrue(guidanceCaptor.getValue().contains(guidedLesson.getTechnology()));
         for (String allowedDocSet : guidedLesson.getDocSet()) {
             assertTrue(guidanceCaptor.getValue().contains(allowedDocSet));
         }
+        assertFalse(guidanceCaptor.getValue().contains("{{example:"));
+        assertFalse(guidanceCaptor.getValue().contains("## Work with text using `String`"));
+        assertTrue(guidanceCaptor.getValue().contains("reuse one complete canonical example verbatim"));
     }
 
     @Test
@@ -136,7 +148,7 @@ class GuidedLearningServiceCitationTest {
     }
 
     @Test
-    void guidedLoopsPromptEmbedsTheCanonicalJava25CompactSourceLesson() throws IOException {
+    void guidedLoopsPromptSuppliesTheCanonicalJava25CompactSourceLessonAsContext() throws IOException {
         GuidedTOCProvider tocProvider = new GuidedTOCProvider(objectMapper);
         RetrievalService retrievalService = mock(RetrievalService.class);
         when(retrievalService.retrieve(anyString(), any(RetrievalConstraint.class)))
@@ -154,10 +166,16 @@ class GuidedLearningServiceCitationTest {
         ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
         verify(chatService)
                 .buildStructuredPromptWithContextAndGuidance(
-                        eq(List.of()), eq(USER_QUESTION), eq(List.of()), guidanceCaptor.capture());
+                        eq(List.of()),
+                        eq(USER_QUESTION),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> promptContextDocuments.size()
+                                        == 1
+                                && canonicalLoopsMarkdown.equals(
+                                        promptContextDocuments.getFirst().getText())),
+                        guidanceCaptor.capture());
         assertTrue(canonicalLoopsMarkdown.contains("void main()"));
         assertTrue(canonicalLoopsMarkdown.contains("IO.println"));
-        assertTrue(guidanceCaptor.getValue().contains(canonicalLoopsMarkdown));
+        assertFalse(guidanceCaptor.getValue().contains(canonicalLoopsMarkdown));
         assertTrue(guidanceCaptor.getValue().contains("Java 25 compact source form"));
         assertTrue(
                 guidanceCaptor.getValue().contains("class-style source code when the learner explicitly requests it"));
@@ -182,8 +200,14 @@ class GuidedLearningServiceCitationTest {
         ArgumentCaptor<String> guidanceCaptor = ArgumentCaptor.forClass(String.class);
         verify(chatService)
                 .buildStructuredPromptWithContextAndGuidance(
-                        eq(List.of()), eq(USER_QUESTION), eq(List.of()), guidanceCaptor.capture());
-        assertTrue(guidanceCaptor.getValue().contains(canonicalKotlinMarkdown));
+                        eq(List.of()),
+                        eq(USER_QUESTION),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> promptContextDocuments.size()
+                                        == 1
+                                && canonicalKotlinMarkdown.equals(
+                                        promptContextDocuments.getFirst().getText())),
+                        guidanceCaptor.capture());
+        assertFalse(guidanceCaptor.getValue().contains(canonicalKotlinMarkdown));
         assertFalse(guidanceCaptor.getValue().contains("Java 25 compact source form"));
     }
 
@@ -226,13 +250,18 @@ class GuidedLearningServiceCitationTest {
                 .buildStructuredPromptWithContextAndGuidance(
                         eq(List.of()),
                         eq(comparisonQuestion),
-                        eq(List.of(java21Document, java24Document)),
+                        org.mockito.ArgumentMatchers.argThat(promptContextDocuments -> promptContextDocuments.size()
+                                        == 3
+                                && promptContextDocuments.getFirst().getId().equals("curated-lesson:" + LESSON_SLUG)
+                                && promptContextDocuments.get(1).equals(java21Document)
+                                && promptContextDocuments.get(2).equals(java24Document)),
                         guidanceCaptor.capture());
         assertTrue(guidanceCaptor.getValue().contains("java/java21-complete"));
         assertTrue(guidanceCaptor.getValue().contains("java/java24-complete"));
         assertFalse(guidanceCaptor.getValue().contains("java/java25-complete"));
         assertFalse(guidanceCaptor.getValue().contains("dev-java"));
         assertTrue(guidanceCaptor.getValue().contains("for pedagogical structure only"));
+        assertFalse(guidanceCaptor.getValue().contains("reuse one complete canonical example verbatim"));
         assertFalse(guidanceCaptor.getValue().contains("Java 25 compact source form"));
     }
 
@@ -382,7 +411,6 @@ class GuidedLearningServiceCitationTest {
 
     private static SystemPromptConfig systemPromptConfig() {
         SystemPromptConfig systemPromptConfig = mock(SystemPromptConfig.class);
-        when(systemPromptConfig.getMarkerUsagePrompt()).thenReturn("{{hint:Text here}}");
         when(systemPromptConfig.getGuidedLearningPrompt()).thenReturn("Teach this lesson progressively.");
         when(systemPromptConfig.buildFullPrompt(anyString(), anyString()))
                 .thenAnswer(promptInvocation -> promptInvocation.getArgument(0));

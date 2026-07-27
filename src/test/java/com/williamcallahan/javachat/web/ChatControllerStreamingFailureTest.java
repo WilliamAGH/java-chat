@@ -460,6 +460,7 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Document officialPromptDocument = mock(Document.class);
+        when(officialPromptDocument.getId()).thenReturn("official-prompt-document");
         Citation officialCitation = new Citation(
                 "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html",
                 "List",
@@ -474,7 +475,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(officialCitation), 0));
         when(streamingService.isAvailable()).thenReturn(true);
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("official-prompt-document"))));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -512,6 +514,7 @@ class ChatControllerStreamingFailureTest {
                 new ExceptionResponseBuilder(),
                 new AppProperties());
         Document broadPromptDocument = mock(Document.class);
+        when(broadPromptDocument.getId()).thenReturn("broad-prompt-document");
         Citation exactOverloadCitation = new Citation(
                 "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/List.html#of(E,E)",
                 "List",
@@ -526,7 +529,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(exactOverloadCitation), 1));
         when(streamingService.isAvailable()).thenReturn(true);
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of("broad-prompt-document"))));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(
@@ -588,7 +592,8 @@ class ChatControllerStreamingFailureTest {
                 .thenReturn(new RetrievalService.CitationOutcome(
                         List.of(new Citation("https://example.com", "Example", "", "")), 2));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.just("Hello"), RateLimitService.ApiProvider.OPENAI, List.of())));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())
@@ -648,8 +653,8 @@ class ChatControllerStreamingFailureTest {
         when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(
-                        Mono.just(new StreamingResult(partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))
                 .thenReturn(true);
 
@@ -694,8 +699,8 @@ class ChatControllerStreamingFailureTest {
         when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(streamingFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamingFailure)).thenReturn(retryable);
 
         return chatController.stream(new ChatStreamRequest(SESSION_ID, USER_QUERY), new MockHttpServletResponse())

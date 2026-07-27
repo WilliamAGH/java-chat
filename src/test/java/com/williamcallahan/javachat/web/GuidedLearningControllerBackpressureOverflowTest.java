@@ -102,8 +102,8 @@ class GuidedLearningControllerBackpressureOverflowTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(
-                        Mono.just(new StreamingResult(partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        partialAnswerThenOverflow, RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(streamBufferOverflowFailure))
                 .thenReturn(true);
 

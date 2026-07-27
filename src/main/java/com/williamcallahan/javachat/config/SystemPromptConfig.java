@@ -113,11 +113,6 @@ public class SystemPromptConfig {
                 .replace(MARKER_INVENTORY_PLACEHOLDER, MARKER_USAGE_PROMPT);
     }
 
-    /** Returns the marker syntax taught at the model prompt boundary. */
-    public String getMarkerUsagePrompt() {
-        return MARKER_USAGE_PROMPT;
-    }
-
     /**
      * Get prompt for when search quality is poor
      */
@@ -133,8 +128,8 @@ public class SystemPromptConfig {
      */
     public String getGuidedLearningPrompt() {
         return """
-            You are in guided learning mode. Structure your response as a step-by-step tutorial.
-            Break down complex concepts into digestible parts and build understanding progressively.
+            You are in guided learning mode. Answer the learner's question directly, then build understanding progressively.
+            Keep the teaching sequence no longer than the question requires.
             Use the default Java environment assumptions unless the user specifies otherwise.
             """;
     }

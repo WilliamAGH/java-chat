@@ -105,8 +105,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(terminalFailure)).thenReturn(true);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(
@@ -143,8 +143,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(terminalFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
 
         List<ServerSentEvent<String>> streamEvents = Objects.requireNonNull(
                 guidedController.stream(
@@ -234,8 +234,8 @@ class GuidedLearningControllerStreamingFailureTest {
         when(guidedLearningService.citationOutcomeForContextDocuments(anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(
-                        new StreamingResult(Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(new StreamingResult(
+                        Flux.error(upstreamFailure), RateLimitService.ApiProvider.OPENAI, List.of())));
         when(streamingService.isRecoverableStreamingFailure(upstreamFailure)).thenReturn(false);
 
         List<ServerSentEvent<String>> streamEvents = guidedController.stream(

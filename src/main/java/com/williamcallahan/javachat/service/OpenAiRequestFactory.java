@@ -5,12 +5,18 @@ import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
 import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.ResponsesModel;
+import com.openai.models.responses.EasyInputMessage;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseTextConfig;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
+import com.williamcallahan.javachat.domain.prompt.ConversationTurnSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.support.AsciiTextNormalizer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -117,11 +123,45 @@ public final class OpenAiRequestFactory {
                     truncatedPrompt.conversationTurnCount());
         }
 
-        ResponseCreateParams responseParams =
-                buildResponseParams(truncatedPrompt.renderInput(), temperature, modelId).toBuilder()
-                        .instructions(truncatedPrompt.prompt().system().content())
-                        .build();
-        return new OpenAiPreparedRequest(responseParams, modelId);
+        List<ResponseInputItem> responseInputItems =
+                buildResponseInputItems(truncatedPrompt, githubModelsGpt5Constrained);
+        ResponseCreateParams responseParams = buildResponseParams(responseInputItems, temperature, modelId).toBuilder()
+                .instructions(truncatedPrompt.prompt().system().content())
+                .build();
+        return new OpenAiPreparedRequest(responseParams, modelId, truncatedPrompt.prompt());
+    }
+
+    /**
+     * Preserves each structured prompt segment's native Responses API role.
+     *
+     * <p>Retrieved context remains developer-owned, prior conversation turns retain their
+     * user or assistant identity, and the active question is always the final user message.</p>
+     */
+    private static List<ResponseInputItem> buildResponseInputItems(
+            PromptTruncator.TruncatedPrompt truncatedPrompt, boolean githubModelsGpt5Constrained) {
+        StructuredPrompt prompt = truncatedPrompt.prompt();
+        List<ResponseInputItem> responseInputItems = new ArrayList<>();
+        if (truncatedPrompt.wasTruncated()) {
+            String truncationNotice = githubModelsGpt5Constrained ? TRUNCATION_NOTICE_GPT5 : TRUNCATION_NOTICE_GENERIC;
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, truncationNotice.strip()));
+        }
+        for (ContextDocumentSegment contextDocument : prompt.contextDocuments()) {
+            responseInputItems.add(textInputItem(EasyInputMessage.Role.DEVELOPER, contextDocument.content()));
+        }
+        for (ConversationTurnSegment conversationTurn : prompt.conversationHistory()) {
+            EasyInputMessage.Role role =
+                    conversationTurn.isAssistantTurn() ? EasyInputMessage.Role.ASSISTANT : EasyInputMessage.Role.USER;
+            responseInputItems.add(textInputItem(role, conversationTurn.messageText()));
+        }
+        responseInputItems.add(
+                textInputItem(EasyInputMessage.Role.USER, prompt.currentQuery().queryText()));
+        return List.copyOf(responseInputItems);
+    }
+
+    private static ResponseInputItem textInputItem(EasyInputMessage.Role role, String messageText) {
+        EasyInputMessage inputMessage =
+                EasyInputMessage.builder().role(role).content(messageText).build();
+        return ResponseInputItem.ofEasyInputMessage(inputMessage);
     }
 
     /**
@@ -204,13 +244,12 @@ public final class OpenAiRequestFactory {
         return prompt;
     }
 
-    private ResponseCreateParams buildResponseParams(String prompt, double temperature, String normalizedModelId) {
-        return buildResponseParams(prompt, temperature, normalizedModelId, null);
-    }
-
     private ResponseCreateParams buildResponseParams(
-            String prompt, double temperature, String normalizedModelId, Integer maximumOutputTokens) {
-        return buildResponseParams(prompt, temperature, normalizedModelId, maximumOutputTokens, false);
+            List<ResponseInputItem> responseInputItems, double temperature, String normalizedModelId) {
+        ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
+                .inputOfResponse(responseInputItems)
+                .model(ResponsesModel.ofString(normalizedModelId));
+        return configureResponseParams(builder, temperature, normalizedModelId, null, false);
     }
 
     private ResponseCreateParams buildResponseParams(
@@ -219,13 +258,20 @@ public final class OpenAiRequestFactory {
             String normalizedModelId,
             Integer maximumOutputTokens,
             boolean requireJsonObject) {
+        ResponseCreateParams.Builder builder =
+                ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
+        return configureResponseParams(builder, temperature, normalizedModelId, maximumOutputTokens, requireJsonObject);
+    }
+
+    private ResponseCreateParams configureResponseParams(
+            ResponseCreateParams.Builder builder,
+            double temperature,
+            String normalizedModelId,
+            Integer maximumOutputTokens,
+            boolean requireJsonObject) {
         boolean gpt5Family = isGpt5Family(normalizedModelId);
         boolean reasoningModel =
                 gpt5Family || canonicalModelName(normalizedModelId).startsWith("o");
-
-        ResponseCreateParams.Builder builder =
-                ResponseCreateParams.builder().input(prompt).model(ResponsesModel.ofString(normalizedModelId));
-
         if (requireJsonObject) {
             builder.text(ResponseTextConfig.builder()
                     .format(ResponseFormatJsonObject.builder().build())

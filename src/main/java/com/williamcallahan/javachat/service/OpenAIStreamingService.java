@@ -15,12 +15,14 @@ import com.openai.models.responses.ResponseTextDeltaEvent;
 import com.williamcallahan.javachat.application.completion.CompletionRequestConfiguration;
 import com.williamcallahan.javachat.application.streaming.ReportedStreamingFailure;
 import com.williamcallahan.javachat.application.streaming.StreamingFailureReporter;
+import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
 import com.williamcallahan.javachat.domain.prompt.StructuredPrompt;
 import com.williamcallahan.javachat.domain.text.UnicodeVisibleContent;
 import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -158,9 +160,15 @@ public class OpenAIStreamingService {
                     }
 
                     RateLimitService.ApiProvider configuredProvider = providerRoutingService.configuredProvider();
+                    OpenAiPreparedRequest preparedStreamingRequest =
+                            requestFactory.prepareStreamingRequest(structuredPrompt, temperature, configuredProvider);
                     Flux<String> responseTextChunks =
-                            executeStreamingWithConfiguredProvider(structuredPrompt, temperature, configuredProvider);
-                    return Mono.just(new StreamingResult(responseTextChunks, configuredProvider));
+                            executeStreamingWithConfiguredProvider(preparedStreamingRequest, configuredProvider);
+                    List<String> contextDocumentIds =
+                            preparedStreamingRequest.structuredPrompt().contextDocuments().stream()
+                                    .map(ContextDocumentSegment::documentId)
+                                    .toList();
+                    return Mono.just(new StreamingResult(responseTextChunks, configuredProvider, contextDocumentIds));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -283,10 +291,7 @@ public class OpenAIStreamingService {
     }
 
     private Flux<String> executeStreamingWithConfiguredProvider(
-            StructuredPrompt structuredPrompt, double temperature, RateLimitService.ApiProvider configuredProvider) {
-        OpenAiPreparedRequest preparedStreamingRequest =
-                requestFactory.prepareStreamingRequest(structuredPrompt, temperature, configuredProvider);
-
+            OpenAiPreparedRequest preparedStreamingRequest, RateLimitService.ApiProvider configuredProvider) {
         log.info(
                 "[LLM] Streaming started (structured, providerId={}, model={})",
                 configuredProvider.ordinal(),

@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.openai.models.ReasoningEffort;
+import com.openai.models.responses.EasyInputMessage;
 import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseInputItem;
 import com.williamcallahan.javachat.application.prompt.PromptTruncator;
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.domain.prompt.ContextDocumentSegment;
@@ -124,10 +126,14 @@ class OpenAiRequestFactoryTest {
     @Test
     void prepareStreamingRequestSeparatesSystemInstructionsFromRequestInput() {
         OpenAiRequestFactory requestFactory = createRequestFactory("");
+        String priorAssistantMessage = "```java\nString marker = \"{{example:literal}}\";\n```";
         StructuredPrompt structuredPrompt = new StructuredPrompt(
                 new SystemSegment("Follow the Java teaching policy", 8),
-                List.of(new ContextDocumentSegment(1, "https://docs.oracle.com/java", "Official context", 4)),
-                List.of(new ConversationTurnSegment(ConversationTurnSegment.ROLE_ASSISTANT, "Earlier explanation", 3)),
+                List.of(new ContextDocumentSegment(
+                        1, "official-java", "https://docs.oracle.com/java", "Official context", 4)),
+                List.of(
+                        new ConversationTurnSegment(ConversationTurnSegment.ROLE_USER, "Earlier question", 3),
+                        new ConversationTurnSegment(ConversationTurnSegment.ROLE_ASSISTANT, priorAssistantMessage, 8)),
                 new CurrentQuerySegment("Explain records", 2));
 
         ResponseCreateParams responseCreateParams = requestFactory
@@ -137,11 +143,22 @@ class OpenAiRequestFactoryTest {
         assertEquals(
                 "Follow the Java teaching policy",
                 responseCreateParams.instructions().orElseThrow());
-        assertEquals(
-                "[CTX 1] https://docs.oracle.com/java\nOfficial context\n\n"
-                        + "Assistant: Earlier explanation\n\nExplain records",
-                responseCreateParams.input().orElseThrow().asText());
-        assertFalse(responseCreateParams.input().orElseThrow().asText().contains("Follow the Java teaching policy"));
+        ResponseCreateParams.Input responseInput = responseCreateParams.input().orElseThrow();
+        assertTrue(responseInput.isResponse());
+        List<ResponseInputItem> responseInputItems = responseInput.asResponse();
+        assertEquals(4, responseInputItems.size());
+        assertInputMessage(
+                responseInputItems.get(0),
+                EasyInputMessage.Role.DEVELOPER,
+                "[CTX 1] https://docs.oracle.com/java\nOfficial context");
+        assertInputMessage(responseInputItems.get(1), EasyInputMessage.Role.USER, "Earlier question");
+        assertInputMessage(responseInputItems.get(2), EasyInputMessage.Role.ASSISTANT, priorAssistantMessage);
+        assertInputMessage(responseInputItems.get(3), EasyInputMessage.Role.USER, "Explain records");
+        assertFalse(responseInputItems.stream()
+                .map(ResponseInputItem::asEasyInputMessage)
+                .map(EasyInputMessage::content)
+                .map(EasyInputMessage.Content::asTextInput)
+                .anyMatch(messageText -> messageText.contains("Follow the Java teaching policy")));
     }
 
     @Test
@@ -241,6 +258,14 @@ class OpenAiRequestFactoryTest {
         String truncatedPrompt = responseCreateParams.input().orElseThrow().asText();
         assertTrue(truncatedPrompt.startsWith("[Context truncated due to GPT-5 8K input limit]"));
         assertTrue(truncatedPrompt.length() < prompt.length());
+    }
+
+    private static void assertInputMessage(
+            ResponseInputItem responseInputItem, EasyInputMessage.Role expectedRole, String expectedMessageText) {
+        assertTrue(responseInputItem.isEasyInputMessage());
+        EasyInputMessage inputMessage = responseInputItem.asEasyInputMessage();
+        assertEquals(expectedRole, inputMessage.role());
+        assertEquals(expectedMessageText, inputMessage.content().asTextInput());
     }
 
     private OpenAiRequestFactory createRequestFactory(String reasoningEffortSetting) {

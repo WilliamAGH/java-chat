@@ -27,6 +27,11 @@ class SystemPromptConfigTest {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
 
         assertAll(
+                () -> assertTrue(corePrompt.contains("{{hint:Text here}} (Helpful Hints)")),
+                () -> assertTrue(corePrompt.contains("{{background:Text here}} (Background Context)")),
+                () -> assertTrue(corePrompt.contains("{{reminder:Text here}} (Important Reminders)")),
+                () -> assertTrue(corePrompt.contains("{{warning:Text here}} (Warning)")),
+                () -> assertTrue(corePrompt.contains("{{example:Text here}} (Example)")),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_PROSE_LINE_CLAUSE)),
                 () -> assertTrue(corePrompt.contains(SystemPromptConfig.MARKER_CODE_BOUNDARY_CLAUSE)),
                 () -> assertTrue(corePrompt.contains("Marker syntax is not valid source code")),
@@ -50,22 +55,5 @@ class SystemPromptConfigTest {
         String corePrompt = systemPromptConfig.getCoreSystemPrompt();
 
         assertTrue(corePrompt.contains("Java " + TEST_DOCUMENTATION_JDK_VERSION));
-    }
-
-    @Test
-    void shouldTeachMarkerSyntaxAndPresentationPurpose() {
-        String markerUsagePrompt = systemPromptConfig.getMarkerUsagePrompt();
-
-        assertAll(
-                () -> assertTrue(markerUsagePrompt.contains("{{hint:Text here}}")),
-                () -> assertTrue(markerUsagePrompt.contains("{{background:Text here}}")),
-                () -> assertTrue(markerUsagePrompt.contains("{{reminder:Text here}}")),
-                () -> assertTrue(markerUsagePrompt.contains("{{warning:Text here}}")),
-                () -> assertTrue(markerUsagePrompt.contains("{{example:Text here}}")),
-                () -> assertTrue(markerUsagePrompt.contains("Helpful Hints")),
-                () -> assertTrue(markerUsagePrompt.contains("Background Context")),
-                () -> assertTrue(markerUsagePrompt.contains("Important Reminders")),
-                () -> assertTrue(markerUsagePrompt.contains("Warning")),
-                () -> assertTrue(markerUsagePrompt.contains("Example")));
     }
 }

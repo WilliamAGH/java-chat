@@ -130,7 +130,8 @@ class ChatPreparationSseIntegrationTest {
         when(retrievalService.toCitationsForQuery(eq(USER_QUERY), anyList()))
                 .thenReturn(new RetrievalService.CitationOutcome(List.of(), 0));
         when(streamingService.streamResponse(any(StructuredPrompt.class), anyDouble()))
-                .thenReturn(Mono.just(new StreamingResult(Flux.just("Complete"), RateLimitService.ApiProvider.OPENAI)));
+                .thenReturn(Mono.just(
+                        new StreamingResult(Flux.just("Complete"), RateLimitService.ApiProvider.OPENAI, List.of())));
         doAnswer(ignoredInvocation -> {
                     chatExchangePersisted.countDown();
                     return null;

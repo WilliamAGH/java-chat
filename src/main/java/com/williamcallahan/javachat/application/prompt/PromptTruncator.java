@@ -154,8 +154,6 @@ public class PromptTruncator {
             if (usedTokens + doc.estimatedTokens() <= availableTokens) {
                 fitting.add(doc);
                 usedTokens += doc.estimatedTokens();
-            } else {
-                break;
             }
         }
 
@@ -164,7 +162,11 @@ public class PromptTruncator {
         for (int newIndex = 0; newIndex < fitting.size(); newIndex++) {
             ContextDocumentSegment original = fitting.get(newIndex);
             reindexed.add(new ContextDocumentSegment(
-                    newIndex + 1, original.sourceUrl(), original.documentContent(), original.estimatedTokens()));
+                    newIndex + 1,
+                    original.documentId(),
+                    original.sourceUrl(),
+                    original.documentContent(),
+                    original.estimatedTokens()));
         }
 
         return List.copyOf(reindexed);

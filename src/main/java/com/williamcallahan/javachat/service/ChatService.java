@@ -204,7 +204,7 @@ public class ChatService {
             String documentText = doc.getText();
 
             segments.add(new ContextDocumentSegment(
-                    docIndex + 1, normalizedUrl, documentText, estimateTokens(documentText)));
+                    docIndex + 1, doc.getId(), normalizedUrl, documentText, estimateTokens(documentText)));
         }
         return segments;
     }
