@@ -46,9 +46,9 @@ import org.mockito.ArgumentCaptor;
 class OpenAiCompatibleEmbeddingClientTest {
 
     private static final int EXPECTED_EMBEDDING_DIMENSION = 2;
-    private static final Duration EXPECTED_LIVE_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(8);
+    private static final Duration EXPECTED_LIVE_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration EXPECTED_BATCH_EMBEDDING_CONNECT_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration EXPECTED_LIVE_EMBEDDING_TIMEOUT = Duration.ofSeconds(8);
+    private static final Duration EXPECTED_LIVE_EMBEDDING_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration EXPECTED_BATCH_EMBEDDING_TIMEOUT = Duration.ofMinutes(10);
     private static final int TEST_LIVE_MAX_CONCURRENT_REQUESTS = 4;
     private static final int TEST_BATCH_MAX_CONCURRENT_REQUESTS = 1;

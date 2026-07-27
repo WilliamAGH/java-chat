@@ -35,7 +35,7 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient, AutoClo
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingClient.class);
 
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 8;
+    private static final int LIVE_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 15;
     private static final int BATCH_EMBEDDING_REQUEST_TIMEOUT_SECONDS = 600;
     private static final int MAX_ERROR_SNIPPET = 512;
     private static final String OPENAI_API_VERSION_SUFFIX = "/v1";
