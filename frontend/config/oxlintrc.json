@@ -40,6 +40,9 @@
       "files": ["**/*.{test,spec}.{js,jsx,ts,tsx}", "src/test/**/*.{js,jsx,ts,tsx}"],
       "env": {
         "vitest": true
+      },
+      "rules": {
+        "vitest/require-mock-type-parameters": "off"
       }
     }
   ],

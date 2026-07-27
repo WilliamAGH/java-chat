@@ -35,7 +35,7 @@ export default [
       "zod/consistent-import-source": ["warn", { sources: ["zod/v4"] }],
       "zod/require-error-message": "warn",
       "zod/prefer-enum-over-literal-union": "warn",
-      "zod/require-schema-suffix": "warn",
+      "zod/consistent-schema-var-name": "warn",
       "zod/prefer-meta": "warn",
       "zod/array-style": "warn",
       "zod/consistent-import": ["warn", { syntax: "named" }],
@@ -44,7 +44,7 @@ export default [
   {
     files: ZOD_TEST_FILES,
     rules: {
-      "zod/require-schema-suffix": "off",
+      "zod/consistent-schema-var-name": "off",
       "zod/require-error-message": "off",
     },
   },
