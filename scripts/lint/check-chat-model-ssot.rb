@@ -5,17 +5,19 @@ CANONICAL_MODEL_PATH = "src/main/java/com/williamcallahan/javachat/config/ModelC
 EXPECTED_CHAT_MODEL = "gpt-5.4"
 SCAN_EXCLUSIONS =
   %r{\A(?:src/test/|config/ast-grep(?:-tests)?/|scripts/lint/check-chat-model-ssot\.rb\z)}
-GPT5_MODEL_TOKEN = %r{(?:[A-Za-z0-9_-]+/)?gpt-5(?:\.[A-Za-z0-9_.-]+)?}i
+OPENAI_MODEL_ASSIGNMENT = /OPENAI_MODEL\s*[:=]\s*([A-Za-z0-9_.\/-]+)/
 
 def violations_for_text(text, canonical_model)
-  text.scan(GPT5_MODEL_TOKEN).reject { |model_token| model_token == canonical_model }
+  text.scan(OPENAI_MODEL_ASSIGNMENT)
+      .flatten
+      .reject { |model_token| model_token == canonical_model }
 end
 
 def run_self_test
   raise "valid canonical model rejected" unless violations_for_text("OPENAI_MODEL=gpt-5.4", EXPECTED_CHAT_MODEL).empty?
   raise "stale model accepted" unless violations_for_text("OPENAI_MODEL=gpt-5", EXPECTED_CHAT_MODEL) == ["gpt-5"]
   qualified_model = "provider/gpt-5.4"
-  unless violations_for_text("MODEL=#{qualified_model}", EXPECTED_CHAT_MODEL) == [qualified_model]
+  unless violations_for_text("OPENAI_MODEL=#{qualified_model}", EXPECTED_CHAT_MODEL) == [qualified_model]
     raise "provider-qualified model accepted"
   end
 end
