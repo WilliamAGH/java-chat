@@ -3,6 +3,7 @@ package com.williamcallahan.javachat.config;
 import com.williamcallahan.javachat.service.EmbeddingClient;
 import com.williamcallahan.javachat.service.LocalEmbeddingClient;
 import com.williamcallahan.javachat.service.OpenAiCompatibleEmbeddingClient;
+import com.williamcallahan.javachat.support.OpenAiSdkUrlNormalizer;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,14 +76,14 @@ public class EmbeddingConfig {
             throw new IllegalStateException(
                     "Gateway embeddings require " + OPENAI_API_KEY_ENVIRONMENT_VARIABLE + " to be configured.");
         }
-        String trimmedOpenAiBaseUrl = openAiBaseUrl == null ? "" : openAiBaseUrl.trim();
-        if (trimmedOpenAiBaseUrl.isEmpty()) {
+        if (openAiBaseUrl == null || openAiBaseUrl.isBlank()) {
             throw new IllegalStateException(
                     "Gateway embeddings require " + OPENAI_BASE_URL_ENVIRONMENT_VARIABLE + " to be configured.");
         }
+        String sharedGatewayBaseUrl = OpenAiSdkUrlNormalizer.normalize(openAiBaseUrl);
         log.info("[EMBEDDING] Using shared OpenAI-compatible gateway");
         return OpenAiCompatibleEmbeddingClient.create(
-                trimmedOpenAiBaseUrl,
+                sharedGatewayBaseUrl,
                 trimmedOpenAiApiKey,
                 new OpenAiCompatibleEmbeddingClient.GatewaySettings(
                         embeddings.getModel(),
