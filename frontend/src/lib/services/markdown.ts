@@ -1,5 +1,6 @@
 import { Marked, type TokenizerExtension, type RendererExtension, type Tokens } from "marked";
 import DOMPurify from "dompurify";
+import { nestNumericListFences } from "./numericListFenceNesting";
 
 /** Display metadata owned by the browser renderer. */
 interface EnrichmentPresentation {
@@ -420,6 +421,10 @@ function normalizeMarkdownForStreaming(content: string): string {
   return normalized;
 }
 
+function prepareMarkdownForParsing(markdownText: string): string {
+  return normalizeMarkdownForStreaming(nestNumericListFences(markdownText));
+}
+
 /** Enrichment close marker. */
 const ENRICHMENT_CLOSE = "}}";
 
@@ -606,7 +611,7 @@ function createEnrichmentExtension(
 
       if (token.resolved !== true) {
         const unresolvedContent = typeof token.content === "string" ? token.content : "";
-        return markdownParser.parse(normalizeMarkdownForStreaming(unresolvedContent), {
+        return markdownParser.parse(prepareMarkdownForParsing(unresolvedContent), {
           async: false,
           gfm: true,
           breaks: false,
@@ -623,7 +628,7 @@ function createEnrichmentExtension(
         return "";
       }
 
-      const normalizedEnrichmentMarkdown = normalizeMarkdownForStreaming(enrichmentMarkdown);
+      const normalizedEnrichmentMarkdown = prepareMarkdownForParsing(enrichmentMarkdown);
 
       // Render inner content as markdown
       // IMPORTANT: Use gfm but disable breaks to prevent fence interference
@@ -673,7 +678,7 @@ export function parseMarkdown(
     return "";
   }
 
-  const normalizedContent = normalizeMarkdownForStreaming(markdownText);
+  const normalizedContent = prepareMarkdownForParsing(markdownText);
 
   if (import.meta.env.DEV && normalizedContent !== markdownText) {
     for (let markerIndex = 0; markerIndex < markdownText.length; markerIndex++) {
