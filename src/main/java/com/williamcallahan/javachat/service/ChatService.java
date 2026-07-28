@@ -14,6 +14,7 @@ import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.support.DocumentContentAdapter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -145,9 +146,24 @@ public class ChatService {
      */
     public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
             List<Message> history, String latestUserMessage) {
+        return buildStructuredPromptWithContextOutcome(history, latestUserMessage, notice -> {});
+    }
+
+    /**
+     * Builds a context-augmented structured prompt while reporting live retrieval progress.
+     *
+     * @param history existing chat history
+     * @param latestUserMessage user query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return structured prompt outcome with segments and retrieval metadata
+     */
+    public StructuredPromptOutcome buildStructuredPromptWithContextOutcome(
+            List<Message> history,
+            String latestUserMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
 
         RetrievalService.RetrievalOutcome retrievalOutcome =
-                retrieveTokenConstrainedOfficialDocumentation(latestUserMessage);
+                retrieveTokenConstrainedOfficialDocumentation(latestUserMessage, retrievalProgressListener);
         logger.debug(
                 "Using GPT-5.4 retrieval context: {} documents with max {} tokens each",
                 retrievalOutcome.documents().size(),
@@ -188,11 +204,24 @@ public class ChatService {
      * @return constrained official-document retrieval outcome
      */
     public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(String query) {
+        return retrieveTokenConstrainedOfficialDocumentation(query, notice -> {});
+    }
+
+    /**
+     * Retrieves the official documentation context while reporting live retrieval progress.
+     *
+     * @param query learner query
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return constrained official-document retrieval outcome
+     */
+    public RetrievalService.RetrievalOutcome retrieveTokenConstrainedOfficialDocumentation(
+            String query, Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
         return retrievalService.retrieveWithLimitOutcome(
                 query,
                 ModelConfiguration.RAG_LIMIT_CONSTRAINED,
                 ModelConfiguration.RAG_TOKEN_LIMIT_CONSTRAINED,
-                officialDocumentationConstraint());
+                officialDocumentationConstraint(),
+                retrievalProgressListener);
     }
 
     private static RetrievalConstraint officialDocumentationConstraint() {

@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -191,6 +192,24 @@ public class GuidedLearningService {
      */
     public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
             List<Message> history, String slug, String userMessage) {
+        return buildStructuredGuidedPromptWithContext(history, slug, userMessage, notice -> {});
+    }
+
+    /**
+     * Builds the guided prompt while reporting live retrieval progress for the lesson context
+     * search.
+     *
+     * @param history conversation history
+     * @param slug lesson slug for context retrieval
+     * @param userMessage user's question
+     * @param retrievalProgressListener receives live user-facing retrieval progress notices
+     * @return guided prompt outcome including structured prompt and context documents
+     */
+    public GuidedChatPromptOutcome buildStructuredGuidedPromptWithContext(
+            List<Message> history,
+            String slug,
+            String userMessage,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
         GuidedLesson lesson = requireListedLesson(slug);
         String curatedLessonMarkdown = requiredCuratedLessonMarkdown(lesson);
         String query = buildLessonQuery(lesson) + "\n" + userMessage;
@@ -198,7 +217,8 @@ public class GuidedLearningService {
         boolean isJavaLesson = JAVA_TECHNOLOGY.equals(lesson.getTechnology());
         List<String> requestedVersions = isJavaLesson ? parsedVersions : List.of();
         List<String> effectiveDocSets = effectiveDocSetsFor(lesson, requestedVersions);
-        List<Document> lessonContextDocuments = retrieveLessonContext(query, effectiveDocSets);
+        List<Document> lessonContextDocuments =
+                retrieveLessonContext(query, effectiveDocSets, retrievalProgressListener);
 
         String guidance = buildLessonGuidance(lesson, curatedLessonMarkdown, effectiveDocSets, requestedVersions);
         List<Document> curatedLessonContextDocuments = curatedLessonContextDocuments(lesson, curatedLessonMarkdown);
@@ -367,7 +387,15 @@ public class GuidedLearningService {
     }
 
     private List<Document> retrieveLessonContext(String query, List<String> effectiveDocSets) {
-        return retrievalService.retrieve(query, RetrievalConstraint.forOfficialDocSets(effectiveDocSets));
+        return retrieveLessonContext(query, effectiveDocSets, notice -> {});
+    }
+
+    private List<Document> retrieveLessonContext(
+            String query,
+            List<String> effectiveDocSets,
+            Consumer<RetrievalService.RetrievalNotice> retrievalProgressListener) {
+        return retrievalService.retrieve(
+                query, RetrievalConstraint.forOfficialDocSets(effectiveDocSets), retrievalProgressListener);
     }
 
     private List<String> effectiveDocSetsFor(GuidedLesson lesson, List<String> requestedVersions) {

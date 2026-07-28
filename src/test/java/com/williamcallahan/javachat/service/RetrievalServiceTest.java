@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import com.williamcallahan.javachat.config.AppProperties;
 import com.williamcallahan.javachat.config.DocsSourceRegistry;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -45,6 +46,25 @@ class RetrievalServiceTest {
         retrievalService.retrieveOutcome("Java strings", guidedConstraint);
 
         verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint));
+    }
+
+    @Test
+    void retrievalReportsSearchThenRerankProgressInOrder() {
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+        RerankerService rerankerService = mock(RerankerService.class);
+        RetrievalService retrievalService = new RetrievalService(
+                hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
+        RetrievalConstraint guidedConstraint =
+                RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint)))
+                .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
+        when(rerankerService.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+
+        List<String> progressSummaries = new ArrayList<>();
+        retrievalService.retrieveOutcome(
+                "Java records", guidedConstraint, progressNotice -> progressSummaries.add(progressNotice.summary()));
+
+        assertEquals(List.of("Searching the Java documentation index", "Reviewing the top matches"), progressSummaries);
     }
 
     @Test

@@ -39,6 +39,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -264,6 +265,12 @@ public class GuidedLearningController extends BaseController {
         String canonicalLessonSlug = listedLesson.getSlug();
 
         sseSupport.configureStreamingHeaders(response);
+
+        // Retrieval progress events stream live from the blocking retrieval work so the client can
+        // show which step (library search, rerank) is running during response preparation.
+        Sinks.Many<ServerSentEvent<String>> retrievalProgressEvents =
+                Sinks.many().multicast().onBackpressureBuffer();
+
         Flux<ServerSentEvent<String>> operationEvents = Flux.defer(() -> {
             if (!openAIStreamingService.isAvailable()) {
                 log.warn("OpenAI streaming service unavailable for guided session");
@@ -273,12 +280,16 @@ public class GuidedLearningController extends BaseController {
                 log.warn("Configured provider temporarily unavailable for guided session");
                 return sseSupport.configuredProviderUnavailableError();
             }
-            return streamGuidedResponse(requestToken, sessionId, userQuery, canonicalLessonSlug);
+            return streamGuidedResponse(
+                    requestToken, sessionId, userQuery, canonicalLessonSlug, retrievalProgressEvents);
         });
         Flux<ServerSentEvent<String>> deadlineBoundOperationEvents =
                 sseSupport.enforceResponsePreparationDeadline(operationEvents);
+        Flux<ServerSentEvent<String>> operationEventsWithProgress = Flux.merge(
+                retrievalProgressEvents.asFlux(),
+                deadlineBoundOperationEvents.doFinally(terminationSignal -> retrievalProgressEvents.tryEmitComplete()));
         return Flux.concat(
-                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(deadlineBoundOperationEvents))
+                        sseSupport.responsePreparationStatus(), sseSupport.withHeartbeats(operationEventsWithProgress))
                 .onErrorResume(error -> guidedStreamError(error, requestToken, sessionId, canonicalLessonSlug));
     }
 
@@ -289,16 +300,27 @@ public class GuidedLearningController extends BaseController {
      * @param sessionId chat session identifier
      * @param userQuery user's question
      * @param lessonSlug lesson context identifier
+     * @param retrievalProgressEvents sink receiving live retrieval progress status events
      * @return SSE stream of response chunks with heartbeats
      */
     private Flux<ServerSentEvent<String>> streamGuidedResponse(
-            long requestToken, String sessionId, String userQuery, String lessonSlug) {
+            long requestToken,
+            String sessionId,
+            String userQuery,
+            String lessonSlug,
+            Sinks.Many<ServerSentEvent<String>> retrievalProgressEvents) {
         return Flux.defer(() -> {
                     List<org.springframework.ai.chat.messages.Message> history = chatMemory.getHistory(sessionId);
                     StringBuilder fullResponse = new StringBuilder();
 
                     GuidedLearningService.GuidedChatPromptOutcome promptOutcome =
-                            guidedService.buildStructuredGuidedPromptWithContext(history, lessonSlug, userQuery);
+                            guidedService.buildStructuredGuidedPromptWithContext(
+                                    history, lessonSlug, userQuery, retrievalNotice -> {
+                                        // A failed emission only means the client went away; progress
+                                        // notices are diagnostics and must not fail retrieval.
+                                        retrievalProgressEvents.tryEmitNext(sseSupport.statusEvent(
+                                                retrievalNotice.summary(), retrievalNotice.details()));
+                                    });
 
                     // Stream with provider transparency - surfaces which LLM is responding
                     return openAIStreamingService

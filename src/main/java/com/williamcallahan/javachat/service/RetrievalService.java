@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -35,6 +36,22 @@ public class RetrievalService {
 
     private static final String FILE_URL_PREFIX = "file://";
     private static final char URL_FRAGMENT_DELIMITER = '#';
+
+    /** User-facing progress status emitted when the hybrid library search begins. */
+    private static final String RETRIEVAL_SEARCH_STATUS_SUMMARY = "Searching the Java documentation index";
+
+    private static final String RETRIEVAL_SEARCH_STATUS_DETAILS =
+            "Embedding your question and matching it against the official JDK documentation, books, and GitHub repositories.";
+
+    /** User-facing progress status emitted when the reranker reviews search matches. */
+    private static final String RETRIEVAL_RERANK_STATUS_SUMMARY = "Reviewing the top matches";
+
+    private static final String RETRIEVAL_RERANK_STATUS_DETAILS =
+            "Ranking the most relevant passages before writing the answer.";
+
+    /** Listener for callers that run retrieval without a user-facing progress channel. */
+    private static final Consumer<RetrievalNotice> NO_PROGRESS_LISTENER = notice -> {};
+
     private static final List<String> SUPPORTED_JAVA_API_VERSIONS =
             DocsSourceRegistry.javaApiDocumentationSources().stream()
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
@@ -113,6 +130,23 @@ public class RetrievalService {
     }
 
     /**
+     * Retrieves documents within the caller-owned constraint while reporting live progress.
+     *
+     * <p>The listener receives one notice when the hybrid library search begins and one when the
+     * reranker starts reviewing matches, so streaming callers can show which retrieval step is
+     * running instead of a single opaque preparation status.</p>
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return retrieved and reranked documents
+     */
+    public List<Document> retrieve(
+            String query, RetrievalConstraint retrievalConstraint, Consumer<RetrievalNotice> progressListener) {
+        return retrieveOutcome(query, retrievalConstraint, progressListener).documents();
+    }
+
+    /**
      * Discovers static citations from one sparse official-documentation query.
      *
      * <p>Candidate documents are converted and deduplicated by their final citation URL and anchor
@@ -159,7 +193,7 @@ public class RetrievalService {
         List<String> requestedVersions =
                 QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
         RetrievalConstraint retrievalConstraint = RetrievalConstraint.forDocVersions(requestedVersions);
-        return retrieveOutcome(query, retrievalConstraint, requestedVersions);
+        return retrieveOutcome(query, retrievalConstraint, requestedVersions, NO_PROGRESS_LISTENER);
     }
 
     /**
@@ -173,18 +207,36 @@ public class RetrievalService {
      * @return retrieval outcome with documents and notices
      */
     public RetrievalOutcome retrieveOutcome(String query, RetrievalConstraint retrievalConstraint) {
+        return retrieveOutcome(query, retrievalConstraint, NO_PROGRESS_LISTENER);
+    }
+
+    /**
+     * Retrieves documents and notices within the caller-owned constraint, reporting live progress.
+     *
+     * @param query retrieval query
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return retrieval outcome with documents and notices
+     */
+    public RetrievalOutcome retrieveOutcome(
+            String query, RetrievalConstraint retrievalConstraint, Consumer<RetrievalNotice> progressListener) {
         Objects.requireNonNull(retrievalConstraint, "retrievalConstraint");
+        Objects.requireNonNull(progressListener, "progressListener");
         if (query == null || query.isBlank()) {
             return new RetrievalOutcome(List.of(), List.of());
         }
         List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
         List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
         RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
-        return retrieveOutcome(query, combinedRetrievalConstraint, requestedVersions);
+        return retrieveOutcome(query, combinedRetrievalConstraint, requestedVersions, progressListener);
     }
 
     private RetrievalOutcome retrieveOutcome(
-            String query, RetrievalConstraint retrievalConstraint, List<String> requestedVersions) {
+            String query,
+            RetrievalConstraint retrievalConstraint,
+            List<String> requestedVersions,
+            Consumer<RetrievalNotice> progressListener) {
+        progressListener.accept(new RetrievalNotice(RETRIEVAL_SEARCH_STATUS_SUMMARY, RETRIEVAL_SEARCH_STATUS_DETAILS));
         CandidateRetrieval candidateRetrieval = retrieveCandidates(query, retrievalConstraint, requestedVersions);
 
         int returnDocumentLimit = appProperties.getRag().getSearchReturnK();
@@ -198,6 +250,8 @@ public class RetrievalService {
                     : retainRequestedVersionCoverage(
                             exactOverloadDocuments, exactOverloadDocuments, requestedVersions, returnDocumentLimit);
         } else {
+            progressListener.accept(
+                    new RetrievalNotice(RETRIEVAL_RERANK_STATUS_SUMMARY, RETRIEVAL_RERANK_STATUS_DETAILS));
             List<Document> reranked =
                     rerankerService.rerank(query, candidateRetrieval.documents(), returnDocumentLimit);
             promptDocuments = retainRequestedVersionCoverage(
@@ -293,8 +347,28 @@ public class RetrievalService {
      */
     public RetrievalOutcome retrieveWithLimitOutcome(
             String query, int maxDocuments, int maxTokensPerDocument, RetrievalConstraint retrievalConstraint) {
+        return retrieveWithLimitOutcome(
+                query, maxDocuments, maxTokensPerDocument, retrievalConstraint, NO_PROGRESS_LISTENER);
+    }
+
+    /**
+     * Retrieves constrained documents with limits while reporting live retrieval progress.
+     *
+     * @param query retrieval query
+     * @param maxDocuments maximum number of documents to retain
+     * @param maxTokensPerDocument maximum estimated tokens retained per document
+     * @param retrievalConstraint exact server-side constraint for the retrieval
+     * @param progressListener receives live user-facing retrieval progress notices
+     * @return constrained, truncated retrieval outcome
+     */
+    public RetrievalOutcome retrieveWithLimitOutcome(
+            String query,
+            int maxDocuments,
+            int maxTokensPerDocument,
+            RetrievalConstraint retrievalConstraint,
+            Consumer<RetrievalNotice> progressListener) {
         return limitRetrievalOutcome(
-                retrieveOutcome(query, retrievalConstraint),
+                retrieveOutcome(query, retrievalConstraint, progressListener),
                 maxDocuments,
                 maxTokensPerDocument,
                 applicableRequestedVersions(
