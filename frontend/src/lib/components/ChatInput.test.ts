@@ -1,22 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 import ChatInput from "./ChatInput.svelte";
-
-function stubFinePointer(isFinePointer: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    value: (query: string) => ({
-      matches: query === "(pointer: fine)" ? isFinePointer : false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  });
-}
 
 function renderChatInput(onSend = vi.fn<(message: string) => void>()) {
   const renderedChatInput = render(ChatInput, { props: { onSend } });
@@ -39,11 +23,16 @@ async function typeMessage(messageInput: HTMLTextAreaElement, typedMessage: stri
 }
 
 describe("ChatInput keyboard behavior", () => {
-  afterEach(() => {
-    stubFinePointer(true);
+  it("does not infer keyboard behavior from pointer capabilities", () => {
+    const matchMediaSpy = vi.spyOn(window, "matchMedia");
+
+    renderChatInput();
+
+    expect(matchMediaSpy).not.toHaveBeenCalled();
+    matchMediaSpy.mockRestore();
   });
 
-  it("sends on Enter and labels the key 'send' with a hardware keyboard", async () => {
+  it("sends on Enter and labels the key 'send'", async () => {
     const { messageInput, onSend } = renderChatInput();
     expect(messageInput).toHaveAttribute("enterkeyhint", "send");
 
@@ -60,25 +49,7 @@ describe("ChatInput keyboard behavior", () => {
     expect(messageInput).toHaveValue("");
   });
 
-  it("inserts a newline on Return and labels the key 'enter' on touch devices", async () => {
-    stubFinePointer(false);
-    const { messageInput, onSend } = renderChatInput();
-    expect(messageInput).toHaveAttribute("enterkeyhint", "enter");
-
-    await typeMessage(messageInput, "Hello");
-    const returnEvent = new KeyboardEvent("keydown", {
-      bubbles: true,
-      cancelable: true,
-      key: "Enter",
-    });
-    await fireEvent(messageInput, returnEvent);
-
-    expect(returnEvent.defaultPrevented).toBe(false);
-    expect(onSend).not.toHaveBeenCalled();
-    expect(messageInput).toHaveValue("Hello");
-  });
-
-  it("never sends on Shift+Enter, even with a hardware keyboard", async () => {
+  it("never sends on Shift+Enter", async () => {
     const { messageInput, onSend } = renderChatInput();
 
     await typeMessage(messageInput, "Hello");
@@ -96,19 +67,55 @@ describe("ChatInput keyboard behavior", () => {
 });
 
 describe("ChatInput focus behavior", () => {
-  afterEach(() => {
-    stubFinePointer(true);
+  it("does not autofocus on mount", () => {
+    const { messageInput } = renderChatInput();
+    expect(document.activeElement).not.toBe(messageInput);
   });
 
-  it("autofocuses on mount with a hardware keyboard", () => {
-    const { messageInput } = renderChatInput();
+  it("preserves focus naturally through a readonly Enter submission", async () => {
+    const { messageInput, rerender } = renderChatInput();
+    messageInput.focus();
+    await typeMessage(messageInput, "Hello");
+    await fireEvent.keyDown(messageInput, { key: "Enter" });
+
+    await rerender({ disabled: true });
+    expect(messageInput).toHaveAttribute("readonly");
+    expect(document.activeElement).toBe(messageInput);
+    await rerender({ disabled: false });
+
+    expect(messageInput).not.toHaveAttribute("readonly");
     expect(document.activeElement).toBe(messageInput);
   });
 
-  it("does not autofocus on touch devices", () => {
-    stubFinePointer(false);
-    const { messageInput } = renderChatInput();
+  it("does not restore focus after an Enter submission loses focus", async () => {
+    const { messageInput, rerender } = renderChatInput();
+    messageInput.focus();
+    await typeMessage(messageInput, "Hello");
+    await fireEvent.keyDown(messageInput, { key: "Enter" });
+
+    await rerender({ disabled: true });
+    const transientFocusControl = document.createElement("button");
+    document.body.append(transientFocusControl);
+    transientFocusControl.focus();
+    transientFocusControl.remove();
+    await rerender({ disabled: false });
+
     expect(document.activeElement).not.toBe(messageInput);
+  });
+
+  it("does not restore focus after a send button submission", async () => {
+    const renderedChatInput = renderChatInput();
+    await typeMessage(renderedChatInput.messageInput, "Hello");
+    await fireEvent.click(renderedChatInput.getByRole("button", { name: "Send message" }));
+
+    await renderedChatInput.rerender({ disabled: true });
+    const transientFocusControl = document.createElement("button");
+    document.body.append(transientFocusControl);
+    transientFocusControl.focus();
+    transientFocusControl.remove();
+    await renderedChatInput.rerender({ disabled: false });
+
+    expect(document.activeElement).not.toBe(renderedChatInput.messageInput);
   });
 });
 

@@ -106,7 +106,7 @@ describe("ChatView streaming stability", () => {
     expect(container.querySelector(".message.assistant .cursor.visible")).toBeNull();
   });
 
-  it("restores input focus after a submitted stream completes with focus in the form", async () => {
+  it("preserves input focus when it remains in the form during streaming", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected stream completion callback to be set");
     };
@@ -125,18 +125,18 @@ describe("ChatView streaming stability", () => {
     messageInput.focus();
 
     await sendChatMessage(renderedChatView, "Explain records");
-    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+    await vi.waitFor(() => expect(messageInput).toHaveAttribute("readonly"));
     expect(messageInput).toHaveFocus();
 
     completeStream();
 
     await vi.waitFor(() => {
-      expect(messageInput).toBeEnabled();
+      expect(messageInput).not.toHaveAttribute("readonly");
       expect(messageInput).toHaveFocus();
     });
   });
 
-  it("restores input focus after a submitted stream completes with focus on the document body", async () => {
+  it("does not restore input focus after a send button stream completes", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected stream completion callback to be set");
     };
@@ -154,7 +154,7 @@ describe("ChatView streaming stability", () => {
     }
 
     await sendChatMessage(renderedChatView, "Explain records");
-    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+    await vi.waitFor(() => expect(messageInput).toHaveAttribute("readonly"));
 
     const transientFocusControl = document.createElement("button");
     renderedChatView.container.append(transientFocusControl);
@@ -165,8 +165,8 @@ describe("ChatView streaming stability", () => {
     completeStream();
 
     await vi.waitFor(() => {
-      expect(messageInput).toBeEnabled();
-      expect(messageInput).toHaveFocus();
+      expect(messageInput).not.toHaveAttribute("readonly");
+      expect(document.activeElement).toBe(document.body);
     });
   });
 
@@ -188,7 +188,7 @@ describe("ChatView streaming stability", () => {
     }
 
     await sendChatMessage(renderedChatView, "Explain records");
-    await vi.waitFor(() => expect(messageInput).toBeDisabled());
+    await vi.waitFor(() => expect(messageInput).toHaveAttribute("readonly"));
 
     const externalNavigationButton = document.createElement("button");
     renderedChatView.container.append(externalNavigationButton);
@@ -197,7 +197,7 @@ describe("ChatView streaming stability", () => {
 
     completeStream();
 
-    await vi.waitFor(() => expect(messageInput).toBeEnabled());
+    await vi.waitFor(() => expect(messageInput).not.toHaveAttribute("readonly"));
     expect(externalNavigationButton).toHaveFocus();
   });
 

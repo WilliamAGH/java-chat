@@ -83,7 +83,7 @@ async function submitMobileGuidedMessage(
     target: { value: "Explain records" },
   });
   await fireEvent.click(mobileSendButton);
-  await vi.waitFor(() => expect(mobileMessageInput).toBeDisabled());
+  await vi.waitFor(() => expect(mobileMessageInput).toHaveAttribute("readonly"));
 }
 
 function configureLessonCatalog(...guidedLessons: GuidedLesson[]): void {
@@ -251,7 +251,7 @@ describe("LearnView guided chat streaming stability", () => {
     expect(mobileChatDialog).toHaveAttribute("open");
   });
 
-  it("restores mobile drawer input focus after a submitted stream completes with focus in the form", async () => {
+  it("preserves mobile drawer input focus when it remains in the form during streaming", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected guided stream completion callback to be set");
     };
@@ -272,12 +272,12 @@ describe("LearnView guided chat streaming stability", () => {
     completeStream();
 
     await vi.waitFor(() => {
-      expect(mobileMessageInput).toBeEnabled();
+      expect(mobileMessageInput).not.toHaveAttribute("readonly");
       expect(mobileMessageInput).toHaveFocus();
     });
   });
 
-  it("restores mobile drawer input focus after a submitted stream completes with focus on the document body", async () => {
+  it("does not restore mobile drawer input focus after a send button stream completes", async () => {
     let completeStream: () => void = () => {
       throw new Error("Expected guided stream completion callback to be set");
     };
@@ -301,8 +301,8 @@ describe("LearnView guided chat streaming stability", () => {
     completeStream();
 
     await vi.waitFor(() => {
-      expect(mobileMessageInput).toBeEnabled();
-      expect(mobileMessageInput).toHaveFocus();
+      expect(mobileMessageInput).not.toHaveAttribute("readonly");
+      expect(document.activeElement).toBe(document.body);
     });
   });
 
@@ -327,7 +327,7 @@ describe("LearnView guided chat streaming stability", () => {
 
     completeStream();
 
-    await vi.waitFor(() => expect(mobileMessageInput).toBeEnabled());
+    await vi.waitFor(() => expect(mobileMessageInput).not.toHaveAttribute("readonly"));
     expect(mobileChatTrigger).toHaveFocus();
   });
 

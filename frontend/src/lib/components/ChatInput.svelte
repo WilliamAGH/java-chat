@@ -4,12 +4,6 @@
   /** Default placeholder text for the chat input field. */
   const DEFAULT_PLACEHOLDER = 'Ask about Java...'
 
-  /**
-   * Devices with a precise pointer have a hardware keyboard, so Enter sends.
-   * Coarse-pointer devices use the software keyboard's Return key for newlines.
-   */
-  const FINE_POINTER_QUERY = '(pointer: fine)'
-
   interface Props {
     /** Callback invoked when user submits a message. */
     onSend: (message: string) => void
@@ -22,51 +16,16 @@
   let { onSend, disabled = false, placeholder = DEFAULT_PLACEHOLDER }: Props = $props()
 
   let inputValue = $state('')
-  let hasFinePointer = $state(window.matchMedia(FINE_POINTER_QUERY).matches)
   let messageInput: HTMLTextAreaElement | null = $state(null)
-  let chatInputForm: HTMLFormElement | null = $state(null)
-  let previouslyDisabled = false
-  let submissionAwaitsDisabledTransition = false
-  let submissionOwnsDisabledTransition = false
   let previousInputLength = 0
   // Owned by the `.input-field` CSS max-height; read once on mount so the
   // resizer never hard-codes the cap.
   let maxInputHeightPx = Number.POSITIVE_INFINITY
 
-  $effect(() => {
-    const hasDisabledStateTransition = disabled !== previouslyDisabled
-
-    if (submissionAwaitsDisabledTransition && hasDisabledStateTransition && disabled) {
-      submissionOwnsDisabledTransition = true
-    }
-
-    if (submissionOwnsDisabledTransition && hasDisabledStateTransition && !disabled) {
-      // Refocusing would reopen the software keyboard on touch devices, so only
-      // restore focus where a hardware keyboard is present.
-      if (hasFinePointer && canRestoreMessageInputFocus()) {
-        messageInput?.focus()
-      }
-      submissionAwaitsDisabledTransition = false
-      submissionOwnsDisabledTransition = false
-    }
-
-    previouslyDisabled = disabled
-  })
-
-  function canRestoreMessageInputFocus(): boolean {
-    const focusedElement = document.activeElement
-    return (
-      focusedElement === null ||
-      focusedElement === document.body ||
-      chatInputForm?.contains(focusedElement) === true
-    )
-  }
-
   function submitMessage(): void {
     const submittedMessage = inputValue.trim()
     if (!submittedMessage || disabled) return
 
-    submissionAwaitsDisabledTransition = true
     onSend(submittedMessage)
     inputValue = ''
     previousInputLength = 0
@@ -83,7 +42,7 @@
   function handleKeyDown(keyboardEvent: KeyboardEvent): void {
     if (keyboardEvent.isComposing) return
 
-    if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey && hasFinePointer) {
+    if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey) {
       keyboardEvent.preventDefault()
       submitMessage()
     }
@@ -110,13 +69,6 @@
   }
 
   onMount(() => {
-    const finePointerQuery = window.matchMedia(FINE_POINTER_QUERY)
-    hasFinePointer = finePointerQuery.matches
-    function synchronizePointerCapability() {
-      hasFinePointer = finePointerQuery.matches
-    }
-    finePointerQuery.addEventListener('change', synchronizePointerCapability)
-
     if (messageInput) {
       const cssMaxHeightPx = Number.parseFloat(getComputedStyle(messageInput).maxHeight)
       if (Number.isFinite(cssMaxHeightPx)) {
@@ -138,13 +90,8 @@
     }
 
     document.addEventListener('keydown', handleGlobalKeyDown)
-    // Autofocus would pop the software keyboard on page load for touch users.
-    if (hasFinePointer) {
-      messageInput?.focus()
-    }
 
     return () => {
-      finePointerQuery.removeEventListener('change', synchronizePointerCapability)
       document.removeEventListener('keydown', handleGlobalKeyDown)
     }
   })
@@ -152,7 +99,7 @@
 
 <div class="input-area">
   <div class="input-container">
-    <form bind:this={chatInputForm} class="input-wrapper" onsubmit={handleFormSubmit}>
+    <form class="input-wrapper" onsubmit={handleFormSubmit}>
       <textarea
         bind:this={messageInput}
         bind:value={inputValue}
@@ -160,8 +107,8 @@
         onkeydown={handleKeyDown}
         {placeholder}
         rows="1"
-        {disabled}
-        enterkeyhint={hasFinePointer ? 'send' : 'enter'}
+        readonly={disabled}
+        enterkeyhint="send"
         class="input-field"
         aria-label="Message input"
       ></textarea>
@@ -185,11 +132,7 @@
     </form>
 
     <p class="input-hint">
-      {#if hasFinePointer}
-        <span class="hint-text">Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for new line</span>
-      {:else}
-        <span class="hint-text">Press <kbd>Return</kbd> for a new line</span>
-      {/if}
+      <span class="hint-text">Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for new line</span>
     </p>
   </div>
 </div>
@@ -241,7 +184,7 @@
     color: var(--color-text-muted);
   }
 
-  .input-field:disabled {
+  .input-field:read-only {
     opacity: 0.6;
     cursor: not-allowed;
   }

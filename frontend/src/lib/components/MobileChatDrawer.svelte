@@ -72,12 +72,6 @@
     }: Props = $props();
 
     /**
-     * Devices with a precise pointer have a hardware keyboard, so focusing the
-     * input on drawer open is convenient rather than keyboard-popping.
-     */
-    const FINE_POINTER_QUERY = "(pointer: fine)";
-
-    /**
      * Minimum gap between layout and visual viewport height that indicates a
      * virtual keyboard is open (toolbar show/hide deltas stay well below it).
      */
@@ -104,13 +98,6 @@
         }
 
         chatDialog.showModal();
-        if (window.matchMedia(FINE_POINTER_QUERY).matches) {
-            chatDialog
-                .querySelector<HTMLTextAreaElement>(
-                    "textarea[aria-label='Message input']",
-                )
-                ?.focus();
-        }
     });
 
     // iOS Safari resizes only the visual viewport when the software keyboard
@@ -129,12 +116,19 @@
             if (!chatDialog || !visualViewport) {
                 return;
             }
+            const keyboardObscuredLayoutHeightPx =
+                window.innerHeight -
+                visualViewport.height * visualViewport.scale;
             const keyboardCoversLayout =
-                window.innerHeight - visualViewport.height >
+                keyboardObscuredLayoutHeightPx >
                 KEYBOARD_VIEWPORT_GAP_PX;
             if (keyboardCoversLayout) {
+                const visualViewportBottomOffsetPx =
+                    visualViewport.offsetTop +
+                    visualViewport.height -
+                    window.innerHeight;
                 chatDialog.style.height = `${visualViewport.height}px`;
-                chatDialog.style.transform = `translateY(${visualViewport.offsetTop}px)`;
+                chatDialog.style.transform = `translateY(${visualViewportBottomOffsetPx}px)`;
             } else {
                 chatDialog.style.height = "";
                 chatDialog.style.transform = "";
