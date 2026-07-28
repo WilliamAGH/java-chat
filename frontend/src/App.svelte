@@ -9,17 +9,21 @@
     applicationViewForPath,
     canonicalRecoveryPathForPath,
     canonicalPathForApplicationView,
+    lessonSlugForPath,
     synchronizeDocumentMetadata,
     type ApplicationView,
   } from './lib/services/pageMetadata'
 
   let currentView = $state<ApplicationView>(applicationViewForPath(globalThis.location.pathname))
+  let currentLessonSlug = $state<string | null>(lessonSlugForPath(globalThis.location.pathname))
 
   $effect(() => {
     recoverUnimplementedLessonRoute()
     if (applicationViewForPath(globalThis.location.pathname) !== currentView) {
       const selectedViewPath = canonicalPathForApplicationView(currentView)
       globalThis.history.pushState({}, '', selectedViewPath)
+    } else if (currentView === 'learn') {
+      synchronizeLessonRouteWithSelection()
     }
     synchronizeDocumentMetadata()
   })
@@ -31,7 +35,17 @@
   function synchronizeViewWithBrowserHistory(): void {
     recoverUnimplementedLessonRoute()
     currentView = applicationViewForPath(globalThis.location.pathname)
+    currentLessonSlug = lessonSlugForPath(globalThis.location.pathname)
     synchronizeDocumentMetadata()
+  }
+
+  function synchronizeLessonRouteWithSelection(): void {
+    const pathLessonSlug = lessonSlugForPath(globalThis.location.pathname)
+    if (currentLessonSlug && pathLessonSlug !== currentLessonSlug) {
+      globalThis.history.pushState({}, '', `/learn/${currentLessonSlug}`)
+    } else if (!currentLessonSlug && pathLessonSlug) {
+      globalThis.history.pushState({}, '', '/learn')
+    }
   }
 
   function recoverUnimplementedLessonRoute(): void {
@@ -51,7 +65,7 @@
     {#if currentView === 'chat'}
       <ChatView />
     {:else}
-      <LearnView />
+      <LearnView bind:selectedSlug={currentLessonSlug} />
     {/if}
   </main>
 

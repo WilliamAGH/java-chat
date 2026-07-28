@@ -449,6 +449,119 @@ describe("LearnView guided chat streaming stability", () => {
     expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
   });
 
+  it("reveals a terminal guided error above the composer after prior content scrolls the list", async () => {
+    streamGuidedChatMock.mockRejectedValue(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    const learnView = await renderLearnView();
+    await fireEvent.click(await learnView.findByRole("button", { name: /test lesson/i }));
+
+    const messagesContainer = learnView.container.querySelector<HTMLElement>(
+      ".chat-panel--desktop .messages-container",
+    );
+    if (!messagesContainer) {
+      throw new Error("Expected the desktop messages container to be rendered");
+    }
+    // scrollHeight grows once the terminal error bubble renders, modeling the
+    // real DOM growth the final reveal must scroll to. At send time only the
+    // user message is present, so the send-time scrollOnce targets the shorter
+    // height; the final reveal after the error must target the taller one.
+    Object.defineProperties(messagesContainer, {
+      scrollTop: { configurable: true, value: 0, writable: true },
+      scrollHeight: {
+        configurable: true,
+        get() {
+          return messagesContainer.querySelector(".message.assistant.error")
+            ? OFFSCREEN_MESSAGES_SCROLL_HEIGHT + 400
+            : OFFSCREEN_MESSAGES_SCROLL_HEIGHT;
+        },
+      },
+      clientHeight: {
+        configurable: true,
+        value: VISIBLE_MESSAGES_CONTAINER_HEIGHT,
+      },
+    });
+    const scrollToSpy = vi.spyOn(messagesContainer, "scrollTo");
+
+    await fireEvent.input(learnView.getByLabelText("Message input"), {
+      target: { value: "Explain records" },
+    });
+    await fireEvent.click(learnView.getByRole("button", { name: "Send message" }));
+
+    const errorMessage = await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(errorMessage.closest(".message.assistant.error")).not.toBeNull();
+
+    const grownScrollHeight = OFFSCREEN_MESSAGES_SCROLL_HEIGHT + 400;
+    await vi.waitFor(() => {
+      const finalRevealCall = scrollToSpy.mock.calls
+        .map((scrollArguments) => scrollArguments[0])
+        .find(
+          (scrollOptions) =>
+            typeof scrollOptions === "object" &&
+            scrollOptions !== null &&
+            "top" in scrollOptions &&
+            (scrollOptions as { top: number }).top === grownScrollHeight,
+        );
+      expect(finalRevealCall).toBeDefined();
+    });
+  });
+
+  it("retries a retryable guided failure with the original question", async () => {
+    const { StreamFailureError } = await import("../services/sse");
+    const retryableStreamFailure = new StreamFailureError({
+      message: "Response preparation timed out",
+      details: "Java documentation retrieval did not complete in time. Please retry.",
+      code: "retrieval.timeout",
+      retryable: true,
+      stage: "retrieval",
+    });
+    streamGuidedChatMock
+      .mockRejectedValueOnce(retryableStreamFailure)
+      .mockImplementation(async (_sessionId, _lessonSlug, _message, streamCallbacks) => {
+        streamCallbacks.onChunk("Recovered guided answer");
+      });
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    const retryButton = await learnView.findByRole("button", { name: "Retry" });
+    await fireEvent.click(retryButton);
+
+    expect(await learnView.findByText("Recovered guided answer")).toBeInTheDocument();
+    expect(streamGuidedChatMock).toHaveBeenCalledTimes(2);
+    expect(streamGuidedChatMock.mock.calls[1][2]).toBe("Explain records");
+    expect(learnView.queryByText("Response preparation timed out")).toBeNull();
+    expect(learnView.container.querySelectorAll(".message.user")).toHaveLength(1);
+  });
+
+  it("offers no retry control for a non-retryable guided failure", async () => {
+    streamGuidedChatMock.mockRejectedValue(new Error(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE));
+
+    const learnView = await renderLearnView();
+    await openLessonAndSendMessage(learnView, /test lesson/i, "Explain records");
+
+    await learnView.findByText(TERMINAL_GUIDED_STREAM_FAILURE_MESSAGE);
+    expect(learnView.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("opens the lesson named by the slug route prop", async () => {
+    const LearnViewComponent = (await import("./LearnView.svelte")).default;
+    const learnView = render(LearnViewComponent, { props: { selectedSlug: "intro" } });
+
+    expect(await learnView.findByRole("button", { name: "All Lessons" })).toBeInTheDocument();
+    expect(streamLessonContentMock).toHaveBeenCalledWith(
+      "intro",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("falls back to the lesson list for an unknown slug route", async () => {
+    const LearnViewComponent = (await import("./LearnView.svelte")).default;
+    const learnView = render(LearnViewComponent, { props: { selectedSlug: "missing-lesson" } });
+
+    expect(await learnView.findByRole("button", { name: /test lesson/i })).toBeInTheDocument();
+    expect(streamLessonContentMock).not.toHaveBeenCalled();
+  });
+
   it("treats invisible guided chunks as an empty failed response", async () => {
     streamGuidedChatMock.mockImplementation(
       async (_sessionId, _lessonSlug, _message, callbacks) => {

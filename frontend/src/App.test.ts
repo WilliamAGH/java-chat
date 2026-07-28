@@ -83,9 +83,9 @@ describe("App route synchronization", () => {
     const application = render(App);
 
     expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
-    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(application.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expect(globalThis.location.pathname).toBe("/learn/");
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
@@ -97,25 +97,40 @@ describe("App route synchronization", () => {
     const application = render(App);
 
     expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
-    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(application.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expect(globalThis.location.pathname).toBe("/guided");
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 
   it("recovers an unimplemented direct learn descendant to the canonical learn route", async () => {
-    globalThis.history.replaceState({}, "", "/learn/not-a-lesson/");
+    globalThis.history.replaceState({}, "", "/learn/not-a-lesson/extra/");
     const App = (await import("./App.svelte")).default;
     const application = render(App);
 
     expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
-    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(application.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expect(globalThis.location.pathname).toBe(LEARN_CANONICAL_PATH);
+    expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
+  });
+
+  it("preserves a direct lesson slug route without recovery", async () => {
+    globalThis.history.replaceState({}, "", "/learn/variables-and-types");
+    const App = (await import("./App.svelte")).default;
+    const application = render(App);
+
+    await tick();
+
+    expect(application.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(globalThis.location.pathname).toBe("/learn/variables-and-types");
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
   });
 
@@ -126,7 +141,10 @@ describe("App route synchronization", () => {
 
     await tick();
 
-    expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+    expect(application.getByRole("button", { name: "Chat" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(globalThis.location.pathname).toBe("/chat");
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
@@ -138,7 +156,10 @@ describe("App route synchronization", () => {
 
     await tick();
 
-    expect(application.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+    expect(application.getByRole("button", { name: "Chat" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(globalThis.location.pathname).toBe("/unknown-route/");
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
@@ -147,34 +168,34 @@ describe("App route synchronization", () => {
     const App = (await import("./App.svelte")).default;
     const application = render(App);
 
-    await fireEvent.click(application.getByRole("tab", { name: "Learn" }));
+    await fireEvent.click(application.getByRole("button", { name: "Learn" }));
     expect(globalThis.location.pathname).toBe("/learn");
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
 
-    await fireEvent.click(application.getByRole("tab", { name: "Chat" }));
+    await fireEvent.click(application.getByRole("button", { name: "Chat" }));
     expect(globalThis.location.pathname).toBe("/");
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
 
-  it("restores the selected tab and metadata when browser history changes", async () => {
+  it("restores the selected view and metadata when browser history changes", async () => {
     const App = (await import("./App.svelte")).default;
     const application = render(App);
 
     globalThis.history.replaceState({}, "", "/guided/");
     globalThis.dispatchEvent(new PopStateEvent("popstate"));
 
-    expect(await application.findByRole("tab", { name: "Learn" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(await application.findByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);
 
     globalThis.history.replaceState({}, "", "/chat/");
     globalThis.dispatchEvent(new PopStateEvent("popstate"));
 
-    expect(await application.findByRole("tab", { name: "Chat" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(await application.findByRole("button", { name: "Chat" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expectCurrentRouteMetadata(CHAT_CANONICAL_PATH);
   });
@@ -187,9 +208,9 @@ describe("App route synchronization", () => {
     globalThis.dispatchEvent(new PopStateEvent("popstate"));
 
     expect(await application.findByRole("heading", { name: "Learn Java" })).toBeInTheDocument();
-    expect(application.getByRole("tab", { name: "Learn" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(application.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expect(globalThis.location.pathname).toBe(LEARN_CANONICAL_PATH);
     expectCurrentRouteMetadata(LEARN_CANONICAL_PATH);

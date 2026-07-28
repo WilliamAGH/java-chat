@@ -10,6 +10,8 @@ const ROOT_APPLICATION_PATH = "/";
 const CHAT_APPLICATION_PATH = "/chat";
 const GUIDED_APPLICATION_PATH = "/guided";
 const LEARN_APPLICATION_PATH = "/learn";
+/** Mirrors the backend lesson slug contract (`GuidedLearningService`). */
+const LESSON_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_OPEN_GRAPH_IMAGE_PATH = "/og-image.png";
 const DOCUMENT_DESCRIPTION_METADATA_NAME = "description";
 const OPEN_GRAPH_TITLE_METADATA_PROPERTY = "og:title";
@@ -111,10 +113,14 @@ function applicationRouteResolutionForPath(pathname: string): ApplicationRouteRe
       normalizedPathname.startsWith(`${applicationPath}/`),
   );
   if (nestedLessonRoute) {
-    const [, applicationRoute] = nestedLessonRoute;
+    const [applicationPath, applicationRoute] = nestedLessonRoute;
+    const isImplementedLessonRoute =
+      applicationPath === LEARN_APPLICATION_PATH && lessonSlugForPath(normalizedPathname) !== null;
     return {
       applicationRoute,
-      canonicalRecoveryPath: canonicalPathForApplicationView(applicationRoute.view),
+      canonicalRecoveryPath: isImplementedLessonRoute
+        ? null
+        : canonicalPathForApplicationView(applicationRoute.view),
     };
   }
 
@@ -188,6 +194,22 @@ export function applicationViewForPath(pathname: string): ApplicationView {
 /** Resolves the canonical repair path for an unimplemented nested lesson route. */
 export function canonicalRecoveryPathForPath(pathname: string): string | null {
   return applicationRouteResolutionForPath(pathname).canonicalRecoveryPath;
+}
+
+/**
+ * Resolves the lesson slug for an implemented lesson route (`/learn/<slug>`).
+ * Returns null for view paths, deeper descendants, and slug-shaped violations.
+ */
+export function lessonSlugForPath(pathname: string): string | null {
+  const normalizedPathname = normalizeApplicationPath(pathname);
+  if (!normalizedPathname.startsWith(`${LEARN_APPLICATION_PATH}/`)) {
+    return null;
+  }
+  const descendantSegment = normalizedPathname.slice(LEARN_APPLICATION_PATH.length + 1);
+  if (descendantSegment.includes("/")) {
+    return null;
+  }
+  return LESSON_SLUG_PATTERN.test(descendantSegment) ? descendantSegment : null;
 }
 
 /** Resolves the canonical public path for a selected SPA view. */
