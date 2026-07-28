@@ -8,6 +8,7 @@ import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import com.williamcallahan.javachat.model.Citation;
 import com.williamcallahan.javachat.util.QueryVersionExtractor;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +59,15 @@ public class RetrievalService {
             DocsSourceRegistry.javaApiDocumentationSources().stream()
                     .map(DocsSourceRegistry.JavaApiDocumentationSource::javaRelease)
                     .toList();
+    private static final Set<String> JAVA_API_DOCUMENTATION_DOC_SETS =
+            Set.copyOf(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .toList());
+    private static final String CURRENT_JAVA_API_DOCUMENTATION_DOC_SET =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())))
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .orElseThrow();
 
     private final HybridSearchService hybridSearchService;
     private final AppProperties appProperties;
@@ -189,8 +199,10 @@ public class RetrievalService {
         int citationCandidateLimit = Math.max(appProperties.getRag().getSearchTopK(), citationLimit);
         long stageDeadlineNanos = retrievalStageDeadlineNanos();
         List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
-        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
-        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
+        RetrievalConstraint scopedRetrievalConstraint =
+                defaultCurrentJavaApiScope(query, retrievalConstraint, parsedVersions);
+        List<String> requestedVersions = applicableRequestedVersions(scopedRetrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = scopedRetrievalConstraint.withDocVersions(requestedVersions);
         List<Document> citationSearchDocuments = searchCitationCandidates(
                 query, citationCandidateLimit, combinedRetrievalConstraint, requestedVersions, stageDeadlineNanos);
         List<Document> orderedCitationCandidates =
@@ -265,8 +277,10 @@ public class RetrievalService {
             return new RetrievalOutcome(List.of(), List.of());
         }
         List<String> parsedVersions = QueryVersionExtractor.extractVersionNumbers(query, SUPPORTED_JAVA_API_VERSIONS);
-        List<String> requestedVersions = applicableRequestedVersions(retrievalConstraint, parsedVersions);
-        RetrievalConstraint combinedRetrievalConstraint = retrievalConstraint.withDocVersions(requestedVersions);
+        RetrievalConstraint scopedRetrievalConstraint =
+                defaultCurrentJavaApiScope(query, retrievalConstraint, parsedVersions);
+        List<String> requestedVersions = applicableRequestedVersions(scopedRetrievalConstraint, parsedVersions);
+        RetrievalConstraint combinedRetrievalConstraint = scopedRetrievalConstraint.withDocVersions(requestedVersions);
         return retrieveOutcome(
                 query, combinedRetrievalConstraint, requestedVersions, progressListener, stageDeadlineNanos);
     }
@@ -368,6 +382,31 @@ public class RetrievalService {
                 && DocsSourceRegistry.javaApiDocumentationSources().stream()
                         .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
                         .anyMatch(retrievalConstraint.docSet()::contains);
+    }
+
+    /**
+     * Uses the current Java API documentation source for a generic broad official-doc request.
+     *
+     * <p>Historical Java API mirrors contain near-duplicate API pages and dominate the broad
+     * documentation corpus. Generic requests therefore use the newest Java API source while
+     * retaining every non-Java documentation set. Explicit release requests, caller-owned release
+     * filters, and exact-overload lookups retain their full source scope for historical evidence.</p>
+     */
+    private static RetrievalConstraint defaultCurrentJavaApiScope(
+            String query, RetrievalConstraint retrievalConstraint, List<String> parsedVersions) {
+        boolean hasBroadOfficialJavaApiScope = "official".equals(retrievalConstraint.sourceKind())
+                && retrievalConstraint.docSet().containsAll(JAVA_API_DOCUMENTATION_DOC_SETS);
+        boolean preservesHistoricalJavaApiEvidence = !parsedVersions.isEmpty()
+                || !retrievalConstraint.docVersions().isEmpty()
+                || requiresExactJavaOverloadEvidence(query, retrievalConstraint);
+        if (!hasBroadOfficialJavaApiScope || preservesHistoricalJavaApiEvidence) {
+            return retrievalConstraint;
+        }
+        List<String> currentJavaApiDocSets = retrievalConstraint.docSet().stream()
+                .filter(docSet -> !JAVA_API_DOCUMENTATION_DOC_SETS.contains(docSet)
+                        || CURRENT_JAVA_API_DOCUMENTATION_DOC_SET.equals(docSet))
+                .toList();
+        return retrievalConstraint.withDocSetScope(currentJavaApiDocSets);
     }
 
     private static void requireExactOverloadEvidence(

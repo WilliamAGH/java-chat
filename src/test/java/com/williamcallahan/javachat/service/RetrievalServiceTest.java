@@ -21,7 +21,9 @@ import com.williamcallahan.javachat.config.DocsSourceRegistry;
 import com.williamcallahan.javachat.config.RetrievalAugmentationConfig;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -36,24 +38,47 @@ class RetrievalServiceTest {
             DocsSourceRegistry.javaApiDocumentationSources().getFirst();
     private static final List<String> OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES =
             DocsSourceRegistry.officialDocumentationSourceIdentities();
+    private static final Set<String> JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES =
+            Set.copyOf(DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .toList());
+    private static final String CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY =
+            DocsSourceRegistry.javaApiDocumentationSources().stream()
+                    .max(Comparator.comparingInt(source -> Integer.parseInt(source.javaRelease())))
+                    .map(DocsSourceRegistry.JavaApiDocumentationSource::relativeMirrorPath)
+                    .orElseThrow();
     private static final Duration STAGE_DEADLINE_ASSERTION_TOLERANCE = Duration.ofSeconds(1);
 
     @Test
-    void constrainedRetrievalPassesTheCallerConstraintInstanceToHybridSearch() {
+    void genericBroadOfficialScopeUsesCurrentJavaApiSourceAndRetainsEveryNonJavaSource() {
         HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         RerankerService rerankerService = mock(RerankerService.class);
         RetrievalService retrievalService = new RetrievalService(
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
         when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
                 .thenReturn(List.of());
 
         retrievalService.retrieveOutcome("Java strings", guidedConstraint);
 
-        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong());
+        verify(hybridSearchService).searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong());
+        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, guidedConstraint.docSet());
+        assertEquals(
+                List.of(CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY),
+                expectedScopedConstraint.docSet().stream()
+                        .filter(JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES::contains)
+                        .toList());
+        assertEquals(
+                OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES.stream()
+                        .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity))
+                        .toList(),
+                expectedScopedConstraint.docSet().stream()
+                        .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity))
+                        .toList());
     }
 
     @Test
@@ -64,7 +89,8 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(), List.of()));
         when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
                 .thenReturn(List.of());
@@ -137,6 +163,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         String repeatedCitationUrl = "https://docs.example.test/String.html#substring(int,int)";
         String uniqueCitationUrl = "https://docs.example.test/List.html#get(int)";
         List<Document> citationCandidates = List.of(
@@ -148,7 +175,7 @@ class RetrievalServiceTest {
                         "third-string-chunk", "Third String chunk", "third-hash", repeatedCitationUrl),
                 citationCandidateDocument("list-chunk", "List chunk", "list-hash", uniqueCitationUrl));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
-                        anyString(), eq(4), same(guidedConstraint), anyLong()))
+                        anyString(), eq(4), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(citationCandidates, List.of()));
 
         RetrievalService.CitationOutcome citationOutcome =
@@ -166,7 +193,7 @@ class RetrievalServiceTest {
                         .toList());
         assertEquals(0, citationOutcome.failedConversionCount());
         verify(hybridSearchService)
-                .searchDocumentationCitationsOutcome(anyString(), eq(4), same(guidedConstraint), anyLong());
+                .searchDocumentationCitationsOutcome(anyString(), eq(4), eq(expectedScopedConstraint), anyLong());
         verify(hybridSearchService, never())
                 .searchOutcome(anyString(), anyInt(), any(RetrievalConstraint.class), anyLong());
         verify(rerankerService, never()).rerank(anyString(), anyList(), anyInt(), anyLong());
@@ -183,6 +210,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         String citationQuery = "What does List.of return?";
         String listPageUrl = javaApiPageUrl("java.util", "List.html");
         List<Document> qdrantCandidates = List.of(
@@ -192,7 +220,7 @@ class RetrievalServiceTest {
                 apiDocumentationCitationCandidate(
                         "list", "static <E> List<E> of(E element)", "java.util", "List.html"));
         when(hybridSearchService.searchDocumentationCitationsOutcome(
-                        eq(citationQuery), eq(4), same(officialDocumentationConstraint), anyLong()))
+                        eq(citationQuery), eq(4), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(qdrantCandidates, List.of()));
 
         RetrievalService.CitationOutcome citationOutcome =
@@ -263,6 +291,8 @@ class RetrievalServiceTest {
                         .toList());
         verify(hybridSearchService)
                 .searchOutcomes(anyString(), eq(10), eq(List.of(java21Constraint, java24Constraint)), anyLong());
+        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java21Constraint.docSet());
+        assertEquals(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES, java24Constraint.docSet());
     }
 
     @Test
@@ -495,6 +525,7 @@ class RetrievalServiceTest {
                 new RetrievalService(hybridSearchService, appProperties, rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint officialDocumentationConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         List<Document> retrievedDocuments = List.of(
                 versionedDocument("document-a", "", "hash-a"),
                 versionedDocument("document-b", "", "hash-b"),
@@ -502,7 +533,7 @@ class RetrievalServiceTest {
                 versionedDocument("document-d", "", "hash-d"),
                 versionedDocument("document-e", "", "hash-e"),
                 versionedDocument("document-f", "", "hash-f"));
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(officialDocumentationConstraint), anyLong()))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(retrievedDocuments, List.of()));
         when(rerankerService.rerank(anyString(), anyList(), eq(6), anyLong())).thenReturn(retrievedDocuments);
 
@@ -541,11 +572,12 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         HybridSearchPartialFailureException.CollectionSearchFailure collectionFailure =
                 new HybridSearchPartialFailureException.CollectionSearchFailure(
                         "java-docs", "Timeout", "5s", HybridSearchPartialFailureException.FailureDisposition.TRANSIENT);
         when(hybridSearchService.searchDocumentationCitationsOutcome(
-                        anyString(), anyInt(), same(guidedConstraint), anyLong()))
+                        anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenThrow(new HybridSearchPartialFailureException("collection failure", List.of(collectionFailure)));
 
         assertThrows(
@@ -563,6 +595,13 @@ class RetrievalServiceTest {
                 .metadata(QdrantPayloadFieldSchema.HASH_FIELD, contentHash)
                 .metadata(QdrantPayloadFieldSchema.URL_FIELD, sourceUrl)
                 .build();
+    }
+
+    private static RetrievalConstraint currentJavaApiBroadOfficialConstraint() {
+        return RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES.stream()
+                .filter(sourceIdentity -> !JAVA_API_DOCUMENTATION_SOURCE_IDENTITIES.contains(sourceIdentity)
+                        || CURRENT_JAVA_API_DOCUMENTATION_SOURCE_IDENTITY.equals(sourceIdentity))
+                .toList());
     }
 
     private static Document versionedDocument(String documentId, String documentVersion, String contentHash) {
@@ -822,10 +861,11 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         Document stageDeadlineDocument = versionedDocument("stage-deadline", "", "stage-deadline-hash");
         long testStartNanos = System.nanoTime();
         AtomicLong capturedStageDeadlineNanos = new AtomicLong();
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenAnswer(searchInvocation -> {
                     capturedStageDeadlineNanos.set(searchInvocation.getArgument(3));
                     return new HybridSearchService.SearchOutcome(List.of(stageDeadlineDocument), List.of());
@@ -855,8 +895,9 @@ class RetrievalServiceTest {
                 hybridSearchService, new AppProperties(), rerankerService, mock(DocumentFactory.class));
         RetrievalConstraint guidedConstraint =
                 RetrievalConstraint.forOfficialDocSets(OFFICIAL_DOCUMENTATION_SOURCE_IDENTITIES);
+        RetrievalConstraint expectedScopedConstraint = currentJavaApiBroadOfficialConstraint();
         Document deadlineDocument = versionedDocument("deadline-expired", "", "deadline-expired-hash");
-        when(hybridSearchService.searchOutcome(anyString(), anyInt(), same(guidedConstraint), anyLong()))
+        when(hybridSearchService.searchOutcome(anyString(), anyInt(), eq(expectedScopedConstraint), anyLong()))
                 .thenReturn(new HybridSearchService.SearchOutcome(List.of(deadlineDocument), List.of()));
         when(rerankerService.rerank(anyString(), anyList(), anyInt(), anyLong()))
                 .thenAnswer(rerankerInvocation -> {

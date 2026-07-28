@@ -69,6 +69,24 @@ public record RetrievalConstraint(
         return new RetrievalConstraint(intersectedVersions, sourceKind, docType, sourceName, docSet);
     }
 
+    /**
+     * Replaces the documentation-set alternatives while preserving every other server-side filter.
+     *
+     * <p>Unlike {@link #withDocVersions(List)}, this deliberately does not intersect the existing
+     * documentation-set alternatives. Callers use it when one broad source scope has a newer
+     * canonical replacement.</p>
+     *
+     * @param replacementDocSets replacement documentation-set tokens matched with any-of semantics
+     * @return this constraint with the replacement documentation-set scope
+     */
+    public RetrievalConstraint withDocSetScope(List<String> replacementDocSets) {
+        List<String> sanitizedReplacementDocSets = sanitizeTokens(replacementDocSets);
+        if (docSet.equals(sanitizedReplacementDocSets)) {
+            return this;
+        }
+        return new RetrievalConstraint(docVersions, sourceKind, docType, sourceName, sanitizedReplacementDocSets);
+    }
+
     /** Returns true when at least one server-side filter can be applied. */
     public boolean hasServerSideConstraint() {
         return !docVersions.isEmpty()
