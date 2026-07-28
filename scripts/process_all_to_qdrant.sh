@@ -202,20 +202,24 @@ if [ -n "$DOCS_SETS_FILTER" ]; then
 fi
 
 source_app_jar="$(locate_app_jar)"
-staged_app_jar_directory="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-document-ingestion.XXXXXX")"
-cleanup_document_ingestion_staged_jar() {
+if ! staged_app_jar_directory="$(mktemp -d "${TMPDIR:-/tmp}/java-chat-document-ingestion.XXXXXX")"; then
+    rm -f "$PID_FILE"
+    return 1
+fi
+cleanup_document_ingestion_resources() {
     chmod u+w "$staged_app_jar_directory" "$staged_app_jar_directory/application.jar" 2>/dev/null || true
     rm -rf "$staged_app_jar_directory"
+    rm -f "$PID_FILE"
 }
 shutdown_document_ingestion() {
     local received_signal="$1"
-    trap cleanup_document_ingestion_staged_jar EXIT
+    trap cleanup_document_ingestion_resources EXIT
     _common_cleanup "$received_signal"
 }
 trap 'shutdown_document_ingestion INT' INT
 trap 'shutdown_document_ingestion TERM' TERM
 if ! app_jar="$(stage_app_jar "$source_app_jar" "$staged_app_jar_directory")"; then
-    cleanup_document_ingestion_staged_jar
+    cleanup_document_ingestion_resources
     return 1
 fi
 
@@ -231,14 +235,13 @@ echo "$APP_PID" > "$PID_FILE"
 log "${BLUE}Application started with PID: $APP_PID${NC}"
 
 if ! monitor_java_process "$APP_PID" "$LOG_FILE" "$PID_FILE"; then
-    cleanup_document_ingestion_staged_jar
+    cleanup_document_ingestion_resources
     return 1
 fi
-cleanup_document_ingestion_staged_jar
+cleanup_document_ingestion_resources
 verify_doc_set_postconditions "$LOG_FILE"
 
 echo ""
-rm -f "$PID_FILE"
 log "${GREEN}Pipeline completed successfully${NC} ($(corpus_indexed_summary))"
 log "Log file: $LOG_FILE"
 }
