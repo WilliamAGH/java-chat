@@ -63,4 +63,16 @@ class SystemPromptConfigTest {
 
         assertTrue(corePrompt.contains("Java " + TEST_DOCUMENTATION_JDK_VERSION));
     }
+
+    @Test
+    void shouldDeclineOffTopicQuestionsWithinScopeRules() {
+        String corePrompt = systemPromptConfig.getCoreSystemPrompt();
+        String lowQualityPrompt = systemPromptConfig.getLowQualitySearchPrompt();
+
+        assertAll(
+                () -> assertTrue(corePrompt.contains("## Scope")),
+                () -> assertTrue(corePrompt.contains("do NOT answer its substance")),
+                () -> assertTrue(corePrompt.contains("do not refuse to answer in-scope questions")),
+                () -> assertTrue(lowQualityPrompt.contains("off-topic questions are still declined")));
+    }
 }

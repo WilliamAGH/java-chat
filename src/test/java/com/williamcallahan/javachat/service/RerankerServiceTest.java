@@ -75,13 +75,52 @@ class RerankerServiceTest {
                         eq(TEST_RERANKER_TIMEOUT));
         verify(streamingService, never()).complete(anyString(), eq(TEST_RERANKER_TEMPERATURE));
         assertTrue(promptCaptor.getValue().contains("Valid indices are 0 through 1."));
-        assertTrue(promptCaptor.getValue().contains("Include each valid index exactly once"));
+        assertTrue(promptCaptor.getValue().contains("Include each relevant index at most once"));
+        assertTrue(promptCaptor.getValue().contains("Return {\"order\":[]} when no document is relevant"));
         assertEquals(TEST_RERANKER_OUTPUT_TOKEN_BUDGET, outputBudgetCaptor.getValue());
         assertEquals(List.of(sourceDocuments.get(1), sourceDocuments.get(0)), rankedDocuments);
     }
 
     @Test
-    void rerankRejectsIncompleteDuplicateAndInvalidOrderings() {
+    void rerankSelectsRelevantSubsetAndDropsUnrelatedDocuments() {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        when(streamingService.completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(TEST_RERANKER_TIMEOUT)))
+                .thenReturn(Mono.just("{\"order\":[2,0]}"));
+
+        RerankerService rerankerService =
+                new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
+        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"), new Document("third"));
+
+        List<Document> selectedDocuments = rerankerService.rerank("query", sourceDocuments, 5);
+
+        assertEquals(List.of(sourceDocuments.get(2), sourceDocuments.get(0)), selectedDocuments);
+    }
+
+    @Test
+    void rerankReturnsEmptySelectionWhenNoDocumentIsRelevant() {
+        OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
+        when(streamingService.completeJsonObject(
+                        anyString(),
+                        eq(TEST_RERANKER_TEMPERATURE),
+                        eq(TEST_RERANKER_OUTPUT_TOKEN_BUDGET),
+                        eq(TEST_RERANKER_TIMEOUT)))
+                .thenReturn(Mono.just("{\"order\":[]}"));
+
+        RerankerService rerankerService =
+                new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
+        List<Document> sourceDocuments = List.of(new Document("first"), new Document("second"));
+
+        List<Document> selectedDocuments = rerankerService.rerank("query", sourceDocuments, 5);
+
+        assertTrue(selectedDocuments.isEmpty());
+    }
+
+    @Test
+    void rerankRejectsDuplicateInvalidAndMalformedOrderings() {
         OpenAIStreamingService streamingService = mock(OpenAIStreamingService.class);
         RerankerService rerankerService =
                 new RerankerService(streamingService, new ObjectMapper(), configuredRerankerProperties());
@@ -89,7 +128,6 @@ class RerankerServiceTest {
                 List.of(new Document("first"), new Document("second"), new Document("third"), new Document("fourth"));
 
         List<String> invalidOrderingJsonValues = List.of(
-                "{\"order\":[2]}",
                 "{\"order\":[1,1,0,2]}",
                 "{\"order\":[null,-1,99,2]}",
                 "{\"order\":[0,1,2,3],\"explanation\":\"extra\"}",

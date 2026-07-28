@@ -28,7 +28,11 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 /**
- * Reorders retrieved documents using an LLM-driven relevance ranking.
+ * Selects and orders retrieved documents by relevance to the query using an LLM.
+ *
+ * <p>Beyond ordering, the reranker is the retrieval pipeline's relevance gate: documents the LLM
+ * judges unrelated to the query are dropped from the selection, so off-topic queries yield an
+ * empty selection instead of surfacing weakly matched documents as prompt context and citations.</p>
  */
 @Service
 public class RerankerService {
@@ -69,8 +73,11 @@ public class RerankerService {
     }
 
     /**
-     * Rerank documents by relevance to query using LLM.
-     * Cache key includes document URLs to prevent returning results for wrong document sets.
+     * Selects and orders documents relevant to the query using the LLM.
+     *
+     * <p>Returns only the documents the reranker judged relevant, most relevant first, capped at
+     * {@code returnK}; the result is empty when no candidate is relevant. The cache key includes
+     * document identities to prevent returning results for wrong document sets.</p>
      */
     @Cacheable(
             value = "reranker-cache",
@@ -126,17 +133,20 @@ public class RerankerService {
     private String buildRerankPrompt(String query, List<Document> documents) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are a document re-ranker for the Java learning assistant system.\n");
-        prompt.append("Reorder the following documents by relevance to the query.\n");
+        prompt.append("Select the documents that are relevant to the query and order them by relevance.\n");
         prompt.append("Consider Java-specific context, version relevance, and learning value.\n");
         prompt.append("Prefer official documentation over blogs or third-party sources.\n");
         prompt.append("Prefer stable release documentation over early-access or preview content.\n");
+        prompt.append("Exclude every document that is not actually about the query's subject; ");
+        prompt.append("a document that merely shares an isolated word with the query is not relevant.\n");
         prompt.append("There are exactly ")
                 .append(documents.size())
                 .append(" documents. Valid indices are 0 through ")
                 .append(documents.size() - 1)
                 .append(".\n");
-        prompt.append("Include each valid index exactly once and do not return any other values.\n");
-        prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices.\n");
+        prompt.append("Include each relevant index at most once and do not return any other values.\n");
+        prompt.append("Return only JSON: {\"order\":[indices...]} with 0-based indices, most relevant first.\n");
+        prompt.append("Return {\"order\":[]} when no document is relevant to the query.\n");
         prompt.append("Do not include markdown, prose, or explanations.\n\n");
         prompt.append("Query: ").append(query).append("\n\n");
 
@@ -160,23 +170,30 @@ public class RerankerService {
         return prompt.toString();
     }
 
-    /** Parses an untrusted LLM ordering only when it is a complete source-index permutation. */
+    /**
+     * Parses an untrusted LLM ordering into the selected documents.
+     *
+     * <p>The reranker acts as the relevance gate for retrieval: it returns only the indices of
+     * documents it judged relevant, most relevant first, so the parsed list may be a strict
+     * subset of the source documents and may be empty when nothing is relevant.</p>
+     */
     private List<Document> parseRerankResponse(String llmOutput, List<Document> documents)
             throws JsonProcessingException {
         List<Document> reordered = new ArrayList<>();
         Set<Integer> includedDocumentIndices = new HashSet<>();
         RerankOrderResponse orderResponse = parseRerankOrderResponse(llmOutput);
-        if (orderResponse == null
-                || orderResponse.order() == null
-                || orderResponse.order().size() != documents.size()) {
-            throw new RerankParsingException("Rerank order must contain every source index exactly once");
+        if (orderResponse == null || orderResponse.order() == null) {
+            throw new RerankParsingException("Rerank order must be a JSON object with an order array");
+        }
+        if (orderResponse.order().size() > documents.size()) {
+            throw new RerankParsingException("Rerank order cannot select more documents than it was given");
         }
         for (Integer documentIndex : orderResponse.order()) {
             if (documentIndex == null
                     || documentIndex < 0
                     || documentIndex >= documents.size()
                     || !includedDocumentIndices.add(documentIndex)) {
-                throw new RerankParsingException("Rerank order must be a permutation of all source indices");
+                throw new RerankParsingException("Rerank order must contain unique valid source indices");
             }
             reordered.add(documents.get(documentIndex));
         }
