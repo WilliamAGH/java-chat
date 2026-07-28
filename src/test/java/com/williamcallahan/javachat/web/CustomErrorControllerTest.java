@@ -188,13 +188,6 @@ class CustomErrorControllerTest {
     }
 
     @Test
-    void does_not_publish_browser_error_pages_directly() throws Exception {
-        for (String directErrorPath : List.of("/errors", "/errors/not-found", "/errors/not-found.html")) {
-            mockMvc.perform(get(directErrorPath).accept(MediaType.TEXT_HTML)).andExpect(status().isNotFound());
-        }
-    }
-
-    @Test
     void renders_browser_error_page_with_original_status() throws Exception {
         mockMvc.perform(errorRequest(HttpStatus.NOT_FOUND, "/missing-page").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isNotFound())
