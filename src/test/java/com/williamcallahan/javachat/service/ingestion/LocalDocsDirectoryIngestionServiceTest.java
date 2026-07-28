@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -103,7 +104,7 @@ class LocalDocsDirectoryIngestionServiceTest {
     }
 
     @Test
-    void continuesAfterFileLocalFailureAndCollectsLaterOutcome(@TempDir Path temporaryDirectory) throws IOException {
+    void retainsLaterFileAfterFileLocalFailure(@TempDir Path temporaryDirectory) throws IOException {
         Path configuredDocumentationRoot = temporaryDirectory.resolve("arbitrary-corpus");
         Path selectedSourceRoot = configuredDocumentationRoot.resolve("java");
         Files.createDirectories(selectedSourceRoot);
@@ -114,11 +115,9 @@ class LocalDocsDirectoryIngestionServiceTest {
         when(fileProcessor.processBatch(
                         org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
                         org.mockito.ArgumentMatchers.anyList()))
-                .thenReturn(List.of(
-                        LocalDocsFileOutcome.failedFile(
-                                new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
-                                        "first.html", "html-read", "malformed input")),
-                        LocalDocsFileOutcome.processedFile()));
+                .thenReturn(List.of(LocalDocsFileOutcome.failedFile(
+                        new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
+                                "first.html", "html-read", "malformed input"))));
         LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
                 fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
 
@@ -126,12 +125,73 @@ class LocalDocsDirectoryIngestionServiceTest {
                 directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), new FileLimit(2));
 
         assertEquals(1, ingestionOutcome.backlog().failedFiles());
-        assertEquals(1, ingestionOutcome.backlog().processedFiles());
-        assertEquals(0, ingestionOutcome.backlog().pendingFiles());
+        assertEquals(0, ingestionOutcome.backlog().processedFiles());
+        assertEquals(1, ingestionOutcome.backlog().pendingFiles());
         assertEquals(0, ingestionOutcome.backlog().skippedFiles());
         assertEquals(
                 IngestionBacklogStatus.Lifecycle.PARTIAL,
                 ingestionOutcome.backlog().lifecycle());
+    }
+
+    @Test
+    void retriesFailedPrefixBeforeLaterFilesAcrossRuns(@TempDir Path temporaryDirectory) throws IOException {
+        Path configuredDocumentationRoot = temporaryDirectory.resolve("arbitrary-corpus");
+        Path selectedSourceRoot = configuredDocumentationRoot.resolve("java");
+        Files.createDirectories(selectedSourceRoot);
+        Path firstDocumentationFile = selectedSourceRoot.resolve("first.html");
+        Path secondDocumentationFile = selectedSourceRoot.resolve("second.html");
+        Files.writeString(firstDocumentationFile, "<html>First</html>");
+        Files.writeString(secondDocumentationFile, "<html>Second</html>");
+        LocalDocsFileIngestionProcessor fileProcessor = mock(LocalDocsFileIngestionProcessor.class);
+        LocalIngestionRunStore ingestionRunStore = availableRunStore(configuredDocumentationRoot, selectedSourceRoot);
+        AtomicReference<IngestionBacklogStatus> persistedBacklog = new AtomicReference<>();
+        when(ingestionRunStore.read(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> Optional.ofNullable(persistedBacklog.get()));
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    persistedBacklog.set(invocation.getArgument(1, IngestionBacklogStatus.class));
+                    return null;
+                })
+                .when(ingestionRunStore)
+                .write(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.any(IngestionBacklogStatus.class),
+                        org.mockito.ArgumentMatchers.anyString());
+        when(fileProcessor.processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(
+                        List.of(LocalDocsFileOutcome.failedFile(
+                                new com.williamcallahan.javachat.domain.ingestion.IngestionLocalFailure(
+                                        firstDocumentationFile.toString(), "html-read", "malformed input"))),
+                        List.of(LocalDocsFileOutcome.processedFile()));
+        LocalDocsDirectoryIngestionService directoryIngestionService = new LocalDocsDirectoryIngestionService(
+                fileProcessor, ingestionRunStore, configuredDocumentationRoot.toString());
+
+        IngestionLocalOutcome firstOutcome =
+                directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), new FileLimit(2));
+        IngestionLocalOutcome secondOutcome =
+                directoryIngestionService.ingestLocalDirectory(selectedSourceRoot.toString(), new FileLimit(1));
+
+        ArgumentCaptor<List<Path>> inspectedFilesCaptor = ArgumentCaptor.captor();
+        verify(fileProcessor, org.mockito.Mockito.times(2))
+                .processBatch(
+                        org.mockito.ArgumentMatchers.eq(selectedSourceRoot.toRealPath()),
+                        inspectedFilesCaptor.capture());
+        List<Path> expectedFileOrder =
+                List.of(firstDocumentationFile.toRealPath(), secondDocumentationFile.toRealPath());
+        assertEquals(expectedFileOrder, inspectedFilesCaptor.getAllValues().get(0));
+        assertEquals(
+                List.of(firstDocumentationFile.toRealPath()),
+                inspectedFilesCaptor.getAllValues().get(1));
+        assertEquals(
+                IngestionBacklogStatus.Lifecycle.PARTIAL, firstOutcome.backlog().lifecycle());
+        assertEquals(1, secondOutcome.backlog().processedFiles());
+        assertEquals(1, secondOutcome.backlog().pendingFiles());
+        assertEquals(
+                IngestionBacklogStatus.Lifecycle.PARTIAL,
+                secondOutcome.backlog().lifecycle());
     }
 
     @Test

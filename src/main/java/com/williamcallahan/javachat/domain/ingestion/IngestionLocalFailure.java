@@ -20,20 +20,4 @@ public record IngestionLocalFailure(String filePath, String phase, String detail
         }
         Objects.requireNonNull(details, "Failure details are required");
     }
-
-    /**
-     * Indicates whether this failure is isolated to one source file and later files remain safe to attempt.
-     *
-     * <p>Unknown phases fail closed. Shared persistence, embedding, marker, and collection-state
-     * failures therefore stop the run instead of returning best-effort ingestion.</p>
-     *
-     * @return true only for source read, extraction, and validation failures scoped to one file
-     */
-    public boolean allowsFollowingFileAttempt() {
-        return switch (phase) {
-            case "filename", "file-attributes", "pdf-extraction", "html-read", "empty-document", "content-guard" ->
-                true;
-            default -> false;
-        };
-    }
 }

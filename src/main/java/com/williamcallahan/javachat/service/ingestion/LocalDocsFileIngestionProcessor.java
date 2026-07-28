@@ -96,7 +96,7 @@ public class LocalDocsFileIngestionProcessor {
      *
      * @param root root ingestion directory
      * @param files ordered files to process
-     * @return ordered outcomes through all file-local failures or the first run-terminal failure
+     * @return ordered outcomes through the first failure
      */
     public List<LocalDocsFileOutcome> processBatch(Path root, List<Path> files) {
         Objects.requireNonNull(root, "root");
@@ -115,7 +115,7 @@ public class LocalDocsFileIngestionProcessor {
                 LocalDocsFileOutcome deferredOutcome =
                         deferredPreparation.transition().get();
                 outcomes.add(deferredOutcome);
-                if (stopsRun(deferredOutcome)) {
+                if (deferredOutcome.failure().isPresent()) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -126,7 +126,7 @@ public class LocalDocsFileIngestionProcessor {
                 }
                 pendingDocumentCount = 0;
                 outcomes.add(terminalPreparation.outcome());
-                if (stopsRun(terminalPreparation.outcome())) {
+                if (terminalPreparation.outcome().failure().isPresent()) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -149,7 +149,7 @@ public class LocalDocsFileIngestionProcessor {
             if (requiresSingleton) {
                 LocalDocsFileOutcome singletonOutcome = processDocuments(processingRequest);
                 outcomes.add(singletonOutcome);
-                if (stopsRun(singletonOutcome)) {
+                if (singletonOutcome.failure().isPresent()) {
                     return List.copyOf(outcomes);
                 }
                 continue;
@@ -159,13 +159,6 @@ public class LocalDocsFileIngestionProcessor {
         }
         flushNewFileBatch(pendingNewFiles, outcomes);
         return List.copyOf(outcomes);
-    }
-
-    private static boolean stopsRun(LocalDocsFileOutcome fileOutcome) {
-        return fileOutcome
-                .failure()
-                .map(ingestionFailure -> !ingestionFailure.allowsFollowingFileAttempt())
-                .orElse(false);
     }
 
     private FilePreparation prepare(Path root, Path file) {
